@@ -1,0 +1,5 @@
+﻿*.db
+*.session
+office_relay_config.json
+.env
+__pycache__/
