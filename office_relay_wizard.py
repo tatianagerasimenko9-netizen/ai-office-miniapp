@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 
 from office_bridge import (
     OfficeSignal,
@@ -617,12 +618,22 @@ async def run() -> None:
     db_path = "office_bridge.db"
 
     client = TelegramClient(session_name, api_id, api_hash)
-    if tg_bot_token:
-        # Non-interactive startup for cloud runtime (Render).
-        await client.start(bot_token=tg_bot_token)
-    else:
-        # Local interactive mode (user account login via phone/code).
-        await client.start()
+    while True:
+        try:
+            if tg_bot_token:
+                # Non-interactive startup for cloud runtime (Render).
+                await client.start(bot_token=tg_bot_token)
+            else:
+                # Local interactive mode (user account login via phone/code).
+                await client.start()
+            break
+        except FloodWaitError as exc:
+            wait_sec = int(getattr(exc, "seconds", 0) or 0)
+            if wait_sec <= 0:
+                wait_sec = 300
+            wait_sec += 5
+            print(f"[relay][WARN] FloodWait під час авторизації. Чекаю {wait_sec}с і пробую знову...")
+            await asyncio.sleep(wait_sec)
     init_office_db(db_path)
 
     main_chat_id: int
