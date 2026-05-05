@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
 
 from office_factor_pack import build_factor_pack_from_desk_inputs
+from office_style_qa import polish_agent_message
 
 from office_bridge import (
     OfficeSignal,
@@ -924,7 +925,7 @@ async def run() -> None:
                     f"fingerprint `{_fp}` (звір з Mini App)\n"
                     f"MAIN={main_chat_id} · OFFICE={office_chat_id}"
                 )
-                await send_office(fmt_agent_line("dev", health_plain), stream="tech")
+                await send_office(fmt_agent_line("dev", polish_agent_message(health_plain)), stream="tech")
                 print("[relay] tech health (Artem) sent -> TECH thread")
             except Exception as exc:
                 print(f"[relay][WARN] tech health ping failed: {exc}")

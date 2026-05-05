@@ -27,6 +27,8 @@ try:
 except Exception:  # pragma: no cover - optional in local sqlite mode
     psycopg = None  # type: ignore[assignment]
 
+from office_style_qa import polish_agent_message
+
 
 Decision = Literal["APPROVED", "REJECTED", "WAIT"]
 TaskStatus = Literal["OPEN", "IN_PROGRESS", "REVIEW", "DONE", "BLOCKED"]
@@ -768,7 +770,7 @@ def journal_learning_hints_from_tags(tags: Dict[str, int]) -> List[str]:
 async def agent_say(sender: AsyncSender, agent_key: str, text: str, delay_sec: float = 0.15) -> None:
     if delay_sec > 0:
         await asyncio.sleep(delay_sec)
-    await sender(fmt_agent_line(agent_key, text))
+    await sender(fmt_agent_line(agent_key, polish_agent_message(text)))
 
 
 def _last_turn(conversation: List[ConversationTurn]) -> str:

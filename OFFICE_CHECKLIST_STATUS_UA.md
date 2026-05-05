@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — **п.25 Factor Pack v2** (`office_factor_pack.py` + desk snapshot)  
+**Оновлено:** 2026-05-06 — **п.27 Style QA** (`office_style_qa.py` + `agent_say`)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -117,7 +117,7 @@
 | 24 | ✅ | `_cross_reply_prefix()` у `office_bridge.py` для ланцюга сигналу та `!ask` desk; короткі підхоплення між репліками. |
 | 25 | ✅ | `office_factor_pack.py` (`FactorPackV2`), знімок у `build_desk_market_snapshot` + funding/mark з Binance; `OFFICE_FACTOR_PACK_UA.md`; `meta.factor_pack_v2` у desk QA. ICT/FVG з графіка — зарезервовано (unknown/None). |
 | 26 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge. |
-| 27 | ⬜ | Окремого авто-QA гейту немає; частково — правила + ручний перегляд. **Референс ідей:** збірник рекомендацій (стиль). |
+| 27 | ✅ | `office_style_qa.py`: `polish_agent_message` у `agent_say`, health Артема в relay; `OFFICE_STYLE_QA_UA.md`; `style_qa_violations` для майбутніх логів. |
 | 28 | ⬜ | Не реалізовано. |
 | 29 | ⬜ | Не реалізовано. |
 | 30 | ⬜ | Не реалізовано. |
@@ -145,6 +145,7 @@
 | `RUNBOOK_UA.md` | Деплой, еталон env, спільна БД, діагностика «тиші», freeze. |
 | `OFFICE_PERSONA_PACK_UA.md` | Persona Pack на 9 ролей (п.23). |
 | `OFFICE_FACTOR_PACK_UA.md` | Опис полів Factor Pack v2 (п.25). |
+| `OFFICE_STYLE_QA_UA.md` | Style QA gate (п.27). |
 
 **З попередніх планів (без номера в 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
 
@@ -154,9 +155,9 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 26 |
+| ✅ | 27 |
 | 🟨 | 0 |
-| ⬜ | 11 |
+| ⬜ | 10 |
 | **Усього** | **37** |
 
 *(Пункти **38–42** не входять у цю суму — див. методичку вище.)*
@@ -172,7 +173,8 @@
 5. ~~**П. 23**~~ — `OFFICE_PERSONA_PACK_UA.md`.  
 6. ~~**П. 24**~~ — префікси cross-reply в bridge.  
 7. ~~**П. 25**~~ — Factor Pack v2.  
-8. **П. 26–36** — шаблони діалогів v2, Style QA, брифінги, Mini App KPI…
+8. ~~**П. 27**~~ — Style QA gate.  
+9. **П. 28–36** — брифінги, weekly review, алерти, Mini App KPI…
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 
