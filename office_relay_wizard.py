@@ -623,7 +623,7 @@ async def run() -> None:
 
     api_id = int(api_id_raw)
     session_name = "office_relay_wizard"
-    db_path = "office_bridge.db"
+    db_path = os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip() or "office_bridge.db"
 
     client = TelegramClient(session_name, api_id, api_hash)
     while True:
