@@ -54,6 +54,7 @@
 | `NEWS_API_KEY` | Новини (якщо увімкнено парсер новин) |
 | `OFFICE_RELAY_CONFIG` | Шлях до JSON конфігу relay (за замовчуванням у проєкті) |
 | `RELAY_SEND_AGENT_CARDS` | `1` — надіслати картки агентів при старті |
+| `RELAY_TECH_HEALTH_ON_START` | `0` — не надсилати стартовий health Артема в гілку «Техніка» (за замовчуванням надсилається, якщо задано `OFFICE_TECH_THREAD_ID`) |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 

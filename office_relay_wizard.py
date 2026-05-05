@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover
 
 from office_bridge import (
     OfficeSignal,
+    fmt_agent_line,
     get_agent_card_text,
     init_office_db,
     journal_close_trade,
@@ -841,6 +842,26 @@ async def run() -> None:
     try:
         await send_office("Офіс на зв'язку. Готовий ловити сигнали з MAIN чату.")
         print("[relay] startup ping sent to OFFICE")
+
+        # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
+        tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "1").strip() == "0"
+        if tech_thread_id and not tech_health_off:
+            try:
+                db_kind = (
+                    "PostgreSQL"
+                    if str(db_path).strip().lower().startswith(("postgres://", "postgresql://"))
+                    else "SQLite"
+                )
+                health_plain = (
+                    "🛠️ Техніка · старт relay\n"
+                    f"Статус: онлайн · БД: {db_kind}\n"
+                    f"MAIN={main_chat_id} · OFFICE={office_chat_id}"
+                )
+                await send_office(fmt_agent_line("dev", health_plain), stream="tech")
+                print("[relay] tech health (Artem) sent -> TECH thread")
+            except Exception as exc:
+                print(f"[relay][WARN] tech health ping failed: {exc}")
+
         send_agent_cards = os.getenv("RELAY_SEND_AGENT_CARDS", "").strip() == "1"
         # Optional: startup visual cards (disabled by default to keep OFFICE chat clean).
         photo_candidates = {
