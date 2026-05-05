@@ -176,7 +176,7 @@ def fmt_agent_line(agent_key: str, text: str) -> str:
 
 
 def _task_status_line(task_id: str, status: TaskStatus, assignee: str) -> str:
-    return f"🗂️ *#Задачник* `{task_id}` · `{status}` · owner `{assignee}`"
+    return ""
 
 
 TASK_ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
@@ -751,20 +751,20 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
         return AgentDecision(
             "marko",
             "APPROVED",
-            _enforce_data_grounding(f"FINAL DECISION: ENTER | {signal.direction} {signal.symbol} | trail {trail} | size normal.", signal),
+            _enforce_data_grounding(f"Рішення: входимо в {signal.direction} {signal.symbol}. Супровід за ковзною {trail}, розмір стандартний.", signal),
             {"trail_mode": trail},
         )
     if final_action == "WAIT":
         return AgentDecision(
             "marko",
             "WAIT",
-            _enforce_data_grounding(f"FINAL DECISION: WAIT | {signal.symbol} на паузі до повторного тригера.", signal),
+            _enforce_data_grounding(f"Рішення: чекаємо по {signal.symbol} до повторного тригера.", signal),
             {"trail_mode": trail},
         )
     return AgentDecision(
         "marko",
         "REJECTED",
-        _enforce_data_grounding(f"FINAL DECISION: SKIP | {signal.symbol} скасовано за desk-рішенням.", signal),
+        _enforce_data_grounding(f"Рішення: пропускаємо {signal.symbol} за командним рішенням.", signal),
         {"trail_mode": trail},
     )
 
@@ -921,11 +921,7 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason})
-    await sender(_task_status_line(task_id, "OPEN", "lev"))
-
-    await sender(
-        f"📥 *#Загальний · Новий кейс*\n`{signal.symbol}` `{signal.direction}` · score `{signal.score}` · {signal.session}/{signal.regime}"
-    )
+    await sender(f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.")
     verdict = _decide_chain(signal)
 
     # Keep room readable: only one task line at open and one at close.
@@ -959,10 +955,7 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
-    await sender(_task_status_line(task_id, final_task_status, "olesya"))
-
-    await sender(_fmt_verdict(signal, verdict))
-    await agent_say(sender, "olesya", "Фіксую кейс у пам'ять офісу, learning-журнал і денний звіт.", 0.05)
+    await agent_say(sender, "olesya", "Зафіксувала результат у журнал і статистику.", 0.05)
     log_verdict(db_path, signal, verdict)
     return verdict
 
@@ -994,8 +987,8 @@ async def office_position_event(
     details: str,
     db_path: str = "office_bridge.db",
 ) -> None:
-    em = {"PRICE_UPDATE": "📡", "PARTIAL_CLOSE": "✂️", "MOVE_SL": "🛟", "EXIT": "🟥"}[event_type]
-    await agent_say(sender, "olesya", f"{em} {event_type}: {symbol} — {details}", 0.03)
+    labels = {"PRICE_UPDATE": "оновлення", "PARTIAL_CLOSE": "часткова фіксація", "MOVE_SL": "перенесення стопа", "EXIT": "вихід"}
+    await agent_say(sender, "olesya", f"{symbol}: {labels[event_type]} — {details}", 0.03)
     log_event(db_path, "POSITION_EVENT", {"symbol": symbol, "event_type": event_type, "details": details})
 
 
@@ -1014,7 +1007,7 @@ async def office_news_trigger(
     )
     if risk_level == "HIGH RISK":
         await agent_say(sender, "daryna", "Вето по новинах. Нові входи тимчасово блокуємо.", 0.02)
-        await agent_say(sender, "marko", "FINAL DECISION: WAIT | News lock активний.", 0.02)
+        await agent_say(sender, "marko", "Рішення: пауза, діє новинне блокування.", 0.02)
     elif risk_level == "RISK":
         await agent_say(sender, "lev", "Знижаємо агресію. Тільки преміум-кейси.", 0.02)
     log_event(

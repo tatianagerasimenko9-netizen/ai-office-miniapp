@@ -252,9 +252,8 @@ def build_signal_kickoff(symbol: str, direction: str) -> str:
     intro = random.choice(intros)
     side = "LONG" if str(direction).upper() == "LONG" else "SHORT"
     return (
-        "📨 *#Загальний · Новий сигнал*\n"
         f"{intro}\n"
-        f"Символ: `{symbol.upper()}` · Напрям: `{side}`"
+        f"Сигнал: {symbol.upper()} · {side}"
     )
 
 
@@ -475,10 +474,10 @@ def build_daily_journal_report(db_path: str) -> str:
     tags_text = ", ".join(f"{k} x{v}" for k, v in top_tags) if top_tags else "нема"
 
     return (
-        "📘 *#Загальний · Щоденний журнал (авто)*\n"
-        f"Угод: `{total}` | W `{wins}` · L `{losses}` · BE `{be}` | WR `{wr:.1f}%`\n"
-        f"PnL сумарно: `{pnl_sum:+.2f}%` | Avg R: `{avg_r:+.2f}`\n"
-        f"Топ помилок: `{tags_text}`"
+        "Щоденний журнал:\n"
+        f"Угод: {total} | W {wins} · L {losses} · BE {be} | WR {wr:.1f}%\n"
+        f"PnL сумарно: {pnl_sum:+.2f}% | Avg R: {avg_r:+.2f}\n"
+        f"Топ помилок: {tags_text}"
     )
 
 
@@ -686,7 +685,7 @@ async def run() -> None:
         await client.send_message(office_entity, message[:3900])
 
     try:
-        await send_office("🟢 #Інфраструктура · Relay підключено. Готовий ловити сигнали з MAIN чату.")
+        await send_office("Офіс на зв'язку. Готовий ловити сигнали з MAIN чату.")
         print("[relay] startup ping sent to OFFICE")
         # Try to send visual team cards to match reference style.
         photo_candidates = {
@@ -724,7 +723,7 @@ async def run() -> None:
     except Exception as exc:
         print(f"[relay][ERROR] cannot send startup ping to OFFICE: {exc}")
 
-    print("[relay] mode: auto-catch signal-like messages from all dialogs")
+    print("[relay] mode: strict source filter (MAIN chat only)")
     active_positions: Dict[str, ActivePosition] = {}
     last_news_level = "SAFE"
     last_daily_report_date = ""
@@ -785,22 +784,22 @@ async def run() -> None:
                         async with aiohttp.ClientSession(timeout=timeout) as http:
                             snap = await build_desk_market_snapshot(http, sym)
                     except Exception as exc:
-                        await send_office(f"[desk] не вдалося зняти snapshot з Binance: {exc}")
+                        await send_office(f"Не вдалося зняти ринковий зріз з Binance: {exc}")
                         return
 
                     gold_line = ""
                     if snap.get("gold_symbol"):
                         gold_line = (
-                            f"Gold proxy `{snap.get('gold_symbol')}` 24h `{float(snap.get('gold_change_pct', 0.0)):+.2f}%`\n"
+                            f"Золото-проксі `{snap.get('gold_symbol')}` 24г `{float(snap.get('gold_change_pct', 0.0)):+.2f}%`\n"
                         )
 
                     await send_office(
-                        "📌 *LIVE SNAPSHOT (Binance USDT-M)*\n"
-                        f"BTCUSDT 24h `{float(snap.get('btc_change_pct', 0.0)):+.2f}%`\n"
-                        f"{sym} 24h `{float(snap.get('sym_change_pct', 0.0)):+.2f}%` · "
+                        "📌 Ринковий зріз (Binance USDT-M)\n"
+                        f"BTCUSDT 24г `{float(snap.get('btc_change_pct', 0.0)):+.2f}%`\n"
+                        f"{sym} 24г `{float(snap.get('sym_change_pct', 0.0)):+.2f}%` · "
                         f"vol `{float(snap.get('quote_volume_usdt', 0.0)):.0f}` USDT notional\n"
                         f"{gold_line}"
-                        f"Chop proxy (HL range): `{float(snap.get('volatility_pct', 0.0)):.2f}%`"
+                        f"Оцінка ринку (діапазон HL): `{float(snap.get('volatility_pct', 0.0)):.2f}%`"
                     )
 
                     async def sender(msg: str) -> None:
@@ -816,15 +815,16 @@ async def run() -> None:
                     print("[relay] desk_qa done")
                 return
 
-            if not looks_like_signal(text):
+            # Hard gate: process trading signals only from MAIN room.
+            # This prevents accidental mirroring from any other dialog/log stream.
+            if src_chat_id is None or int(src_chat_id) != int(main_chat_id):
                 return
-            # Never ingest the Office room itself, otherwise mirror + agent replies re-trigger the relay.
-            if src_chat_id is not None and int(src_chat_id) == int(office_chat_id):
+            if not looks_like_signal(text):
                 return
             print(f"[relay] matched message id={event.id} chat_id={src_chat_id}")
             sig = parse_signal(text, event.id)
             await send_office(build_signal_kickoff(sig.symbol, sig.direction))
-            await send_office(f"🪞 #Загальний · Дзеркало сирого тексту\n\n{text[:3500]}")
+            await send_office(f"Отримала сигнал:\n{text[:3500]}")
             print("[relay] mirror sent")
 
             async def sender(msg: str) -> None:
@@ -836,8 +836,7 @@ async def run() -> None:
                 if recurring:
                     hints = journal_learning_hints_from_tags(recurring)[:3]
                     await send_office(
-                        "🧠 *#Загальний · Learning Guard*\n"
-                        "Перед входом нагадування з минулих помилок:\n"
+                        "Нагадування перед входом (з минулих помилок):\n"
                         + "\n".join(f"- {h}" for h in hints)
                     )
                 active_positions[sig.signal_id] = ActivePosition(
@@ -907,10 +906,10 @@ async def run() -> None:
                                 sender=sender,
                                 symbol=p.symbol,
                                 event_type="PARTIAL_CLOSE",
-                                details="TIME_EVENT 60s: немає live ціни, fallback partial close 50%.",
+                                details="Через 60с немає живої ціни: часткова фіксація 50% у запасному режимі.",
                                 db_path=db_path,
                             )
-                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nFINAL DECISION: PARTIAL CLOSE 50% `{p.symbol}`")
+                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: частково закрити 50% по {p.symbol}.")
                             p.stage = 1
                             continue
                         if p.stage == 1 and age >= 120:
@@ -918,10 +917,10 @@ async def run() -> None:
                                 sender=sender,
                                 symbol=p.symbol,
                                 event_type="MOVE_SL",
-                                details="TIME_EVENT 120s: fallback move SL to BE.",
+                                details="Через 120с: переносимо стоп у беззбиток у запасному режимі.",
                                 db_path=db_path,
                             )
-                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nFINAL DECISION: MOVE SL TO BE `{p.symbol}`")
+                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: перенести SL в беззбиток по {p.symbol}.")
                             p.stage = 2
                             continue
                         if p.stage == 2 and age >= 180:
@@ -929,7 +928,7 @@ async def run() -> None:
                                 sender=sender,
                                 symbol=p.symbol,
                                 event_type="EXIT",
-                                details="TIME_EVENT 180s: fallback exit.",
+                                details="Через 180с: вихід у запасному режимі.",
                                 db_path=db_path,
                             )
                             await office_trade_closed(
@@ -946,7 +945,7 @@ async def run() -> None:
                                 outcome="BE",
                                 exit_price=(p.last_price if p.last_price > 0 else None),
                                 pnl_pct=0.0,
-                                exit_reason="TIME_EVENT fallback close",
+                                exit_reason="Закриття у запасному режимі за таймером",
                                 mistake_tags=["no_live_price"],
                                 review_note="Закриття по часу без live ціни.",
                             )
@@ -965,10 +964,10 @@ async def run() -> None:
                             sender=sender,
                             symbol=p.symbol,
                             event_type="PARTIAL_CLOSE",
-                            details=f"LIVE PRICE +{move_pct:.2f}%: часткова фіксація 50%.",
+                            details=f"Жива ціна +{move_pct:.2f}%: часткова фіксація 50%.",
                             db_path=db_path,
                         )
-                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nFINAL DECISION: PARTIAL CLOSE 50% `{p.symbol}`")
+                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: частково закрити 50% по {p.symbol}.")
                         p.partial_sent = True
                         continue
                     if p.partial_sent and (not p.moved_sl) and move_pct >= 2.0:
@@ -976,10 +975,10 @@ async def run() -> None:
                             sender=sender,
                             symbol=p.symbol,
                             event_type="MOVE_SL",
-                            details=f"LIVE PRICE +{move_pct:.2f}%: move SL to breakeven.",
+                            details=f"Жива ціна +{move_pct:.2f}%: переносимо стоп у беззбиток.",
                             db_path=db_path,
                         )
-                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nFINAL DECISION: MOVE SL TO BE `{p.symbol}`")
+                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: перенести SL в беззбиток по {p.symbol}.")
                         p.moved_sl = True
                         continue
                     if p.moved_sl and move_pct >= 3.0:
@@ -987,7 +986,7 @@ async def run() -> None:
                             sender=sender,
                             symbol=p.symbol,
                             event_type="EXIT",
-                            details=f"LIVE PRICE +{move_pct:.2f}%: desk take-profit exit.",
+                            details=f"Жива ціна +{move_pct:.2f}%: вихід по тейк-профіту.",
                             db_path=db_path,
                         )
                         await office_trade_closed(
@@ -1015,7 +1014,7 @@ async def run() -> None:
                             sender=sender,
                             symbol=p.symbol,
                             event_type="EXIT",
-                            details=f"LIVE PRICE {move_pct:.2f}%: risk exit (SL zone).",
+                            details=f"Жива ціна {move_pct:.2f}%: захисний вихід (зона стопа).",
                             db_path=db_path,
                         )
                         await office_trade_closed(
@@ -1045,9 +1044,8 @@ async def run() -> None:
                             context_patch={"stoploss_analysis": {"tags": tags, "age_sec": int(age), "move_pct": move_pct}},
                         )
                         await send_office(
-                            "🛑 *#Загальний · STOP REVIEW*\n"
-                            f"`{p.symbol}` · {review_note}\n"
-                            f"Теги: `{', '.join(tags)}`"
+                            f"STOP REVIEW по {p.symbol}: {review_note}\n"
+                            f"Теги: {', '.join(tags)}"
                         )
                         active_positions.pop(sig_id, None)
             except Exception as exc:
