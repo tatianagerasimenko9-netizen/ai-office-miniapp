@@ -1091,9 +1091,13 @@ async def office_handle_signal(
     verdict = _decide_chain(signal)
 
     # Keep room readable: only one task line at open and one at close.
+    prev_agent: Optional[str] = None
     for idx, d in enumerate(verdict.decisions, start=1):
-        await agent_say(sender, d.agent_key, d.note)
-        log_message(db_path, signal.signal_id, idx, d.agent_key, d.note)
+        pre = _cross_reply_prefix(prev_agent, d.agent_key)
+        out = f"{pre}{d.note}" if pre else d.note
+        await agent_say(sender, d.agent_key, out)
+        log_message(db_path, signal.signal_id, idx, d.agent_key, out)
+        prev_agent = d.agent_key
         next_status: TaskStatus = "IN_PROGRESS"
         if d.agent_key == "marko":
             next_status = "REVIEW"
@@ -1216,6 +1220,30 @@ def _fmt_tv(symbol: str) -> str:
     return f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{symbol.upper()}"
 
 
+def _cross_reply_prefix(prev_key: Optional[str], cur_key: str) -> str:
+    """
+    Короткий «підхоплення» попередньої репліки (MASTER п.24), без зміни логіки рішень.
+    """
+    if not prev_key or prev_key == cur_key:
+        return ""
+    key = (prev_key, cur_key)
+    if key == ("maks", "news"):
+        return "Макс, підхоплюю: "
+    if key == ("news", "daryna"):
+        return "Назаре, враховую: "
+    if key == ("daryna", "memory"):
+        return "До ризику додаю пам'ять: "
+    if key == ("memory", "psych"):
+        return "Додам по дисципліні: "
+    if key == ("psych", "dev"):
+        return "І технічно: "
+    if key == ("dev", "lev"):
+        return "Техніка ок. "
+    if key == ("lev", "marko"):
+        return "У execution: "
+    return ""
+
+
 def _simple_ua(agent_key: str, note: str) -> str:
     """
     Convert desk notes to short plain-UA style for interactive Q&A.
@@ -1269,10 +1297,9 @@ def _simple_ua(agent_key: str, note: str) -> str:
 
 
 def _memory_reply(symbol: str, market: Dict[str, Any]) -> str:
-    wr_hint = 70 if float(market.get("score_hint", 12)) >= 13 else 54
     return (
-        f"Бачу схожі кейси по {symbol}. Історично це близько {wr_hint}% успішних сценаріїв. "
-        "Не форсуй вхід без підтвердження."
+        f"По {symbol} є схожі записи в журналі — без RAG / агрегації точний winrate не цитую. "
+        "Звіряй факти, не форсуй вхід."
     )
 
 
@@ -1298,7 +1325,7 @@ def _dev_reply(question: str) -> str:
 SCENARIO_TEMPLATES: Dict[str, List[tuple[str, str]]] = {
     "asia_strong": [
         ("lev", "Бачу чистий сетап. @Дарина, працюємо акуратно і по плану."),
-        ("memory", "Схожі кейси за 30 днів: близько 74% у плюс."),
+        ("memory", "Схожі кейси в журналі є — точний % без бази не називаю, без форсу."),
         ("marko", "Технічно ок. @Макс, фон ринку нормальний, можемо працювати."),
         ("daryna", "Приймаю. Ризик 1%, без форсу."),
         ("marko", "Фінальне рішення: ВХІД"),
@@ -1412,17 +1439,30 @@ async def office_desk_user_question(
     # Lightweight chain (still uses grounding rules via _metric_pack inside decisions if we reuse helpers)
     conversation: List[ConversationTurn] = []
 
+    prev_agent: Optional[str] = None
+
     analyst = _analyst_reply(sig, conversation)
-    await agent_say(sender, analyst.agent_key, _simple_ua(analyst.agent_key, analyst.note), 0.12)
+    au = _simple_ua(analyst.agent_key, analyst.note)
+    await agent_say(
+        sender,
+        analyst.agent_key,
+        f"{_cross_reply_prefix(prev_agent, analyst.agent_key)}{au}",
+        0.12,
+    )
     conversation.append(ConversationTurn(analyst.agent_key, analyst.note))
+    prev_agent = analyst.agent_key
 
     news = _news_reply(sig, conversation)
-    await agent_say(sender, news.agent_key, _simple_ua(news.agent_key, news.note), 0.12)
+    nu = _simple_ua(news.agent_key, news.note)
+    await agent_say(sender, news.agent_key, f"{_cross_reply_prefix(prev_agent, news.agent_key)}{nu}", 0.12)
     conversation.append(ConversationTurn(news.agent_key, news.note))
+    prev_agent = news.agent_key
 
     risk = _risk_reply(sig, conversation)
-    await agent_say(sender, risk.agent_key, _simple_ua(risk.agent_key, risk.note), 0.12)
+    ru = _simple_ua(risk.agent_key, risk.note)
+    await agent_say(sender, risk.agent_key, f"{_cross_reply_prefix(prev_agent, risk.agent_key)}{ru}", 0.12)
     conversation.append(ConversationTurn(risk.agent_key, risk.note))
+    prev_agent = risk.agent_key
 
     q_low = q.lower()
     need_memory = any(k in q_low for k in ("істор", "схож", "статист", "пам'ят")) or float(market.get("volatility_pct", 0.0)) >= 3.0
@@ -1432,28 +1472,55 @@ async def office_desk_user_question(
 
     if need_memory:
         mem_note = _memory_reply(sym, market)
-        await agent_say(sender, "memory", _simple_ua("memory", mem_note), 0.11)
+        mu = _simple_ua("memory", mem_note)
+        await agent_say(sender, "memory", f"{_cross_reply_prefix(prev_agent, 'memory')}{mu}", 0.11)
         conversation.append(ConversationTurn("memory", mem_note))
+        prev_agent = "memory"
     if need_psych:
         psy_note = _psych_reply(recurring)
-        await agent_say(sender, "psych", _simple_ua("psych", psy_note), 0.11)
+        pu = _simple_ua("psych", psy_note)
+        await agent_say(sender, "psych", f"{_cross_reply_prefix(prev_agent, 'psych')}{pu}", 0.11)
         conversation.append(ConversationTurn("psych", psy_note))
+        prev_agent = "psych"
     if need_dev:
         dev_note = _dev_reply(q)
-        await agent_say(sender, "dev", _simple_ua("dev", dev_note), 0.11)
+        du = _simple_ua("dev", dev_note)
+        await agent_say(sender, "dev", f"{_cross_reply_prefix(prev_agent, 'dev')}{du}", 0.11)
         conversation.append(ConversationTurn("dev", dev_note))
+        prev_agent = "dev"
 
     strategist = _strategist_reply(sig, conversation)
-    await agent_say(sender, strategist.agent_key, _simple_ua(strategist.agent_key, strategist.note), 0.12)
+    su = _simple_ua(strategist.agent_key, strategist.note)
+    await agent_say(
+        sender,
+        strategist.agent_key,
+        f"{_cross_reply_prefix(prev_agent, strategist.agent_key)}{su}",
+        0.12,
+    )
     conversation.append(ConversationTurn(strategist.agent_key, strategist.note))
+    prev_agent = strategist.agent_key
 
     rebuttal = _risk_rebuttal(sig, strategist, risk)
     if rebuttal is not None:
-        await agent_say(sender, rebuttal.agent_key, _simple_ua(rebuttal.agent_key, rebuttal.note), 0.10)
+        reb_u = _simple_ua(rebuttal.agent_key, rebuttal.note)
+        await agent_say(
+            sender,
+            rebuttal.agent_key,
+            f"{_cross_reply_prefix(prev_agent, rebuttal.agent_key)}{reb_u}",
+            0.10,
+        )
         conversation.append(ConversationTurn(rebuttal.agent_key, rebuttal.note))
+        prev_agent = rebuttal.agent_key
         strategist2 = _strategist_after_rebuttal(sig, rebuttal)
-        await agent_say(sender, strategist2.agent_key, _simple_ua(strategist2.agent_key, strategist2.note), 0.10)
+        s2u = _simple_ua(strategist2.agent_key, strategist2.note)
+        await agent_say(
+            sender,
+            strategist2.agent_key,
+            f"{_cross_reply_prefix(prev_agent, strategist2.agent_key)}{s2u}",
+            0.10,
+        )
         conversation.append(ConversationTurn(strategist2.agent_key, strategist2.note))
+        prev_agent = strategist2.agent_key
         strategist = strategist2
 
     final_action: Literal["ENTER", "SKIP", "WAIT"] = "ENTER"
@@ -1463,7 +1530,13 @@ async def office_desk_user_question(
         final_action = "WAIT"
 
     executor = _executor_reply(sig, final_action)
-    await agent_say(sender, executor.agent_key, _simple_ua(executor.agent_key, executor.note), 0.12)
+    eu = _simple_ua(executor.agent_key, executor.note)
+    await agent_say(
+        sender,
+        executor.agent_key,
+        f"{_cross_reply_prefix(prev_agent, executor.agent_key)}{eu}",
+        0.12,
+    )
 
     await sender(
         "🧾 *#Загальний · Підсумок обговорення*\n"
