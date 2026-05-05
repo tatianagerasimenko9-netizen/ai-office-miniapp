@@ -177,7 +177,8 @@ def _now_iso() -> str:
 
 
 def fmt_agent_line(agent_key: str, text: str) -> str:
-    return text
+    # Hidden routing tag for relay multi-bot delivery; stripped before sending to Telegram.
+    return f"@@{agent_key}@@{text}"
 
 
 def _task_status_line(task_id: str, status: TaskStatus, assignee: str) -> str:

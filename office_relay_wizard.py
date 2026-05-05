@@ -142,6 +142,9 @@ def load_agent_bot_tokens() -> Dict[str, str]:
 
 
 def detect_agent_key(message: str) -> Optional[str]:
+    m = re.match(r"^@@([a-z_]+)@@", message)
+    if m:
+        return m.group(1).strip().lower()
     text = message[:120]
     if "Лев" in text:
         return "lev"
@@ -244,6 +247,10 @@ def _parse_desk_command(text: str) -> Optional[str]:
         if low.startswith(p):
             return s[len(p) :].strip()
     return None
+
+
+def _strip_agent_tag(message: str) -> str:
+    return re.sub(r"^@@[a-z_]+@@", "", message, count=1)
 
 
 def _parse_scenario_command(text: str) -> Optional[str]:
@@ -733,19 +740,20 @@ async def run() -> None:
 
     async def send_office(message: str, reply_to_message_id: Optional[int] = None) -> Optional[int]:
         agent_key = detect_agent_key(message)
+        clean_message = _strip_agent_tag(message)
         token = agent_bot_tokens.get(agent_key or "")
         if token:
             ok, reason, msg_id = await send_via_bot_api(
                 bot_http,
                 token,
                 office_chat_id,
-                message,
+                clean_message,
                 reply_to_message_id=reply_to_message_id,
             )
             if ok:
                 return msg_id
             print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
-        sent = await client.send_message(office_entity, message[:3900], reply_to=reply_to_message_id)
+        sent = await client.send_message(office_entity, clean_message[:3900], reply_to=reply_to_message_id)
         try:
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception:
