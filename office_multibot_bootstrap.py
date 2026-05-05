@@ -65,7 +65,20 @@ def main() -> int:
     interactive = os.getenv("MULTIBOT_INTERACTIVE", "").strip() == "1"
     keys_needed = ("lev", "maks", "news", "daryna", "marko", "olesya")
     tokens = cfg.get("agent_bot_tokens") if isinstance(cfg.get("agent_bot_tokens"), dict) else {}
-    missing = [k for k in keys_needed if not (isinstance(tokens, dict) and str(tokens.get(k, "") or "").strip())]
+    env_map = {
+        "lev": "AGENT_BOT_TOKEN_LEV",
+        "maks": "AGENT_BOT_TOKEN_MAKS",
+        "news": "AGENT_BOT_TOKEN_NEWS",
+        "daryna": "AGENT_BOT_TOKEN_DARYNA",
+        "marko": "AGENT_BOT_TOKEN_MARKO",
+        "olesya": "AGENT_BOT_TOKEN_OLESYA",
+    }
+    missing = []
+    for k in keys_needed:
+        from_env = os.getenv(env_map[k], "").strip()
+        from_cfg = str(tokens.get(k, "") or "").strip() if isinstance(tokens, dict) else ""
+        if not from_env and not from_cfg:
+            missing.append(k)
 
     if missing and not interactive:
         print(f"[multibot] missing bot tokens: {', '.join(missing)}")
