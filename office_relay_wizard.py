@@ -751,7 +751,12 @@ async def run() -> None:
     except Exception as exc:
         print(f"[relay][ERROR] cannot send startup ping to OFFICE: {exc}")
 
-    print("[relay] mode: strict source filter (MAIN chat only)")
+    source_raw = os.getenv("SOURCE_CHAT_ID", "").strip()
+    source_chat_id = int(source_raw) if source_raw else None
+    if source_chat_id is not None:
+        print(f"[relay] mode: source bridge enabled ({source_chat_id} -> {main_chat_id}), MAIN ingest only")
+    else:
+        print("[relay] mode: strict source filter (MAIN chat only)")
     active_positions: Dict[str, ActivePosition] = {}
     last_news_level = "SAFE"
     last_daily_report_date = ""
@@ -841,6 +846,14 @@ async def run() -> None:
                         db_path=db_path,
                     )
                     print("[relay] desk_qa done")
+                return
+
+            # Optional sidecar bridge: forward signal-like messages from SOURCE chat to MAIN chat.
+            # Keeps trade-core untouched while enabling automatic feed into MAIN.
+            if source_chat_id is not None and src_chat_id is not None and int(src_chat_id) == int(source_chat_id):
+                if looks_like_signal(text):
+                    await client.send_message(main_entity, text[:3900])
+                    print(f"[relay] forwarded SOURCE -> MAIN id={event.id} chat_id={src_chat_id}")
                 return
 
             # Hard gate: process trading signals only from MAIN room.
