@@ -319,6 +319,15 @@ setInterval(loadOffice, 9000);
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_HEAD(self) -> None:
+        u = urlparse(self.path)
+        if u.path in ("/", "/api/summary"):
+            self.send_response(200)
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_GET(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/summary":
