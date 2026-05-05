@@ -810,6 +810,20 @@ async def run() -> None:
             if ok:
                 return msg_id
             print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
+        # Cloud/runtime mode: always prefer Bot API fallback via main office bot token.
+        # This avoids Telethon peer resolution issues for non-agent/system messages.
+        if tg_bot_token:
+            ok, reason, msg_id = await send_via_bot_api(
+                bot_http,
+                tg_bot_token,
+                office_chat_id,
+                clean_message,
+                reply_to_message_id=reply_to_message_id,
+                message_thread_id=thread_id,
+            )
+            if ok:
+                return msg_id
+            print(f"[relay][WARN] fallback bot-send failed: {reason} (trying Telethon client)")
         sent = await client.send_message(office_entity, clean_message[:3900], reply_to=reply_to_message_id)
         try:
             return int(getattr(sent, "id", 0) or 0) or None
