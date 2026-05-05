@@ -953,11 +953,12 @@ def _decide_chain(signal: OfficeSignal) -> OfficeVerdict:
 
 
 def _fmt_verdict(signal: OfficeSignal, verdict: OfficeVerdict) -> str:
+    action_ua = {"ENTER": "ВХІД", "SKIP": "ПРОПУСК", "WAIT": "ОЧІКУВАННЯ"}.get(verdict.action, verdict.action)
     return (
-        f"✅ *#Загальний · Office Verdict* #{signal.signal_id}\n"
+        f"✅ *#Загальний · Вердикт офісу* #{signal.signal_id}\n"
         f"Символ: `{signal.symbol}` · Напрям: `{signal.direction}` · Score: `{signal.score}`\n"
         f"Сесія: `{signal.session}` · Режим: `{signal.regime}`\n"
-        f"Рішення: *{verdict.action}*\n"
+        f"Рішення: *{action_ua}*\n"
         f"Підсумок: {verdict.summary}"
     )
 
@@ -1135,10 +1136,14 @@ async def office_news_trigger(
     minutes_to_event: int,
     db_path: str = "office_bridge.db",
 ) -> None:
+    risk_ua = {"SAFE": "СПОКІЙНО", "RISK": "УВАГА", "HIGH RISK": "ВИСОКИЙ РИЗИК"}.get(risk_level, risk_level)
+    short_headline = "Важлива макроподія в календарі."
+    if str(headline or "").strip():
+        short_headline = "Подія в календарі потребує обережності."
     await agent_say(
         sender,
         "news",
-        f"{risk_level}: подія через {minutes_to_event} хв. {headline[:180]}",
+        f"{risk_ua}: подія через {minutes_to_event} хв. {short_headline}",
         0.02,
     )
     if risk_level == "HIGH RISK":
@@ -1167,7 +1172,7 @@ async def office_daily_wrap(
         f"Угод: `{total}` · W `{wins}` · L `{losses}` · BE `{be}` · WR `{wr:.1f}%`"
     )
     if top_note:
-        await sender(f"🧠 *#Задачник · Learning note*\n{top_note}")
+        await sender(f"🧠 *#Задачник · Нотатка навчання*\n{top_note}")
     await agent_say(sender, "olesya", "День закрито. Завтра стартуємо з оновленим learning-фокусом.", 0.05)
 
 
@@ -1267,14 +1272,14 @@ SCENARIO_TEMPLATES: Dict[str, List[tuple[str, str]]] = {
         ("memory", "Схожі кейси за 30 днів: близько 74% у плюс."),
         ("marko", "Технічно ок. @Макс, фон ринку нормальний, можемо працювати."),
         ("daryna", "Приймаю. Ризик 1%, без форсу."),
-        ("marko", "FINAL DECISION: ENTER"),
+        ("marko", "Фінальне рішення: ВХІД"),
     ],
     "weak_skip": [
         ("maks", "Увага, фон слабкий. @Марко, ліквідність не подобається."),
         ("marko", "Підтверджую: спред/ліквідність слабкі, вхід неякісний."),
         ("memory", "Історично такі входи часто закінчуються стопом."),
         ("daryna", "Ризик завеликий. Скасовуємо."),
-        ("marko", "FINAL DECISION: SKIP"),
+        ("marko", "Фінальне рішення: ПРОПУСК"),
     ],
     "daryna_question": [
         ("daryna", "Командо, що думаєте по ETHUSDT зараз?"),
@@ -1282,7 +1287,7 @@ SCENARIO_TEMPLATES: Dict[str, List[tuple[str, str]]] = {
         ("maks", "По новинах тихо, але ринок трохи нервовий."),
         ("marko", "Технічно можна, але краще вхід після ретесту."),
         ("daryna", "Прийнято. Поки чекаємо."),
-        ("marko", "FINAL DECISION: WAIT"),
+        ("marko", "Фінальне рішення: ОЧІКУВАННЯ"),
     ],
     "win_close": [
         ("marko", "TP досягнуто, фіксація виконана."),
@@ -1369,7 +1374,7 @@ async def office_desk_user_question(
     log_event(db_path, "DESK_QUESTION", {"symbol": sym, "question": q}, sig.signal_id)
 
     await sender(
-        "🧭 *#Загальний · DESK Q&A*\n"
+        "🧭 *#Загальний · Питання до офісу*\n"
         f"Питання: {q}\n"
         f"Фокус: `{sym}` · BTC24h `{float(market.get('btc_change_pct', 0.0)):+.2f}%` · ALTs24h `{float(market.get('sym_change_pct', 0.0)):+.2f}%`\n"
         f"TV: {_fmt_tv(sym)}"
@@ -1432,9 +1437,9 @@ async def office_desk_user_question(
     await agent_say(sender, executor.agent_key, _simple_ua(executor.agent_key, executor.note), 0.12)
 
     await sender(
-        "🧾 *#Загальний · DESK SUMMARY*\n"
-        f"`{sym}` · desk view: vol `{float(market.get('quote_volume_usdt', 0.0)):.0f}` USDT (24h notional)\n"
-        f"FINAL (desk QA): `{final_action}`"
+        "🧾 *#Загальний · Підсумок обговорення*\n"
+        f"`{sym}` · обсяг `{float(market.get('quote_volume_usdt', 0.0)):.0f}` USDT (24г)\n"
+        f"Фінальне рішення офісу: `{ {'ENTER':'ВХІД','SKIP':'ПРОПУСК','WAIT':'ОЧІКУВАННЯ'}.get(final_action, final_action) }`"
     )
 
     log_event(
