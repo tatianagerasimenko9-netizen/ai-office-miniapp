@@ -15,6 +15,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
+try:
+    import psycopg
+except Exception:  # pragma: no cover
+    psycopg = None  # type: ignore[assignment]
 
 from office_bridge import (
     OfficeSignal,
@@ -431,14 +435,31 @@ def build_stoploss_postmortem(
 
 def build_daily_journal_report(db_path: str) -> str:
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT outcome, pnl_pct, r_multiple, mistake_tags_json
-                FROM trade_journal
-                WHERE status = 'CLOSED' AND date(ts_close_utc) = date('now')
-                """
-            ).fetchall()
+        is_pg = str(db_path).lower().startswith("postgres://") or str(db_path).lower().startswith("postgresql://")
+        if is_pg:
+            if psycopg is None:
+                raise RuntimeError("psycopg is required for PostgreSQL mode")
+            with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT outcome, pnl_pct, r_multiple, mistake_tags_json
+                        FROM trade_journal
+                        WHERE status = 'CLOSED' AND LEFT(COALESCE(ts_close_utc, ''), 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
+                        """
+                    )
+                    rows = cur.fetchall()
+        else:
+            if str(db_path).lower().startswith("sqlite:///"):
+                db_path = str(db_path)[10:]
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT outcome, pnl_pct, r_multiple, mistake_tags_json
+                    FROM trade_journal
+                    WHERE status = 'CLOSED' AND date(ts_close_utc) = date('now')
+                    """
+                ).fetchall()
     except Exception:
         rows = []
 
@@ -623,7 +644,11 @@ async def run() -> None:
 
     api_id = int(api_id_raw)
     session_name = "office_relay_wizard"
-    db_path = os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip() or "office_bridge.db"
+    db_path = (
+        os.getenv("DATABASE_URL", "").strip()
+        or os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip()
+        or "office_bridge.db"
+    )
 
     client = TelegramClient(session_name, api_id, api_hash)
     while True:

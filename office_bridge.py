@@ -18,6 +18,12 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from urllib.parse import urlparse
+
+try:
+    import psycopg
+except Exception:  # pragma: no cover - optional in local sqlite mode
+    psycopg = None  # type: ignore[assignment]
 
 
 Decision = Literal["APPROVED", "REJECTED", "WAIT"]
@@ -188,8 +194,160 @@ TASK_ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
 }
 
 
+def _is_pg(db_path: str) -> bool:
+    s = str(db_path or "").strip().lower()
+    return s.startswith("postgres://") or s.startswith("postgresql://")
+
+
+def _adapt_sql(sql: str, db_path: str) -> str:
+    if not _is_pg(db_path):
+        return sql
+    return sql.replace("?", "%s")
+
+
+def _sqlite_path_from_url(db_path: str) -> str:
+    # Support sqlite:///... style for compatibility.
+    if str(db_path).lower().startswith("sqlite:///"):
+        return str(db_path)[10:]
+    return db_path
+
+
+def _execute(db_path: str, sql: str, params: tuple = ()) -> None:
+    qry = _adapt_sql(sql, db_path)
+    if _is_pg(db_path):
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for PostgreSQL mode")
+        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+            with conn.cursor() as cur:
+                cur.execute(qry, params)
+            conn.commit()
+        return
+    with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
+        conn.execute(qry, params)
+        conn.commit()
+
+
+def _fetchone(db_path: str, sql: str, params: tuple = ()) -> Optional[tuple]:
+    qry = _adapt_sql(sql, db_path)
+    if _is_pg(db_path):
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for PostgreSQL mode")
+        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+            with conn.cursor() as cur:
+                cur.execute(qry, params)
+                row = cur.fetchone()
+        return tuple(row) if row else None
+    with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
+        row = conn.execute(qry, params).fetchone()
+    return tuple(row) if row else None
+
+
+def _fetchall(db_path: str, sql: str, params: tuple = ()) -> List[tuple]:
+    qry = _adapt_sql(sql, db_path)
+    if _is_pg(db_path):
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for PostgreSQL mode")
+        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+            with conn.cursor() as cur:
+                cur.execute(qry, params)
+                rows = cur.fetchall()
+        return [tuple(r) for r in rows]
+    with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
+        rows = conn.execute(qry, params).fetchall()
+    return [tuple(r) for r in rows]
+
+
 def init_office_db(db_path: str = "office_bridge.db") -> None:
-    with sqlite3.connect(db_path) as conn:
+    if _is_pg(db_path):
+        if psycopg is None:
+            raise RuntimeError("psycopg is required for PostgreSQL mode")
+        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts_utc TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        signal_id TEXT,
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_tasks (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts_utc TEXT NOT NULL,
+                        task_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        assignee TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_decisions (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts_utc TEXT NOT NULL,
+                        signal_id TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        decisions_json TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_messages (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts_utc TEXT NOT NULL,
+                        signal_id TEXT NOT NULL,
+                        turn_idx INTEGER NOT NULL,
+                        agent_key TEXT NOT NULL,
+                        message TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS trade_journal (
+                        trade_id TEXT PRIMARY KEY,
+                        ts_open_utc TEXT NOT NULL,
+                        ts_close_utc TEXT,
+                        symbol TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        entry_price DOUBLE PRECISION,
+                        stop_loss DOUBLE PRECISION,
+                        take_profit DOUBLE PRECISION,
+                        position_qty DOUBLE PRECISION,
+                        exit_price DOUBLE PRECISION,
+                        outcome TEXT,
+                        pnl_pct DOUBLE PRECISION,
+                        fees_pct DOUBLE PRECISION,
+                        r_multiple DOUBLE PRECISION,
+                        setup_name TEXT,
+                        timeframe TEXT,
+                        entry_reason TEXT,
+                        exit_reason TEXT,
+                        mistake_tags_json TEXT NOT NULL,
+                        review_note TEXT,
+                        context_json TEXT NOT NULL
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
+            conn.commit()
+        return
+
+    with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS office_events (
@@ -275,9 +433,7 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(sql, params)
-        conn.commit()
+    _execute(db_path, sql, params)
 
 
 def log_event(db_path: str, event_type: str, payload: Dict[str, Any], signal_id: str = "") -> None:
@@ -305,11 +461,11 @@ def upsert_task(
 
 def _get_task_last_status(db_path: str, task_id: str) -> Optional[str]:
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT status FROM office_tasks WHERE task_id = ? ORDER BY id DESC LIMIT 1",
-                (task_id,),
-            ).fetchone()
+        row = _fetchone(
+            db_path,
+            "SELECT status FROM office_tasks WHERE task_id = ? ORDER BY id DESC LIMIT 1",
+            (task_id,),
+        )
         return str(row[0]) if row else None
     except Exception:
         return None
@@ -377,8 +533,7 @@ def journal_open_trade(
 ) -> None:
     # Do not clobber an existing row (e.g. if a signal is replayed).
     try:
-        with sqlite3.connect(db_path) as conn:
-            exists = conn.execute("SELECT 1 FROM trade_journal WHERE trade_id = ?", (trade_id,)).fetchone()
+        exists = _fetchone(db_path, "SELECT 1 FROM trade_journal WHERE trade_id = ?", (trade_id,))
         if exists:
             return
     except Exception:
@@ -443,15 +598,15 @@ def journal_close_trade(
     # Compute R-multiple as PnL% / initial risk% (if entry+SL exist), else best-effort from price distances.
     r_multiple: Optional[float] = None
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT entry_price, stop_loss, direction
-                FROM trade_journal
-                WHERE trade_id = ?
-                """,
-                (trade_id,),
-            ).fetchone()
+        row = _fetchone(
+            db_path,
+            """
+            SELECT entry_price, stop_loss, direction
+            FROM trade_journal
+            WHERE trade_id = ?
+            """,
+            (trade_id,),
+        )
         if row and row[0] and row[1]:
             entry = float(row[0])
             sl = float(row[1])
@@ -470,12 +625,11 @@ def journal_close_trade(
 
     merged_ctx: Dict[str, Any] = {}
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute("SELECT context_json FROM trade_journal WHERE trade_id = ?", (trade_id,)).fetchone()
-            if row and row[0]:
-                obj = json.loads(str(row[0]) or "{}")
-                if isinstance(obj, dict):
-                    merged_ctx.update(obj)
+        row = _fetchone(db_path, "SELECT context_json FROM trade_journal WHERE trade_id = ?", (trade_id,))
+        if row and row[0]:
+            obj = json.loads(str(row[0]) or "{}")
+            if isinstance(obj, dict):
+                merged_ctx.update(obj)
     except Exception:
         merged_ctx = {}
     if context_patch:
@@ -537,17 +691,17 @@ def journal_recurring_mistakes(
     """
     counts: Dict[str, int] = {}
     try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT mistake_tags_json
-                FROM trade_journal
-                WHERE status = 'CLOSED' AND outcome = 'LOSS'
-                ORDER BY ts_close_utc DESC
-                LIMIT ?
-                """,
-                (lookback_losses,),
-            ).fetchall()
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT mistake_tags_json
+            FROM trade_journal
+            WHERE status = 'CLOSED' AND outcome = 'LOSS'
+            ORDER BY ts_close_utc DESC
+            LIMIT ?
+            """,
+            (lookback_losses,),
+        )
     except Exception:
         return {}
 

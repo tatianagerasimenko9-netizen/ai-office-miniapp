@@ -7,13 +7,33 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+try:
+    import psycopg
+except Exception:  # pragma: no cover
+    psycopg = None  # type: ignore[assignment]
 
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = os.getenv("OFFICE_DB_PATH", "office_bridge.db")
 HOST = os.getenv("OFFICE_MINI_HOST", "127.0.0.1")
 PORT = int(os.getenv("OFFICE_MINI_PORT", "8790"))
 
 
+def _is_pg() -> bool:
+    s = str(DATABASE_URL or "").strip().lower()
+    return s.startswith("postgres://") or s.startswith("postgresql://")
+
+
 def q(sql: str, params: tuple = ()) -> list[tuple]:
+    if _is_pg():
+        if psycopg is None:
+            raise RuntimeError("psycopg is required when DATABASE_URL is set")
+        qry = sql.replace("?", "%s")
+        with psycopg.connect(DATABASE_URL) as conn:  # type: ignore[arg-type]
+            with conn.cursor() as cur:
+                cur.execute(qry, params)
+                rows = cur.fetchall()
+        return [tuple(r) for r in rows]
     with sqlite3.connect(DB_PATH) as conn:
         return conn.execute(sql, params).fetchall()
 
@@ -322,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not os.path.exists(DB_PATH):
+    if (not _is_pg()) and (not os.path.exists(DB_PATH)):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"mini-app: http://{HOST}:{PORT}")
