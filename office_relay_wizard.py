@@ -167,6 +167,7 @@ async def send_via_bot_api(
     chat_id: int,
     text: str,
     reply_to_message_id: Optional[int] = None,
+    message_thread_id: Optional[int] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """
     Send via Bot API without parse_mode.
@@ -182,6 +183,8 @@ async def send_via_bot_api(
     }
     if reply_to_message_id:
         payload["reply_to_message_id"] = int(reply_to_message_id)
+    if message_thread_id:
+        payload["message_thread_id"] = int(message_thread_id)
     try:
         async with session.post(url, json=payload) as resp:
             body = await resp.json()
@@ -774,9 +777,26 @@ async def run() -> None:
             lvl = "OK" if ok_chk else "WARN"
             print(f"[relay][{lvl}] bot-check {k}: {note_chk}")
 
-    async def send_office(message: str, reply_to_message_id: Optional[int] = None) -> Optional[int]:
+    general_thread_id = int(os.getenv("OFFICE_GENERAL_THREAD_ID", "0") or "0") or None
+    tasks_thread_id = int(os.getenv("OFFICE_TASKS_THREAD_ID", "0") or "0") or None
+    tech_thread_id = int(os.getenv("OFFICE_TECH_THREAD_ID", "0") or "0") or None
+
+    def _thread_for_stream(stream: str) -> Optional[int]:
+        s = str(stream or "general").strip().lower()
+        if s == "tasks":
+            return tasks_thread_id or general_thread_id
+        if s == "tech":
+            return tech_thread_id or general_thread_id
+        return general_thread_id
+
+    async def send_office(
+        message: str,
+        reply_to_message_id: Optional[int] = None,
+        stream: str = "general",
+    ) -> Optional[int]:
         agent_key = detect_agent_key(message)
         clean_message = _strip_agent_tag(message)
+        thread_id = _thread_for_stream(stream)
         token = agent_bot_tokens.get(agent_key or "")
         if token:
             ok, reason, msg_id = await send_via_bot_api(
@@ -785,6 +805,7 @@ async def run() -> None:
                 office_chat_id,
                 clean_message,
                 reply_to_message_id=reply_to_message_id,
+                message_thread_id=thread_id,
             )
             if ok:
                 return msg_id
@@ -886,7 +907,8 @@ async def run() -> None:
                     if not scenario_key:
                         await send_office(
                             "ℹ️ Формат: `!scenario morning` або `!scenario loss_streak`.\n"
-                            "Доступні: `asia_strong, weak_skip, daryna_question, win_close, loss_streak, morning`"
+                            "Доступні: `asia_strong, weak_skip, daryna_question, win_close, loss_streak, morning`",
+                            stream="tasks",
                         )
                         return
                     await office_run_scenario(sender=sender, scenario_key=scenario_key, db_path=db_path)
@@ -907,7 +929,7 @@ async def run() -> None:
                         async with aiohttp.ClientSession(timeout=timeout) as http:
                             snap = await build_desk_market_snapshot(http, sym)
                     except Exception as exc:
-                        await send_office(f"Не вдалося зняти ринковий зріз з Binance: {exc}")
+                        await send_office(f"Не вдалося зняти ринковий зріз з Binance: {exc}", stream="tech")
                         return
 
                     gold_line = ""
@@ -922,11 +944,12 @@ async def run() -> None:
                         f"{sym} 24г `{float(snap.get('sym_change_pct', 0.0)):+.2f}%` · "
                         f"vol `{float(snap.get('quote_volume_usdt', 0.0)):.0f}` USDT notional\n"
                         f"{gold_line}"
-                        f"Оцінка ринку (діапазон HL): `{float(snap.get('volatility_pct', 0.0)):.2f}%`"
+                        f"Оцінка ринку (діапазон HL): `{float(snap.get('volatility_pct', 0.0)):.2f}%`",
+                        stream="tasks",
                     )
 
                     async def sender(msg: str) -> None:
-                        await send_office(msg[:3900])
+                        await send_office(msg[:3900], stream="tasks")
 
                     await office_desk_user_question(
                         sender=sender,
@@ -973,7 +996,8 @@ async def run() -> None:
                     hints = journal_learning_hints_from_tags(recurring)[:3]
                     await send_office(
                         "Нагадування перед входом (з минулих помилок):\n"
-                        + "\n".join(f"- {h}" for h in hints)
+                        + "\n".join(f"- {h}" for h in hints),
+                        stream="tasks",
                     )
                 active_positions[sig.signal_id] = ActivePosition(
                     signal_id=sig.signal_id,
@@ -1226,7 +1250,7 @@ async def run() -> None:
                     risk = await fetch_news_risk(session, news_api_key)
                     if risk.level != last_news_level:
                         async def sender(msg: str) -> None:
-                            await send_office(msg[:3900])
+                            await send_office(msg[:3900], stream="tech")
                         await office_news_trigger(
                             sender=sender,
                             risk_level=risk.level,  # type: ignore[arg-type]
@@ -1238,6 +1262,7 @@ async def run() -> None:
                         last_news_level = risk.level
                 except Exception as exc:
                     print(f"[relay][WARN] monitor_news failed: {exc}")
+                    await send_office(f"Технічне попередження news-монітора: {exc}", stream="tech")
                 await asyncio.sleep(120)
 
     asyncio.create_task(monitor_news())
@@ -1250,11 +1275,12 @@ async def run() -> None:
                 today = now_local.strftime("%Y-%m-%d")
                 if now_local.hour >= 22 and last_daily_report_date != today:
                     report = build_daily_journal_report(db_path)
-                    await send_office(report)
+                    await send_office(report, stream="tasks")
                     last_daily_report_date = today
                     print("[relay] daily journal report sent")
             except Exception as exc:
                 print(f"[relay][WARN] monitor_daily_report failed: {exc}")
+                await send_office(f"Технічне попередження daily-report: {exc}", stream="tech")
             await asyncio.sleep(60)
 
     asyncio.create_task(monitor_daily_report())
