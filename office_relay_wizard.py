@@ -711,7 +711,8 @@ async def run() -> None:
     try:
         await send_office("Офіс на зв'язку. Готовий ловити сигнали з MAIN чату.")
         print("[relay] startup ping sent to OFFICE")
-        # Try to send visual team cards to match reference style.
+        send_agent_cards = os.getenv("RELAY_SEND_AGENT_CARDS", "").strip() == "1"
+        # Optional: startup visual cards (disabled by default to keep OFFICE chat clean).
         photo_candidates = {
             "lev": [
                 r"C:\Users\Pentagon\.cursor\projects\C-Users-Pentagon-AppData-Local-Temp-07d40f9e-ec21-4d7d-bc54-c797470e57f7\assets\c__Users_Pentagon_AppData_Roaming_Cursor_User_workspaceStorage_1776115782677_images_IMG_4628-8d05ee5a-9ee6-478a-80c8-672f0c6022b4.png",
@@ -734,16 +735,19 @@ async def run() -> None:
                 r"C:\Users\Pentagon\.cursor\projects\C-Users-Pentagon-AppData-Local-Temp-07d40f9e-ec21-4d7d-bc54-c797470e57f7\assets\c__Users_Pentagon_AppData_Roaming_Cursor_User_workspaceStorage_1776115782677_images_IMG_4635-63540880-d30a-4552-8710-d6bc996b18bc.png",
             ],
         }
-        for key in ("lev", "maks", "daryna", "marko", "olesya"):
-            variants = photo_candidates.get(key, [])
-            p = next((Path(v) for v in variants if Path(v).exists()), None)
-            caption = get_agent_card_text(key)
-            if p is not None and p.exists():
-                await client.send_file(office_entity, file=str(p), caption=caption)
-                print(f"[relay] agent card photo sent: {key}")
-            else:
-                await send_office(caption)
-                print(f"[relay] agent card text only: {key}")
+        if send_agent_cards:
+            for key in ("lev", "maks", "daryna", "marko", "olesya"):
+                variants = photo_candidates.get(key, [])
+                p = next((Path(v) for v in variants if Path(v).exists()), None)
+                caption = get_agent_card_text(key)
+                if p is not None and p.exists():
+                    await client.send_file(office_entity, file=str(p), caption=caption)
+                    print(f"[relay] agent card photo sent: {key}")
+                else:
+                    await send_office(caption)
+                    print(f"[relay] agent card text only: {key}")
+        else:
+            print("[relay] startup agent cards disabled (set RELAY_SEND_AGENT_CARDS=1 to enable)")
     except Exception as exc:
         print(f"[relay][ERROR] cannot send startup ping to OFFICE: {exc}")
 
