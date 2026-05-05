@@ -1,1 +1,2 @@
-﻿# No external runtime deps required for mini app.
+aiohttp
+telethon
