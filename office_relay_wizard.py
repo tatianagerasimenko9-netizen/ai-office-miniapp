@@ -200,6 +200,32 @@ async def send_via_bot_api(
         return False, f"exception: {exc}", None
 
 
+async def check_bot_api_access(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+) -> tuple[bool, str, Optional[int]]:
+    try:
+        me_url = f"https://api.telegram.org/bot{token}/getMe"
+        async with session.get(me_url) as resp:
+            body = await resp.json()
+            if resp.status != 200 or not bool((body or {}).get("ok")):
+                return False, f"getMe failed: {body}", None
+            bot_id = int(((body or {}).get("result") or {}).get("id"))
+        member_url = f"https://api.telegram.org/bot{token}/getChatMember"
+        params = {"chat_id": chat_id, "user_id": bot_id}
+        async with session.get(member_url, params=params) as resp2:
+            body2 = await resp2.json()
+            if resp2.status != 200 or not bool((body2 or {}).get("ok")):
+                return False, f"getChatMember failed: {body2}", bot_id
+            status = str((((body2 or {}).get("result") or {}).get("status") or "")).lower()
+            if status in ("left", "kicked", ""):
+                return False, f"chat member status: {status or 'unknown'}", bot_id
+            return True, f"status={status}", bot_id
+    except Exception as exc:
+        return False, f"exception: {exc}", None
+
+
 async def fetch_mark_price(session: aiohttp.ClientSession, symbol: str) -> float:
     """
     Binance Futures public mark price endpoint (no auth required).
@@ -737,6 +763,16 @@ async def run() -> None:
         print(f"[relay] multi-bot mode enabled for: {', '.join(sorted(agent_bot_tokens.keys()))}")
     else:
         print("[relay] multi-bot mode disabled (no AGENT_BOT_TOKEN_* found)")
+    if agent_bot_tokens:
+        seen_ids: Dict[int, str] = {}
+        for k in sorted(agent_bot_tokens.keys()):
+            ok_chk, note_chk, bot_id = await check_bot_api_access(bot_http, agent_bot_tokens[k], office_chat_id)
+            if bot_id is not None and bot_id in seen_ids:
+                print(f"[relay][WARN] duplicate token: {k} same bot_id as {seen_ids[bot_id]} ({bot_id})")
+            elif bot_id is not None:
+                seen_ids[bot_id] = k
+            lvl = "OK" if ok_chk else "WARN"
+            print(f"[relay][{lvl}] bot-check {k}: {note_chk}")
 
     async def send_office(message: str, reply_to_message_id: Optional[int] = None) -> Optional[int]:
         agent_key = detect_agent_key(message)
