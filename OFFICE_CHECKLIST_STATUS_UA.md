@@ -1,7 +1,9 @@
 # Статус MASTER-CHECKLIST (37 кроків)
 
 **Зафіксовано:** 2026-05-06  
+**Оновлено:** 2026-05-06 (повний список формулювань + інтеграція останніх змін репо/прод)  
 **Репозиторій:** `ai-office-miniapp`  
+
 **Правила відміток:**
 
 | Символ | Значення |
@@ -12,81 +14,132 @@
 
 ---
 
-## P0 — інфраструктура та робочий контур
+## Повний нумерований список (1–37) — повна назва кожного кроку
 
-| № | Статус | Пункт | Короткий доказ / заувага |
-|---|--------|--------|---------------------------|
-| 1 | ✅ | Ядро `file-1.py.py` не чіпати; Office — sidecar | Політика зафіксована в `OFFICE_RULES_UA.md` |
-| 2 | ✅ | Окремий GitHub repo Office (`ai-office-miniapp`) | Цей репозиторій |
-| 3 | ✅ | Mini App на Render | `office_mini_app.py`, HTTP-сервер, читання БД |
-| 4 | ✅ | Кнопка Open Office (BotFather) | Підтверджено в експлуатації (зовнішній крок Telegram) |
-| 5 | ✅ | Базовий `!ask` + live snapshot | `office_bridge.py`, relay у `office_relay_wizard.py` |
-| 6 | ✅ | Журнал + stop-review + learning guard | Таблиці / логіка журналу в bridge + relay |
-| 7 | ✅ | 9 ролей (Софія / Віктор / Артем тощо) | `AGENTS` / ролі в `office_bridge.py` |
-| 8 | ✅ | `!scenario` + сценарні шаблони | `SCENARIO_TEMPLATES` та обробка в relay/bridge |
-| 9 | ✅ | `OFFICE_RULES_UA.md` | Файл у репо |
-| 10 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` | Файл у репо |
-| 11 | ✅ | Повний Office runtime у репо | `office_bridge.py`, `office_relay_wizard.py`, `office_multibot_bootstrap.py` |
-| 12 | ✅ | `.gitignore` (сесії, конфіг, `.env`, БД-файли) | `*.db`, `*.session`, `office_relay_config.json`, `.env` |
-| 13 | 🟨 | Commit + Push; контрольний список релізів | Деплої з GitHub є; окремий «freeze-лист» комітів не ведеться |
-| 14 | 🟨 | Другий Render service (runtime окремо від Mini App) | За замовчуванням два сервіси; уточнити тип Web/Worker у панелі |
-| 15 | 🟨 | Env vars runtime на Render | Задано; варто зафіксувати **еталон** у runbook (п. 21) |
-| 16 | ✅ | Стабільне сховище БД (disk / external / managed Postgres) | `DATABASE_URL` + `init_office_db` у bridge/relay; managed PG на Render |
-| 17 | 🟨 | Mini App читає ту ж БД, що runtime | Код: `office_mini_app.py` → `psycopg` при `postgresql://`; **перевірити**, що на обох сервісах **однаковий** `DATABASE_URL` |
-| 18 | ✅ | Три гілки (Загальний / Задачник / Техніка) | `OFFICE_GENERAL_THREAD_ID`, `OFFICE_TASKS_THREAD_ID`, `OFFICE_TECH_THREAD_ID` у `send_office` |
-| 19 | ⬜ | Технічний health / report канал Артема | Окремий регулярний health-стрим не виділено |
-| 20 | 🟨 | E2E: сигнал → діалог → вердикт → журнал → mini app | Сигнал/діалог/журнал — так; повне закриття з Mini App — перевірка в проді |
-| 21 | ⬜ | Freeze + короткий runbook | Документ процесу ще не додано |
-
----
-
-## P1 — якість діалогу та логіки
-
-| № | Статус | Пункт | Короткий доказ / заувага |
-|---|--------|--------|---------------------------|
-| 22 | ✅ | Natural chat-style (без службових префіксів у видимому чаті) | Приховані теги маршрутизації; `[data: …]` прибрано з `_enforce_data_grounding` |
-| 23 | 🟨 | Повний Persona Pack для 9 ролей | Профілі в коді є; окремий «production pack» (файл/версія) не оформлено |
-| 24 | 🟨 | Cross-reply (відповіді в нитці) | `reply_to` у Bot API + теми; «живий» багатохідовий суперечковий діалог — обмежено |
-| 25 | ⬜ | Factor Pack v2 (funding, ATR, FVG, OB, … єдина структура) | У коді немає єдиного factor-pack шару для всіх ролей |
-| 26 | ✅ | Natural Dialog Templates v2 (6 живих сценаріїв) | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge |
-| 27 | ⬜ | Style QA Gate (авто-перевірка тону/мови/довжини) | Окремого гейту немає; спрощення тексту — через промпти/шаблони |
-| 28 | ⬜ | Auto Briefing Scheduler (ранок + вечір) | Не реалізовано |
-| 29 | ⬜ | Weekly Review Engine | Не реалізовано |
-| 30 | ⬜ | Risk Committee Trigger | Не реалізовано |
-| 31 | ⬜ | Circuit Breaker (3 SL поспіль) | Не реалізовано |
-| 32 | ⬜ | Funding Alert Rule | Не реалізовано |
-| 33 | ⬜ | ATR Exhaustion Alert Rule | Не реалізовано |
-| 34 | ⬜ | KPI by Agent у Mini App | Загальні KPI є; по ролях — ні |
-| 35 | ⬜ | Decision History Filters у Mini App | Не реалізовано |
-| 36 | ⬜ | Discipline Pack (правила проп-фірми) | Не реалізовано як окремий enforcement |
+1. Зафіксувати правило: ядро бота не чіпати (`file-1.py.py` — лише джерело сигналу / ручне дзеркало).  
+2. Створити окремий GitHub репозиторій Office (`ai-office-miniapp`).  
+3. Задеплоїти Mini App на Render.  
+4. Додати кнопку `Open Office` в боті (через BotFather).  
+5. Базова офіс-логіка: `!ask`, live snapshot, прості відповіді українською.  
+6. Журнал угод + stop-review + learning guard.  
+7. 9 ролей (включно з Софією / Віктором / Артемом).  
+8. `!scenario …` + «міні-театр» з @згадками.  
+9. Офісні правила — файл `OFFICE_RULES_UA.md`.  
+10. Сценарії діалогів — файл `OFFICE_DIALOG_SCENARIOS_UA.md`.  
+11. Повний Office runtime у `ai-office-miniapp` (bridge / relay / bootstrap / rules / scenarios; без секретів у репо).  
+12. Оновити `.gitignore` у Office repo (`*.db`, `*.session`, `office_relay_config.json`, `.env`, тощо).  
+13. Commit + Push Office runtime у GitHub.  
+14. Створити 2-й Render service для runtime (окремо від Mini App).  
+15. Налаштувати env vars runtime у Render (`TG_API_ID`, `TG_API_HASH`, `MAIN_CHAT_ID`, `OFFICE_CHAT_ID`, `NEWS_API_KEY`, токени агентів за потреби).  
+16. Підключити стабільне сховище БД (Render disk або external / managed DB).  
+17. Зробити так, щоб Mini App читав ту ж БД, що runtime.  
+18. Розвести повідомлення у 3 канали / гілки: Загальний / Задачник / Техніка.  
+19. Додати технічний health / report канал Артема.  
+20. Фінальний E2E тест: signal → office dialogue → verdict → journal → mini app.  
+21. Фінальний freeze + короткий runbook («що запускати», «як відновити», «якщо тиша — що перевірити»).  
+22. Chat-Style режим «Natural»: прибрати службові префікси з видимих повідомлень у Telegram; структура лишається у внутрішніх логах / БД.  
+23. Role Persona Pack (повні промпти на 9 ролей): стиль, межі, приклади фраз, заборонені патерни.  
+24. Cross-reply механіка: реакція на попередню репліку колеги (короткий reply-hop).  
+25. Factor Pack v2 (єдиний набір факторів): funding, liquidity, volume, ATR, FVG, GAP, OB, BB, mirror levels, weekly/daily/4h, ICT/SMC, OTE, EQ — єдина структура даних для всіх ролей.  
+26. Natural Dialog Templates v2 (6 сценаріїв без шаблонщини).  
+27. Style QA Gate: авто-перевірка «по-людськи», коротко, українською, без зайвого формалізму.  
+28. Auto Briefing Scheduler (ранковий брифінг + вечірній debrief).  
+29. Weekly Review Engine (тижневий розбір).  
+30. Risk Committee Trigger (автозапуск при просадці / серії SL).  
+31. Circuit Breaker Hard Rule (наприклад 3 SL поспіль → блок + розбір).  
+32. Funding Alert Rule.  
+33. ATR Exhaustion Alert Rule.  
+34. KPI by Agent у Mini App (метрики по ролях).  
+35. Decision History Filters у Mini App (фільтри: символ, сесія, дія, outcome).  
+36. Discipline Pack Enforcement (правила проп-фірми: обговорення перед входом, вето, review кожні N угод).  
+37. Culture Layer (опційно): leaderboard, trade of week, roast session без токсичності.  
 
 ---
 
-## P2 — пізніше / складне
+## Таблиця статусів P0 (1–21)
 
-| № | Статус | Пункт | Короткий доказ / заувага |
-|---|--------|--------|---------------------------|
-| 37 | ⬜ | Culture layer (leaderboard, trade of week, roast) | Не реалізовано |
-
-**Також з попередніх планів (без окремого № у базовому 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
+| № | Статус | Короткий доказ / заувага |
+|---|--------|---------------------------|
+| 1 | ✅ | Політика в `OFFICE_RULES_UA.md` §1; ядро не в репо Office. |
+| 2 | ✅ | Репозиторій `ai-office-miniapp` на GitHub. |
+| 3 | ✅ | `office_mini_app.py`, деплой Web Service на Render. |
+| 4 | ✅ | Кнопка меню / Open Office налаштована в BotFather (експлуатація). |
+| 5 | ✅ | `!ask` / ланцюжок у `office_bridge.py`, ingest у `office_relay_wizard.py`. |
+| 6 | ✅ | `trade_journal`, stop-review, learning guard у bridge + події в relay. |
+| 7 | ✅ | `AGENTS` з ключами `lev`…`dev`; мультибот токени `AGENT_BOT_TOKEN_MEMORY`, `_PSYCH`, `_DEV` підхоплюються relay/bootstrap (коміт на `main`). |
+| 8 | ✅ | `SCENARIO_TEMPLATES`, команди `!scenario` у relay. |
+| 9 | ✅ | `OFFICE_RULES_UA.md` (+ §9 мапінг ботів і ключів). |
+| 10 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md`. |
+| 11 | ✅ | Runtime-файли в репо; секрети не комітяться (див. `.gitignore`). |
+| 12 | ✅ | `.gitignore`: `*.db`, `*.session`, `office_relay_config.json`, `.env`, `__pycache__/`. |
+| 13 | ✅ | Регулярні commit + push на `origin/main` (зокрема чекліст, мультибот, збірник рекомендацій). Окремий «freeze-лист» релізів — див. п. 21. |
+| 14 | ✅ | Два сервіси на Render: Mini App + worker/runtime з `office_multibot_bootstrap.py` (підтверджено логами деплою). |
+| 15 | 🟨 | Env задані; **еталон** змінних ще варто зафіксувати в runbook (п. 21). |
+| 16 | ✅ | Підтримка `DATABASE_URL` (PostgreSQL) у bridge, relay, mini app через `psycopg`. |
+| 17 | 🟨 | Код готовий; потрібна звірка, що **ідентичний** `DATABASE_URL` на обох Render-сервісах і дані видно в Mini App. |
+| 18 | ✅ | `OFFICE_GENERAL_THREAD_ID`, `OFFICE_TASKS_THREAD_ID`, `OFFICE_TECH_THREAD_ID` у `send_office` (форумні гілки). |
+| 19 | 🟨 | Бот **Артем** (`dev`) у групі, `AGENT_BOT_TOKEN_DEV`, `bot-check dev: OK`; **немає** окремого розкладу health-звітів / сценарію «тільки техніка» — дописати поведінку (п. 19 повністю). |
+| 20 | 🟨 | Сигнал, діалог, журнал, новини — у проді; повний ланцюг до Mini App + спільна БД — закрити перевіркою (п. 17). |
+| 21 | ⬜ | Немає файлу runbook / freeze-процедури в репо. |
 
 ---
 
-## Підсумкові цифри (за цим документом)
+## Таблиця статусів P1 (22–36)
+
+| № | Статус | Короткий доказ / заувага |
+|---|--------|---------------------------|
+| 22 | ✅ | Прихований `@@ключ@@`, українізація шаблонів; `_enforce_data_grounding` спрощено для «людського» тексту. |
+| 23 | 🟨 | Профілі в `AGENTS`; повного окремого «Persona Pack» артефакту немає. **Ідеї для розширення:** `OFFICE_AI_RECOMMENDATIONS_UA.md` (brain по ролях, тон). |
+| 24 | 🟨 | `reply_to` + теми; глибокий живий крос-діалог обмежений ланцюжком. |
+| 25 | ⬜ | Єдиний factor-pack у коді не реалізовано. **Підготовка:** збірник рекомендацій + майбутня база знань / RAG. |
+| 26 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge. |
+| 27 | ⬜ | Окремого авто-QA гейту немає; частково — правила + ручний перегляд. **Референс ідей:** збірник рекомендацій (стиль). |
+| 28 | ⬜ | Не реалізовано. |
+| 29 | ⬜ | Не реалізовано. |
+| 30 | ⬜ | Не реалізовано. |
+| 31 | ⬜ | Не реалізовано. |
+| 32 | ⬜ | Не реалізовано. |
+| 33 | ⬜ | Не реалізовано. |
+| 34 | ⬜ | Загальні KPI у mini app є; по агентах — ні. |
+| 35 | ⬜ | Не реалізовано. |
+| 36 | ⬜ | Не реалізовано (veto Дарини в логіці є; «проп-фірма» як пакет — ні). |
+
+---
+
+## P2 (37) + поза списком
+
+| № | Статус | Короткий доказ / заувага |
+|---|--------|---------------------------|
+| 37 | ⬜ | Culture layer не реалізовано. |
+
+**Додатково (не входили в 37 оригінальних кроків, але зафіксовано в репо):**
+
+| Артефакт | Призначення |
+|----------|-------------|
+| `OFFICE_AI_RECOMMENDATIONS_UA.md` | Збірник ідей (RAG, ICT, поведінка агентів) для п. 23–27, 25, майбутньої бази знань. |
+| `OFFICE_CHECKLIST_STATUS_UA.md` | Цей файл — єдине джерело статусу по 37 пунктах. |
+
+**З попередніх планів (без номера в 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
+
+---
+
+## Підсумкові цифри
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 16 |
-| 🟨 | 7 |
-| ⬜ | 14 |
+| ✅ | 18 |
+| 🟨 | 6 |
+| ⬜ | 13 |
 | **Усього** | **37** |
 
 ---
 
 ## Наступні кроки (рекомендовано)
 
-1. Закрити **п. 17**: однаковий `DATABASE_URL` на runtime і Mini App + швидка перевірка даних у UI.  
-2. Закрити **п. 20**: один прохід E2E з фіксацією скрінів/логів.  
-3. Додати **п. 21** + **п. 19** (runbook + health від Артема).  
+1. **П. 17** — однаковий `DATABASE_URL` на runtime і Mini App; швидка перевірка в UI.  
+2. **П. 19** — сценарій health/debrief для **Артема** (`dev`) у гілку «Техніка» (розклад або подія).  
+3. **П. 21** — `RUNBOOK_UA.md` або розділ у README: еталон env, відновлення, «тиша в чаті».  
+4. **П. 20** — один повний E2E з логами/скрінами після п. 17.  
+5. За потреби узгодити **п. 23** з `OFFICE_RULES_UA` (фінал: Лев vs Марко) і винести Persona Pack окремим файлом.
 
-Після змін у статусах — оновлюйте таблиці вище та дату «Зафіксовано».
+Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
