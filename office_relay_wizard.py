@@ -607,6 +607,7 @@ async def run() -> None:
 
     api_id_raw = (os.getenv("TG_API_ID", "").strip() or cfg.get("tg_api_id", "").strip())
     api_hash = (os.getenv("TG_API_HASH", "").strip() or cfg.get("tg_api_hash", "").strip())
+    tg_bot_token = os.getenv("TG_BOT_TOKEN", "").strip()
     if not api_id_raw:
         api_id_raw = input("TG_API_ID: ").strip()
     if not api_hash:
@@ -617,7 +618,12 @@ async def run() -> None:
     db_path = "office_bridge.db"
 
     client = TelegramClient(session_name, api_id, api_hash)
-    await client.start()
+    if tg_bot_token:
+        # Non-interactive startup for cloud runtime (Render).
+        await client.start(bot_token=tg_bot_token)
+    else:
+        # Local interactive mode (user account login via phone/code).
+        await client.start()
     init_office_db(db_path)
 
     main_chat_id: int
