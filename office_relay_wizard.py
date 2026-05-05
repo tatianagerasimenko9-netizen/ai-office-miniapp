@@ -159,7 +159,8 @@ async def send_via_bot_api(
     token: str,
     chat_id: int,
     text: str,
-) -> tuple[bool, str]:
+    reply_to_message_id: Optional[int] = None,
+) -> tuple[bool, str, Optional[int]]:
     """
     Send via Bot API without parse_mode.
 
@@ -172,17 +173,24 @@ async def send_via_bot_api(
         "text": text[:3900],
         "disable_web_page_preview": True,
     }
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = int(reply_to_message_id)
     try:
         async with session.post(url, json=payload) as resp:
             body = await resp.json()
             if resp.status != 200:
-                return False, f"http {resp.status}: {body}"
+                return False, f"http {resp.status}: {body}", None
             if not bool(body.get("ok")):
                 desc = str((body or {}).get("description") or body)
-                return False, f"telegram: {desc}"
-            return True, "ok"
+                return False, f"telegram: {desc}", None
+            msg_id = None
+            try:
+                msg_id = int(((body or {}).get("result") or {}).get("message_id"))
+            except Exception:
+                msg_id = None
+            return True, "ok", msg_id
     except Exception as exc:
-        return False, f"exception: {exc}"
+        return False, f"exception: {exc}", None
 
 
 async def fetch_mark_price(session: aiohttp.ClientSession, symbol: str) -> float:
@@ -698,15 +706,25 @@ async def run() -> None:
     else:
         print("[relay] multi-bot mode disabled (no AGENT_BOT_TOKEN_* found)")
 
-    async def send_office(message: str) -> None:
+    async def send_office(message: str, reply_to_message_id: Optional[int] = None) -> Optional[int]:
         agent_key = detect_agent_key(message)
         token = agent_bot_tokens.get(agent_key or "")
         if token:
-            ok, reason = await send_via_bot_api(bot_http, token, office_chat_id, message)
+            ok, reason, msg_id = await send_via_bot_api(
+                bot_http,
+                token,
+                office_chat_id,
+                message,
+                reply_to_message_id=reply_to_message_id,
+            )
             if ok:
-                return
+                return msg_id
             print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
-        await client.send_message(office_entity, message[:3900])
+        sent = await client.send_message(office_entity, message[:3900], reply_to=reply_to_message_id)
+        try:
+            return int(getattr(sent, "id", 0) or 0) or None
+        except Exception:
+            return None
 
     try:
         await send_office("Офіс на зв'язку. Готовий ловити сигнали з MAIN чату.")
@@ -868,12 +886,16 @@ async def run() -> None:
                 return
             print(f"[relay] matched message id={event.id} chat_id={src_chat_id}")
             sig = parse_signal(text, event.id)
-            await send_office(build_signal_kickoff(sig.symbol, sig.direction))
-            await send_office(f"Отримала сигнал:\n{text[:3500]}")
+            kickoff_msg_id = await send_office(build_signal_kickoff(sig.symbol, sig.direction))
+            mirror_msg_id = await send_office(
+                f"Отримала сигнал:\n{text[:3500]}",
+                reply_to_message_id=kickoff_msg_id,
+            )
             print("[relay] mirror sent")
+            thread_root_id = mirror_msg_id or kickoff_msg_id
 
             async def sender(msg: str) -> None:
-                await send_office(msg[:3900])
+                await send_office(msg[:3900], reply_to_message_id=thread_root_id)
 
             verdict = await office_handle_signal(sender=sender, signal=sig, db_path=db_path)
             if verdict.action == "ENTER":
