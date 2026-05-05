@@ -1424,6 +1424,7 @@ async def office_desk_user_question(
             "btc_change_pct": float(market.get("btc_change_pct", 0.0)),
             "sym_change_pct": float(market.get("sym_change_pct", 0.0)),
             "quote_volume_usdt": float(market.get("quote_volume_usdt", 0.0)),
+            "factor_pack_v2": market.get("factor_pack_v2"),
         },
     )
 

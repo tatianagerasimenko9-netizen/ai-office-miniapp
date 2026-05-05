@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — **п.23 `OFFICE_PERSONA_PACK_UA.md`**, **п.24 `_cross_reply_prefix` у bridge + desk**  
+**Оновлено:** 2026-05-06 — **п.25 Factor Pack v2** (`office_factor_pack.py` + desk snapshot)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -115,7 +115,7 @@
 | 22 | ✅ | Прихований `@@ключ@@`, українізація шаблонів; `_enforce_data_grounding` спрощено для «людського» тексту. |
 | 23 | ✅ | Файл `OFFICE_PERSONA_PACK_UA.md` (9 ролей: місія, тон, межі, приклади, заборони); посилання з `OFFICE_RULES_UA.md`. |
 | 24 | ✅ | `_cross_reply_prefix()` у `office_bridge.py` для ланцюга сигналу та `!ask` desk; короткі підхоплення між репліками. |
-| 25 | ⬜ | Єдиний factor-pack у коді не реалізовано. **Підготовка:** збірник рекомендацій + майбутня база знань / RAG. |
+| 25 | ✅ | `office_factor_pack.py` (`FactorPackV2`), знімок у `build_desk_market_snapshot` + funding/mark з Binance; `OFFICE_FACTOR_PACK_UA.md`; `meta.factor_pack_v2` у desk QA. ICT/FVG з графіка — зарезервовано (unknown/None). |
 | 26 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge. |
 | 27 | ⬜ | Окремого авто-QA гейту немає; частково — правила + ручний перегляд. **Референс ідей:** збірник рекомендацій (стиль). |
 | 28 | ⬜ | Не реалізовано. |
@@ -144,6 +144,7 @@
 | `OFFICE_CHECKLIST_STATUS_UA.md` | Список **1–37** (MASTER + ✅/🟨/⬜) + пункти **38–42** (методичка) + Частина II (деталі п. 38–42). |
 | `RUNBOOK_UA.md` | Деплой, еталон env, спільна БД, діагностика «тиші», freeze. |
 | `OFFICE_PERSONA_PACK_UA.md` | Persona Pack на 9 ролей (п.23). |
+| `OFFICE_FACTOR_PACK_UA.md` | Опис полів Factor Pack v2 (п.25). |
 
 **З попередніх планів (без номера в 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
 
@@ -153,9 +154,9 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 25 |
+| ✅ | 26 |
 | 🟨 | 0 |
-| ⬜ | 12 |
+| ⬜ | 11 |
 | **Усього** | **37** |
 
 *(Пункти **38–42** не входять у цю суму — див. методичку вище.)*
@@ -170,7 +171,8 @@
 4. ~~**П. 20**~~ — чеклист у runbook §7 (виконати вручну на Render після деплою).  
 5. ~~**П. 23**~~ — `OFFICE_PERSONA_PACK_UA.md`.  
 6. ~~**П. 24**~~ — префікси cross-reply в bridge.  
-7. **П. 25–36** — за пріоритетом продукту (Factor Pack, брифінги, Mini App KPI…).
+7. ~~**П. 25**~~ — Factor Pack v2.  
+8. **П. 26–36** — шаблони діалогів v2, Style QA, брифінги, Mini App KPI…
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 

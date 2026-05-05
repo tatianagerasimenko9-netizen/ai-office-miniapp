@@ -20,6 +20,8 @@ try:
 except Exception:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
 
+from office_factor_pack import build_factor_pack_from_desk_inputs
+
 from office_bridge import (
     OfficeSignal,
     fmt_agent_line,
@@ -252,6 +254,35 @@ async def fetch_mark_price(session: aiohttp.ClientSession, symbol: str) -> float
     return float(data.get("markPrice") or data.get("price") or 0.0)
 
 
+async def fetch_binance_premium_index(session: aiohttp.ClientSession, symbol: str) -> Optional[Dict[str, float]]:
+    """
+    Mark / index / last funding (Binance USDT-M public).
+    """
+    url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+    params = {"symbol": symbol.upper()}
+    async with session.get(url, params=params) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+    funding_pct: Optional[float] = None
+    fr = data.get("lastFundingRate")
+    if fr is not None:
+        try:
+            funding_pct = float(fr) * 100.0
+        except Exception:
+            funding_pct = None
+    try:
+        mp = float(data.get("markPrice") or 0.0)
+        ip = float(data.get("indexPrice") or 0.0)
+    except Exception:
+        return None
+    return {
+        "mark_price": mp if mp > 0 else None,
+        "index_price": ip if ip > 0 else None,
+        "funding_rate_pct": funding_pct,
+    }
+
+
 async def fetch_binance_futures_ticker(session: aiohttp.ClientSession, symbol: str) -> Dict[str, float]:
     """
     Public 24h ticker for USDT-M futures.
@@ -321,6 +352,12 @@ async def build_desk_market_snapshot(session: aiohttp.ClientSession, symbol: str
     btc = await fetch_binance_futures_ticker(session, "BTCUSDT")
     alt = await fetch_binance_futures_ticker(session, sym)
 
+    premium: Optional[Dict[str, float]] = None
+    try:
+        premium = await fetch_binance_premium_index(session, sym)
+    except Exception:
+        premium = None
+
     # "Gold" proxy on Binance USDT-M (best-effort). If symbol missing, ignore in snapshot.
     gold: Dict[str, float] = {}
     for candidate in ("PAXGUSDT", "XAUUSDT"):
@@ -342,21 +379,41 @@ async def build_desk_market_snapshot(session: aiohttp.ClientSession, symbol: str
     if alt["volatility_pct"] >= 6.0:
         regime = "CHOP"
 
+    score_hint = max(8, min(18, score_hint))
+
+    gs: Optional[str] = None
+    gc: Optional[float] = None
+    if gold:
+        gs = str(gold.get("symbol", ""))
+        gc = float(gold.get("pct", 0.0))
+
+    pack = build_factor_pack_from_desk_inputs(
+        btc_ticker=btc,
+        alt_ticker=alt,
+        premium=premium,
+        gold_symbol=gs,
+        gold_change_pct=gc,
+        score_hint=score_hint,
+        regime=regime,
+        session="LONDON",
+    )
+
     out: Dict[str, Any] = {
         "btc_change_pct": btc["pct"],
         "sym_change_pct": alt["pct"],
         "quote_volume_usdt": alt["quote_volume_usdt"],
         "volatility_pct": alt["volatility_pct"],
         "rr_hint": 2.0,
-        "score_hint": max(8, min(18, score_hint)),
+        "score_hint": score_hint,
         "session": "LONDON",
         "regime": regime,
         "news_risk": "SAFE",
         "minutes_to_event": 999,
+        "factor_pack_v2": pack.to_json_safe(),
     }
     if gold:
-        out["gold_symbol"] = str(gold.get("symbol", ""))
-        out["gold_change_pct"] = float(gold.get("pct", 0.0))
+        out["gold_symbol"] = gs or ""
+        out["gold_change_pct"] = gc or 0.0
     return out
 
 
@@ -991,11 +1048,21 @@ async def run() -> None:
                             f"Золото-проксі `{snap.get('gold_symbol')}` 24г `{float(snap.get('gold_change_pct', 0.0)):+.2f}%`\n"
                         )
 
+                    fp = snap.get("factor_pack_v2") or {}
+                    fund = fp.get("funding_rate_pct")
+                    liq = fp.get("liquidity_tier")
+                    fund_line = ""
+                    if fund is not None:
+                        fund_line = f"Funding (остання ставка, %): `{fund:.4f}`\n"
+                    liq_line = f"Ліквідність (яр): `{liq}`\n" if liq else ""
+
                     await send_office(
-                        "📌 Ринковий зріз (Binance USDT-M)\n"
+                        "📌 Ринковий зріз (Binance USDT-M) · Factor Pack v2\n"
                         f"BTCUSDT 24г `{float(snap.get('btc_change_pct', 0.0)):+.2f}%`\n"
                         f"{sym} 24г `{float(snap.get('sym_change_pct', 0.0)):+.2f}%` · "
                         f"vol `{float(snap.get('quote_volume_usdt', 0.0)):.0f}` USDT notional\n"
+                        f"{fund_line}"
+                        f"{liq_line}"
                         f"{gold_line}"
                         f"Оцінка ринку (діапазон HL): `{float(snap.get('volatility_pct', 0.0)):.2f}%`",
                         stream="tasks",
