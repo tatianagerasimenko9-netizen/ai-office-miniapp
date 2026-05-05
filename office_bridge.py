@@ -178,7 +178,7 @@ def _now_iso() -> str:
 
 def fmt_agent_line(agent_key: str, text: str) -> str:
     a = AGENTS[agent_key]
-    return f"{a.emoji} *{a.name} «{a.nickname}»:*\n{text}"
+    return f"*{a.name}:*\n{text}"
 
 
 def _task_status_line(task_id: str, status: TaskStatus, assignee: str) -> str:
