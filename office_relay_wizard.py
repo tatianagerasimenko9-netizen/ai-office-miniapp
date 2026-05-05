@@ -753,6 +753,8 @@ async def run() -> None:
 
     source_raw = os.getenv("SOURCE_CHAT_ID", "").strip()
     source_chat_id = int(source_raw) if source_raw else None
+    source_entity = await client.get_entity(source_chat_id) if source_chat_id is not None else None
+    last_source_msg_id = 0
     if source_chat_id is not None:
         print(f"[relay] mode: source bridge enabled ({source_chat_id} -> {main_chat_id}), MAIN ingest only")
     else:
@@ -782,6 +784,7 @@ async def run() -> None:
     @client.on(events.NewMessage())
     async def on_message(event):  # type: ignore[no-redef]
         try:
+            nonlocal last_source_msg_id
             text = event.raw_text or ""
             if not text.strip():
                 return
@@ -851,6 +854,7 @@ async def run() -> None:
             # Optional sidecar bridge: forward signal-like messages from SOURCE chat to MAIN chat.
             # Keeps trade-core untouched while enabling automatic feed into MAIN.
             if source_chat_id is not None and src_chat_id is not None and int(src_chat_id) == int(source_chat_id):
+                last_source_msg_id = max(last_source_msg_id, int(getattr(event, "id", 0) or 0))
                 if looks_like_signal(text):
                     await client.send_message(main_entity, text[:3900])
                     print(f"[relay] forwarded SOURCE -> MAIN id={event.id} chat_id={src_chat_id}")
@@ -912,6 +916,33 @@ async def run() -> None:
             print("[relay] office_handle_signal done")
         except Exception as exc:
             print(f"[relay][ERROR] handler failed: {exc}")
+
+    async def monitor_source_bridge() -> None:
+        nonlocal last_source_msg_id
+        while True:
+            try:
+                if source_entity is None:
+                    await asyncio.sleep(10)
+                    continue
+                newest_id = last_source_msg_id
+                batch = []
+                async for m in client.iter_messages(source_entity, limit=20):
+                    mid = int(getattr(m, "id", 0) or 0)
+                    if mid <= 0:
+                        continue
+                    newest_id = max(newest_id, mid)
+                    if mid <= last_source_msg_id:
+                        continue
+                    batch.append(m)
+                for m in reversed(batch):
+                    txt = str(getattr(m, "raw_text", "") or "")
+                    if looks_like_signal(txt):
+                        await client.send_message(main_entity, txt[:3900])
+                        print(f"[relay] poll-forward SOURCE -> MAIN id={m.id}")
+                last_source_msg_id = newest_id
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_source_bridge failed: {exc}")
+            await asyncio.sleep(5)
 
     async def monitor_positions() -> None:
         http_timeout = aiohttp.ClientTimeout(total=10)
@@ -1136,6 +1167,7 @@ async def run() -> None:
             await asyncio.sleep(60)
 
     asyncio.create_task(monitor_daily_report())
+    asyncio.create_task(monitor_source_bridge())
 
     try:
         await client.run_until_disconnected()
