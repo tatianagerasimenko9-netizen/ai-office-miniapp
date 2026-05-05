@@ -7,6 +7,8 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from office_bridge import office_db_identity
+
 try:
     import psycopg
 except Exception:  # pragma: no cover
@@ -22,6 +24,13 @@ PORT = int(os.getenv("OFFICE_MINI_PORT", "8790"))
 def _is_pg() -> bool:
     s = str(DATABASE_URL or "").strip().lower()
     return s.startswith("postgres://") or s.startswith("postgresql://")
+
+
+def _db_target_for_identity() -> str:
+    """Той самий рядок підключення, що й у relay (`DATABASE_URL` або шлях SQLite)."""
+    if _is_pg():
+        return DATABASE_URL
+    return DB_PATH
 
 
 def q(sql: str, params: tuple = ()) -> list[tuple]:
@@ -108,6 +117,7 @@ def get_data() -> dict:
 
     return {
         "now_utc": datetime.utcnow().isoformat(),
+        "db_identity": office_db_identity(_db_target_for_identity()),
         "kpi": {
             "total": total,
             "wins": wins,
@@ -176,6 +186,7 @@ def html() -> str:
 <div class="wrap">
   <h1>AI Trading Desk · Mini App Live</h1>
   <div class="muted">Живий графік + журнал + помилки (простий режим)</div>
+  <div id="dbfinger" class="muted" style="margin-top:6px;">DB …</div>
 
   <div class="row">
     <div class="card">Символ<br><input id="symbol" value="BTCUSDT" style="width:110px;" /></div>
@@ -270,6 +281,11 @@ function t(id, html) { document.getElementById(id).innerHTML = html; }
 async function loadOffice() {
   const r = await fetch('/api/summary');
   const d = await r.json();
+  const di = d.db_identity || {};
+  const fp = di.fingerprint || '?';
+  const back = di.backend || '?';
+  document.getElementById('dbfinger').textContent =
+    'БД: ' + back + ' · fingerprint ' + fp + ' (має збігатися з логом relay [relay] DB identity)';
   t('kpi',
     'Угод: <b>' + d.kpi.total + '</b><br>' +
     'W/L/BE: <b>' + d.kpi.wins + '/' + d.kpi.losses + '/' + d.kpi.be + '</b><br>' +

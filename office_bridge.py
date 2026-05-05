@@ -12,7 +12,9 @@ This module is intentionally standalone and does not mutate trading logic.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -210,6 +212,33 @@ def _sqlite_path_from_url(db_path: str) -> str:
     if str(db_path).lower().startswith("sqlite:///"):
         return str(db_path)[10:]
     return db_path
+
+
+def office_db_identity(db_path: str) -> Dict[str, Any]:
+    """
+    Стабільний відбиток конфігурації БД для звірки Mini App ↔ relay (MASTER п.17).
+    Не виводить паролі; fingerprint = sha256(connection string або абс. шляху SQLite)[:16].
+    """
+    raw = str(db_path or "").strip() or "office_bridge.db"
+    if _is_pg(raw):
+        fp = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        p = urlparse(raw)
+        dbname = (p.path or "").lstrip("/").split("?")[0] or "?"
+        host = p.hostname or "?"
+        host_disp = host[:10] + "…" if len(host) > 12 else host
+        return {
+            "backend": "postgresql",
+            "fingerprint": fp,
+            "host_hint": host_disp,
+            "dbname": dbname,
+        }
+    path = os.path.abspath(_sqlite_path_from_url(raw))
+    fp = hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+    return {
+        "backend": "sqlite",
+        "fingerprint": fp,
+        "path_basename": os.path.basename(path),
+    }
 
 
 def _execute(db_path: str, sql: str, params: tuple = ()) -> None:

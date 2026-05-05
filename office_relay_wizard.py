@@ -25,6 +25,7 @@ from office_bridge import (
     fmt_agent_line,
     get_agent_card_text,
     init_office_db,
+    office_db_identity,
     journal_close_trade,
     journal_learning_hints_from_tags,
     journal_open_trade,
@@ -713,6 +714,12 @@ async def run() -> None:
             print(f"[relay][WARN] FloodWait під час авторизації. Чекаю {wait_sec}с і пробую знову...")
             await asyncio.sleep(wait_sec)
     init_office_db(db_path)
+    _db_ident = office_db_identity(db_path)
+    print(
+        f"[relay] DB identity: {_db_ident.get('backend')} "
+        f"fingerprint={_db_ident.get('fingerprint')} "
+        f"(звір з Mini App /api/summary → db_identity)"
+    )
 
     main_chat_id: int
     office_chat_id: int
@@ -852,9 +859,12 @@ async def run() -> None:
                     if str(db_path).strip().lower().startswith(("postgres://", "postgresql://"))
                     else "SQLite"
                 )
+                _ident = office_db_identity(db_path)
+                _fp = _ident.get("fingerprint", "?")
                 health_plain = (
                     "🛠️ Техніка · старт relay\n"
                     f"Статус: онлайн · БД: {db_kind}\n"
+                    f"fingerprint `{_fp}` (звір з Mini App)\n"
                     f"MAIN={main_chat_id} · OFFICE={office_chat_id}"
                 )
                 await send_office(fmt_agent_line("dev", health_plain), stream="tech")
