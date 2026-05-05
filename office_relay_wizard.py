@@ -115,9 +115,11 @@ def load_agent_bot_tokens() -> Dict[str, str]:
     """
     Optional multi-bot mode via env vars:
     AGENT_BOT_TOKEN_LEV, AGENT_BOT_TOKEN_MAKS, AGENT_BOT_TOKEN_DARYNA,
-    AGENT_BOT_TOKEN_MARKO, AGENT_BOT_TOKEN_OLESYA, AGENT_BOT_TOKEN_NEWS
+    AGENT_BOT_TOKEN_MARKO, AGENT_BOT_TOKEN_OLESYA, AGENT_BOT_TOKEN_NEWS,
+    AGENT_BOT_TOKEN_MEMORY (Софія), AGENT_BOT_TOKEN_PSYCH (Віктор),
+    AGENT_BOT_TOKEN_DEV (Артем)
     """
-    keys = ("lev", "maks", "news", "daryna", "marko", "olesya")
+    keys = ("lev", "maks", "news", "daryna", "marko", "olesya", "memory", "psych", "dev")
     result: Dict[str, str] = {}
     for k in keys:
         v = os.getenv(f"AGENT_BOT_TOKEN_{k.upper()}", "").strip()
@@ -158,6 +160,12 @@ def detect_agent_key(message: str) -> Optional[str]:
         return "marko"
     if "Олеся" in text:
         return "olesya"
+    if "Софія" in text:
+        return "memory"
+    if "Віктор" in text:
+        return "psych"
+    if "Артем" in text:
+        return "dev"
     return None
 
 

@@ -72,6 +72,9 @@ def main() -> int:
         "daryna": "AGENT_BOT_TOKEN_DARYNA",
         "marko": "AGENT_BOT_TOKEN_MARKO",
         "olesya": "AGENT_BOT_TOKEN_OLESYA",
+        "memory": "AGENT_BOT_TOKEN_MEMORY",
+        "psych": "AGENT_BOT_TOKEN_PSYCH",
+        "dev": "AGENT_BOT_TOKEN_DEV",
     }
     missing = []
     for k in keys_needed:
@@ -92,6 +95,9 @@ def main() -> int:
         prompt_if_missing(cfg, "AGENT_BOT_TOKEN_DARYNA", "daryna", "DARYNA bot token")
         prompt_if_missing(cfg, "AGENT_BOT_TOKEN_MARKO", "marko", "MARKO bot token")
         prompt_if_missing(cfg, "AGENT_BOT_TOKEN_OLESYA", "olesya", "OLESYA bot token")
+        prompt_if_missing(cfg, "AGENT_BOT_TOKEN_MEMORY", "memory", "SOFIA (memory) bot token")
+        prompt_if_missing(cfg, "AGENT_BOT_TOKEN_PSYCH", "psych", "VIKTOR (psych) bot token")
+        prompt_if_missing(cfg, "AGENT_BOT_TOKEN_DEV", "dev", "ARTEM (dev) bot token")
 
     save_cfg(cfg_path, cfg)
 
@@ -105,6 +111,9 @@ def main() -> int:
             "daryna": "AGENT_BOT_TOKEN_DARYNA",
             "marko": "AGENT_BOT_TOKEN_MARKO",
             "olesya": "AGENT_BOT_TOKEN_OLESYA",
+            "memory": "AGENT_BOT_TOKEN_MEMORY",
+            "psych": "AGENT_BOT_TOKEN_PSYCH",
+            "dev": "AGENT_BOT_TOKEN_DEV",
         }
         for k, envk in mapping.items():
             v = str(tokens.get(k, "") or "").strip()
