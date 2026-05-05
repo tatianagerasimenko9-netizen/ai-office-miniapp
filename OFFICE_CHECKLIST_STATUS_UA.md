@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — **п.27 Style QA** (`office_style_qa.py` + `agent_say`)  
+**Оновлено:** 2026-05-06 — **п.28 Auto Briefing** (ранок + вечір у relay)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -118,7 +118,7 @@
 | 25 | ✅ | `office_factor_pack.py` (`FactorPackV2`), знімок у `build_desk_market_snapshot` + funding/mark з Binance; `OFFICE_FACTOR_PACK_UA.md`; `meta.factor_pack_v2` у desk QA. ICT/FVG з графіка — зарезервовано (unknown/None). |
 | 26 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge. |
 | 27 | ✅ | `office_style_qa.py`: `polish_agent_message` у `agent_say`, health Артема в relay; `OFFICE_STYLE_QA_UA.md`; `style_qa_violations` для майбутніх логів. |
-| 28 | ⬜ | Не реалізовано. |
+| 28 | ✅ | `monitor_briefing_scheduler` у relay: `office_morning_briefing` + `office_evening_debrief`; env `OFFICE_BRIEFING_*`; `RUNBOOK_UA.md`. |
 | 29 | ⬜ | Не реалізовано. |
 | 30 | ⬜ | Не реалізовано. |
 | 31 | ⬜ | Не реалізовано. |
@@ -155,9 +155,9 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 27 |
+| ✅ | 28 |
 | 🟨 | 0 |
-| ⬜ | 10 |
+| ⬜ | 9 |
 | **Усього** | **37** |
 
 *(Пункти **38–42** не входять у цю суму — див. методичку вище.)*
@@ -174,7 +174,8 @@
 6. ~~**П. 24**~~ — префікси cross-reply в bridge.  
 7. ~~**П. 25**~~ — Factor Pack v2.  
 8. ~~**П. 27**~~ — Style QA gate.  
-9. **П. 28–36** — брифінги, weekly review, алерти, Mini App KPI…
+9. ~~**П. 28**~~ — авто-брифінг ранок/вечір.  
+10. **П. 29–36** — weekly review, алерти, Mini App KPI…
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 

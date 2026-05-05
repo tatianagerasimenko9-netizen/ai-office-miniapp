@@ -1044,6 +1044,27 @@ async def office_morning_briefing(
     await agent_say(sender, "olesya", "Веду лог desk-рішень та статистику змін у реальному часі.", 0.08)
 
 
+async def office_evening_debrief(
+    sender: AsyncSender,
+    *,
+    btc_change_pct: float,
+    journal_summary: str,
+) -> None:
+    """
+    Вечірній debrief після сесії (MASTER п.28). Короткий підсумок + репліки команди.
+    """
+    js = (journal_summary or "").strip()[:650]
+    await sender(
+        f"🌆 *#Загальний · Вечірній debrief*\n"
+        f"BTC 24г `{btc_change_pct:+.2f}%`\n"
+        f"{js}"
+    )
+    await agent_say(sender, "olesya", "День на столі зафіксовано. Завтра продовжимо з тим самим фокусом на дисципліні.", 0.07)
+    await agent_say(sender, "lev", "Гарна робота. Завтра знову тільки чисті сетапи, без форсу.", 0.07)
+    await agent_say(sender, "psych", "Відпочинь від екранів — завтра заходимо без зайвого емоційного багажу.", 0.07)
+    await agent_say(sender, "daryna", "Капітал під контролем — це найкращий результат. Завтра знову жорсткий ризик-периметр.", 0.07)
+
+
 async def office_emergency_alert(
     sender: AsyncSender,
     alert_type: Literal["PUMP", "DUMP", "SWEEP"],

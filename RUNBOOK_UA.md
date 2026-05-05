@@ -55,6 +55,10 @@
 | `OFFICE_RELAY_CONFIG` | Шлях до JSON конфігу relay (за замовчуванням у проєкті) |
 | `RELAY_SEND_AGENT_CARDS` | `1` — надіслати картки агентів при старті |
 | `RELAY_TECH_HEALTH_ON_START` | `0` — не надсилати стартовий health Артема в гілку «Техніка» (за замовчуванням надсилається, якщо задано `OFFICE_TECH_THREAD_ID`) |
+| `OFFICE_BRIEFING_DISABLE` | `1` — вимкнути авто-брифінги (п.28) |
+| `OFFICE_BRIEFING_TZ` | Часова зона, напр. `Europe/Kyiv` (якщо `zoneinfo` не знає ім’я — fallback UTC) |
+| `OFFICE_BRIEFING_MORNING` | Час ранкового брифінгу `HH:MM` (за замовчуванням `08:00`) |
+| `OFFICE_BRIEFING_EVENING` | Час вечірнього debrief `HH:MM` (за замовчуванням `21:00`) |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 

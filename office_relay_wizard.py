@@ -12,6 +12,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[misc, assignment]
+
 import aiohttp
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
@@ -34,7 +39,9 @@ from office_bridge import (
     journal_open_trade,
     journal_recurring_mistakes,
     office_desk_user_question,
+    office_evening_debrief,
     office_handle_signal,
+    office_morning_briefing,
     office_news_trigger,
     office_position_event,
     office_run_scenario,
@@ -331,6 +338,43 @@ def _parse_scenario_command(text: str) -> Optional[str]:
         if low.startswith(p):
             return s[len(p) :].strip().lower()
     return None
+
+
+def _parse_hh_mm(env_val: str, default_h: int, default_m: int) -> Tuple[int, int]:
+    raw = (env_val or "").strip()
+    if not raw:
+        return default_h, default_m
+    sep = ":" if ":" in raw else ("." if "." in raw else None)
+    if sep is None:
+        return default_h, default_m
+    parts = raw.split(sep, 1)
+    if len(parts) != 2:
+        return default_h, default_m
+    try:
+        return int(parts[0].strip()), int(parts[1].strip())
+    except Exception:
+        return default_h, default_m
+
+
+def _briefing_tzinfo():
+    if ZoneInfo is None:
+        return timezone.utc
+    name = os.getenv("OFFICE_BRIEFING_TZ", "Europe/Kyiv").strip()
+    if not name:
+        return timezone.utc
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        print(f"[relay][WARN] OFFICE_BRIEFING_TZ={name!r} недоступна, використовую UTC")
+        return timezone.utc
+
+
+def _session_label_from_hour(h: int) -> str:
+    if 0 <= h < 9:
+        return "ASIA"
+    if 9 <= h < 16:
+        return "LONDON"
+    return "NEW_YORK"
 
 
 def build_signal_kickoff(symbol: str, direction: str) -> str:
@@ -1387,6 +1431,64 @@ async def run() -> None:
                 await asyncio.sleep(120)
 
     asyncio.create_task(monitor_news())
+
+    async def monitor_briefing_scheduler() -> None:
+        """MASTER п.28: ранковий брифінг + вечірній debrief за локальним часом."""
+        last_morning_date = ""
+        last_evening_date = ""
+        mh, mm = _parse_hh_mm(os.getenv("OFFICE_BRIEFING_MORNING", "08:00"), 8, 0)
+        eh, em = _parse_hh_mm(os.getenv("OFFICE_BRIEFING_EVENING", "21:00"), 21, 0)
+        http_timeout = aiohttp.ClientTimeout(total=15)
+        while True:
+            try:
+                if os.getenv("OFFICE_BRIEFING_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                today = now.strftime("%Y-%m-%d")
+                h, mi = now.hour, now.minute
+
+                if h == mh and mi == mm and last_morning_date != today:
+                    async with aiohttp.ClientSession(timeout=http_timeout) as http:
+                        btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
+                        regime = "CHOP" if float(btc.get("volatility_pct", 0.0)) >= 6.0 else "TREND"
+                        sess = _session_label_from_hour(h)
+
+                        async def sender_m(msg: str) -> None:
+                            await send_office(msg[:3900])
+
+                        await office_morning_briefing(
+                            sender_m,
+                            session=sess,
+                            market_state=regime,
+                            btc_bias=f"{float(btc.get('pct', 0.0)):+.2f}%",
+                        )
+                    last_morning_date = today
+                    print("[relay] auto morning briefing sent")
+
+                if h == eh and mi == em and last_evening_date != today:
+                    report = build_daily_journal_report(db_path)
+                    summary = "\n".join(report.split("\n")[:4]).strip()
+                    async with aiohttp.ClientSession(timeout=http_timeout) as http:
+                        btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
+                        btc_pct = float(btc.get("pct", 0.0))
+
+                        async def sender_e(msg: str) -> None:
+                            await send_office(msg[:3900])
+
+                        await office_evening_debrief(
+                            sender_e,
+                            btc_change_pct=btc_pct,
+                            journal_summary=summary,
+                        )
+                    last_evening_date = today
+                    print("[relay] auto evening debrief sent")
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_briefing_scheduler failed: {exc}")
+            await asyncio.sleep(40)
+
+    asyncio.create_task(monitor_briefing_scheduler())
 
     async def monitor_daily_report() -> None:
         nonlocal last_daily_report_date
