@@ -639,8 +639,21 @@ async def run() -> None:
     main_chat_id: int
     office_chat_id: int
 
-    main_raw = (os.getenv("MAIN_CHAT_ID", "").strip() or str(cfg.get("main_chat_id", "") or "").strip())
-    office_raw = (os.getenv("OFFICE_CHAT_ID", "").strip() or str(cfg.get("office_chat_id", "") or "").strip())
+    cloud_mode = bool(tg_bot_token)
+    env_main = os.getenv("MAIN_CHAT_ID", "").strip()
+    env_office = os.getenv("OFFICE_CHAT_ID", "").strip()
+    if cloud_mode:
+        # In cloud mode use only env vars to avoid stale local config IDs.
+        main_raw = env_main
+        office_raw = env_office
+        if not (main_raw and office_raw):
+            raise RuntimeError(
+                "Cloud mode requires MAIN_CHAT_ID and OFFICE_CHAT_ID env vars. "
+                "Set both in Render Environment."
+            )
+    else:
+        main_raw = (env_main or str(cfg.get("main_chat_id", "") or "").strip())
+        office_raw = (env_office or str(cfg.get("office_chat_id", "") or "").strip())
     if force_setup or not (main_raw and office_raw):
         main_chat_id, office_chat_id = await pick_chats(client)
     else:
