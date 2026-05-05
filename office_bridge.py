@@ -607,38 +607,20 @@ def _metric_pack(signal: OfficeSignal) -> Dict[str, str]:
 
 
 def _enforce_data_grounding(note: str, signal: OfficeSignal, min_metrics: int = 2) -> str:
-    """
-    Strict mode: every agent message must include >= min_metrics references.
-    If not, append compact data suffix.
-    """
-    low = note.lower()
-    pack = _metric_pack(signal)
-    matched = [k for k, v in pack.items() if v.split()[0] in low or v in low]
-    if len(matched) >= min_metrics:
-        return note
-    suffix = f"[data: {pack['score']}, {pack['rr']}, {pack['vol']}, {pack['news']}]"
-    return f"{note} {suffix}"
+    # Chat-first mode: keep replies human and compact.
+    return note
 
 
 def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     min_score = 12 if signal.session.upper() in ("LONDON", "NEW_YORK") else 15
     prev = _last_turn(conversation)
     if signal.regime.upper() == "CHOP":
-        note = (
-            f"По даних маємо CHOP. Score {signal.score}, сесія {signal.session}. "
-            "Шум домінує, я за пропуск."
-        )
+        note = "Ринок шумний, сетап слабкий. Я за пропуск."
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
     if signal.score < min_score:
-        note = (
-            f"Цифри проти входу: score {signal.score} нижче порога {min_score}. "
-            f"Після тези '{prev[:60]}' не бачу підстав агресивно входити."
-        )
+        note = "Сигнал нижче порога. Поки без входу."
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
-    note = (
-        f"Технічно ок: score {signal.score} >= {min_score}, режим {signal.regime}. "
-        "Передаю ризик-контроль Дарині."
-    )
+    note = "Технічно ок, можна передавати в ризик-контроль."
     return AgentDecision("maks", "APPROVED", _enforce_data_grounding(note, signal), {"min_score": min_score})
 
 
@@ -650,20 +632,20 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         return AgentDecision(
             "news",
             "REJECTED",
-            _enforce_data_grounding(f"HIGH RISK: подія через {mins} хв. Після '{prev[:45]}' рекомендую SKIP.", signal),
+            _enforce_data_grounding(f"Високий новинний ризик, подія через {mins} хв. Краще пропустити.", signal),
             {"news": "HIGH RISK"},
         )
     if risk == "RISK":
         return AgentDecision(
             "news",
             "WAIT",
-            _enforce_data_grounding(f"RISK: подія через {mins} хв. Пропоную WAIT до релізу/затухання.", signal),
+            _enforce_data_grounding(f"Є новинний ризик, подія через {mins} хв. Краще зачекати.", signal),
             {"news": "RISK"},
         )
     return AgentDecision(
         "news",
         "APPROVED",
-        _enforce_data_grounding(f"SAFE: критичних подій поруч немає ({mins} хв буфер).", signal),
+        _enforce_data_grounding("Критичних новин поруч немає.", signal),
         {"news": "SAFE"},
     )
 
@@ -677,34 +659,34 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding(f"Cooldown активний. RR {rr:.2f}, vol {vol:.2f}%. Після '{prev[:55]}' відкриття переносимо.", signal),
+            _enforce_data_grounding("Активний cooldown. Вхід переносимо.", signal),
             {"veto": True},
         )
     if news_flag:
         return AgentDecision(
             "daryna",
             "WAIT",
-            "Вето по новинах: до зниження новинного ризику вхід заборонено.",
+            "Вето по новинах. До зниження ризику не входимо.",
             {"veto": True},
         )
     if rr < 1.5:
         return AgentDecision(
             "daryna",
             "REJECTED",
-            _enforce_data_grounding(f"Вето: RR {rr:.2f} нижче 1.50. Ризик не виправданий.", signal),
+            _enforce_data_grounding("Вето: ризик не виправданий.", signal),
             {"veto": True},
         )
     if vol > 4.5:
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding(f"Volatility {vol:.2f}% зависока. Чекаємо стабілізацію перед входом.", signal),
+            _enforce_data_grounding("Волатильність зависока. Чекаємо стабілізацію.", signal),
             {"veto": True},
         )
     return AgentDecision(
         "daryna",
         "APPROVED",
-        _enforce_data_grounding(f"Ризик-контур чистий: RR {rr:.2f}, vol {vol:.2f}%. Допуск на execution.", signal),
+        _enforce_data_grounding("Ризик-контур чистий. Допуск на виконання.", signal),
         {"veto": False},
     )
 
@@ -713,12 +695,12 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
     has_reject = any("Вето" in t.text or "пропуск" in t.text.lower() or "HIGH RISK" in t.text for t in conversation if t.agent_key in ("maks", "daryna", "news"))
     has_wait = any("Чекаємо" in t.text or "переносимо" in t.text for t in conversation if t.agent_key in ("maks", "daryna"))
     if signal.regime.upper() == "CHOP":
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Погоджуюсь із командою: CHOP. Фінал: SKIP.", signal))
+        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Ринок шумний. Фінал: пропускаємо.", signal))
     if has_reject:
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Приймаю veto ризику. Фінал: SKIP.", signal))
+        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Приймаю вето ризику. Фінал: пропускаємо.", signal))
     if has_wait:
-        return AgentDecision("lev", "WAIT", _enforce_data_grounding("Позицію не форсуємо. Фінал: WAIT.", signal))
-    return AgentDecision("lev", "APPROVED", _enforce_data_grounding("Контекст прийнятний, команда узгоджена. Фінал: ENTER.", signal))
+        return AgentDecision("lev", "WAIT", _enforce_data_grounding("Не форсуємо. Фінал: чекаємо.", signal))
+    return AgentDecision("lev", "APPROVED", _enforce_data_grounding("Контекст нормальний. Фінал: входимо.", signal))
 
 
 def _risk_rebuttal(signal: OfficeSignal, strategist: AgentDecision, prior_risk: AgentDecision) -> Optional[AgentDecision]:
