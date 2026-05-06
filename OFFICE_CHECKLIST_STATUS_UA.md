@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — **п.29–37** (weekly, risk committee, circuit breaker, алерти, Mini App KPI/фільтри/культура, discipline pack)  
+**Оновлено:** 2026-05-06 — прод relay Render + журнал у `RUNBOOK_UA.md` §7.1; §3 правил: фінал Лева vs execution Марка (п.38–42)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -100,10 +100,10 @@
 | 14 | ✅ | Два сервіси на Render: Mini App + worker/runtime з `office_multibot_bootstrap.py` (підтверджено логами деплою). |
 | 15 | ✅ | Еталон змінних зафіксовано в `RUNBOOK_UA.md` §2 (значення на Render — експлуатація). |
 | 16 | ✅ | Підтримка `DATABASE_URL` (PostgreSQL) у bridge, relay, mini app через `psycopg`. |
-| 17 | ✅ | `office_db_identity()` у `office_bridge.py`; лог relay `[relay] DB identity`; Mini App `/api/summary` + рядок на UI; health у TECH з fingerprint. Експлуатація: звірити збіг на Render. |
+| 17 | 🟨 | Код і логи OK; **прод relay** (2026-05-06): PostgreSQL `fingerprint=c78e00696e638425`. Збіг з Mini App — звірити вручну після деплою Web (`RUNBOOK_UA.md` §7.1). |
 | 18 | ✅ | `OFFICE_GENERAL_THREAD_ID`, `OFFICE_TASKS_THREAD_ID`, `OFFICE_TECH_THREAD_ID` у `send_office` (форумні гілки). |
 | 19 | ✅ | Гілка `OFFICE_TECH_THREAD_ID`: помилки Binance/news/daily → `stream="tech"`; при старті relay — **health від Артема** (`@@dev@@`, `RELAY_TECH_HEALTH_ON_START`, за замовчуванням увімкнено). Окремий cron «щогодини» — не робили; за потреби — пізніше. |
-| 20 | ✅ | Процедура E2E в `RUNBOOK_UA.md` §7; після збігу fingerprint (п.17) виконати ручний прохід сигнал → офіс → Mini App. |
+| 20 | 🟨 | Процедура E2E в `RUNBOOK_UA.md` §7; ручний прохід після повної звірки fingerprint — зафіксувати в §7.1 таблиці. |
 | 21 | ✅ | `RUNBOOK_UA.md`: env, спільна БД, тиша, freeze, відновлення. |
 
 ---
@@ -148,7 +148,7 @@
 | `OFFICE_STYLE_QA_UA.md` | Style QA gate (п.27). |
 | `OFFICE_DISCIPLINE_UA.md` | Discipline / prop-firm нуджі (п.36). |
 
-**З попередніх планів (без номера в 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
+**З попередніх планів (без номера в 37):** live overlays у Mini App → One-Click Review → Risk Heatmap — усі ⬜ (рекомендований порядок такий самий).
 
 ---
 
@@ -156,8 +156,8 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 37 |
-| 🟨 | 0 |
+| ✅ | 35 |
+| 🟨 | 2 |
 | ⬜ | 0 |
 | **Усього** | **37** |
 
@@ -177,6 +177,13 @@
 8. ~~**П. 27**~~ — Style QA gate.  
 9. ~~**П. 28**~~ — авто-брифінг ранок/вечір.  
 10. ~~**П. 29–37**~~ — weekly, risk committee, circuit breaker, алерти, Mini App, discipline (див. таблиці вище).
+
+**Наступна черга (після 1–37):**
+
+1. **Звірка fingerprint:** Mini App Web на Render → той самий `c78e00696e638425`, що relay (див. `RUNBOOK_UA.md` §3 і §7.1).
+2. **E2E:** пройти `RUNBOOK_UA.md` §7 п.2–5 і відмітити таблицю §7.1 → тоді п.17 і п.20 можна знову позначити ✅.
+3. **Методичка п.38–42:** текст уже в Частині II; у правилах зафіксовано фінал Лева vs Марко execution (`OFFICE_RULES_UA.md` §3).
+4. **Backlog поза 37** (див. таблицю нижче): live overlays у Mini App → One-Click Review → Risk Heatmap — по одному PR/ітерації.
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 
