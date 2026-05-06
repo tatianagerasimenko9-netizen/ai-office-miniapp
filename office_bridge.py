@@ -831,16 +831,46 @@ def _enforce_data_grounding(note: str, signal: OfficeSignal, min_metrics: int = 
     return note
 
 
+def _level_pack(signal: OfficeSignal) -> Dict[str, Optional[float]]:
+    def _f(k: str) -> Optional[float]:
+        try:
+            v = signal.meta.get(k)
+            if v is None:
+                return None
+            return float(v)
+        except Exception:
+            return None
+
+    return {
+        "entry": _f("entry_price"),
+        "sl": _f("stop_loss"),
+        "tp": _f("take_profit"),
+    }
+
+
+def _fmt_level(v: Optional[float]) -> str:
+    if v is None:
+        return "—"
+    if abs(v) >= 1000:
+        return f"{v:.1f}"
+    if abs(v) >= 1:
+        return f"{v:.4f}".rstrip("0").rstrip(".")
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
 def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     min_score = 12 if signal.session.upper() in ("LONDON", "NEW_YORK") else 15
-    prev = _last_turn(conversation)
+    lv = _level_pack(signal)
+    rr = float(signal.meta.get("rr", 2.0))
+    vol = float(signal.meta.get("volatility_pct", 0.0))
+    level_line = f"Рівні: вхід {_fmt_level(lv['entry'])}, SL {_fmt_level(lv['sl'])}, TP {_fmt_level(lv['tp'])}."
     if signal.regime.upper() == "CHOP":
-        note = "Ринок шумний, сетап слабкий. Я за пропуск."
+        note = f"Ринок шумний ({vol:.2f}%). Я за пропуск. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
     if signal.score < min_score:
-        note = "Сигнал нижче порога. Поки без входу."
+        note = f"Сигнал нижче порога ({signal.score} < {min_score}). Поки без входу. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
-    note = "Технічно ок, можна передавати в ризик-контроль."
+    note = f"Технічно ок: score {signal.score}, rr {rr:.2f}, vol {vol:.2f}%. {level_line}"
     return AgentDecision("maks", "APPROVED", _enforce_data_grounding(note, signal), {"min_score": min_score})
 
 
@@ -871,47 +901,52 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
 
 
 def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
-    prev = _last_turn(conversation)
+    lv = _level_pack(signal)
     rr = float(signal.meta.get("rr", 2.0))
     vol = float(signal.meta.get("volatility_pct", 0.0))
     news_flag = any(t.agent_key == "news" and ("HIGH RISK" in t.text or "RISK:" in t.text) for t in conversation)
+    risk_levels = f"Контроль: SL {_fmt_level(lv['sl'])}, invalidation по SL."
     if bool(signal.meta.get("loss_cooldown_active", False)):
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding("Активний cooldown. Вхід переносимо.", signal),
+            _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal),
             {"veto": True},
         )
     if news_flag:
         return AgentDecision(
             "daryna",
             "WAIT",
-            "Вето по новинах. До зниження ризику не входимо.",
+            f"Вето по новинах. До зниження ризику не входимо. {risk_levels}",
             {"veto": True},
         )
     if rr < 1.5:
         return AgentDecision(
             "daryna",
             "REJECTED",
-            _enforce_data_grounding("Вето: ризик не виправданий.", signal),
+            _enforce_data_grounding(f"Вето: ризик не виправданий (rr {rr:.2f}). {risk_levels}", signal),
             {"veto": True},
         )
     if vol > 4.5:
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding("Волатильність зависока. Чекаємо стабілізацію.", signal),
+            _enforce_data_grounding(f"Волатильність зависока ({vol:.2f}%). Чекаємо стабілізацію. {risk_levels}", signal),
             {"veto": True},
         )
     return AgentDecision(
         "daryna",
         "APPROVED",
-        _enforce_data_grounding("Ризик-контур чистий. Допуск на виконання.", signal),
+        _enforce_data_grounding(f"Ризик-контур чистий. Допуск на виконання. {risk_levels}", signal),
         {"veto": False},
     )
 
 
 def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
+    lv = _level_pack(signal)
+    entry = _fmt_level(lv["entry"])
+    sl = _fmt_level(lv["sl"])
+    tp = _fmt_level(lv["tp"])
     has_reject = any("Вето" in t.text or "пропуск" in t.text.lower() or "HIGH RISK" in t.text for t in conversation if t.agent_key in ("maks", "daryna", "news"))
     has_wait = any("Чекаємо" in t.text or "переносимо" in t.text for t in conversation if t.agent_key in ("maks", "daryna"))
     if signal.regime.upper() == "CHOP":
@@ -919,8 +954,12 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
     if has_reject:
         return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Приймаю вето ризику. Фінал: пропускаємо.", signal))
     if has_wait:
-        return AgentDecision("lev", "WAIT", _enforce_data_grounding("Не форсуємо. Фінал: чекаємо.", signal))
-    return AgentDecision("lev", "APPROVED", _enforce_data_grounding("Контекст нормальний. Фінал: входимо.", signal))
+        return AgentDecision("lev", "WAIT", _enforce_data_grounding(f"Не форсуємо. Чекаємо підтвердження біля {entry}.", signal))
+    return AgentDecision(
+        "lev",
+        "APPROVED",
+        _enforce_data_grounding(f"Контекст нормальний. Фінал: входимо. План: entry {entry}, SL {sl}, TP {tp}.", signal),
+    )
 
 
 def _risk_rebuttal(signal: OfficeSignal, strategist: AgentDecision, prior_risk: AgentDecision) -> Optional[AgentDecision]:
@@ -949,11 +988,19 @@ def _strategist_after_rebuttal(signal: OfficeSignal, rebuttal: AgentDecision) ->
 
 def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
     trail = "EMA50" if bool(signal.meta.get("is_whitelist", True)) else "EMA21"
+    lv = _level_pack(signal)
+    entry = _fmt_level(lv["entry"])
+    sl = _fmt_level(lv["sl"])
+    tp = _fmt_level(lv["tp"])
     if final_action == "ENTER":
         return AgentDecision(
             "marko",
             "APPROVED",
-            _enforce_data_grounding(f"Рішення: входимо в {signal.direction} {signal.symbol}. Супровід за ковзною {trail}, розмір стандартний.", signal),
+            _enforce_data_grounding(
+                f"Вхід {signal.direction} {signal.symbol}. Рівні: entry {entry}, SL {sl}, TP {tp}. "
+                f"Супровід за {trail}. Якщо SL пробито — без добору проти руху.",
+                signal,
+            ),
             {"trail_mode": trail},
         )
     if final_action == "WAIT":
