@@ -76,11 +76,106 @@ def _parse_ts_close(s: object) -> datetime | None:
         return None
 
 
+def _f_or_none(x: object) -> float | None:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+        if v != v:  # NaN
+            return None
+        return v
+    except Exception:
+        return None
+
+
+def build_live_overlays(chart_symbol: str) -> dict[str, object]:
+    """
+    Рівні з trade_journal для символу на графіку (backlog: live overlays у Mini App).
+    """
+    cs = chart_symbol.strip().upper()
+    open_trade: dict[str, object] | None = None
+    last_closed: dict[str, object] | None = None
+
+    try:
+        if cs:
+            rows = q(
+                """
+                SELECT trade_id, symbol, direction, entry_price, stop_loss, take_profit,
+                       ts_open_utc, setup_name, timeframe
+                FROM trade_journal
+                WHERE status = 'OPEN' AND UPPER(symbol) = ?
+                ORDER BY ts_open_utc DESC
+                LIMIT 1
+                """,
+                (cs,),
+            )
+        else:
+            rows = q(
+                """
+                SELECT trade_id, symbol, direction, entry_price, stop_loss, take_profit,
+                       ts_open_utc, setup_name, timeframe
+                FROM trade_journal
+                WHERE status = 'OPEN'
+                ORDER BY ts_open_utc DESC
+                LIMIT 1
+                """,
+                (),
+            )
+        if rows:
+            r = rows[0]
+            open_trade = {
+                "trade_id": str(r[0] or ""),
+                "symbol": str(r[1] or ""),
+                "direction": str(r[2] or ""),
+                "entry_price": _f_or_none(r[3]),
+                "stop_loss": _f_or_none(r[4]),
+                "take_profit": _f_or_none(r[5]),
+                "ts_open_utc": str(r[6] or ""),
+                "setup_name": str(r[7] or ""),
+                "timeframe": str(r[8] or ""),
+            }
+    except Exception:
+        open_trade = None
+
+    try:
+        if cs:
+            rows_c = q(
+                """
+                SELECT trade_id, entry_price, exit_price, stop_loss, take_profit, outcome, ts_close_utc
+                FROM trade_journal
+                WHERE status = 'CLOSED' AND UPPER(symbol) = ?
+                ORDER BY ts_close_utc DESC
+                LIMIT 1
+                """,
+                (cs,),
+            )
+            if rows_c:
+                x = rows_c[0]
+                last_closed = {
+                    "trade_id": str(x[0] or ""),
+                    "entry_price": _f_or_none(x[1]),
+                    "exit_price": _f_or_none(x[2]),
+                    "stop_loss": _f_or_none(x[3]),
+                    "take_profit": _f_or_none(x[4]),
+                    "outcome": str(x[5] or ""),
+                    "ts_close_utc": str(x[6] or ""),
+                }
+    except Exception:
+        last_closed = None
+
+    return {
+        "chart_symbol": cs,
+        "open_trade": open_trade,
+        "last_closed_hint": last_closed,
+    }
+
+
 def get_data(
     *,
     symbol_filter: str = "",
     action_filter: str = "",
     agent_filter: str = "",
+    chart_symbol: str = "",
 ) -> dict:
     sym_f = symbol_filter.strip().upper()
     act_f = action_filter.strip().upper()
@@ -229,9 +324,11 @@ def get_data(
         {"symbol": k, "wins_14d": v} for k, v in sorted(sym_wins.items(), key=lambda x: (-x[1], x[0]))[:10]
     ]
 
+    overlays = build_live_overlays(chart_symbol)
+
     return {
         "now_utc": datetime.now(timezone.utc).isoformat(),
-        "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f},
+        "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f, "chart": chart_symbol.strip().upper()},
         "db_identity": office_db_identity(_db_target_for_identity()),
         "kpi": {
             "total": total,
@@ -247,6 +344,7 @@ def get_data(
             "trade_of_week": best_trade,
             "leaderboard_wins_14d": leaderboard,
         },
+        "overlays": overlays,
         "decisions": [
             {"ts_utc": r[0], "signal_id": r[1], "symbol": r[2], "action": r[3]}
             for r in rows_decisions
@@ -300,6 +398,14 @@ def html() -> str:
     #tv { height:520px; }
     .ok { color:#22c55e; }
     .bad { color:#ef4444; }
+    .overlay-band { font-size:11px; margin-bottom:8px; line-height:1.35; }
+    .overlay-ruler-wrap { position:relative; height:14px; background:#1e293b; border-radius:6px; border:1px solid #334155; margin-top:6px; }
+    .overlay-mark { position:absolute; top:0; width:3px; height:100%; border-radius:1px; transform:translateX(-50%); }
+    .om-sl { background:#ef4444; }
+    .om-entry { background:#eab308; }
+    .om-tp { background:#22c55e; }
+    .om-mark { background:#f8fafc; box-shadow:0 0 0 1px #334155; z-index:2; }
+    .overlay-legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; font-size:10px; color:#94a3b8; }
   </style>
 </head>
 <body>
@@ -332,6 +438,8 @@ def html() -> str:
 
   <div class="grid">
     <div class="panel">
+      <div><b>Live overlay</b> <span class="muted">(рівні з журналу + mark з Binance)</span></div>
+      <div id="overlayBar" class="overlay-band muted">…</div>
       <div id="tv"></div>
     </div>
     <div class="panel">
@@ -363,6 +471,62 @@ def html() -> str:
 <script src="https://s3.tradingview.com/tv.js"></script>
 <script>
 let widget = null;
+window._deskOverlays = null;
+window._lastMark = null;
+
+function renderOverlayBar() {
+  const el = document.getElementById('overlayBar');
+  const ov = window._deskOverlays;
+  const mark = window._lastMark;
+  if (!el) return;
+  if (!ov) {
+    el.textContent = 'Завантаження overlay…';
+    return;
+  }
+  const ot = ov.open_trade;
+  const sym = (document.getElementById('symbol').value || 'BTCUSDT').toUpperCase();
+  if (!ot || !ot.entry_price) {
+    el.innerHTML =
+      '<span class="muted">Немає OPEN угоди з цінами в журналі для <b>' + sym + '</b>. ' +
+      'Остання закрита (підказка): ' + formatClosedHint(ov.last_closed_hint) + '</span>';
+    return;
+  }
+  const e = Number(ot.entry_price);
+  const sl = ot.stop_loss != null ? Number(ot.stop_loss) : null;
+  const tp = ot.take_profit != null ? Number(ot.take_profit) : null;
+  const prices = [e];
+  if (sl != null && sl > 0) prices.push(sl);
+  if (tp != null && tp > 0) prices.push(tp);
+  if (mark != null && mark > 0) prices.push(mark);
+  let lo = Math.min.apply(null, prices);
+  let hi = Math.max.apply(null, prices);
+  if (hi <= lo) { hi = lo * 1.001; lo = lo * 0.999; }
+  function pct(p) { return ((p - lo) / (hi - lo)) * 100; }
+  let ruler =
+    '<div class="overlay-ruler-wrap">' +
+    (sl != null && sl > 0 ? '<div class="overlay-mark om-sl" style="left:' + pct(sl).toFixed(2) + '%" title="SL"></div>' : '') +
+    '<div class="overlay-mark om-entry" style="left:' + pct(e).toFixed(2) + '%" title="Entry"></div>' +
+    (tp != null && tp > 0 ? '<div class="overlay-mark om-tp" style="left:' + pct(tp).toFixed(2) + '%" title="TP"></div>' : '') +
+    (mark != null && mark > 0 ? '<div class="overlay-mark om-mark" style="left:' + pct(mark).toFixed(2) + '%" title="Mark"></div>' : '') +
+    '</div>';
+  let leg =
+    '<div class="overlay-legend">' +
+    '<span>side <b>' + (ot.direction || '') + '</b></span>' +
+    '<span>entry <b>' + e.toFixed(4) + '</b></span>' +
+    (sl != null ? '<span class="bad">SL ' + sl.toFixed(4) + '</span>' : '') +
+    (tp != null ? '<span class="ok">TP ' + tp.toFixed(4) + '</span>' : '') +
+    (mark != null && mark > 0 ? '<span>mark <b>' + mark.toFixed(4) + '</b></span>' : '') +
+    '</div>';
+  el.innerHTML =
+    '<div><b>' + (ot.symbol || sym) + '</b> · OPEN <span class="muted">' + (ot.trade_id || '') + '</span></div>' +
+    ruler + leg;
+}
+
+function formatClosedHint(h) {
+  if (!h || !h.ts_close_utc) return '—';
+  return (h.outcome || '') + ' @ ' + (h.exit_price != null ? Number(h.exit_price).toFixed(4) : '?');
+}
+
 function loadTV() {
   const sym = (document.getElementById('symbol').value || 'BTCUSDT').toUpperCase();
   const tf = document.getElementById('tf').value;
@@ -403,9 +567,12 @@ async function loadTickers() {
     const [btc, alt] = await Promise.all([fetchTicker('BTCUSDT'), fetchTicker(sym)]);
     document.getElementById('btc24').innerHTML = fmtPct(btc.priceChangePercent);
     document.getElementById('sym24').innerHTML = fmtPct(alt.priceChangePercent);
+    window._lastMark = alt.lastPrice != null ? Number(alt.lastPrice) : null;
+    renderOverlayBar();
   } catch (e) {
     document.getElementById('btc24').textContent = 'err';
     document.getElementById('sym24').textContent = 'err';
+    window._lastMark = null;
   }
 }
 
@@ -416,9 +583,11 @@ function officeApiQuery() {
   const fs = (document.getElementById('filterSymbol').value || '').trim();
   const fa = (document.getElementById('filterAction').value || '').trim();
   const fag = (document.getElementById('filterAgent').value || '').trim();
+  const chart = (document.getElementById('symbol').value || '').trim();
   if (fs) p.set('symbol', fs);
   if (fa) p.set('action', fa);
   if (fag) p.set('agent', fag);
+  if (chart) p.set('chart', chart);
   const s = p.toString();
   return s ? ('?' + s) : '';
 }
@@ -426,6 +595,8 @@ function officeApiQuery() {
 async function loadOffice() {
   const r = await fetch('/api/summary' + officeApiQuery());
   const d = await r.json();
+  window._deskOverlays = d.overlays || null;
+  renderOverlayBar();
   const di = d.db_identity || {};
   const fp = di.fingerprint || '?';
   const back = di.backend || '?';
@@ -520,6 +691,7 @@ class Handler(BaseHTTPRequestHandler):
                     symbol_filter=_first("symbol"),
                     action_filter=_first("action"),
                     agent_filter=_first("agent"),
+                    chart_symbol=_first("chart"),
                 ),
                 ensure_ascii=False,
             ).encode("utf-8")

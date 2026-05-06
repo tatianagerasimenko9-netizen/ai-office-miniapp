@@ -83,7 +83,7 @@
 | `DATABASE_URL` або `OFFICE_DB_PATH` | **Той самий**, що й у runtime |
 | `OFFICE_MINI_HOST` / `OFFICE_MINI_PORT` | Bind для веб-сервісу |
 
-**API:** `GET /api/summary?symbol=BTCUSDT&action=SKIP&agent=lev` — фільтри рішень/журналу (п.35); KPI по ролях і культура — у JSON без фільтрації агрегатів.
+**API:** `GET /api/summary?symbol=BTCUSDT&action=SKIP&agent=lev&chart=ETHUSDT` — фільтри рішень/журналу (п.35); параметр **`chart`** задає символ для блоку **live overlay** (OPEN угода з журналу + рівні SL/TP/entry поруч із графіком). KPI по ролях і культура — у JSON; поле **`overlays`**.
 
 ---
 
