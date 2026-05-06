@@ -1,7 +1,7 @@
 # Runbook AI Office (`ai-office-miniapp`)
 
 **Призначення:** швидке відновлення, перевірка env і дій при «тиші» в чатах.  
-**Оновлено:** 2026-05-06 (fingerprint БД, E2E чеклист)  
+**Оновлено:** 2026-05-06 (п.29–37: weekly, risk committee, алерти, Mini App KPI/фільтри, discipline)  
 
 ---
 
@@ -59,6 +59,20 @@
 | `OFFICE_BRIEFING_TZ` | Часова зона IANA, напр. `Europe/Kyiv`. У репо в `requirements.txt` додано **`tzdata`** — щоб Windows і мінімальні Linux-образи мали базу зон; без неї Python може не знайти `Europe/Kyiv` і тоді relay логуватиме попередження й брифінги підуть за **UTC** (години «з’їдуть» відносно Києва). |
 | `OFFICE_BRIEFING_MORNING` | Час ранкового брифінгу `HH:MM` (за замовчуванням `08:00`) |
 | `OFFICE_BRIEFING_EVENING` | Час вечірнього debrief `HH:MM` (за замовчуванням `21:00`) |
+| `OFFICE_CIRCUIT_DISABLE` | `1` — вимкнути circuit breaker (п.31); за замовчуванням увімкнено |
+| `OFFICE_CIRCUIT_LOSSES` | Мінімум підряд LOSS у журналі для блоку нового входу (за замовчуванням `3`) |
+| `OFFICE_DISCIPLINE_REVIEW_EVERY` | Якщо `N ≥ 2`, нагадування про review кожні N **закритих** угод (п.36); `0` — вимкнено |
+| `OFFICE_WEEKLY_DISABLE` | `1` — не слати тижневий зріз журналу (п.29) |
+| `OFFICE_WEEKLY_TIME` | Час `HH:MM` у зоні `OFFICE_BRIEFING_TZ` (за замовчуванням `20:00`) |
+| `OFFICE_WEEKLY_ISO_DOW` | День ISO 1=Пн … 7=Нд (за замовчуванням `7`, неділя) |
+| `OFFICE_RISK_COMMITTEE_DISABLE` | `1` — вимкнути щоденний тригер «risk committee» (п.30) |
+| `OFFICE_RISK_COMMITTEE_DAY_LOSSES` | Поріг кількості LOSS «сьогодні» (за замовчуванням `4`) |
+| `OFFICE_RISK_COMMITTEE_STREAK` | Поріг серії SL підряд у журналі (за замовчуванням `3`) |
+| `OFFICE_MARKET_ALERTS_DISABLE` | `1` — вимкнути funding/ATR алерти (п.32–33) |
+| `OFFICE_FUNDING_ALERT_ABS_PCT` | Поріг \|funding\| для BTC, у % як у snapshot (за замовчуванням `0.07`) |
+| `OFFICE_ATR_ALERT_VOL_PCT` | Поріг 24h range % BTC (за замовчуванням `7.5`) |
+| `OFFICE_MARKET_ALERT_COOLDOWN_SEC` | Мінімум секунд між повторними алертами одного типу (за замовчуванням `3600`) |
+| `OFFICE_MARKET_ALERT_POLL_SEC` | Інтервал опитування Binance (за замовчуванням `180`) |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 
@@ -68,6 +82,8 @@
 |--------|----------|
 | `DATABASE_URL` або `OFFICE_DB_PATH` | **Той самий**, що й у runtime |
 | `OFFICE_MINI_HOST` / `OFFICE_MINI_PORT` | Bind для веб-сервісу |
+
+**API:** `GET /api/summary?symbol=BTCUSDT&action=SKIP&agent=lev` — фільтри рішень/журналу (п.35); KPI по ролях і культура — у JSON без фільтрації агрегатів.
 
 ---
 

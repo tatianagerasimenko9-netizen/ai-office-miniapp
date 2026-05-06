@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — **п.28 Auto Briefing** (ранок + вечір у relay)  
+**Оновлено:** 2026-05-06 — **п.29–37** (weekly, risk committee, circuit breaker, алерти, Mini App KPI/фільтри/культура, discipline pack)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -119,14 +119,14 @@
 | 26 | ✅ | `OFFICE_DIALOG_SCENARIOS_UA.md` + шаблони в bridge. |
 | 27 | ✅ | `office_style_qa.py`: `polish_agent_message` у `agent_say`, health Артема в relay; `OFFICE_STYLE_QA_UA.md`; `style_qa_violations` для майбутніх логів. |
 | 28 | ✅ | `monitor_briefing_scheduler` у relay: `office_morning_briefing` + `office_evening_debrief`; env `OFFICE_BRIEFING_*`; `RUNBOOK_UA.md`. |
-| 29 | ⬜ | Не реалізовано. |
-| 30 | ⬜ | Не реалізовано. |
-| 31 | ⬜ | Не реалізовано. |
-| 32 | ⬜ | Не реалізовано. |
-| 33 | ⬜ | Не реалізовано. |
-| 34 | ⬜ | Загальні KPI у mini app є; по агентах — ні. |
-| 35 | ⬜ | Не реалізовано. |
-| 36 | ⬜ | Не реалізовано (veto Дарини в логіці є; «проп-фірма» як пакет — ні). |
+| 29 | ✅ | `build_weekly_journal_report` + `monitor_weekly_review` у relay; env `OFFICE_WEEKLY_*`; `RUNBOOK_UA.md`. |
+| 30 | ✅ | `monitor_risk_committee` + подія `RISK_COMMITTEE` у БД; пороги `OFFICE_RISK_COMMITTEE_*`. |
+| 31 | ✅ | `journal_consecutive_loss_streak` + SKIP у `office_handle_signal`; `OFFICE_CIRCUIT_*`. |
+| 32 | ✅ | `monitor_funding_atr_alerts`: funding BTC, поріг `OFFICE_FUNDING_ALERT_ABS_PCT` → гілка «Техніка». |
+| 33 | ✅ | Той самий монітор: 24h range % BTC, `OFFICE_ATR_ALERT_VOL_PCT`. |
+| 34 | ✅ | Mini App: `agent_kpi` з `decisions_json`, таблиця «KPI по ролях». |
+| 35 | ✅ | Mini App: query `?symbol=&action=&agent=` + поля фільтра на UI. |
+| 36 | ✅ | `OFFICE_DISCIPLINE_UA.md` + `OFFICE_DISCIPLINE_REVIEW_EVERY` (nudge у bridge). |
 
 ---
 
@@ -134,7 +134,7 @@
 
 | № | Статус | Короткий доказ / заувага |
 |---|--------|---------------------------|
-| 37 | ⬜ | Culture layer не реалізовано. |
+| 37 | ✅ | Mini App: `culture.trade_of_week` (7д), `leaderboard_wins_14d` — легкий шар без токсичності. |
 
 **Додатково (не входили в 37 оригінальних кроків, але зафіксовано в репо):**
 
@@ -146,6 +146,7 @@
 | `OFFICE_PERSONA_PACK_UA.md` | Persona Pack на 9 ролей (п.23). |
 | `OFFICE_FACTOR_PACK_UA.md` | Опис полів Factor Pack v2 (п.25). |
 | `OFFICE_STYLE_QA_UA.md` | Style QA gate (п.27). |
+| `OFFICE_DISCIPLINE_UA.md` | Discipline / prop-firm нуджі (п.36). |
 
 **З попередніх планів (без номера в 37):** live overlays у Mini App, One-Click Review, Risk Heatmap — ⬜.
 
@@ -155,9 +156,9 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 28 |
+| ✅ | 37 |
 | 🟨 | 0 |
-| ⬜ | 9 |
+| ⬜ | 0 |
 | **Усього** | **37** |
 
 *(Пункти **38–42** не входять у цю суму — див. методичку вище.)*
@@ -175,7 +176,7 @@
 7. ~~**П. 25**~~ — Factor Pack v2.  
 8. ~~**П. 27**~~ — Style QA gate.  
 9. ~~**П. 28**~~ — авто-брифінг ранок/вечір.  
-10. **П. 29–36** — weekly review, алерти, Mini App KPI…
+10. ~~**П. 29–37**~~ — weekly, risk committee, circuit breaker, алерти, Mini App, discipline (див. таблиці вище).
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 

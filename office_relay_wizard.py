@@ -17,6 +17,11 @@ try:
 except ImportError:  # pragma: no cover
     ZoneInfo = None  # type: ignore[misc, assignment]
 
+try:
+    import tzdata  # noqa: F401  # IANA zones для ZoneInfo (Windows / slim Linux)
+except ImportError:
+    pass
+
 import aiohttp
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
@@ -33,11 +38,13 @@ from office_bridge import (
     fmt_agent_line,
     get_agent_card_text,
     init_office_db,
-    office_db_identity,
     journal_close_trade,
+    journal_consecutive_loss_streak,
     journal_learning_hints_from_tags,
     journal_open_trade,
     journal_recurring_mistakes,
+    log_event,
+    office_db_identity,
     office_desk_user_question,
     office_evening_debrief,
     office_handle_signal,
@@ -659,6 +666,136 @@ def build_daily_journal_report(db_path: str) -> str:
     )
 
 
+def build_weekly_journal_report(db_path: str) -> str:
+    """
+    Ролінг 7 днів закритих угод (MASTER п.29).
+    """
+    try:
+        is_pg = str(db_path).lower().startswith("postgres://") or str(db_path).lower().startswith("postgresql://")
+        if is_pg:
+            if psycopg is None:
+                raise RuntimeError("psycopg is required for PostgreSQL mode")
+            with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT outcome, pnl_pct, r_multiple, mistake_tags_json, symbol
+                        FROM trade_journal
+                        WHERE status = 'CLOSED'
+                          AND ts_close_utc IS NOT NULL
+                          AND TRIM(ts_close_utc) <> ''
+                          AND ts_close_utc::timestamptz >= (NOW() - INTERVAL '7 days')
+                        """
+                    )
+                    rows = cur.fetchall()
+        else:
+            dbp = db_path
+            if str(dbp).lower().startswith("sqlite:///"):
+                dbp = str(dbp)[10:]
+            with sqlite3.connect(dbp) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT outcome, pnl_pct, r_multiple, mistake_tags_json, symbol
+                    FROM trade_journal
+                    WHERE status = 'CLOSED'
+                      AND ts_close_utc IS NOT NULL
+                      AND TRIM(ts_close_utc) <> ''
+                      AND datetime(ts_close_utc) >= datetime('now', '-7 days')
+                    """
+                ).fetchall()
+    except Exception:
+        rows = []
+
+    wins = 0
+    losses = 0
+    be = 0
+    pnl_sum = 0.0
+    r_vals: List[float] = []
+    tags_count: Dict[str, int] = {}
+    sym_trade_count: Dict[str, int] = {}
+
+    for outcome, pnl_pct, r_multiple, tags_json, symbol in rows:
+        o = str(outcome or "").upper()
+        if o == "WIN":
+            wins += 1
+        elif o == "LOSS":
+            losses += 1
+        elif o == "BE":
+            be += 1
+        try:
+            pnl_sum += float(pnl_pct or 0.0)
+        except Exception:
+            pass
+        try:
+            if r_multiple is not None:
+                r_vals.append(float(r_multiple))
+        except Exception:
+            pass
+        try:
+            tags = json.loads(str(tags_json or "[]"))
+            if isinstance(tags, list):
+                for t in tags:
+                    k = str(t).strip().lower()
+                    if k:
+                        tags_count[k] = tags_count.get(k, 0) + 1
+        except Exception:
+            pass
+        sym = str(symbol or "").upper().strip()
+        if sym:
+            sym_trade_count[sym] = sym_trade_count.get(sym, 0) + 1
+
+    total = wins + losses + be
+    wr = (wins / (wins + losses) * 100.0) if (wins + losses) > 0 else 0.0
+    avg_r = (sum(r_vals) / len(r_vals)) if r_vals else 0.0
+    top_tags = sorted(tags_count.items(), key=lambda x: (-x[1], x[0]))[:4]
+    tags_text = ", ".join(f"{k} x{v}" for k, v in top_tags) if top_tags else "нема"
+    top_syms = sorted(sym_trade_count.items(), key=lambda x: (-x[1], x[0]))[:4]
+    syms_text = ", ".join(f"{k} ({v})" for k, v in top_syms) if top_syms else "нема"
+
+    return (
+        "Тижневий зріз (останні 7 діб, закриті):\n"
+        f"Угод: {total} | W {wins} · L {losses} · BE {be} | WR {wr:.1f}%\n"
+        f"PnL сумарно: {pnl_sum:+.2f}% | Avg R: {avg_r:+.2f}\n"
+        f"Топ помилок: {tags_text}\n"
+        f"Найчастіші символи: {syms_text}"
+    )
+
+
+def _journal_today_loss_count(db_path: str) -> int:
+    try:
+        is_pg = str(db_path).lower().startswith("postgres://") or str(db_path).lower().startswith("postgresql://")
+        if is_pg:
+            if psycopg is None:
+                return 0
+            with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*) FROM trade_journal
+                        WHERE status = 'CLOSED'
+                          AND UPPER(TRIM(COALESCE(outcome, ''))) = 'LOSS'
+                          AND LEFT(COALESCE(ts_close_utc, ''), 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
+                        """
+                    )
+                    row = cur.fetchone()
+                    return int(row[0]) if row and row[0] is not None else 0
+        dbp = db_path
+        if str(dbp).lower().startswith("sqlite:///"):
+            dbp = str(dbp)[10:]
+        with sqlite3.connect(dbp) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM trade_journal
+                WHERE status = 'CLOSED'
+                  AND UPPER(TRIM(COALESCE(outcome, ''))) = 'LOSS'
+                  AND date(ts_close_utc) = date('now')
+                """
+            ).fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+    except Exception:
+        return 0
+
+
 def parse_signal(text: str, msg_id: int) -> OfficeSignal:
     symbol = "UNKNOWNUSDT"
     direction = "LONG"
@@ -822,6 +959,9 @@ async def run() -> None:
         f"fingerprint={_db_ident.get('fingerprint')} "
         f"(звір з Mini App /api/summary → db_identity)"
     )
+    _tzp = _briefing_tzinfo()
+    _tzn = getattr(_tzp, "key", None) or ("UTC" if _tzp is timezone.utc else repr(_tzp))
+    print(f"[relay] briefing TZ active: {_tzn} (OFFICE_BRIEFING_TZ; пакет tzdata у venv допомагає на Windows)")
 
     main_chat_id: int
     office_chat_id: int
@@ -1489,6 +1629,126 @@ async def run() -> None:
             await asyncio.sleep(40)
 
     asyncio.create_task(monitor_briefing_scheduler())
+
+    async def monitor_weekly_review() -> None:
+        """MASTER п.29: тижневий текстовий зріз журналу за розкладом."""
+        last_week_key = ""
+        wh, wm = _parse_hh_mm(os.getenv("OFFICE_WEEKLY_TIME", "20:00"), 20, 0)
+        try:
+            target_dow = int(os.getenv("OFFICE_WEEKLY_ISO_DOW", "7") or "7")
+        except Exception:
+            target_dow = 7
+        if target_dow < 1 or target_dow > 7:
+            target_dow = 7
+        while True:
+            try:
+                if os.getenv("OFFICE_WEEKLY_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                iso = now.isocalendar()
+                week_key = f"{iso[0]}-W{iso[1]:02d}"
+                h, mi = now.hour, now.minute
+                if now.isoweekday() == target_dow and h == wh and mi == wm and last_week_key != week_key:
+                    report = build_weekly_journal_report(db_path)
+                    await send_office("📆 Тижневий розбір (ролінг 7д):\n" + report[:3600])
+                    last_week_key = week_key
+                    print("[relay] weekly journal report sent")
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_weekly_review failed: {exc}")
+            await asyncio.sleep(45)
+
+    asyncio.create_task(monitor_weekly_review())
+
+    async def monitor_risk_committee() -> None:
+        """MASTER п.30: один нагадувальний пост на день при серії SL або багатьох денних лоссах."""
+        last_sent_day = ""
+        while True:
+            try:
+                if os.getenv("OFFICE_RISK_COMMITTEE_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                try:
+                    need_day = int(os.getenv("OFFICE_RISK_COMMITTEE_DAY_LOSSES", "4") or "4")
+                except Exception:
+                    need_day = 4
+                try:
+                    need_streak = int(os.getenv("OFFICE_RISK_COMMITTEE_STREAK", "3") or "3")
+                except Exception:
+                    need_streak = 3
+                tz = _briefing_tzinfo()
+                today = datetime.now(tz).strftime("%Y-%m-%d")
+                if last_sent_day == today:
+                    await asyncio.sleep(120)
+                    continue
+                day_losses = _journal_today_loss_count(db_path)
+                streak = journal_consecutive_loss_streak(db_path)
+                if day_losses >= need_day or streak >= need_streak:
+                    log_event(
+                        db_path,
+                        "RISK_COMMITTEE",
+                        {"day_losses": day_losses, "streak": streak, "thresholds": [need_day, need_streak]},
+                    )
+                    await send_office(
+                        "⚖️ Risk committee:\n"
+                        f"За сьогодні LOSS: {day_losses} (поріг {need_day}). "
+                        f"Серія SL підряд у журналі: {streak} (поріг {need_streak}).\n"
+                        "Короткий обов’язковий розбір: що повторюється, де форс, що вимкнути до завтра."
+                    )
+                    last_sent_day = today
+                    print("[relay] risk committee notice sent")
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_risk_committee failed: {exc}")
+            await asyncio.sleep(90)
+
+    asyncio.create_task(monitor_risk_committee())
+
+    async def monitor_funding_atr_alerts() -> None:
+        """MASTER п.32–33: екстремальний funding BTC та «втома» ATR (24h range %) — з cooldown."""
+        last_fund_mono = 0.0
+        last_atr_mono = 0.0
+        http_timeout = aiohttp.ClientTimeout(total=12)
+        while True:
+            try:
+                if os.getenv("OFFICE_MARKET_ALERTS_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                try:
+                    fund_thr = float(os.getenv("OFFICE_FUNDING_ALERT_ABS_PCT", "0.07") or "0.07")
+                except Exception:
+                    fund_thr = 0.07
+                try:
+                    atr_thr = float(os.getenv("OFFICE_ATR_ALERT_VOL_PCT", "7.5") or "7.5")
+                except Exception:
+                    atr_thr = 7.5
+                try:
+                    cooldown = float(os.getenv("OFFICE_MARKET_ALERT_COOLDOWN_SEC", "3600") or "3600")
+                except Exception:
+                    cooldown = 3600.0
+                async with aiohttp.ClientSession(timeout=http_timeout) as http:
+                    prem = await fetch_binance_premium_index(http, "BTCUSDT")
+                    btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
+                now_m = time.monotonic()
+                fr = prem.get("funding_rate_pct") if prem else None
+                if fr is not None and abs(float(fr)) >= fund_thr and (now_m - last_fund_mono) >= cooldown:
+                    await send_office(
+                        f"📈 Funding alert (BTC): |{float(fr):.4f}|% ≥ {fund_thr:.4f}% — перевірити bias/перекіс перед новими входами.",
+                        stream="tech",
+                    )
+                    last_fund_mono = now_m
+                vol = float(btc.get("volatility_pct") or 0.0)
+                if vol >= atr_thr and (now_m - last_atr_mono) >= cooldown:
+                    await send_office(
+                        f"📉 ATR/волатильність (BTC 24h range): {vol:.2f}% ≥ {atr_thr:.2f}% — зменшити агресію, більше фільтрації.",
+                        stream="tech",
+                    )
+                    last_atr_mono = now_m
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_funding_atr_alerts failed: {exc}")
+            await asyncio.sleep(int(os.getenv("OFFICE_MARKET_ALERT_POLL_SEC", "180") or "180"))
+
+    asyncio.create_task(monitor_funding_atr_alerts())
 
     async def monitor_daily_report() -> None:
         nonlocal last_daily_report_date

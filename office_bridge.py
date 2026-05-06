@@ -753,6 +753,41 @@ def journal_recurring_mistakes(
     return {k: v for k, v in counts.items() if v >= min_count}
 
 
+def journal_closed_trade_count(db_path: str) -> int:
+    """Скільки закритих угод у журналі (для discipline nudge, п.36)."""
+    try:
+        row = _fetchone(db_path, "SELECT COUNT(*) FROM trade_journal WHERE status = 'CLOSED'", ())
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception:
+        return 0
+
+
+def journal_consecutive_loss_streak(db_path: str, *, max_check: int = 12) -> int:
+    """
+    Скільки останніх закритих угод підряд мають outcome LOSS (для circuit breaker, п.31).
+    """
+    try:
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT outcome FROM trade_journal
+            WHERE status = 'CLOSED' AND outcome IS NOT NULL AND TRIM(outcome) != ''
+            ORDER BY ts_close_utc DESC
+            LIMIT ?
+            """,
+            (max_check,),
+        )
+    except Exception:
+        return 0
+    streak = 0
+    for r in rows:
+        if str(r[0] or "").upper() == "LOSS":
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def journal_learning_hints_from_tags(tags: Dict[str, int]) -> List[str]:
     mapping = {
         "high_volatility": "зменшити розмір позиції в періоди високої волатильності",
@@ -1111,7 +1146,52 @@ async def office_handle_signal(
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason})
     await sender(f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.")
-    verdict = _decide_chain(signal)
+
+    try:
+        disc_every = int(os.getenv("OFFICE_DISCIPLINE_REVIEW_EVERY", "0") or "0")
+    except Exception:
+        disc_every = 0
+    if disc_every >= 2:
+        c_closed = journal_closed_trade_count(db_path)
+        if c_closed > 0 and c_closed % disc_every == 0:
+            await sender(
+                f"📋 Discipline check: у журналі вже {c_closed} закритих угод (кратно {disc_every}). "
+                "Короткий обов’язковий review перед новим входом (MASTER п.36)."
+            )
+
+    cb_disabled = os.getenv("OFFICE_CIRCUIT_DISABLE", "").strip() == "1"
+    try:
+        cb_need = max(2, int(os.getenv("OFFICE_CIRCUIT_LOSSES", "3") or "3"))
+    except Exception:
+        cb_need = 3
+    if not cb_disabled and journal_consecutive_loss_streak(db_path) >= cb_need:
+        log_event(
+            db_path,
+            "CIRCUIT_BREAKER",
+            {"streak": cb_need, "symbol": signal.symbol},
+            signal.signal_id,
+        )
+        await sender(
+            f"⚠️ Circuit breaker: {cb_need}+ SL підряд у журналі. Новий вхід не відкриваємо — тільки обговорення / пропуск."
+        )
+        # Один крок з Левом: інакше другий REJECTED після BLOCKED ламає FSM задачі (OPEN→BLOCKED→BLOCKED).
+        verdict = OfficeVerdict(
+            "SKIP",
+            [
+                AgentDecision(
+                    "lev",
+                    "REJECTED",
+                    _enforce_data_grounding(
+                        f"Circuit breaker: {cb_need} збитки підряд. Вхід заборонено, поки серія не перерветься виграшем або BE.",
+                        signal,
+                    ),
+                    {"circuit_breaker": True},
+                ),
+            ],
+            f"Автоматичне блокування після {cb_need}+ SL поспіль (MASTER п.31).",
+        )
+    else:
+        verdict = _decide_chain(signal)
 
     # Keep room readable: only one task line at open and one at close.
     prev_agent: Optional[str] = None
