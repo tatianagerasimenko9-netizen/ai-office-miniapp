@@ -1174,11 +1174,11 @@ async def run() -> None:
             return None
 
     try:
-        await send_office("Офіс на зв'язку. Готовий ловити сигнали з MAIN чату.")
+        await send_office("Офіс на зв'язку. Готові працювати.")
         print("[relay] startup ping sent to OFFICE")
 
         # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
-        tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "1").strip() == "0"
+        tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "0").strip() == "0"
         if tech_thread_id and not tech_health_off:
             try:
                 db_kind = (
@@ -1189,10 +1189,8 @@ async def run() -> None:
                 _ident = office_db_identity(db_path)
                 _fp = _ident.get("fingerprint", "?")
                 health_plain = (
-                    "🛠️ Техніка · старт relay\n"
-                    f"Статус: онлайн · БД: {db_kind}\n"
-                    f"fingerprint `{_fp}` (звір з Mini App)\n"
-                    f"MAIN={main_chat_id} · OFFICE={office_chat_id}"
+                    "🛠️ Техніка: все працює.\n"
+                    f"База: {db_kind} · fingerprint `{_fp}`."
                 )
                 await send_office(fmt_agent_line("dev", polish_agent_message(health_plain)), stream="tech")
                 print("[relay] tech health (Artem) sent -> TECH thread")
@@ -1284,6 +1282,11 @@ async def run() -> None:
 
             # OFFICE interactive desk Q&A (explicit command only -> reduces spam/chaos)
             if src_chat_id is not None and int(src_chat_id) == int(office_chat_id):
+                if (text or "").strip().lower() in ("/status", "!status", "статус", "/статус"):
+                    ident = office_db_identity(db_path)
+                    fp = str(ident.get("fingerprint") or "?")
+                    await send_office(fmt_agent_line("dev", f"Статус: все працює. fingerprint `{fp}`."), stream="tech")
+                    return
                 scenario_key = _parse_scenario_command(text)
                 if scenario_key is not None:
                     async def sender(msg: str) -> None:

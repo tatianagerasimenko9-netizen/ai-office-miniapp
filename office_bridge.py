@@ -1331,19 +1331,19 @@ def _cross_reply_prefix(prev_key: Optional[str], cur_key: str) -> str:
         return ""
     key = (prev_key, cur_key)
     if key == ("maks", "news"):
-        return "Макс, підхоплюю: "
+        return "По новинах: "
     if key == ("news", "daryna"):
-        return "Назаре, враховую: "
+        return "По ризику: "
     if key == ("daryna", "memory"):
-        return "До ризику додаю пам'ять: "
+        return "По історії: "
     if key == ("memory", "psych"):
-        return "Додам по дисципліні: "
+        return "По дисципліні: "
     if key == ("psych", "dev"):
-        return "І технічно: "
+        return "По техніці: "
     if key == ("dev", "lev"):
-        return "Техніка ок. "
+        return "Все ок. "
     if key == ("lev", "marko"):
-        return "У execution: "
+        return ""
     return ""
 
 
@@ -1643,9 +1643,8 @@ async def office_desk_user_question(
     )
 
     await sender(
-        "🧾 *#Загальний · Підсумок обговорення*\n"
-        f"`{sym}` · обсяг `{float(market.get('quote_volume_usdt', 0.0)):.0f}` USDT (24г)\n"
-        f"Фінальне рішення офісу: `{ {'ENTER':'ВХІД','SKIP':'ПРОПУСК','WAIT':'ОЧІКУВАННЯ'}.get(final_action, final_action) }`"
+        "Підсумок:\n"
+        f"{sym} — { {'ENTER':'входимо','SKIP':'пропускаємо','WAIT':'чекаємо'}.get(final_action, final_action) }."
     )
 
     log_event(
