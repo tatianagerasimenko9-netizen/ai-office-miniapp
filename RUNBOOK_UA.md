@@ -73,6 +73,8 @@
 | `OFFICE_ATR_ALERT_VOL_PCT` | Поріг 24h range % BTC (за замовчуванням `7.5`) |
 | `OFFICE_MARKET_ALERT_COOLDOWN_SEC` | Мінімум секунд між повторними алертами одного типу (за замовчуванням `3600`) |
 | `OFFICE_MARKET_ALERT_POLL_SEC` | Інтервал опитування Binance (за замовчуванням `180`) |
+| `OFFICE_MINI_VERIFY_URL` | Публічний URL Mini App Web (**без** `/api/summary`). При старті relay автоматично звіряє `db_identity.fingerprint` з БД relay → **MASTER п.17** у логах `[relay][OK] Mini App fingerprint…`. |
+| `OFFICE_MINI_VERIFY_DISABLE` | `1` — не викликати перевірку Mini App при старті |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 
@@ -157,7 +159,11 @@ pip install -r requirements.txt
 
 Останній відомий відбиток relay з логів Render — **`c78e00696e638425`**; у Mini App має бути той самий рядок у `/api/summary` або в шапці сторінки.
 
-### 7.2 Автоматична звірка п.17 (`office_e2e_preflight.py`)
+### 7.2 Автоматична звірка п.17
+
+**A) На Render (без локального ПК):** задайте **`OFFICE_MINI_VERIFY_URL`** на сервісі **relay** (той самий базовий URL, що відкриває Mini App у браузері). Після деплою в логах має з’явитися **`[relay][OK] Mini App fingerprint збігається з relay`** — це закриває **п.17** без скрипта.
+
+**B) Локально або CI:** скрипт `office_e2e_preflight.py`
 
 Скрипт у корені репозиторію порівнює **`db_identity.fingerprint`** з `GET …/api/summary` з еталоном:
 
@@ -188,7 +194,7 @@ py -3 office_e2e_preflight.py
 
 | Крок | Перевірка | Зроблено |
 |------|-----------|----------|
-| E2E-1 | `office_e2e_preflight.py` завершився з кодом 0 (або вручну fingerprint збігся) | ☐ |
+| E2E-1 | У логах relay після старту: `[relay][OK] Mini App fingerprint…` (**`OFFICE_MINI_VERIFY_URL`**) **або** `office_e2e_preflight.py` код 0 **або** ручна звірка §3 | ☐ |
 | E2E-2 | У MAIN надіслано тестовий сигнал **або** у OFFICE виконано `!ask` з символом | ☐ |
 | E2E-3 | У Telegram офісу видно ланцюжок ролей / вердикт без падіння relay у логах | ☐ |
 | E2E-4 | У Mini App у «Останні рішення» з’явився рядок з очікуваним символом / дією | ☐ |

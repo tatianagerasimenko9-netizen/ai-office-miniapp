@@ -1020,6 +1020,31 @@ async def run() -> None:
     print("\nRelay запущено. Залиш це вікно відкритим.")
     agent_bot_tokens = load_agent_bot_tokens()
     bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
+
+    mini_verify = os.getenv("OFFICE_MINI_VERIFY_URL", "").strip()
+    if mini_verify and os.getenv("OFFICE_MINI_VERIFY_DISABLE", "").strip() != "1":
+        fp_r = str(_db_ident.get("fingerprint") or "")
+        surl = mini_verify.rstrip("/") + "/api/summary"
+        try:
+            async with bot_http.get(surl, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    print(f"[relay][WARN] Mini App verify HTTP {resp.status}: {surl}")
+                else:
+                    data = await resp.json()
+                    di = data.get("db_identity") if isinstance(data, dict) else {}
+                    di = di if isinstance(di, dict) else {}
+                    fp_m = str(di.get("fingerprint") or "")
+                    if fp_m and fp_r and fp_m.lower() == fp_r.lower():
+                        print(
+                            f"[relay][OK] Mini App fingerprint збігається з relay ({fp_r}) — MASTER п.17 (авто)"
+                        )
+                    else:
+                        print(
+                            f"[relay][WARN] Mini App fingerprint ≠ relay: mini={fp_m!r} relay={fp_r!r} · {surl}"
+                        )
+        except Exception as exc:
+            print(f"[relay][WARN] Mini App verify недоступний ({surl}): {exc}")
+
     if agent_bot_tokens:
         print(f"[relay] multi-bot mode enabled for: {', '.join(sorted(agent_bot_tokens.keys()))}")
     else:

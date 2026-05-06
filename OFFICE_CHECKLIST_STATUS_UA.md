@@ -100,7 +100,7 @@
 | 14 | ✅ | Два сервіси на Render: Mini App + worker/runtime з `office_multibot_bootstrap.py` (підтверджено логами деплою). |
 | 15 | ✅ | Еталон змінних зафіксовано в `RUNBOOK_UA.md` §2 (значення на Render — експлуатація). |
 | 16 | ✅ | Підтримка `DATABASE_URL` (PostgreSQL) у bridge, relay, mini app через `psycopg`. |
-| 17 | 🟨 | Автозвірка: `office_e2e_preflight.py` + `RUNBOOK_UA.md` §7.2. **Прод relay** (приклад fingerprint): `c78e00696e638425`. Після `EXIT 0` скрипта — п.17 ✅ (зафіксувати в §7.1). |
+| 17 | 🟨 | **Авто на Render:** `OFFICE_MINI_VERIFY_URL` на relay → лог `[relay][OK] Mini App fingerprint…` (`RUNBOOK_UA.md` §7.2). Або скрипт `office_e2e_preflight.py`. Після підтвердження в логах / §7.1 — ✅. |
 | 18 | ✅ | `OFFICE_GENERAL_THREAD_ID`, `OFFICE_TASKS_THREAD_ID`, `OFFICE_TECH_THREAD_ID` у `send_office` (форумні гілки). |
 | 19 | ✅ | Гілка `OFFICE_TECH_THREAD_ID`: помилки Binance/news/daily → `stream="tech"`; при старті relay — **health від Артема** (`@@dev@@`, `RELAY_TECH_HEALTH_ON_START`, за замовчуванням увімкнено). Окремий cron «щогодини» — не робили; за потреби — пізніше. |
 | 20 | 🟨 | Розширений чеклист `RUNBOOK_UA.md` §7.3 (E2E-1…E2E-6); після виконання — відмітки в §7.1 → п.20 ✅. |
@@ -180,7 +180,7 @@
 
 **Наступна черга (після 1–37):**
 
-1. **Звірка fingerprint (п.17):** `office_e2e_preflight.py` (`RUNBOOK_UA.md` §7.2) або вручну §7.1.
+1. **Звірка fingerprint (п.17):** на Render задай **`OFFICE_MINI_VERIFY_URL` на relay** → лог OK (`RUNBOOK_UA.md` §7.2A); або скрипт §7.2B; або §7.1 вручну.
 2. **E2E (п.20):** таблиця §7.3 у runbook + відмітки §7.1 → потім п.17 і п.20 як ✅.
 3. **Методичка п.38–42:** текст уже в Частині II; у правилах зафіксовано фінал Лева vs Марко execution (`OFFICE_RULES_UA.md` §3).
 4. ~~**Backlog поза 37**~~ — overlays / one-click review / heatmap реалізовані в Mini App; далі лише покращення за потребою (R-бакети, календар, експорт).
