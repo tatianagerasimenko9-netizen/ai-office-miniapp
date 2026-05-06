@@ -85,6 +85,8 @@
 
 **API:** `GET /api/summary?symbol=BTCUSDT&action=SKIP&agent=lev&chart=ETHUSDT` — фільтри рішень/журналу (п.35); параметр **`chart`** задає символ для блоку **live overlay** (OPEN угода з журналу + рівні SL/TP/entry поруч із графіком). KPI по ролях і культура — у JSON; поле **`overlays`**.
 
+**One-click review:** `GET /api/review_draft` або `GET /api/review_draft?trade_id=…` — відповідь JSON з **`draft_ua`** (чернета stop-review українською); без `trade_id` береться останній **LOSS**, інакше остання закрита, інакше відкрита. На сторінці Mini App — кнопки 📋 у таблиці журналу та «останній LOSS».
+
 ---
 
 ## 3. Спільна БД (критично)

@@ -170,6 +170,113 @@ def build_live_overlays(chart_symbol: str) -> dict[str, object]:
     }
 
 
+def build_review_draft(trade_id: str | None) -> dict[str, object]:
+    """
+    Чернета stop-review українською (One-Click Review): для Telegram / нотатки / подальшого запису в журнал.
+    """
+    tid_in = (trade_id or "").strip()
+    sel = """
+        SELECT trade_id, symbol, direction, status, outcome, pnl_pct, r_multiple,
+               entry_price, stop_loss, take_profit, exit_price,
+               mistake_tags_json, review_note, ts_open_utc, ts_close_utc,
+               setup_name, timeframe, entry_reason, exit_reason
+        FROM trade_journal
+        """
+    row: tuple | None = None
+    try:
+        if tid_in:
+            rows = q(sel + " WHERE trade_id = ? LIMIT 1", (tid_in,))
+            row = rows[0] if rows else None
+        if row is None:
+            rows = q(
+                sel + " WHERE status = 'CLOSED' AND UPPER(TRIM(COALESCE(outcome,''))) = 'LOSS' ORDER BY ts_close_utc DESC LIMIT 1",
+                (),
+            )
+            row = rows[0] if rows else None
+        if row is None:
+            rows = q(sel + " WHERE status = 'CLOSED' ORDER BY ts_close_utc DESC LIMIT 1", ())
+            row = rows[0] if rows else None
+        if row is None:
+            rows = q(sel + " WHERE status = 'OPEN' ORDER BY ts_open_utc DESC LIMIT 1", ())
+            row = rows[0] if rows else None
+    except Exception:
+        row = None
+
+    if row is None:
+        return {"ok": False, "error": "no_trade", "draft_ua": "", "trade_id": ""}
+
+    (
+        tid,
+        symbol,
+        direction,
+        status,
+        outcome,
+        pnl_pct,
+        r_mult,
+        entry_p,
+        sl_p,
+        tp_p,
+        exit_p,
+        mist_raw,
+        rev_note,
+        ts_o,
+        ts_c,
+        setup_n,
+        tf,
+        ent_rs,
+        ex_rs,
+    ) = row
+    tags = safe_json_list(str(mist_raw or "[]"))
+    tags_txt = ", ".join(tags) if tags else "—"
+
+    def fmtp(label: str, v: object) -> str:
+        x = _f_or_none(v)
+        return f"{label}: {x:.6g}" if x is not None else f"{label}: —"
+
+    try:
+        pnl_s = f"{float(pnl_pct or 0):+.2f}%"
+    except Exception:
+        pnl_s = str(pnl_pct or "—")
+    try:
+        r_s = f"{float(r_mult or 0):+.2f}R" if r_mult is not None else "—"
+    except Exception:
+        r_s = str(r_mult or "—")
+
+    lines = [
+        "📋 STOP-REVIEW · чернетка (AI Office Mini App)",
+        f"trade_id: {tid}",
+        f"Статус: {status} · Символ: {symbol} · Сторона: {direction}",
+        f"Результат: {outcome or '—'} · PnL {pnl_s} · R {r_s}",
+        f"Відкрито: {ts_o or '—'} · Закрито: {ts_c or '—'}",
+        fmtp("Entry", entry_p),
+        fmtp("SL", sl_p),
+        fmtp("TP", tp_p),
+        fmtp("Exit", exit_p),
+        f"Сетап / TF: {str(setup_n or '—')} / {str(tf or '—')}",
+        f"Причина входу (з журналу): {str(ent_rs or '—')}",
+        f"Причина виходу (з журналу): {str(ex_rs or '—')}",
+        f"Теги помилок (вже в журналі): {tags_txt}",
+        f"Існуюча нотатка review: {str(rev_note or '—')}",
+        "",
+        "—— Заповни нижче ——",
+        "Що пішло не так / що повторилося:",
+        "- ",
+        "",
+        "Що змінюємо наступного разу (1–3 пункти):",
+        "1. ",
+        "2. ",
+        "",
+        "(Далі: встав у чат офісу або допиши review_note через процес закриття угоди.)",
+    ]
+    draft = "\n".join(lines)
+    return {
+        "ok": True,
+        "trade_id": str(tid or ""),
+        "draft_ua": draft,
+        "had_existing_note": bool(str(rev_note or "").strip()),
+    }
+
+
 def get_data(
     *,
     symbol_filter: str = "",
@@ -191,7 +298,7 @@ def get_data(
     )
     rows_journal_raw = q(
         """
-        SELECT ts_open_utc, ts_close_utc, symbol, direction, status, outcome, pnl_pct, r_multiple, mistake_tags_json, review_note
+        SELECT trade_id, ts_open_utc, ts_close_utc, symbol, direction, status, outcome, pnl_pct, r_multiple, mistake_tags_json, review_note
         FROM trade_journal
         ORDER BY ts_open_utc DESC
         LIMIT 100
@@ -261,7 +368,7 @@ def get_data(
 
     rows_journal: list[tuple] = []
     for r in rows_journal_raw:
-        if sym_f and sym_f not in str(r[2] or "").upper():
+        if sym_f and sym_f not in str(r[3] or "").upper():
             continue
         rows_journal.append(r)
 
@@ -272,7 +379,7 @@ def get_data(
     r_vals: list[float] = []
     mistakes: dict[str, int] = {}
     for r in rows_journal:
-        outcome = str(r[5] or "").upper()
+        outcome = str(r[6] or "").upper()
         if outcome == "WIN":
             wins += 1
         elif outcome == "LOSS":
@@ -280,15 +387,15 @@ def get_data(
         elif outcome == "BE":
             be += 1
         try:
-            pnl_sum += float(r[6] or 0.0)
+            pnl_sum += float(r[7] or 0.0)
         except Exception:
             pass
         try:
-            if r[7] is not None:
-                r_vals.append(float(r[7]))
+            if r[8] is not None:
+                r_vals.append(float(r[8]))
         except Exception:
             pass
-        for t in safe_json_list(str(r[8] or "[]")):
+        for t in safe_json_list(str(r[9] or "[]")):
             k = t.strip().lower()
             if k:
                 mistakes[k] = mistakes.get(k, 0) + 1
@@ -351,16 +458,17 @@ def get_data(
         ],
         "journal": [
             {
-                "ts_open_utc": r[0],
-                "ts_close_utc": r[1],
-                "symbol": r[2],
-                "direction": r[3],
-                "status": r[4],
-                "outcome": r[5],
-                "pnl_pct": r[6],
-                "r_multiple": r[7],
-                "mistakes": safe_json_list(str(r[8] or "[]")),
-                "review_note": r[9] or "",
+                "trade_id": str(r[0] or ""),
+                "ts_open_utc": r[1],
+                "ts_close_utc": r[2],
+                "symbol": r[3],
+                "direction": r[4],
+                "status": r[5],
+                "outcome": r[6],
+                "pnl_pct": r[7],
+                "r_multiple": r[8],
+                "mistakes": safe_json_list(str(r[9] or "[]")),
+                "review_note": r[10] or "",
             }
             for r in rows_journal
         ],
@@ -406,6 +514,9 @@ def html() -> str:
     .om-tp { background:#22c55e; }
     .om-mark { background:#f8fafc; box-shadow:0 0 0 1px #334155; z-index:2; }
     .overlay-legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; font-size:10px; color:#94a3b8; }
+    .ocr-btn { cursor:pointer; font-size:13px; padding:2px 8px; border-radius:6px; background:#334155; border:1px solid #475569; color:#e2e8f0; }
+    .ocr-btn:hover { background:#475569; }
+    #reviewToast { margin-top:8px; min-height:18px; }
   </style>
 </head>
 <body>
@@ -463,7 +574,11 @@ def html() -> str:
   </div>
 
   <div class="panel" style="margin-top:12px;">
-    <b>Журнал угод</b>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <b>Журнал угод</b>
+      <button type="button" class="ocr-btn" onclick="copyReviewDraft('')" title="Чернета для останнього LOSS (або останньої закритої)">One-click review · останній LOSS</button>
+      <span id="reviewToast" class="muted"></span>
+    </div>
     <table id="journal"></table>
   </div>
 </div>
@@ -640,14 +755,32 @@ async function loadOffice() {
   );
 
   t('journal',
-    '<tr><th>Open</th><th>Symbol</th><th>Side</th><th>Outcome</th><th>PnL</th><th>R</th><th>Mistakes</th><th>Нотатка</th></tr>' +
+    '<tr><th>Review</th><th>Open</th><th>Symbol</th><th>Side</th><th>Outcome</th><th>PnL</th><th>R</th><th>Mistakes</th><th>Нотатка</th></tr>' +
     (d.journal || []).slice(0, 16).map(x =>
-      '<tr><td>' + (x.ts_open_utc || '') + '</td><td>' + x.symbol + '</td><td>' + x.direction + '</td><td>' + (x.outcome || '') + '</td>' +
+      '<tr><td><button type="button" class="ocr-btn" onclick="copyReviewDraft(' + JSON.stringify(x.trade_id || '') + ')">📋</button></td>' +
+      '<td>' + (x.ts_open_utc || '') + '</td><td>' + x.symbol + '</td><td>' + x.direction + '</td><td>' + (x.outcome || '') + '</td>' +
       '<td>' + (x.pnl_pct == null ? '' : ((Number(x.pnl_pct)>=0?'+':'') + Number(x.pnl_pct).toFixed(2) + '%')) + '</td>' +
       '<td>' + (x.r_multiple == null ? '' : ((Number(x.r_multiple)>=0?'+':'') + Number(x.r_multiple).toFixed(2) + 'R')) + '</td>' +
       '<td>' + (x.mistakes || []).slice(0,3).join(', ') + '</td><td>' + (x.review_note || '') + '</td></tr>'
     ).join('')
   );
+}
+
+async function copyReviewDraft(tradeId) {
+  const toast = document.getElementById('reviewToast');
+  try {
+    const q = tradeId ? ('?trade_id=' + encodeURIComponent(tradeId)) : '';
+    const r = await fetch('/api/review_draft' + q);
+    const d = await r.json();
+    if (!d.ok) {
+      if (toast) toast.textContent = 'Немає угоди в журналі для review.';
+      return;
+    }
+    await navigator.clipboard.writeText(d.draft_ua);
+    if (toast) toast.textContent = 'Скопійовано в буфер: ' + (d.trade_id || '') + ' (встав у Telegram / нотатки)';
+  } catch (e) {
+    if (toast) toast.textContent = 'Помилка clipboard або API: ' + e;
+  }
 }
 
 async function reloadAll() {
@@ -670,7 +803,7 @@ setInterval(loadOffice, 9000);
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         u = urlparse(self.path)
-        if u.path in ("/", "/api/summary"):
+        if u.path in ("/", "/api/summary", "/api/review_draft"):
             self.send_response(200)
             self.end_headers()
             return
@@ -679,6 +812,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         u = urlparse(self.path)
+        if u.path == "/api/review_draft":
+            qs = parse_qs(u.query)
+            tid = (qs.get("trade_id") or [""])[0].strip()
+            body = json.dumps(build_review_draft(tid or None), ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == "/api/summary":
             qs = parse_qs(u.query)
 
