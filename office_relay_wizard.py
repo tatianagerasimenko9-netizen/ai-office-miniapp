@@ -1282,10 +1282,18 @@ async def run() -> None:
 
             # OFFICE interactive desk Q&A (explicit command only -> reduces spam/chaos)
             if src_chat_id is not None and int(src_chat_id) == int(office_chat_id):
+                low = (text or "").strip().lower()
                 if (text or "").strip().lower() in ("/status", "!status", "статус", "/статус"):
                     ident = office_db_identity(db_path)
                     fp = str(ident.get("fingerprint") or "?")
                     await send_office(fmt_agent_line("dev", f"Статус: все працює. fingerprint `{fp}`."), stream="tech")
+                    return
+                if low.startswith("/chart") or low.startswith("!chart") or low.startswith("графік"):
+                    sym = _extract_first_usdt_symbol(text) or "BTCUSDT"
+                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
+                    mini_url = f"{mini_base}/?symbol={sym}&filterSymbol={sym}"
+                    tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{sym}"
+                    await send_office(f"Графік {sym}:\nMini App: {mini_url}\nTV: {tv_url}")
                     return
                 scenario_key = _parse_scenario_command(text)
                 if scenario_key is not None:

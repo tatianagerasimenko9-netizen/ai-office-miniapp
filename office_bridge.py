@@ -1145,7 +1145,10 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason})
-    await sender(f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.")
+    await sender(
+        f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.\n"
+        f"{_live_chart_links(signal.symbol)}"
+    )
 
     try:
         disc_every = int(os.getenv("OFFICE_DISCIPLINE_REVIEW_EVERY", "0") or "0")
@@ -1241,7 +1244,7 @@ async def office_trade_closed(
     note: str = "",
     db_path: str = "office_bridge.db",
 ) -> None:
-    await sender(_fmt_closed_case(symbol, outcome, pnl_pct, note))
+    await sender(_fmt_closed_case(symbol, outcome, pnl_pct, note) + "\n" + _live_chart_links(symbol))
     if outcome == "WIN":
         await agent_say(sender, "marko", "План виконано чисто. Фіксація без жадібності спрацювала.", 0.06)
         await agent_say(sender, "olesya", "Додаю патерн у best-practices та піднімаю вагу цього сценарію.", 0.06)
@@ -1262,6 +1265,7 @@ async def office_position_event(
 ) -> None:
     labels = {"PRICE_UPDATE": "оновлення", "PARTIAL_CLOSE": "часткова фіксація", "MOVE_SL": "перенесення стопа", "EXIT": "вихід"}
     await agent_say(sender, "olesya", f"{symbol}: {labels[event_type]} — {details}", 0.03)
+    await sender(_live_chart_links(symbol))
     log_event(db_path, "POSITION_EVENT", {"symbol": symbol, "event_type": event_type, "details": details})
 
 
@@ -1321,6 +1325,17 @@ def _extract_first_usdt_symbol(text: str) -> str:
 def _fmt_tv(symbol: str) -> str:
     s = symbol.upper().replace("USDT", "")
     return f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{symbol.upper()}"
+
+
+def _fmt_mini(symbol: str) -> str:
+    base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
+    sym = symbol.upper().strip() or "BTCUSDT"
+    return f"{base}/?symbol={sym}&filterSymbol={sym}"
+
+
+def _live_chart_links(symbol: str) -> str:
+    sym = symbol.upper().strip() or "BTCUSDT"
+    return f"📊 Графік: {_fmt_mini(sym)}\nTV: {_fmt_tv(sym)}"
 
 
 def _cross_reply_prefix(prev_key: Optional[str], cur_key: str) -> str:

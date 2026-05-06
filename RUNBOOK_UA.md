@@ -73,6 +73,7 @@
 | `OFFICE_ATR_ALERT_VOL_PCT` | Поріг 24h range % BTC (за замовчуванням `7.5`) |
 | `OFFICE_MARKET_ALERT_COOLDOWN_SEC` | Мінімум секунд між повторними алертами одного типу (за замовчуванням `3600`) |
 | `OFFICE_MARKET_ALERT_POLL_SEC` | Інтервал опитування Binance (за замовчуванням `180`) |
+| `OFFICE_MINI_PUBLIC_URL` | Публічний URL Mini App (за замовчуванням `https://ai-office-miniapp.onrender.com`). Використовується для прямих лінків на графік у повідомленнях офісу та команді `/chart`. |
 | `OFFICE_MINI_VERIFY_URL` | Публічний URL Mini App Web (**без** `/api/summary`). При старті relay автоматично звіряє `db_identity.fingerprint` з БД relay → **MASTER п.17** у логах `[relay][OK] Mini App fingerprint…`. |
 | `OFFICE_MINI_VERIFY_DISABLE` | `1` — не викликати перевірку Mini App при старті |
 | `OFFICE_SIGNAL_SOURCE_BOT_IDS` | Опційно: список `sender_id` через кому (напр. `123456789,987654321`). Повідомлення цих ботів у MAIN примусово вважаються сигналами навіть при нетиповому форматі. |
