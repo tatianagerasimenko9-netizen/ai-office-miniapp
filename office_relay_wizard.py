@@ -195,6 +195,7 @@ async def send_via_bot_api(
     text: str,
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """
     Send via Bot API without parse_mode.
@@ -212,6 +213,8 @@ async def send_via_bot_api(
         payload["reply_to_message_id"] = int(reply_to_message_id)
     if message_thread_id:
         payload["message_thread_id"] = int(message_thread_id)
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         async with session.post(url, json=payload) as resp:
             body = await resp.json()
@@ -1124,6 +1127,16 @@ async def run() -> None:
         agent_key = detect_agent_key(message)
         clean_message = _strip_agent_tag(message)
         thread_id = _thread_for_stream(stream)
+        sym_for_btn = _extract_first_usdt_symbol(clean_message)
+        btn_markup: Optional[Dict[str, Any]] = None
+        if sym_for_btn and sym_for_btn != "BTCUSDT":
+            mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
+            mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
+            btn_markup = {
+                "inline_keyboard": [
+                    [{"text": "📊 Графік", "url": mini_url}],
+                ]
+            }
         token = agent_bot_tokens.get(agent_key or "")
         if token:
             ok, reason, msg_id = await send_via_bot_api(
@@ -1133,6 +1146,7 @@ async def run() -> None:
                 clean_message,
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
+                reply_markup=btn_markup,
             )
             if ok:
                 return msg_id
@@ -1147,6 +1161,7 @@ async def run() -> None:
                     clean_message,
                     reply_to_message_id=None,
                     message_thread_id=thread_id,
+                    reply_markup=btn_markup,
                 )
                 if ok2:
                     print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
@@ -1163,6 +1178,7 @@ async def run() -> None:
                 clean_message,
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
+                reply_markup=btn_markup,
             )
             if ok:
                 return msg_id
