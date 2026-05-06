@@ -1117,6 +1117,22 @@ async def run() -> None:
             )
             if ok:
                 return msg_id
+            # Some bots cannot reply to a specific message id in forum topics
+            # (Telegram returns: "message to be replied not found").
+            # Retry once without reply_to to keep delivery reliable.
+            if "message to be replied not found" in str(reason).lower() and reply_to_message_id is not None:
+                ok2, reason2, msg_id2 = await send_via_bot_api(
+                    bot_http,
+                    token,
+                    office_chat_id,
+                    clean_message,
+                    reply_to_message_id=None,
+                    message_thread_id=thread_id,
+                )
+                if ok2:
+                    print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
+                    return msg_id2
+                reason = f"{reason}; retry_without_reply failed: {reason2}"
             print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
         # Cloud/runtime mode: always prefer Bot API fallback via main office bot token.
         # This avoids Telethon peer resolution issues for non-agent/system messages.
