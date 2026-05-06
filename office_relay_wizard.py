@@ -531,12 +531,36 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
 
 
 def looks_like_signal(text: str) -> bool:
-    up = text.upper()
-    hard_keys = ("SMART MONEY SETUP", "ВХОДЬ", "SIGNAL", "СИГНАЛ")
+    up = (text or "").upper()
+
+    # Явні тригери з каналів / шаблонів.
+    hard_keys = (
+        "SMART MONEY SETUP",
+        "ВХОДЬ",
+        "ВХІД",
+        "SIGNAL",
+        "СИГНАЛ",
+        "ENTRY",
+        "SETUP",
+    )
     if any(k in up for k in hard_keys):
         return True
-    has_symbol = "USDT" in up
-    has_side = ("LONG" in up) or ("SHORT" in up)
+
+    # Символ (напр. BTCUSDT) + напрямок у різних форматах.
+    has_symbol = bool(re.search(r"\b[A-Z0-9]{2,15}USDT\b", up))
+    side_tokens = (
+        "LONG",
+        "SHORT",
+        "BUY",
+        "SELL",
+        "ЛОНГ",
+        "ШОРТ",
+        "КУПІВЛ",
+        "ПРОДАЖ",
+        "🟢",
+        "🔴",
+    )
+    has_side = any(tok in up for tok in side_tokens)
     return has_symbol and has_side
 
 
@@ -797,15 +821,16 @@ def _journal_today_loss_count(db_path: str) -> int:
 
 
 def parse_signal(text: str, msg_id: int) -> OfficeSignal:
-    symbol = "UNKNOWNUSDT"
+    up = (text or "").upper()
+    symbol = _extract_first_usdt_symbol(text)
+
     direction = "LONG"
-    for token in text.replace("\n", " ").split():
-        t = token.strip().upper()
-        if t.endswith("USDT") and 4 <= len(t) <= 15:
-            symbol = t
-            break
-    if "SHORT" in text.upper():
+    short_tokens = ("SHORT", "SELL", "ШОРТ", "ПРОДАЖ", "🔴")
+    long_tokens = ("LONG", "BUY", "ЛОНГ", "КУПІВЛ", "🟢")
+    if any(tok in up for tok in short_tokens):
         direction = "SHORT"
+    elif any(tok in up for tok in long_tokens):
+        direction = "LONG"
     score = 12
     rr = 2.0
     vol = 1.8
@@ -1305,6 +1330,9 @@ async def run() -> None:
             if src_chat_id is None or int(src_chat_id) != int(main_chat_id):
                 return
             if not looks_like_signal(text):
+                if os.getenv("RELAY_LOG_NONSIGNAL_MAIN", "").strip() == "1":
+                    prev = " ".join((text or "").split())[:180]
+                    print(f"[relay][DEBUG] MAIN message ignored (not signal) id={event.id}: {prev}")
                 return
             print(f"[relay] matched message id={event.id} chat_id={src_chat_id}")
             sig = parse_signal(text, event.id)
