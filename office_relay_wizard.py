@@ -868,6 +868,25 @@ def parse_signal(text: str, msg_id: int) -> OfficeSignal:
     )
 
 
+def _env_int_set(name: str) -> set[int]:
+    """
+    Parse env like "123,456" into a set of ints.
+    """
+    raw = os.getenv(name, "").strip()
+    out: set[int] = set()
+    if not raw:
+        return out
+    for part in raw.replace(";", ",").split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.add(int(p))
+        except Exception:
+            continue
+    return out
+
+
 async def pick_chats(client: TelegramClient) -> Tuple[int, int]:
     items: List[DialogItem] = []
     i = 1
@@ -1223,6 +1242,8 @@ async def run() -> None:
     source_raw = os.getenv("SOURCE_CHAT_ID", "").strip()
     source_chat_id = int(source_raw) if source_raw else None
     source_entity = await client.get_entity(source_chat_id) if source_chat_id is not None else None
+    signal_source_bot_ids = _env_int_set("OFFICE_SIGNAL_SOURCE_BOT_IDS")
+    signal_source_bot_username = os.getenv("OFFICE_SIGNAL_SOURCE_BOT_USERNAME", "").strip().lstrip("@").lower()
     last_source_msg_id = 0
     if source_chat_id is not None:
         print(f"[relay] mode: source bridge enabled ({source_chat_id} -> {main_chat_id}), MAIN ingest only")
@@ -1345,16 +1366,37 @@ async def run() -> None:
             # This prevents accidental mirroring from any other dialog/log stream.
             if src_chat_id is None or int(src_chat_id) != int(main_chat_id):
                 return
-            if not looks_like_signal(text):
+            sender_id = getattr(event, "sender_id", None)
+            sender_username = ""
+            try:
+                sender_obj = await event.get_sender()
+                sender_username = str(getattr(sender_obj, "username", "") or "").strip().lower()
+            except Exception:
+                sender_obj = None  # noqa: F841
+
+            from_scanner = False
+            try:
+                if sender_id is not None and int(sender_id) in signal_source_bot_ids:
+                    from_scanner = True
+            except Exception:
+                pass
+            if signal_source_bot_username and sender_username == signal_source_bot_username:
+                from_scanner = True
+
+            if not from_scanner and not looks_like_signal(text):
                 if os.getenv("RELAY_LOG_NONSIGNAL_MAIN", "").strip() == "1":
                     prev = " ".join((text or "").split())[:180]
                     print(f"[relay][DEBUG] MAIN message ignored (not signal) id={event.id}: {prev}")
                 return
-            print(f"[relay] matched message id={event.id} chat_id={src_chat_id}")
+            print(
+                f"[relay] matched message id={event.id} chat_id={src_chat_id}"
+                + (" (scanner-forced)" if from_scanner else "")
+            )
             sig = parse_signal(text, event.id)
             kickoff_msg_id = await send_office(build_signal_kickoff(sig.symbol, sig.direction))
             mirror_msg_id = await send_office(
-                f"Отримала сигнал:\n{text[:3500]}",
+                "🔔 Новий сигнал від My Crypto Scanner:\n"
+                f"{text[:3800]}",
                 reply_to_message_id=kickoff_msg_id,
             )
             print("[relay] mirror sent")

@@ -75,6 +75,9 @@
 | `OFFICE_MARKET_ALERT_POLL_SEC` | Інтервал опитування Binance (за замовчуванням `180`) |
 | `OFFICE_MINI_VERIFY_URL` | Публічний URL Mini App Web (**без** `/api/summary`). При старті relay автоматично звіряє `db_identity.fingerprint` з БД relay → **MASTER п.17** у логах `[relay][OK] Mini App fingerprint…`. |
 | `OFFICE_MINI_VERIFY_DISABLE` | `1` — не викликати перевірку Mini App при старті |
+| `OFFICE_SIGNAL_SOURCE_BOT_IDS` | Опційно: список `sender_id` через кому (напр. `123456789,987654321`). Повідомлення цих ботів у MAIN примусово вважаються сигналами навіть при нетиповому форматі. |
+| `OFFICE_SIGNAL_SOURCE_BOT_USERNAME` | Опційно: username бота-джерела (напр. `my_crypto_scanner_bot`, можна без `@`). Також форсує запуск офісу по повідомленнях у MAIN. |
+| `RELAY_LOG_NONSIGNAL_MAIN` | `1` — debug-лог відкинутих повідомлень у MAIN (`not signal`) для швидкого підбору формату детектора. |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 
