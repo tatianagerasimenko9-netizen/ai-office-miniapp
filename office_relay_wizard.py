@@ -1270,6 +1270,7 @@ async def run() -> None:
     save_relay_config(cfg)
 
     last_desk_qa_mono = 0.0
+    last_main_fingerprint_by_msg: Dict[int, str] = {}
 
     @client.on(events.NewMessage())
     async def on_message(event):  # type: ignore[no-redef]
@@ -1279,6 +1280,7 @@ async def run() -> None:
             if not text.strip():
                 return
             src_chat_id = getattr(event, "chat_id", None)
+            msg_id = int(getattr(event, "id", 0) or 0)
 
             # OFFICE interactive desk Q&A (explicit command only -> reduces spam/chaos)
             if src_chat_id is not None and int(src_chat_id) == int(office_chat_id):
@@ -1366,6 +1368,13 @@ async def run() -> None:
             # This prevents accidental mirroring from any other dialog/log stream.
             if src_chat_id is None or int(src_chat_id) != int(main_chat_id):
                 return
+            # If the same message id is re-delivered with identical text
+            # (e.g. duplicate update callback), ignore it.
+            fp = f"{msg_id}:{text.strip()}"
+            if msg_id > 0 and last_main_fingerprint_by_msg.get(msg_id) == fp:
+                return
+            if msg_id > 0:
+                last_main_fingerprint_by_msg[msg_id] = fp
             sender_id = getattr(event, "sender_id", None)
             sender_username = ""
             try:
@@ -1447,6 +1456,12 @@ async def run() -> None:
             print("[relay] office_handle_signal done")
         except Exception as exc:
             print(f"[relay][ERROR] handler failed: {exc}")
+
+    @client.on(events.MessageEdited())
+    async def on_message_edited(event):  # type: ignore[no-redef]
+        # My Crypto Scanner can publish a skeleton message and then edit it with full signal.
+        # Reuse the same handler path so office flow starts automatically on edits too.
+        await on_message(event)
 
     async def monitor_source_bridge() -> None:
         nonlocal last_source_msg_id
