@@ -56,7 +56,7 @@
 | `RELAY_SEND_AGENT_CARDS` | `1` — надіслати картки агентів при старті |
 | `RELAY_TECH_HEALTH_ON_START` | `0` — не надсилати стартовий health Артема в гілку «Техніка» (за замовчуванням надсилається, якщо задано `OFFICE_TECH_THREAD_ID`) |
 | `OFFICE_BRIEFING_DISABLE` | `1` — вимкнути авто-брифінги (п.28) |
-| `OFFICE_BRIEFING_TZ` | Часова зона, напр. `Europe/Kyiv` (якщо `zoneinfo` не знає ім’я — fallback UTC) |
+| `OFFICE_BRIEFING_TZ` | Часова зона IANA, напр. `Europe/Kyiv`. У репо в `requirements.txt` додано **`tzdata`** — щоб Windows і мінімальні Linux-образи мали базу зон; без неї Python може не знайти `Europe/Kyiv` і тоді relay логуватиме попередження й брифінги підуть за **UTC** (години «з’їдуть» відносно Києва). |
 | `OFFICE_BRIEFING_MORNING` | Час ранкового брифінгу `HH:MM` (за замовчуванням `08:00`) |
 | `OFFICE_BRIEFING_EVENING` | Час вечірнього debrief `HH:MM` (за замовчуванням `21:00`) |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |

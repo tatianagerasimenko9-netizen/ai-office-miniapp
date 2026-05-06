@@ -1,3 +1,4 @@
 aiohttp
 telethon
 psycopg[binary]
+tzdata>=2024.1
