@@ -1124,7 +1124,7 @@ async def office_emergency_alert(
         return
     await sender("🚨 *#Інфраструктура · SWEEP ALERT*\nЗафіксовано sweep ключового діапазону.")
     await agent_say(sender, "lev", "Чекаємо підтвердження напрямку. Перший рух може бути пасткою.", 0.05)
-    await agent_say(sender, "marko", "Execution на паузі до clear signal.", 0.05)
+    await agent_say(sender, "marko", "Поки пауза. Чекаємо чіткий сигнал.", 0.05)
 
 
 async def office_handle_signal(
@@ -1247,7 +1247,7 @@ async def office_trade_closed(
         await agent_say(sender, "olesya", "Додаю патерн у best-practices та піднімаю вагу цього сценарію.", 0.06)
     elif outcome == "LOSS":
         await agent_say(sender, "daryna", "Лосс контрольований. Капітал цілий — це головне.", 0.06)
-        await agent_say(sender, "olesya", "Роблю post-mortem: контекст, таймінг, чи був early/late entry.", 0.06)
+        await agent_say(sender, "olesya", "Роблю короткий розбір: контекст, таймінг і що виправити далі.", 0.06)
     else:
         await agent_say(sender, "lev", "Нейтральне закриття — це нормально. Переходимо до наступного чистого сетапу.", 0.06)
     log_event(db_path, "CASE_CLOSED", {"symbol": symbol, "outcome": outcome, "pnl_pct": pnl_pct, "note": note})
