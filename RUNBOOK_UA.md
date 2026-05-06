@@ -78,6 +78,20 @@
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
 
+#### Де взяти `OFFICE_MINI_VERIFY_URL` (Render, покроково)
+
+Це **не** окремий секрет і не URL з BotFather — це звичайна **публічна HTTPS-адреса Web-сервісу**, на якому крутиться `office_mini_app.py`.
+
+1. Увійди в [dashboard.render.com](https://dashboard.render.com) і відкрий **саме той сервіс**, який деплоїть **Mini App** (Web Service; стартова команда на кшталт `python -u office_mini_app.py`).
+2. Зверху сторінки сервісу знайди блок **URL** (або **Links**) — рядок виду `https://ім’я-сервісу.onrender.com`. Це і є базовий URL.
+3. Перевір у браузері: відкрий цей URL — має відкритися сторінка Mini App (графік, KPI). Якщо відкривається — скопіюй адресу **без** шляху `/api/summary` (суфікс не додавати; код сам допише запит).
+4. Відкрий **інший** сервіс — **Office relay / worker** (`office_multibot_bootstrap.py` або аналог).
+5. **Environment** → **Add Environment Variable** → ключ **`OFFICE_MINI_VERIFY_URL`** → значення **вставити скопійований URL** (можна з або без слеша в кінці — обидва варіанти підтримуються).
+6. **Save Changes** → виконай **Manual Deploy** / дочекайся автодеплою relay.
+7. У **логах relay** після старту шукай рядок **`[relay][OK] Mini App fingerprint збігається з relay`** — тоді п.17 підтверджений автоматично. Якщо **`[relay][WARN]`** — перевір, що Mini App живий, що на обох сервісах **однаковий `DATABASE_URL`**, і що Web не «спить» на безкоштовному плані під час першого запиту (інколи потрібна повторна перезагрузка relay).
+
+**Куди не треба додавати:** на сервіс Mini App цю змінну ставити не обов’язково — її читає лише **relay**.
+
 ### Mini App
 
 | Змінна | Значення |
@@ -155,9 +169,9 @@ pip install -r requirements.txt
 
 | Дата | Relay | Mini App fingerprint збігається | E2E §7 пункти 2–5 |
 |------|--------|-----------------------------------|-------------------|
-| 2026-05-06 | PostgreSQL `fingerprint=c78e00696e638425`, TZ `Europe/Kyiv`, multi-bot OK | перевірити після деплою Web | за потреби |
+| 2026-05-06 | PostgreSQL `fingerprint=c78e00696e638425`; `[relay][OK] Mini App fingerprint… (авто)` | **Так** (`OFFICE_MINI_VERIFY_URL` → [ai-office-miniapp.onrender.com](https://ai-office-miniapp.onrender.com)) | за потреби |
 
-Останній відомий відбиток relay з логів Render — **`c78e00696e638425`**; у Mini App має бути той самий рядок у `/api/summary` або в шапці сторінки.
+Останній підтверджений відбиток — **`c78e00696e638425`** (relay = Mini App за автоперевіркою при старті relay).
 
 ### 7.2 Автоматична звірка п.17
 

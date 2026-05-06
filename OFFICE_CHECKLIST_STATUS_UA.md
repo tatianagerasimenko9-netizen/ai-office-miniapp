@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — Mini App **Risk heatmap** (символ × частка L серед журналу); backlog поза 37 закрито по коду  
+**Оновлено:** 2026-05-06 — **п.17 ✅** прод: лог `[relay][OK] Mini App fingerprint…` + `c78e00696e638425` (`OFFICE_MINI_VERIFY_URL`)  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -100,7 +100,7 @@
 | 14 | ✅ | Два сервіси на Render: Mini App + worker/runtime з `office_multibot_bootstrap.py` (підтверджено логами деплою). |
 | 15 | ✅ | Еталон змінних зафіксовано в `RUNBOOK_UA.md` §2 (значення на Render — експлуатація). |
 | 16 | ✅ | Підтримка `DATABASE_URL` (PostgreSQL) у bridge, relay, mini app через `psycopg`. |
-| 17 | 🟨 | **Авто на Render:** `OFFICE_MINI_VERIFY_URL` на relay → лог `[relay][OK] Mini App fingerprint…` (`RUNBOOK_UA.md` §7.2). Або скрипт `office_e2e_preflight.py`. Після підтвердження в логах / §7.1 — ✅. |
+| 17 | ✅ | Прод Render: `[relay][OK] Mini App fingerprint збігається з relay (c78e00696e638425) — MASTER п.17 (авто)` після `OFFICE_MINI_VERIFY_URL=https://ai-office-miniapp.onrender.com`. |
 | 18 | ✅ | `OFFICE_GENERAL_THREAD_ID`, `OFFICE_TASKS_THREAD_ID`, `OFFICE_TECH_THREAD_ID` у `send_office` (форумні гілки). |
 | 19 | ✅ | Гілка `OFFICE_TECH_THREAD_ID`: помилки Binance/news/daily → `stream="tech"`; при старті relay — **health від Артема** (`@@dev@@`, `RELAY_TECH_HEALTH_ON_START`, за замовчуванням увімкнено). Окремий cron «щогодини» — не робили; за потреби — пізніше. |
 | 20 | 🟨 | Розширений чеклист `RUNBOOK_UA.md` §7.3 (E2E-1…E2E-6); після виконання — відмітки в §7.1 → п.20 ✅. |
@@ -156,8 +156,8 @@
 
 | Категорія | Кількість |
 |-----------|-----------|
-| ✅ | 35 |
-| 🟨 | 2 |
+| ✅ | 36 |
+| 🟨 | 1 |
 | ⬜ | 0 |
 | **Усього** | **37** |
 
@@ -170,7 +170,7 @@
 1. ~~**П. 17**~~ — інструменти звірки + runbook §3.  
 2. ~~**П. 19**~~ — стартовий health у TECH.  
 3. ~~**П. 21**~~ — `RUNBOOK_UA.md`.  
-4. ~~**П. 20**~~ — чеклист у runbook §7 (виконати вручну на Render після деплою).  
+4. **П. 20** — виконати E2E за `RUNBOOK_UA.md` §7.3 (після закриття п.17).  
 5. ~~**П. 23**~~ — `OFFICE_PERSONA_PACK_UA.md`.  
 6. ~~**П. 24**~~ — префікси cross-reply в bridge.  
 7. ~~**П. 25**~~ — Factor Pack v2.  
@@ -180,8 +180,8 @@
 
 **Наступна черга (після 1–37):**
 
-1. **Звірка fingerprint (п.17):** на Render задай **`OFFICE_MINI_VERIFY_URL` на relay** → лог OK (`RUNBOOK_UA.md` §7.2A); або скрипт §7.2B; або §7.1 вручну.
-2. **E2E (п.20):** таблиця §7.3 у runbook + відмітки §7.1 → потім п.17 і п.20 як ✅.
+1. ~~**Звірка fingerprint (п.17)**~~ — закрито в проді (auto verify у логах relay).
+2. **E2E (п.20):** таблиця §7.3 у runbook + відмітки §7.1 → потім п.20 як ✅.
 3. **Методичка п.38–42:** текст уже в Частині II; у правилах зафіксовано фінал Лева vs Марко execution (`OFFICE_RULES_UA.md` §3).
 4. ~~**Backlog поза 37**~~ — overlays / one-click review / heatmap реалізовані в Mini App; далі лише покращення за потребою (R-бакети, календар, експорт).
 
