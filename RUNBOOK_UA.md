@@ -157,6 +157,46 @@ pip install -r requirements.txt
 
 Останній відомий відбиток relay з логів Render — **`c78e00696e638425`**; у Mini App має бути той самий рядок у `/api/summary` або в шапці сторінки.
 
+### 7.2 Автоматична звірка п.17 (`office_e2e_preflight.py`)
+
+Скрипт у корені репозиторію порівнює **`db_identity.fingerprint`** з `GET …/api/summary` з еталоном:
+
+- або **`RELAY_FINGERPRINT_EXPECTED`** / `--relay-fingerprint` (16 hex з логів `[relay] DB identity`),
+- або локальним **`DATABASE_URL`** / **`OFFICE_DB_PATH`** (як у `.env` з тим самим рядком, що на Mini App).
+
+Приклад (PowerShell):
+
+```text
+$env:RELAY_FINGERPRINT_EXPECTED="c78e00696e638425"
+$env:OFFICE_MINI_URL="https://ВАШ-mini-app.onrender.com"
+py -3 office_e2e_preflight.py
+```
+
+Вихід **`[preflight][OK]`** і код **0** означає: Mini App віддає той самий fingerprint, що й relay у логах → **п.17 закрито автоматично**.
+
+Якщо порівнюєте з локальним `DATABASE_URL` (скопійованим з Render), relay-прапорець можна не задавати:
+
+```text
+$env:DATABASE_URL="postgresql://…"
+$env:OFFICE_MINI_URL="https://…"
+py -3 office_e2e_preflight.py
+```
+
+### 7.3 Повний E2E чеклист (п.20) — приймальні критерії
+
+Після **§7.2 OK** пройдіть таблицю й відмітьте дату / результат у §7.1.
+
+| Крок | Перевірка | Зроблено |
+|------|-----------|----------|
+| E2E-1 | `office_e2e_preflight.py` завершився з кодом 0 (або вручну fingerprint збігся) | ☐ |
+| E2E-2 | У MAIN надіслано тестовий сигнал **або** у OFFICE виконано `!ask` з символом | ☐ |
+| E2E-3 | У Telegram офісу видно ланцюжок ролей / вердикт без падіння relay у логах | ☐ |
+| E2E-4 | У Mini App у «Останні рішення» з’явився рядок з очікуваним символом / дією | ☐ |
+| E2E-5 | За наявності угоди в журналі — рядок узгоджений у таблиці «Журнал угод» після Refresh | ☐ |
+| E2E-6 | (Опційно) скріни або короткий запис у внутрішній нотатці для freeze | ☐ |
+
+Якщо всі обов’язкові пункти (E2E-1 … E2E-5) виконані — **MASTER п.20** можна вважати закритим для поточного релізу.
+
 ---
 
 *Кінець runbook. Доповнюйте після змін інфраструктури.*
