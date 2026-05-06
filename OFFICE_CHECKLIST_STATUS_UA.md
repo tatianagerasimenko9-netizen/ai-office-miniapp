@@ -1,7 +1,7 @@
 # Статус MASTER-CHECKLIST + методичка застосування збірника
 
 **Зафіксовано:** 2026-05-06  
-**Оновлено:** 2026-05-06 — Mini App **One-Click Review** (`review_draft` + clipboard); наступний backlog: Risk Heatmap  
+**Оновлено:** 2026-05-06 — Mini App **Risk heatmap** (символ × частка L серед журналу); backlog поза 37 закрито по коду  
 **Репозиторій:** `ai-office-miniapp`  
 
 **Як читати нумерацію (коротко):**
@@ -148,7 +148,7 @@
 | `OFFICE_STYLE_QA_UA.md` | Style QA gate (п.27). |
 | `OFFICE_DISCIPLINE_UA.md` | Discipline / prop-firm нуджі (п.36). |
 
-**З попередніх планів (без номера в 37):** ~~live overlays у Mini App~~ ✅ → ~~One-Click Review~~ ✅ (`/api/review_draft`, кнопки 📋 у журналі) → **Risk Heatmap** — ⬜.
+**З попередніх планів (без номера в 37):** ~~live overlays у Mini App~~ ✅ → ~~One-Click Review~~ ✅ → ~~Risk Heatmap~~ ✅ (`risk_heatmap` у `/api/summary`, таблиця на UI).
 
 ---
 
@@ -183,7 +183,7 @@
 1. **Звірка fingerprint:** Mini App Web на Render → той самий `c78e00696e638425`, що relay (див. `RUNBOOK_UA.md` §3 і §7.1).
 2. **E2E:** пройти `RUNBOOK_UA.md` §7 п.2–5 і відмітити таблицю §7.1 → тоді п.17 і п.20 можна знову позначити ✅.
 3. **Методичка п.38–42:** текст уже в Частині II; у правилах зафіксовано фінал Лева vs Марко execution (`OFFICE_RULES_UA.md` §3).
-4. **Backlog поза 37** (див. таблицю нижче): ~~live overlays~~ → ~~One-Click Review~~ → **Risk Heatmap** — по одному PR/ітерації.
+4. ~~**Backlog поза 37**~~ — overlays / one-click review / heatmap реалізовані в Mini App; далі лише покращення за потребою (R-бакети, календар, експорт).
 
 Після змін — оновлюйте таблиці та поле **«Оновлено»** на початку файлу.
 

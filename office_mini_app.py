@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -277,6 +278,80 @@ def build_review_draft(trade_id: str | None) -> dict[str, object]:
     }
 
 
+def build_risk_heatmap(*, limit_rows: int = 400, min_decided: int = 2, top_n: int = 18) -> dict[str, object]:
+    """
+    Спрощений risk heatmap: по символам із закритих угод (останні limit_rows записів журналу).
+    Чим вища частка LOSS серед WIN+LOSS, тим «гарячіший» ризик у таблиці.
+    """
+    try:
+        rows = q(
+            """
+            SELECT symbol, outcome, pnl_pct
+            FROM trade_journal
+            WHERE status = 'CLOSED' AND outcome IS NOT NULL AND TRIM(COALESCE(outcome, '')) <> ''
+            ORDER BY ts_close_utc DESC
+            LIMIT ?
+            """,
+            (limit_rows,),
+        )
+    except Exception:
+        rows = []
+
+    agg: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"w": 0.0, "l": 0.0, "be": 0.0, "pnl_sum": 0.0, "n": 0.0}
+    )
+    for sym, outcome, pnl_pct in rows:
+        su = str(sym or "").upper().strip()
+        if not su:
+            continue
+        o = str(outcome or "").upper().strip()
+        bucket = agg[su]
+        bucket["n"] += 1
+        try:
+            bucket["pnl_sum"] += float(pnl_pct or 0.0)
+        except Exception:
+            pass
+        if o == "WIN":
+            bucket["w"] += 1
+        elif o == "LOSS":
+            bucket["l"] += 1
+        elif o == "BE":
+            bucket["be"] += 1
+
+    out_rows: list[dict[str, object]] = []
+    for sym, st in agg.items():
+        w, l, be_ct = int(st["w"]), int(st["l"]), int(st["be"])
+        decided = w + l
+        if decided < min_decided:
+            continue
+        loss_share = (l / decided) if decided else 0.0
+        wr_pct = (w / decided * 100.0) if decided else 0.0
+        ntot = int(st["n"])
+        avg_pnl = (st["pnl_sum"] / ntot) if ntot else 0.0
+        out_rows.append(
+            {
+                "symbol": sym,
+                "total": ntot,
+                "wins": w,
+                "losses": l,
+                "be": be_ct,
+                "wr_pct": round(wr_pct, 1),
+                "loss_share": round(loss_share, 3),
+                "avg_pnl_pct": round(avg_pnl, 3),
+            }
+        )
+
+    out_rows.sort(key=lambda x: (-int(x["losses"]), -float(x["loss_share"]), -int(x["total"])))
+    out_rows = out_rows[:top_n]
+
+    return {
+        "limit_rows": limit_rows,
+        "min_decided": min_decided,
+        "rows": out_rows,
+        "hint_ua": "Зеленіші комірки — менша частка лоссів серед вирішених WIN/LOSS; червоніші — обережніше з символом.",
+    }
+
+
 def get_data(
     *,
     symbol_filter: str = "",
@@ -432,6 +507,7 @@ def get_data(
     ]
 
     overlays = build_live_overlays(chart_symbol)
+    risk_heatmap = build_risk_heatmap()
 
     return {
         "now_utc": datetime.now(timezone.utc).isoformat(),
@@ -452,6 +528,7 @@ def get_data(
             "leaderboard_wins_14d": leaderboard,
         },
         "overlays": overlays,
+        "risk_heatmap": risk_heatmap,
         "decisions": [
             {"ts_utc": r[0], "signal_id": r[1], "symbol": r[2], "action": r[3]}
             for r in rows_decisions
@@ -517,6 +594,7 @@ def html() -> str:
     .ocr-btn { cursor:pointer; font-size:13px; padding:2px 8px; border-radius:6px; background:#334155; border:1px solid #475569; color:#e2e8f0; }
     .ocr-btn:hover { background:#475569; }
     #reviewToast { margin-top:8px; min-height:18px; }
+    td.heat-cell { text-align:center; font-weight:600; }
   </style>
 </head>
 <body>
@@ -566,6 +644,11 @@ def html() -> str:
       <div><b>Культура (7д / 14д)</b></div>
       <div id="culture" class="muted">…</div>
     </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px;">
+    <b>Risk heatmap</b> <span class="muted" id="heatmapHint">з журналу (останні закриті)</span>
+    <table id="heatmap"></table>
   </div>
 
   <div class="panel" style="margin-top:12px;">
@@ -746,6 +829,24 @@ async function loadOffice() {
     ? ('Топ WIN 14д: ' + lb.map(x => x.symbol + '×' + x.wins_14d).join(', '))
     : 'Топ WIN 14д: немає';
   t('culture', twTxt + '<br/>' + lbTxt);
+
+  const hm = d.risk_heatmap || {};
+  const hmRows = hm.rows || [];
+  const hmHint = document.getElementById('heatmapHint');
+  if (hmHint && hm.hint_ua) hmHint.textContent = hm.hint_ua;
+  function heatStyle(ls) {
+    const x = Math.max(0, Math.min(1, Number(ls) || 0));
+    const hue = 120 * (1 - x);
+    return 'background:hsla(' + hue + ',62%,22%,0.92);color:#f8fafc;';
+  }
+  t('heatmap',
+    '<tr><th>Символ</th><th>Всього</th><th>W</th><th>L</th><th>BE</th><th>WR%</th><th>L/(W+L)</th><th>Avg PnL%</th><th>Ризик</th></tr>' +
+    (hmRows.length ? hmRows.map(function(r) {
+      const ls = r.loss_share;
+      return '<tr><td><b>' + r.symbol + '</b></td><td>' + r.total + '</td><td class="ok">' + r.wins + '</td><td class="bad">' + r.losses + '</td><td>' + r.be + '</td><td>' + r.wr_pct + '</td><td>' + ls + '</td><td>' + r.avg_pnl_pct + '</td>' +
+        '<td class="heat-cell" style="' + heatStyle(ls) + '">' + Math.round(100 * ls) + '%</td></tr>';
+    }).join('') : '<tr><td colspan="9" class="muted">Недостатньо закритих угод для heatmap (мінімум ' + (hm.min_decided || 2) + ' вирішених WIN/LOSS по символу).</td></tr>')
+  );
 
   t('decisions',
     '<tr><th>Час</th><th>Сигнал</th><th>Символ</th><th>Дія</th></tr>' +
