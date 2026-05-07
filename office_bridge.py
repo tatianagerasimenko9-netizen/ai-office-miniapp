@@ -1148,10 +1148,25 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
             except Exception:
                 return default
 
+        factor = signal.meta.get("factor_pack_v2") or {}
+        funding_raw = (
+            (factor.get("funding_rate_pct") if isinstance(factor, dict) else None)
+            or signal.meta.get("funding_rate")
+            or signal.meta.get("funding")
+            or "невідомо"
+        )
+        if isinstance(funding_raw, (int, float)):
+            funding_disp = f"{float(funding_raw):.4f}%"
+        else:
+            try:
+                funding_disp = f"{float(funding_raw):.4f}%"
+            except Exception:
+                funding_disp = str(funding_raw)
+
         context = (
             f"Сигнал: {signal.direction} {signal.symbol}\n"
             f"BTC за добу: {_f(signal.meta.get('btc_change_pct', 0.0)):.1f}%\n"
-            f"Funding: {signal.meta.get('funding_rate', 'невідомо')}\n"
+            f"Funding: {funding_disp}\n"
             f"RR: {_f(signal.meta.get('rr', 0.0)):.1f}\n"
             f"Волатильність: {_f(signal.meta.get('volatility_pct', 0.0)):.1f}%\n"
             f"Відкритих позицій: {int(snapshot.get('open_trades_count', 0)) if isinstance(snapshot, dict) else 0}\n"
