@@ -7,10 +7,18 @@ from typing import Any, Dict, List
 import httpx
 
 from office_market_data import (
+    fetch_atr_context,
     fetch_candles,
     fetch_funding_rate,
+    fetch_key_levels,
+    fetch_long_short_ratio,
     fetch_liquidations_proxy,
+    fetch_macro_context,
     fetch_open_interest,
+    fetch_ote_levels,
+    fetch_recent_liquidations,
+    fetch_top_movers,
+    fetch_top_traders_ratio,
 )
 
 
@@ -35,6 +43,84 @@ TOOLS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["symbol", "timeframe"],
+        },
+    },
+    {
+        "name": "get_atr_context",
+        "description": "ATR і запас ходу. Показує скільки монета пройшла за день і чи вигідно зараз входити.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}},
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_long_short_ratio",
+        "description": "Співвідношення лонгів і шортів на ринку. Якщо >70% лонги — небезпека розвороту вниз.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}},
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_top_traders",
+        "description": "Позиції топ трейдерів біржі — що роблять великі гравці.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}},
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_liquidations_real",
+        "description": "Реальні ліквідації на ринку — де вибивали позиції.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}},
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_key_levels",
+        "description": "Ключові горизонтальні рівні де ціна реагувала кілька разів. Метод Герчика — торгівля від рівнів.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}},
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_ote_levels",
+        "description": "OTE зона для снайперського входу. Fibonacci 61.8-78.6% після імпульсу — мінімальний стоп.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "timeframe": {"type": "string", "description": "1h або 4h"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_top_movers",
+        "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "description": "gainers або losers"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["direction"],
+        },
+    },
+    {
+        "name": "get_macro_context",
+        "description": "Макро контекст: BTC, Gold, S&P 500, DXY. Кореляції і загальний настрій ринку.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
         },
     },
     {
@@ -74,6 +160,25 @@ TOOLS: List[Dict[str, Any]] = [
 
 def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     sym = str((tool_input or {}).get("symbol") or "").upper().strip()
+    if tool_name == "get_atr_context":
+        return fetch_atr_context(sym)
+    if tool_name == "get_long_short_ratio":
+        return fetch_long_short_ratio(sym)
+    if tool_name == "get_top_traders":
+        return fetch_top_traders_ratio(sym)
+    if tool_name == "get_liquidations_real":
+        return {"symbol": sym, "items": fetch_recent_liquidations(sym)}
+    if tool_name == "get_key_levels":
+        return {"symbol": sym, "levels": fetch_key_levels(sym)}
+    if tool_name == "get_ote_levels":
+        tf = str((tool_input or {}).get("timeframe") or "4h").strip().lower()
+        return {"symbol": sym, "timeframe": tf, "ote": fetch_ote_levels(sym, tf)}
+    if tool_name == "get_top_movers":
+        direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
+        limit = int((tool_input or {}).get("limit") or 5)
+        return {"direction": direction, "items": fetch_top_movers(direction, limit)}
+    if tool_name == "get_macro_context":
+        return fetch_macro_context()
     if tool_name == "get_candles":
         tf = str((tool_input or {}).get("timeframe") or "").strip().lower() or "4h"
         limit = int((tool_input or {}).get("limit") or 5)
