@@ -844,6 +844,65 @@ def daily_drawdown_pct(db_path: str) -> float:
     return abs(total) if total < 0 else 0.0
 
 
+def live_risk_snapshot(db_path: str) -> Dict[str, Any]:
+    """
+    Live risk зріз для Risk Manager:
+    - відкриті позиції (загалом/long/short)
+    - top-5 символів з найвищим loss_rate (тільки якщо є >=3 закритих угод)
+    """
+    try:
+        row = _fetchone(
+            db_path,
+            """
+            SELECT
+                SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END) AS open_total,
+                SUM(CASE WHEN status = 'OPEN' AND UPPER(direction) = 'LONG' THEN 1 ELSE 0 END) AS open_long,
+                SUM(CASE WHEN status = 'OPEN' AND UPPER(direction) = 'SHORT' THEN 1 ELSE 0 END) AS open_short
+            FROM trade_journal
+            """,
+            (),
+        )
+        open_total = int(row[0]) if row and row[0] is not None else 0
+        open_long = int(row[1]) if row and row[1] is not None else 0
+        open_short = int(row[2]) if row and row[2] is not None else 0
+
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT
+                symbol,
+                SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_cnt,
+                SUM(CASE WHEN status = 'CLOSED' AND UPPER(outcome) = 'LOSS' THEN 1 ELSE 0 END) AS loss_cnt
+            FROM trade_journal
+            GROUP BY symbol
+            HAVING SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) >= 3
+            """,
+            (),
+        )
+    except Exception:
+        return {}
+
+    ranked: List[tuple[str, float]] = []
+    for r in rows:
+        sym = str(r[0] or "").strip().upper()
+        if not sym:
+            continue
+        closed_cnt = int(r[1] or 0)
+        loss_cnt = int(r[2] or 0)
+        if closed_cnt <= 0:
+            continue
+        ranked.append((sym, float(loss_cnt) / float(closed_cnt)))
+
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    top5 = ranked[:5]
+    return {
+        "open_trades_count": open_total,
+        "open_long_count": open_long,
+        "open_short_count": open_short,
+        "symbol_loss_rate": {sym: rate for sym, rate in top5},
+    }
+
+
 def journal_learning_hints_from_tags(tags: Dict[str, int]) -> List[str]:
     mapping = {
         "high_volatility": "зменшити розмір позиції в періоди високої волатильності",
@@ -962,6 +1021,10 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     vol = float(signal.meta.get("volatility_pct", 0.0))
     news_flag = any(t.agent_key == "news" and ("HIGH RISK" in t.text or "RISK:" in t.text) for t in conversation)
     risk_levels = f"Контроль: SL {_fmt_level(lv['sl'])}, invalidation по SL."
+    snapshot = signal.meta.get("live_risk", {})
+    open_total = int(snapshot.get("open_trades_count", 0)) if isinstance(snapshot, dict) else 0
+    if open_total > 0:
+        risk_levels += f" Відкрито позицій: {open_total}."
     if bool(signal.meta.get("loss_cooldown_active", False)):
         return AgentDecision(
             "daryna",
@@ -1074,7 +1137,7 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
     )
 
 
-def _decide_chain(signal: OfficeSignal) -> OfficeVerdict:
+def _decide_chain(signal: OfficeSignal, db_path: str = "office_bridge.db") -> OfficeVerdict:
     decisions: List[AgentDecision] = []
     conversation: List[ConversationTurn] = []
 
@@ -1086,6 +1149,8 @@ def _decide_chain(signal: OfficeSignal) -> OfficeVerdict:
     decisions.append(news)
     conversation.append(ConversationTurn(news.agent_key, news.note))
 
+    snapshot = live_risk_snapshot(db_path)
+    signal.meta["live_risk"] = snapshot
     risk = _risk_reply(signal, conversation)
     decisions.append(risk)
     conversation.append(ConversationTurn(risk.agent_key, risk.note))
@@ -1398,7 +1463,7 @@ async def office_handle_signal(
             f"Автоматичне блокування після {cb_need}+ SL поспіль (MASTER п.31).",
         )
     else:
-        verdict = _decide_chain(signal)
+        verdict = _decide_chain(signal, db_path)
 
     # Keep room readable: only one task line at open and one at close.
     prev_agent: Optional[str] = None
