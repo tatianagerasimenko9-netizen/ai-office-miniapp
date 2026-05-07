@@ -3,17 +3,29 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+try:
+    import psycopg
+    HAS_PG = True
+except ImportError:
+    HAS_PG = False
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 DB_PATH = os.getenv("OFFICE_DB_PATH", "office_bridge.db")
+_USE_PG = bool(DATABASE_URL and HAS_PG)
 HOST = os.getenv("OFFICE_DASH_HOST", "127.0.0.1")
 PORT = int(os.getenv("OFFICE_DASH_PORT", "8787"))
 
 
 def q(sql: str, params: tuple = ()) -> list[tuple]:
+    if _USE_PG:
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.fetchall()
     with sqlite3.connect(DB_PATH) as conn:
         return conn.execute(sql, params).fetchall()
 
@@ -202,7 +214,7 @@ def html_page(data: dict) -> str:
 </head>
 <body>
   <h1>AI Office Dashboard (MVP)</h1>
-  <div class="muted">UTC: {data['now_utc']} · DB: {DB_PATH}</div>
+  <div class="muted">UTC: {data['now_utc']} · DB: {"postgres" if _USE_PG else DB_PATH}</div>
   <div class="cards">
     <div class="card">OPEN<br><b>{counts['tasks_open']}</b></div>
     <div class="card">IN_PROGRESS<br><b>{counts['tasks_progress']}</b></div>
@@ -257,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    if not os.path.exists(DB_PATH):
+    if not _USE_PG and not os.path.exists(DB_PATH):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"dashboard: http://{HOST}:{PORT}")
