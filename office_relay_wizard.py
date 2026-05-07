@@ -976,8 +976,7 @@ def extract_symbols(text: str) -> List[str]:
     found: List[str] = []
     seen: set[str] = set()
 
-    for m in re.finditer(r"\b([A-Z0-9]{2,15}USDT)\b", up):
-        sym = m.group(1)
+    for sym in re.findall(r"\b[A-Z]{2,10}USDT\b", up):
         if sym not in seen:
             seen.add(sym)
             found.append(sym)
@@ -1061,6 +1060,9 @@ async def office_free_chat(
             for sym in symbols:
                 liq = fetch_liquidations_proxy(sym)
                 candles = fetch_candles(sym, "4h", 3)
+                if not isinstance(candles, list) or not candles:
+                    lines.append(f"{sym}: немає даних з Binance")
+                    continue
                 px = liq.get("current_price", "невідомо") if isinstance(liq, dict) else "невідомо"
                 lines.append(f"{sym} ціна: {px}")
                 lines.append(f"{sym} H4 свічки: {candles}")
