@@ -104,7 +104,9 @@ class NewsRisk:
     headline: str
     minutes_to_event: int
     event_name: str = ""
+    event_time_utc: str = ""
     currency: str = "USD"
+    importance: str = "low"
 
 
 def relay_config_path() -> Path:
@@ -537,7 +539,7 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
     Returns SAFE/RISK/HIGH RISK with nearest headline.
     """
     if not api_key:
-        return NewsRisk("SAFE", "news api key missing", 999)
+        return NewsRisk("SAFE", "news api key missing", 999, "", "", "USD", "low")
     now = datetime.now(timezone.utc)
     from_s = now.strftime("%Y-%m-%d")
     to_s = from_s
@@ -545,20 +547,26 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
     params = {"from": from_s, "to": to_s, "apikey": api_key}
     async with session.get(url, params=params) as resp:
         if resp.status != 200:
-            return NewsRisk("SAFE", f"news status {resp.status}", 999)
+            return NewsRisk("SAFE", f"news status {resp.status}", 999, "", "", "USD", "low")
         data = await resp.json()
     nearest_min = 999
     nearest_title = "no high impact events"
+    nearest_time_utc = ""
     nearest_currency = "USD"
-    keys = ("fomc", "fed", "rate", "cpi", "nfp", "powell", "inflation")
+    nearest_importance = "low"
+    keys = ("fomc", "fed", "rate", "cpi", "nfp", "powell", "inflation", "ecb", "boj")
     for e in (data if isinstance(data, list) else []):
         title = str(e.get("event") or e.get("title") or "")
         if not title:
             continue
-        impact = str(e.get("impact") or e.get("importance") or "").lower()
-        is_high = ("high" in impact) or any(k in title.lower() for k in keys)
-        if not is_high:
-            continue
+        impact = str(e.get("impact") or e.get("importance") or "").lower().strip()
+        importance = "low"
+        if "high" in impact:
+            importance = "high"
+        elif "medium" in impact or "med" in impact:
+            importance = "medium"
+        elif any(k in title.lower() for k in keys):
+            importance = "high"
         dt = _parse_dt_any(str(e.get("date") or e.get("time") or ""))
         if dt is None:
             continue
@@ -566,12 +574,38 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
         if 0 <= mins < nearest_min:
             nearest_min = mins
             nearest_title = title
+            nearest_time_utc = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
             nearest_currency = str(e.get("currency") or e.get("country") or "USD")
+            nearest_importance = importance
     if nearest_min <= 60:
-        return NewsRisk("HIGH RISK", nearest_title, nearest_min, nearest_title, nearest_currency)
+        return NewsRisk(
+            "HIGH RISK",
+            nearest_title,
+            nearest_min,
+            nearest_title,
+            nearest_time_utc,
+            nearest_currency,
+            nearest_importance,
+        )
     if nearest_min <= 180:
-        return NewsRisk("RISK", nearest_title, nearest_min, nearest_title, nearest_currency)
-    return NewsRisk("SAFE", nearest_title, nearest_min, nearest_title, nearest_currency)
+        return NewsRisk(
+            "RISK",
+            nearest_title,
+            nearest_min,
+            nearest_title,
+            nearest_time_utc,
+            nearest_currency,
+            nearest_importance,
+        )
+    return NewsRisk(
+        "SAFE",
+        nearest_title,
+        nearest_min,
+        nearest_title,
+        nearest_time_utc,
+        nearest_currency,
+        nearest_importance,
+    )
 
 
 def looks_like_signal(text: str) -> bool:
@@ -1701,6 +1735,25 @@ async def run() -> None:
                 + (" (scanner-forced)" if from_scanner else "")
             )
             sig = parse_signal(text, event.id)
+            if news_api_key:
+                news_timeout = aiohttp.ClientTimeout(total=10)
+                try:
+                    async with aiohttp.ClientSession(timeout=news_timeout) as news_http:
+                        live_news = await fetch_news_risk(news_http, news_api_key)
+                    risk_level = str(live_news.level).upper()
+                    mapped_risk = "SAFE"
+                    if risk_level in ("HIGH RISK", "HIGH"):
+                        mapped_risk = "HIGH"
+                    elif risk_level == "RISK":
+                        mapped_risk = "RISK"
+                    sig.meta["news_risk"] = mapped_risk
+                    sig.meta["minutes_to_event"] = int(live_news.minutes_to_event)
+                    sig.meta["news_event_name"] = live_news.event_name or ""
+                    sig.meta["news_currency"] = live_news.currency or "USD"
+                    sig.meta["news_event_time_utc"] = live_news.event_time_utc or ""
+                    sig.meta["news_importance"] = live_news.importance or "low"
+                except Exception as exc:
+                    print(f"[relay][WARN] live news risk refresh failed: {type(exc).__name__}: {exc}")
             kickoff_msg_id = await send_office(build_signal_kickoff(sig.symbol, sig.direction))
             mirror_msg_id = await send_office(
                 "🔔 Новий сигнал від My Crypto Scanner:\n"

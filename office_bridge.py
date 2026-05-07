@@ -1058,6 +1058,20 @@ def _to_kyiv_time(mins: int) -> str:
     return kyiv.strftime("%H:%M")
 
 
+def _to_kyiv_time_from_utc(event_time_utc: str, mins_fallback: int) -> str:
+    raw = str(event_time_utc or "").strip()
+    if not raw:
+        return _to_kyiv_time(mins_fallback)
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        kyiv = dt.astimezone(timezone.utc) + timedelta(hours=3)
+        return kyiv.strftime("%H:%M")
+    except Exception:
+        return _to_kyiv_time(mins_fallback)
+
+
 TRADING_KNOWLEDGE = """
 ATR І ЗАПАС ХОДУ:
 Завжди перевіряй get_atr_context перед входом.
@@ -1320,7 +1334,10 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
     mins = int(signal.meta.get("minutes_to_event", 999))
     event_name = str(signal.meta.get("news_event_name") or signal.meta.get("news_headline") or "невідомо")
+    event_time_utc = str(signal.meta.get("news_event_time_utc") or "")
     currency = str(signal.meta.get("news_currency") or "USD")
+    importance = str(signal.meta.get("news_importance") or "low").lower()
+    kyiv_time = _to_kyiv_time_from_utc(event_time_utc, mins)
     system = (
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
@@ -1334,6 +1351,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Знаєш що одна новина може знищити будь-який красивий сетап.\n"
         "Завжди кажеш час по Києву.\n"
         "Називаєш подію конкретно — 'виступ Пауела' а не 'подія'.\n"
+        "Пояснюєш простою мовою, що це означає для входу в позицію.\n"
         "Якщо небезпечно — кричиш.\n"
         "Якщо спокійно — одне речення.\n"
         "Ти пишеш в Telegram груповий чат. Без таблиць, без заголовків ##, без ліній ---. "
@@ -1344,9 +1362,10 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     context = (
         f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
         f"Хвилин до події: {mins}\n"
-        f"Час події по Києву: {_to_kyiv_time(mins)}\n"
+        f"Час по Києву: {kyiv_time}\n"
         f"Назва події: {event_name}\n"
-        f"Валюта/країна: {currency}\n"
+        f"Валюта: {currency}\n"
+        f"Важливість: {importance}\n"
         f"Символ: {signal.symbol}\n"
         f"Напрямок: {signal.direction}"
     )
@@ -1354,7 +1373,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     if risk == "HIGH":
         fallback = (
             f"{'Важлива макро подія' if event_name == 'невідомо' else event_name} "
-            f"через {mins} хв ({_to_kyiv_time(mins)} за Києвом). Не входимо."
+            f"через {mins} хв ({kyiv_time} за Києвом). Не входимо."
         )
         return AgentDecision(
             "news",
@@ -1365,7 +1384,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     if risk == "RISK":
         fallback = (
             f"{'Новина середньої важливості' if event_name == 'невідомо' else event_name} "
-            f"через {mins} хв ({_to_kyiv_time(mins)} за Києвом). Краще зачекати."
+            f"через {mins} хв ({kyiv_time} за Києвом). Можна торгувати, але обережно."
         )
         return AgentDecision(
             "news",
