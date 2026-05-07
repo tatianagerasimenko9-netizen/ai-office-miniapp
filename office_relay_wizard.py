@@ -946,40 +946,6 @@ def parse_signal(text: str, msg_id: int) -> OfficeSignal:
     )
 
 
-def detect_addressed_agent(text: str) -> str:
-    """Detect the addressed office agent by name mention."""
-    text_lower = str(text or "").lower()
-    agents = {
-        "дарина": "daryna",
-        "дарино": "daryna",
-        "дарині": "daryna",
-        "лев": "lev",
-        "леве": "lev",
-        "левe": "lev",
-        "макс": "maks",
-        "максе": "maks",
-        "марічка": "marichka",
-        "марічко": "marichka",
-        "назар": "news",
-        "назаре": "news",
-        "марко": "marko",
-        "олеся": "olesya",
-        "олесю": "olesya",
-        "олесі": "olesya",
-        "софія": "memory",
-        "софіє": "memory",
-        "софії": "memory",
-        "віктор": "psych",
-        "вікторе": "psych",
-        "артем": "dev",
-        "артеме": "dev",
-    }
-    for name, key in agents.items():
-        if name in text_lower:
-            return key
-    return "lev"
-
-
 def extract_symbols(text: str) -> List[str]:
     """
     Extract likely trading symbols from user text.
@@ -1017,7 +983,6 @@ def extract_symbols(text: str) -> List[str]:
 async def office_free_chat(
     sender,
     text: str,
-    agent_key: str,
     db_path: str,
 ) -> None:
     language_block = (
@@ -1027,35 +992,11 @@ async def office_free_chat(
         "будь-які інші російські слова. "
         "Якщо думка прийшла російською — перекладай правильною українською."
     )
-    personalities = {
-        "lev": f"{language_block}\nТобі 42 роки. Ти Лев — керівник офісу. Холодна голова. Відповідаєш Тетяні коротко і впевнено.",
-        "maks": f"{language_block}\nТобі 38 років. Ти Макс — ринковий аналітик. Бачиш ринок через цифри. Відповідаєш по суті.",
-        "marichka": f"{language_block}\nТобі 26 років. Ти Марічка — аналітик тренду. Говориш образно і просто.",
-        "daryna": (
-            f"{language_block}\n"
-            "Тобі 34 роки. Ти Дарина — захищаєш капітал. Пряма і чесна. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
-        ),
-        "marko": f"{language_block}\nТобі 29 років. Ти Марко — технічний виконавець. Точний.",
-        "news": f"{language_block}\nТобі 31 рік. Ти Назар — стежиш за новинами. Обережний.",
-        "olesya": (
-            f"{language_block}\n"
-            "Ти Олеся — ведеш журнал. Тепла і точна. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
-        ),
-        "memory": (
-            f"{language_block}\n"
-            "Ти Софія — знаєш історію угод. Говориш тільки фактами з журналу. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
-        ),
-        "psych": f"{language_block}\nТи Віктор — психолог команди. Стежиш за дисципліною.",
-        "dev": f"{language_block}\nТи Артем — технічний девелопер. Відповідаєш про систему.",
-    }
     system = (
-        f"{personalities.get(agent_key, personalities['lev'])}\n\n"
+        f"{language_block}\n"
+        "Тобі 42 роки. Ти Лев — керівник офісу.\n"
+        "Ти координатор AI Trading Desk і сам вирішуєш, хто має відповідати на запит Тетяни.\n"
+        "Якщо треба — відповідаєш сам. Якщо треба — делегуєш, прямо звертаючись до колеги по імені.\n\n"
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
@@ -1089,11 +1030,11 @@ async def office_free_chat(
         "Тетяна написала в офіс:\n"
         f"\"{text}\"\n\n"
         f"{market_context}\n\n"
-        f"Відповідай як {agent_key} — своїм характером і голосом."
+        "Відповідай як Лев-координатор офісу."
     )
-    response = clean_llm_note(ask_agent(agent_key, system, context, max_tokens=500))
+    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=500))
     if response:
-        await agent_say(sender, agent_key, response)
+        await agent_say(sender, "lev", response)
 
 
 def _env_int_set(name: str) -> set[int]:
@@ -1655,13 +1596,11 @@ async def run() -> None:
                     return
                 if owner_user_id is not None and sender_id_int != owner_user_id:
                     return
-                agent_key = detect_addressed_agent(text)
                 async def send_office_fn(msg: str) -> None:
                     await send_office(msg[:3900], stream="general")
                 await office_free_chat(
                     send_office_fn,
                     text,
-                    agent_key,
                     db_path,
                 )
                 return
