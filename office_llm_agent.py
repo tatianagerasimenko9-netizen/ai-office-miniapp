@@ -17,8 +17,6 @@ def ask_agent(
     Returns empty string on any failure (graceful fallback).
     """
     try:
-        print(f"[debug-api] calling model for {agent_key}")
-        print(f"[debug-api] ANTHROPIC_API_KEY exists: {bool(os.getenv('ANTHROPIC_API_KEY'))}")
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return ""
@@ -45,8 +43,6 @@ def ask_agent(
 
         with httpx.Client(timeout=20.0) as client:
             resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-            print(f"[debug-api] status: {resp.status_code}")
-            print(f"[debug-api] body: {resp.text[:200]}")
             resp.raise_for_status()
             data = resp.json()
 
@@ -62,6 +58,5 @@ def ask_agent(
                 if isinstance(txt, str) and txt.strip():
                     parts.append(txt.strip())
         return "\n".join(parts).strip()
-    except Exception as e:
-        print(f"[debug-api] error: {e}")
+    except Exception:
         return ""
