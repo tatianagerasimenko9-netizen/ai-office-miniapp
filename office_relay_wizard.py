@@ -35,6 +35,8 @@ from office_style_qa import polish_agent_message
 
 from office_bridge import (
     OfficeSignal,
+    agent_say,
+    clean_llm_note,
     detect_setup_type,
     fmt_agent_line,
     get_agent_card_text,
@@ -56,6 +58,7 @@ from office_bridge import (
     office_trade_closed,
     _extract_first_usdt_symbol,
 )
+from office_llm_agent import ask_agent
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -943,6 +946,79 @@ def parse_signal(text: str, msg_id: int) -> OfficeSignal:
     )
 
 
+def detect_addressed_agent(text: str) -> str:
+    """Detect the addressed office agent by name mention."""
+    text_lower = str(text or "").lower()
+    agents = {
+        "макс": "maks",
+        "марічка": "marichka",
+        "назар": "news",
+        "дарина": "daryna",
+        "лев": "lev",
+        "марко": "marko",
+        "олеся": "olesya",
+        "софія": "memory",
+        "віктор": "psych",
+        "артем": "dev",
+    }
+    for name, key in agents.items():
+        if name in text_lower:
+            return key
+    return "lev"
+
+
+async def office_free_chat(
+    sender,
+    text: str,
+    agent_key: str,
+    db_path: str,
+) -> None:
+    personalities = {
+        "lev": "Тобі 42 роки. Ти Лев — керівник офісу. Холодна голова. Відповідаєш Тетяні коротко і впевнено.",
+        "maks": "Тобі 38 років. Ти Макс — ринковий аналітик. Бачиш ринок через цифри. Відповідаєш по суті.",
+        "marichka": "Тобі 26 років. Ти Марічка — аналітик тренду. Говориш образно і просто.",
+        "daryna": "Тобі 34 роки. Ти Дарина — захищаєш капітал. Пряма і чесна.",
+        "marko": "Тобі 29 років. Ти Марко — технічний виконавець. Точний.",
+        "news": "Тобі 31 рік. Ти Назар — стежиш за новинами. Обережний.",
+        "olesya": "Ти Олеся — ведеш журнал. Тепла і точна.",
+        "memory": "Ти Софія — знаєш історію угод. Говориш тільки фактами з журналу.",
+        "psych": "Ти Віктор — психолог команди. Стежиш за дисципліною.",
+        "dev": "Ти Артем — технічний девелопер. Відповідаєш про систему.",
+    }
+    system = (
+        f"{personalities.get(agent_key, personalities['lev'])}\n\n"
+        "МОВА: Говориш ТІЛЬКИ українською. Жодного слова російською.\n"
+        "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
+        "Звертайся до Тетяни по імені. Відповідай природно як людина."
+    )
+
+    market_context = ""
+    low = str(text or "").lower()
+    if any(w in low for w in ("btc", "біток", "ринок", "ціна", "тренд", "сигнал", "позиція")):
+        try:
+            from office_market_data import fetch_btc_candles, fetch_liquidations_proxy
+
+            candles = fetch_btc_candles("4h", 3)
+            liq = fetch_liquidations_proxy("BTCUSDT")
+            market_context = (
+                "Поточний контекст ринку:\n"
+                f"BTC ціна: {liq.get('current_price', 'невідомо') if isinstance(liq, dict) else 'невідомо'}\n"
+                f"BTC H4 свічки: {candles}"
+            )
+        except Exception:
+            market_context = ""
+
+    context = (
+        "Тетяна написала в офіс:\n"
+        f"\"{text}\"\n\n"
+        f"{market_context}\n\n"
+        f"Відповідай як {agent_key} — своїм характером і голосом."
+    )
+    response = clean_llm_note(ask_agent(agent_key, system, context, max_tokens=300))
+    if response:
+        await agent_say(sender, agent_key, response)
+
+
 def _env_int_set(name: str) -> set[int]:
     """
     Parse env like "123,456" into a set of ints.
@@ -1122,6 +1198,29 @@ async def run() -> None:
 
     main_entity = await client.get_entity(main_chat_id)
     office_entity = await client.get_entity(office_chat_id)
+    me = await client.get_me()
+    owner_user_id: Optional[int] = None
+    owner_env = os.getenv("OFFICE_OWNER_USER_ID", "").strip()
+    if owner_env:
+        try:
+            owner_user_id = int(owner_env)
+        except Exception:
+            owner_user_id = None
+    if owner_user_id is None and not tg_bot_token:
+        try:
+            owner_user_id = int(getattr(me, "id", 0) or 0) or None
+        except Exception:
+            owner_user_id = None
+    bot_user_ids: set[int] = set()
+    for k in sorted(agent_bot_tokens.keys()):
+        ok_chk, note_chk, bot_id = await check_bot_api_access(bot_http, agent_bot_tokens[k], office_chat_id)
+        if bot_id is not None:
+            bot_user_ids.add(int(bot_id))
+    if tg_bot_token:
+        ok_main, note_main, main_bot_id = await check_bot_api_access(bot_http, tg_bot_token, office_chat_id)
+        if main_bot_id is not None:
+            bot_user_ids.add(int(main_bot_id))
+        _ = (ok_main, note_main)  # keep diagnostics side-effect without extra logging here
     print(f"\nMAIN={main_chat_id}")
     print(f"OFFICE={office_chat_id}")
 
@@ -1462,6 +1561,27 @@ async def run() -> None:
                         db_path=db_path,
                     )
                     print("[relay] desk_qa done")
+                    return
+
+                # Free-form office chat: owner message -> addressed agent reply.
+                sender_id = getattr(event, "sender_id", None)
+                sender_id_int = int(sender_id) if sender_id is not None else 0
+                if sender_id_int in bot_user_ids:
+                    return
+                sender_obj = await event.get_sender()
+                if bool(getattr(sender_obj, "bot", False)):
+                    return
+                if owner_user_id is not None and sender_id_int != owner_user_id:
+                    return
+                agent_key = detect_addressed_agent(text)
+                async def send_office_fn(msg: str) -> None:
+                    await send_office(msg[:3900], stream="general")
+                await office_free_chat(
+                    send_office_fn,
+                    text,
+                    agent_key,
+                    db_path,
+                )
                 return
 
             # Optional sidecar bridge: forward signal-like messages from SOURCE chat to MAIN chat.
