@@ -1129,44 +1129,83 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     vol = float(signal.meta.get("volatility_pct", 0.0))
     news_flag = any(t.agent_key == "news" and ("HIGH RISK" in t.text or "RISK:" in t.text) for t in conversation)
     risk_levels = f"Контроль: SL {_fmt_level(lv['sl'])}, invalidation по SL."
+    llm_mode = os.getenv("OFFICE_LLM_MODE", "off").strip().lower()
+    use_llm = llm_mode in ("daryna", "all")
     snapshot = signal.meta.get("live_risk", {})
     open_total = int(snapshot.get("open_trades_count", 0)) if isinstance(snapshot, dict) else 0
     if open_total > 0:
         risk_levels += f" Відкрито позицій: {open_total}."
     if signal.meta.get("against_bias", False):
         risk_levels += " Сигнал проти тренду — розмір позиції вдвічі менше."
+
+    llm_note = ""
+    if use_llm:
+        from office_llm_agent import ask_agent
+
+        def _f(val: Any, default: float = 0.0) -> float:
+            try:
+                return float(val)
+            except Exception:
+                return default
+
+        context = (
+            f"Сигнал: {signal.direction} {signal.symbol}\n"
+            f"BTC за добу: {_f(signal.meta.get('btc_change_pct', 0.0)):.1f}%\n"
+            f"Funding: {signal.meta.get('funding_rate', 'невідомо')}\n"
+            f"RR: {_f(signal.meta.get('rr', 0.0)):.1f}\n"
+            f"Волатильність: {_f(signal.meta.get('volatility_pct', 0.0)):.1f}%\n"
+            f"Відкритих позицій: {int(snapshot.get('open_trades_count', 0)) if isinstance(snapshot, dict) else 0}\n"
+            f"Проти тренду: {bool(signal.meta.get('against_bias', False))}\n"
+            f"Денний bias: {signal.meta.get('daily_bias', 'NEUTRAL')}\n"
+            f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
+            f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
+        )
+        system = (
+            "Ти Дарина — ризик-менеджер торгового офісу. Захищаєш капітал.\n"
+            "Говориш коротко, просто, українською.\n"
+            "Максимум 2 речення. Без технічних термінів.\n"
+            "Кажеш як людина: не варто, занадто ризиковано, можна входити.\n"
+            "Маєш право сказати НІ — це фінальне.\n"
+            "Якщо є небезпека — кажеш прямо і чому."
+        )
+        llm_note = ask_agent("daryna", system, context, max_tokens=120)
     if bool(signal.meta.get("loss_cooldown_active", False)):
+        note = llm_note or _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal)
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal),
+            note,
             {"veto": True},
         )
     if news_flag:
+        note = llm_note or f"Вето по новинах. До зниження ризику не входимо. {risk_levels}"
         return AgentDecision(
             "daryna",
             "WAIT",
-            f"Вето по новинах. До зниження ризику не входимо. {risk_levels}",
+            note,
             {"veto": True},
         )
     if rr < 1.5:
+        note = llm_note or _enforce_data_grounding(f"Вето: ризик не виправданий (rr {rr:.2f}). {risk_levels}", signal)
         return AgentDecision(
             "daryna",
             "REJECTED",
-            _enforce_data_grounding(f"Вето: ризик не виправданий (rr {rr:.2f}). {risk_levels}", signal),
+            note,
             {"veto": True},
         )
     if vol > 4.5:
+        note = llm_note or _enforce_data_grounding(f"Волатильність зависока ({vol:.2f}%). Чекаємо стабілізацію. {risk_levels}", signal)
         return AgentDecision(
             "daryna",
             "WAIT",
-            _enforce_data_grounding(f"Волатильність зависока ({vol:.2f}%). Чекаємо стабілізацію. {risk_levels}", signal),
+            note,
             {"veto": True},
         )
+    note = llm_note or _enforce_data_grounding(f"Ризик-контур чистий. Допуск на виконання. {risk_levels}", signal)
     return AgentDecision(
         "daryna",
         "APPROVED",
-        _enforce_data_grounding(f"Ризик-контур чистий. Допуск на виконання. {risk_levels}", signal),
+        note,
         {"veto": False},
     )
 
