@@ -140,3 +140,37 @@ def fetch_liquidations_proxy(symbol: str) -> Dict[str, Any]:
         }
     except Exception:
         return {}
+
+
+def fetch_funding_rate(symbol: str) -> Dict[str, Any]:
+    """
+    Fetch current funding/mark/index data from Binance premiumIndex.
+    Returns {} on failure.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        data = _http_get_json(
+            "https://fapi.binance.com/fapi/v1/premiumIndex",
+            {"symbol": sym},
+        )
+        if not isinstance(data, dict):
+            return {}
+        fr = data.get("lastFundingRate")
+        funding_rate_pct = None
+        try:
+            if fr is not None:
+                funding_rate_pct = float(fr) * 100.0
+        except Exception:
+            funding_rate_pct = None
+        return {
+            "symbol": sym,
+            "funding_rate_pct": funding_rate_pct,
+            "mark_price": float(data.get("markPrice") or 0.0),
+            "index_price": float(data.get("indexPrice") or 0.0),
+        }
+    except Exception:
+        return {}
