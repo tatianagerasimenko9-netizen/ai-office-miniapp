@@ -132,7 +132,12 @@ def ask_agent(
                     "tools": TOOLS,
                     "messages": messages,
                 }
-                resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+                resp = client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=25.0,
+                )
                 resp.raise_for_status()
                 data = resp.json()
 

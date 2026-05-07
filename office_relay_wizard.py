@@ -980,6 +980,26 @@ def extract_symbols(text: str) -> List[str]:
     return found
 
 
+def detect_agent_from_text(text: str) -> str:
+    t = str(text or "").lower()
+    mapping = {
+        "daryna": ["дарин"],
+        "maks": ["макс"],
+        "marichka": ["марічк"],
+        "news": ["назар"],
+        "marko": ["марко"],
+        "olesya": ["олес"],
+        "memory": ["софі"],
+        "psych": ["віктор"],
+        "dev": ["артем"],
+    }
+    for agent, patterns in mapping.items():
+        for p in patterns:
+            if p in t:
+                return agent
+    return "lev"
+
+
 async def office_free_chat(
     sender,
     text: str,
@@ -1019,18 +1039,6 @@ async def office_free_chat(
         "psych": f"{language_block}\nТи Віктор — психолог команди. Стежиш за дисципліною.",
         "dev": f"{language_block}\nТи Артем — технічний девелопер. Відповідаєш про систему.",
     }
-    router_system = (
-        "Ти координатор офісу. Визнач хто має відповісти на це повідомлення. "
-        "Відповідай ТІЛЬКИ одним словом — ім'ям агента: "
-        "lev, maks, marichka, daryna, marko, news, olesya, memory, psych, dev.\n"
-        "Якщо в тексті є пряме звертання до агента (наприклад: 'Дарино', 'Максе', 'Марічко', 'Назаре') — "
-        "повертай саме цього агента.\n"
-        "Якщо питання про ринок — maks або marichka.\n"
-        "Якщо про ризик/позиції — daryna.\n"
-        "Якщо про новини — news.\n"
-        "Якщо про стратегію — lev.\n"
-        "Якщо до всіх — lev."
-    )
 
     market_context = ""
     low = str(text or "").lower()
@@ -1061,12 +1069,9 @@ async def office_free_chat(
         "Тетяна написала в офіс:\n"
         f"\"{text}\"\n\n"
         f"{market_context}\n\n"
-        "Спочатку визнач, хто має відповідати, потім відповідь має бути голосом цього агента."
+        "Відповідь має бути голосом правильного агента."
     )
-    chosen_raw = clean_llm_note(ask_agent("lev", router_system, context, max_tokens=300)).lower().strip()
-    allowed = {"lev", "maks", "marichka", "daryna", "marko", "news", "olesya", "memory", "psych", "dev"}
-    chosen_agent = chosen_raw if chosen_raw in allowed else "lev"
-    print(f"[debug-router] chosen={chosen_agent}")
+    chosen_agent = detect_agent_from_text(text)
     answer_system = (
         f"{personalities.get(chosen_agent, personalities['lev'])}\n\n"
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
