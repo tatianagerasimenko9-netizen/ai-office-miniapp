@@ -967,6 +967,41 @@ def detect_addressed_agent(text: str) -> str:
     return "lev"
 
 
+def extract_symbols(text: str) -> List[str]:
+    """
+    Extract likely trading symbols from user text.
+    Supports explicit XXXUSDT and short aliases like BTC, ETH, SOL.
+    """
+    up = str(text or "").upper()
+    found: List[str] = []
+    seen: set[str] = set()
+
+    for m in re.finditer(r"\b([A-Z0-9]{2,15}USDT)\b", up):
+        sym = m.group(1)
+        if sym not in seen:
+            seen.add(sym)
+            found.append(sym)
+
+    aliases = {
+        "BTC": "BTCUSDT",
+        "ETH": "ETHUSDT",
+        "SOL": "SOLUSDT",
+        "BNB": "BNBUSDT",
+        "XRP": "XRPUSDT",
+        "DOGE": "DOGEUSDT",
+        "ADA": "ADAUSDT",
+        "LINK": "LINKUSDT",
+        "AVAX": "AVAXUSDT",
+        "DOT": "DOTUSDT",
+        "SXT": "SXTUSDT",
+    }
+    for key, sym in aliases.items():
+        if re.search(rf"\b{re.escape(key)}\b", up) and sym not in seen:
+            seen.add(sym)
+            found.append(sym)
+    return found
+
+
 async def office_free_chat(
     sender,
     text: str,
@@ -1017,15 +1052,19 @@ async def office_free_chat(
     low = str(text or "").lower()
     if any(w in low for w in ("btc", "біток", "ринок", "ціна", "тренд", "сигнал", "позиція")):
         try:
-            from office_market_data import fetch_btc_candles, fetch_liquidations_proxy
+            from office_market_data import fetch_candles, fetch_liquidations_proxy
 
-            candles = fetch_btc_candles("4h", 3)
-            liq = fetch_liquidations_proxy("BTCUSDT")
-            market_context = (
-                "Поточний контекст ринку:\n"
-                f"BTC ціна: {liq.get('current_price', 'невідомо') if isinstance(liq, dict) else 'невідомо'}\n"
-                f"BTC H4 свічки: {candles}"
-            )
+            symbols = extract_symbols(text)
+            if not symbols:
+                symbols = ["BTCUSDT"]
+            lines: List[str] = ["Поточний контекст ринку:"]
+            for sym in symbols:
+                liq = fetch_liquidations_proxy(sym)
+                candles = fetch_candles(sym, "4h", 3)
+                px = liq.get("current_price", "невідомо") if isinstance(liq, dict) else "невідомо"
+                lines.append(f"{sym} ціна: {px}")
+                lines.append(f"{sym} H4 свічки: {candles}")
+            market_context = "\n".join(lines)
         except Exception:
             market_context = ""
 
@@ -1037,7 +1076,7 @@ async def office_free_chat(
         f"{market_context}\n\n"
         f"Відповідай як {agent_key} — своїм характером і голосом."
     )
-    response = clean_llm_note(ask_agent(agent_key, system, context, max_tokens=300))
+    response = clean_llm_note(ask_agent(agent_key, system, context, max_tokens=500))
     if response:
         await agent_say(sender, agent_key, response)
 

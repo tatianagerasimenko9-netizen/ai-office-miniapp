@@ -18,15 +18,20 @@ def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
     return json.loads(raw)
 
 
-def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Fetch BTCUSDT futures candles from Binance.
+    Fetch futures candles from Binance for any USDT symbol.
     Returns list of candles or {} on failure.
     """
     try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
         data = _http_get_json(
             "https://fapi.binance.com/fapi/v1/klines",
-            {"symbol": "BTCUSDT", "interval": tf, "limit": int(limit)},
+            {"symbol": sym, "interval": tf, "limit": int(limit)},
         )
         out: List[Dict[str, Any]] = []
         if not isinstance(data, list):
@@ -49,6 +54,13 @@ def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Di
         return out
     except Exception:
         return {}
+
+
+def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Backward-compatible wrapper for BTC candles.
+    """
+    return fetch_candles("BTCUSDT", tf, limit)
 
 
 def fetch_open_interest(symbol: str) -> Dict[str, Any]:
