@@ -79,9 +79,18 @@
 | `OFFICE_SIGNAL_SOURCE_BOT_IDS` | Опційно: список `sender_id` через кому (напр. `123456789,987654321`). Повідомлення цих ботів у MAIN примусово вважаються сигналами навіть при нетиповому форматі. |
 | `OFFICE_SIGNAL_SOURCE_BOT_USERNAME` | Опційно: username бота-джерела (напр. `my_crypto_scanner_bot`, можна без `@`). Також форсує запуск офісу по повідомленнях у MAIN. |
 | `RELAY_LOG_NONSIGNAL_MAIN` | `1` — debug-лог відкинутих повідомлень у MAIN (`not signal`) для швидкого підбору формату детектора. |
+| `OFFICE_AUTOSAVE_SEC` | Інтервал автозбереження стану офісу в секундах (дефолт `600` = 10 хв). |
+| `OFFICE_AUTOSAVE_DISABLE` | `1` — вимкнути автозбереження стану (`office_autosave/state_latest.json`). |
 | *(вбудовано в relay)* | Обробка `MessageEdited`: якщо бот спочатку публікує короткий сигнал, а потім редагує його до повного тексту, office-flow теж запускається автоматично. |
 | `SOURCE_CHAT_ID` | Джерело повідомлень (якщо відрізняється від MAIN) |
 | `RELAY_FORCE_SETUP` / `RELAY_INTERACTIVE` | Майстер першого налаштування |
+
+### Команди в офіс-чаті (операційні)
+
+- `/status` / `!status` / `статус` — технічний статус relay + fingerprint.
+- `/rules` / `!rules` / `правила` — коротка пам'ятка правил офісу.
+- `/officeprompt` / `!officeprompt` / `промпт` — короткий витяг master prompt.
+- `/chart BTCUSDT` / `графік BTCUSDT` — швидкий перехід на Mini App + TradingView.
 
 #### Де взяти `OFFICE_MINI_VERIFY_URL` (Render, покроково)
 

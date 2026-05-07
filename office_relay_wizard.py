@@ -56,6 +56,21 @@ from office_bridge import (
     _extract_first_usdt_symbol,
 )
 
+ROOT_DIR = Path(__file__).resolve().parent
+MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
+CHECKLIST_PATH = ROOT_DIR / "OFFICE_CHECKLIST_STATUS_UA.md"
+RUNBOOK_PATH = ROOT_DIR / "RUNBOOK_UA.md"
+
+OFFICE_RULES_BRIEF_UA = (
+    "Правила офісу (коротко):\n"
+    "1) Пишемо простою українською, коротко.\n"
+    "2) Спочатку безпека депозиту, потім прибуток.\n"
+    "3) Рішення по сигналу = командна дискусія ролей, без хаосу.\n"
+    "4) Лев фіналить напрямок, Марко дає план виконання.\n"
+    "5) При серії збитків ризик має пріоритет, вхід блокується.\n"
+    "6) Для повних ролей/деталей: команда /officeprompt."
+)
+
 
 @dataclass
 class DialogItem:
@@ -128,6 +143,24 @@ def save_relay_config(cfg: Dict[str, Any]) -> None:
             merged[k] = v
 
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_text_head(path: Path, max_chars: int = 3500) -> str:
+    try:
+        txt = path.read_text(encoding="utf-8")
+        txt = txt.strip()
+        if not txt:
+            return ""
+        return txt[:max_chars]
+    except Exception:
+        return ""
+
+
+def _safe_json_write(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 def load_agent_bot_tokens() -> Dict[str, str]:
@@ -1304,6 +1337,16 @@ async def run() -> None:
                     fp = str(ident.get("fingerprint") or "?")
                     await send_office(fmt_agent_line("dev", f"Статус: все працює. fingerprint `{fp}`."), stream="tech")
                     return
+                if low in ("/rules", "!rules", "правила", "/правила"):
+                    await send_office(OFFICE_RULES_BRIEF_UA, stream="tasks")
+                    return
+                if low in ("/officeprompt", "!officeprompt", "промпт", "/промпт"):
+                    full = _read_text_head(MASTER_PROMPT_PATH, max_chars=3600)
+                    if not full:
+                        await send_office("Не знайшла файл OFFICE_MASTER_PROMPT_UA.md у репозиторії.", stream="tech")
+                        return
+                    await send_office("📘 OFFICE MASTER PROMPT (скорочено):\n" + full, stream="tasks")
+                    return
                 if low.startswith("/chart") or low.startswith("!chart") or low.startswith("графік"):
                     sym = _extract_first_usdt_symbol(text) or "BTCUSDT"
                     mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
@@ -1919,8 +1962,47 @@ async def run() -> None:
                 await send_office(f"Технічне попередження daily-report: {exc}", stream="tech")
             await asyncio.sleep(60)
 
+    async def monitor_office_autosave() -> None:
+        """
+        Автозбереження стану кожні N секунд (дефолт 600 = 10 хв).
+        Допомагає швидко відновитись після раптового рестарту/втрати сесії.
+        """
+        if os.getenv("OFFICE_AUTOSAVE_DISABLE", "").strip() == "1":
+            return
+        try:
+            every_sec = max(60, int(os.getenv("OFFICE_AUTOSAVE_SEC", "600") or "600"))
+        except Exception:
+            every_sec = 600
+        tick = 0
+        autosave_dir = ROOT_DIR / "office_autosave"
+        while True:
+            try:
+                tick += 1
+                ident = office_db_identity(db_path)
+                payload: Dict[str, Any] = {
+                    "ts_utc": datetime.now(timezone.utc).isoformat(),
+                    "db_identity": ident,
+                    "main_chat_id": main_chat_id,
+                    "office_chat_id": office_chat_id,
+                    "checklist_head": _read_text_head(CHECKLIST_PATH, max_chars=700),
+                    "runbook_head": _read_text_head(RUNBOOK_PATH, max_chars=500),
+                    "master_prompt_head": _read_text_head(MASTER_PROMPT_PATH, max_chars=900),
+                    "notes": "autosave by relay; generated every OFFICE_AUTOSAVE_SEC",
+                }
+                latest_path = autosave_dir / "state_latest.json"
+                _safe_json_write(latest_path, payload)
+                # Щогодинний снепшот (при дефолті 600 сек = кожні 6 циклів).
+                if tick % max(1, int(3600 / every_sec)) == 0:
+                    hour_tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H00Z")
+                    hourly_path = autosave_dir / f"state_{hour_tag}.json"
+                    _safe_json_write(hourly_path, payload)
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_office_autosave failed: {exc}")
+            await asyncio.sleep(every_sec)
+
     asyncio.create_task(monitor_daily_report())
     asyncio.create_task(monitor_source_bridge())
+    asyncio.create_task(monitor_office_autosave())
 
     try:
         await client.run_until_disconnected()
