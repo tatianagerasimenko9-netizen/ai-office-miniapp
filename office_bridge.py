@@ -18,7 +18,7 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
@@ -27,6 +27,8 @@ try:
 except Exception:  # pragma: no cover - optional in local sqlite mode
     psycopg = None  # type: ignore[assignment]
 
+from office_llm_agent import ask_agent
+from office_market_data import fetch_btc_candles, fetch_liquidations_proxy, fetch_open_interest
 from office_style_qa import polish_agent_message
 
 
@@ -1016,19 +1018,82 @@ def _fmt_level(v: Optional[float]) -> str:
     return f"{v:.6f}".rstrip("0").rstrip(".")
 
 
+def clean_llm_note(text: str) -> str:
+    if not text:
+        return text
+    patterns = [
+        r"^\*{0,2}\w+\s+каж[еє]т?:?\*{0,2}\s*",
+        r"^\*{0,2}По\s+\w+:?\*{0,2}\s*",
+    ]
+    out = text
+    for p in patterns:
+        out = re.sub(p, "", out, flags=re.IGNORECASE)
+    return out.strip()
+
+
+def _resolve_funding_disp(signal: OfficeSignal) -> str:
+    factor = signal.meta.get("factor_pack_v2") or {}
+    funding_raw = (
+        (factor.get("funding_rate_pct") if isinstance(factor, dict) else None)
+        or signal.meta.get("funding_rate")
+        or signal.meta.get("funding")
+        or "немає даних"
+    )
+    if isinstance(funding_raw, (int, float)):
+        return f"{float(funding_raw):.4f}%"
+    try:
+        return f"{float(funding_raw):.4f}%"
+    except Exception:
+        return str(funding_raw)
+
+
+def _to_kyiv_time(mins: int) -> str:
+    now = datetime.now(timezone.utc)
+    event = now + timedelta(minutes=int(mins))
+    kyiv = event + timedelta(hours=3)
+    return kyiv.strftime("%H:%M")
+
+
 def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     min_score = 12 if signal.session.upper() in ("LONDON", "NEW_YORK") else 15
     lv = _level_pack(signal)
     rr = float(signal.meta.get("rr", 2.0))
     vol = float(signal.meta.get("volatility_pct", 0.0))
     level_line = f"Рівні: вхід {_fmt_level(lv['entry'])}, SL {_fmt_level(lv['sl'])}, TP {_fmt_level(lv['tp'])}."
+    oi = fetch_open_interest(signal.symbol)
+    liq = fetch_liquidations_proxy(signal.symbol)
+    funding_disp = _resolve_funding_disp(signal)
+    system = (
+        "Ти Макс — ринковий аналітик.\n"
+        "20 років досвіду. Бачиш ринок через цифри.\n"
+        "Говориш коротко, українською, як досвідчений трейдер у чаті.\n"
+        "Часто починаєш з 'Увага!' якщо є аномалія.\n"
+        "Максимум 2 речення. Тільки факти.\n"
+        "Ніколи не кажеш 'входимо' або 'пропускаємо' — це не твоя зона.\n"
+        "Ніколи не вигадуєш цифри.\n"
+        "Якщо даних немає — кажеш 'немає даних'."
+    )
+    context = (
+        f"Символ: {signal.symbol}\n"
+        f"Напрямок сигналу: {signal.direction}\n"
+        f"RR: {rr:.1f}\n"
+        f"Волатильність: {vol:.1f}%\n"
+        f"BTC 24h: {float(signal.meta.get('btc_change_pct', 0.0) or 0.0):.1f}%\n"
+        f"Funding: {funding_disp}\n"
+        f"Відкритий інтерес: {(oi.get('oi', 'немає даних') if isinstance(oi, dict) else 'немає даних')}\n"
+        f"OI тренд: {(oi.get('history', 'немає даних') if isinstance(oi, dict) else 'немає даних')}\n"
+        f"Ліквідності зверху: {(liq.get('liq_zone_above', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
+        f"Ліквідності знизу: {(liq.get('liq_zone_below', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
+        f"Поточна ціна: {(liq.get('current_price', 'немає даних') if isinstance(liq, dict) else 'немає даних')}"
+    )
+    llm_note = clean_llm_note(ask_agent("maks", system, context, max_tokens=120))
     if signal.regime.upper() == "CHOP":
-        note = f"Ринок шумний ({vol:.2f}%). Я за пропуск. {level_line}"
+        note = llm_note or f"Ринок шумний ({vol:.2f}%). Я за пропуск. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
     if signal.score < min_score:
-        note = f"Сигнал нижче порога ({signal.score} < {min_score}). Поки без входу. {level_line}"
+        note = llm_note or f"Сигнал нижче порога ({signal.score} < {min_score}). Поки без входу. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
-    note = f"Технічно ок: score {signal.score}, rr {rr:.2f}, vol {vol:.2f}%. {level_line}"
+    note = llm_note or f"Технічно ок: score {signal.score}, rr {rr:.2f}, vol {vol:.2f}%. {level_line}"
     return AgentDecision("maks", "APPROVED", _enforce_data_grounding(note, signal), {"min_score": min_score})
 
 
@@ -1052,8 +1117,35 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
 
         signal.meta["daily_bias"] = bias
         signal.meta["against_bias"] = against
+        daily = fetch_btc_candles("1d", 3)
+        h4 = fetch_btc_candles("4h", 6)
+        pdh = daily[-2]["high"] if isinstance(daily, list) and len(daily) >= 2 else None
+        pdl = daily[-2]["low"] if isinstance(daily, list) and len(daily) >= 2 else None
+        current = daily[-1]["close"] if isinstance(daily, list) and daily else None
+        system = (
+            "Ти Марічка — аналітик денного напрямку ринку.\n"
+            "Дивишся зверху вниз: Daily -> H4.\n"
+            "Говориш просто, образно, українською.\n"
+            "'Ринок сьогодні росте' або 'падає' або 'без напрямку'.\n"
+            "Максимум 2 речення.\n"
+            "Ніколи не вигадуєш — тільки те що бачиш на свічках.\n"
+            "Якщо свічок немає — кажеш 'немає даних про тренд'."
+        )
+        context = (
+            f"Символ сигналу: {signal.symbol}\n"
+            f"Напрямок сигналу: {signal.direction}\n"
+            f"BTC Daily свічки: {daily}\n"
+            f"BTC H4 свічки: {h4}\n"
+            f"Вчорашній максимум (PDH): {pdh}\n"
+            f"Вчорашній мінімум (PDL): {pdl}\n"
+            f"Поточна ціна BTC: {current}\n"
+            f"BTC 24h зміна: {btc:.1f}%"
+        )
+        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=120))
 
-        if bias == "BULLISH" and not against:
+        if llm_note:
+            note = llm_note
+        elif bias == "BULLISH" and not against:
             note = (
                 f"Ринок сьогодні росте 📈 BTC за добу +{btc:.1f}%. "
                 f"Твій сигнал по тренду — це добре."
@@ -1098,27 +1190,44 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
 
 
 def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
-    prev = _last_turn(conversation)
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
     mins = int(signal.meta.get("minutes_to_event", 999))
+    system = (
+        "Ти Назар — новинний аналітик.\n"
+        "Захищаєш команду від входів перед новинами.\n"
+        "Говориш коротко, українською.\n"
+        "ЗАВЖДИ вказуєш час по Києву.\n"
+        "Називаєш подію конкретно — не 'подія' а 'виступ Пауела' або 'дані CPI'.\n"
+        "Якщо ризик є — кажеш прямо і чому.\n"
+        "Максимум 2 речення.\n"
+        "Ніколи не вигадуєш новини."
+    )
+    context = (
+        f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
+        f"Хвилин до події: {mins}\n"
+        f"Час події по Києву: {_to_kyiv_time(mins)}\n"
+        f"Символ: {signal.symbol}\n"
+        f"Напрямок: {signal.direction}"
+    )
+    llm_note = clean_llm_note(ask_agent("news", system, context, max_tokens=120))
     if risk == "HIGH":
         return AgentDecision(
             "news",
             "REJECTED",
-            _enforce_data_grounding(f"Високий новинний ризик, подія через {mins} хв. Краще пропустити.", signal),
+            llm_note or _enforce_data_grounding(f"Високий новинний ризик, подія через {mins} хв. Краще пропустити.", signal),
             {"news": "HIGH RISK"},
         )
     if risk == "RISK":
         return AgentDecision(
             "news",
             "WAIT",
-            _enforce_data_grounding(f"Є новинний ризик, подія через {mins} хв. Краще зачекати.", signal),
+            llm_note or _enforce_data_grounding(f"Є новинний ризик, подія через {mins} хв. Краще зачекати.", signal),
             {"news": "RISK"},
         )
     return AgentDecision(
         "news",
         "APPROVED",
-        _enforce_data_grounding("Критичних новин поруч немає.", signal),
+        llm_note or _enforce_data_grounding("Критичних новин поруч немає.", signal),
         {"news": "SAFE"},
     )
 
@@ -1129,8 +1238,6 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     vol = float(signal.meta.get("volatility_pct", 0.0))
     news_flag = any(t.agent_key == "news" and ("HIGH RISK" in t.text or "RISK:" in t.text) for t in conversation)
     risk_levels = f"Контроль: SL {_fmt_level(lv['sl'])}, invalidation по SL."
-    llm_mode = os.getenv("OFFICE_LLM_MODE", "off").strip().lower()
-    use_llm = llm_mode in ("daryna", "all")
     snapshot = signal.meta.get("live_risk", {})
     open_total = int(snapshot.get("open_trades_count", 0)) if isinstance(snapshot, dict) else 0
     if open_total > 0:
@@ -1138,52 +1245,34 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     if signal.meta.get("against_bias", False):
         risk_levels += " Сигнал проти тренду — розмір позиції вдвічі менше."
 
-    llm_note = ""
-    if use_llm:
-        from office_llm_agent import ask_agent
+    def _f(val: Any, default: float = 0.0) -> float:
+        try:
+            return float(val)
+        except Exception:
+            return default
 
-        def _f(val: Any, default: float = 0.0) -> float:
-            try:
-                return float(val)
-            except Exception:
-                return default
-
-        factor = signal.meta.get("factor_pack_v2") or {}
-        funding_raw = (
-            (factor.get("funding_rate_pct") if isinstance(factor, dict) else None)
-            or signal.meta.get("funding_rate")
-            or signal.meta.get("funding")
-            or "невідомо"
-        )
-        if isinstance(funding_raw, (int, float)):
-            funding_disp = f"{float(funding_raw):.4f}%"
-        else:
-            try:
-                funding_disp = f"{float(funding_raw):.4f}%"
-            except Exception:
-                funding_disp = str(funding_raw)
-
-        context = (
-            f"Сигнал: {signal.direction} {signal.symbol}\n"
-            f"BTC за добу: {_f(signal.meta.get('btc_change_pct', 0.0)):.1f}%\n"
-            f"Funding: {funding_disp}\n"
-            f"RR: {_f(signal.meta.get('rr', 0.0)):.1f}\n"
-            f"Волатильність: {_f(signal.meta.get('volatility_pct', 0.0)):.1f}%\n"
-            f"Відкритих позицій: {int(snapshot.get('open_trades_count', 0)) if isinstance(snapshot, dict) else 0}\n"
-            f"Проти тренду: {bool(signal.meta.get('against_bias', False))}\n"
-            f"Денний bias: {signal.meta.get('daily_bias', 'NEUTRAL')}\n"
-            f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
-            f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
-        )
-        system = (
-            "Ти Дарина — ризик-менеджер торгового офісу. Захищаєш капітал.\n"
-            "Говориш коротко, просто, українською.\n"
-            "Максимум 2 речення. Без технічних термінів.\n"
-            "Кажеш як людина: не варто, занадто ризиковано, можна входити.\n"
-            "Маєш право сказати НІ — це фінальне.\n"
-            "Якщо є небезпека — кажеш прямо і чому."
-        )
-        llm_note = ask_agent("daryna", system, context, max_tokens=120)
+    funding_disp = _resolve_funding_disp(signal)
+    context = (
+        f"Сигнал: {signal.direction} {signal.symbol}\n"
+        f"BTC за добу: {_f(signal.meta.get('btc_change_pct', 0.0)):.1f}%\n"
+        f"Funding: {funding_disp}\n"
+        f"RR: {_f(signal.meta.get('rr', 0.0)):.1f}\n"
+        f"Волатильність: {_f(signal.meta.get('volatility_pct', 0.0)):.1f}%\n"
+        f"Відкритих позицій: {int(snapshot.get('open_trades_count', 0)) if isinstance(snapshot, dict) else 0}\n"
+        f"Проти тренду: {bool(signal.meta.get('against_bias', False))}\n"
+        f"Денний bias: {signal.meta.get('daily_bias', 'NEUTRAL')}\n"
+        f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
+        f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
+    )
+    system = (
+        "Ти Дарина — ризик-менеджер торгового офісу. Захищаєш капітал.\n"
+        "Говориш коротко, просто, українською.\n"
+        "Максимум 2 речення. Без технічних термінів.\n"
+        "Кажеш як людина: не варто, занадто ризиковано, можна входити.\n"
+        "Маєш право сказати НІ — це фінальне.\n"
+        "Якщо є небезпека — кажеш прямо і чому."
+    )
+    llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=120))
     if bool(signal.meta.get("loss_cooldown_active", False)):
         note = llm_note or _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal)
         return AgentDecision(
@@ -1234,16 +1323,47 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
     bias_tail = " Торгуємо проти тренду — підвищена обережність." if against_bias else ""
     has_reject = any("Вето" in t.text or "пропуск" in t.text.lower() or "HIGH RISK" in t.text for t in conversation if t.agent_key in ("maks", "daryna", "news"))
     has_wait = any("Чекаємо" in t.text or "переносимо" in t.text for t in conversation if t.agent_key in ("maks", "daryna"))
+    final_action: Literal["ENTER", "SKIP", "WAIT"] = "ENTER"
+    if signal.regime.upper() == "CHOP" or has_reject:
+        final_action = "SKIP"
+    elif has_wait:
+        final_action = "WAIT"
+    team_lines = "\n".join([f"{t.agent_key}: {t.text[:120]}" for t in conversation])
+    system = (
+        "Ти Лев — керівник офісу.\n"
+        "Стриманий, впевнений лідер.\n"
+        "Читаєш думки команди і приймаєш фінальне рішення.\n"
+        "Говориш коротко, впевнено, українською.\n"
+        "ОБОВ'ЯЗКОВО одне з трьох:\n"
+        "'Рішення: ВХІД' або 'Рішення: ПРОПУСК' або 'Рішення: ЧЕКАЄМО'\n"
+        "Потім одне речення чому.\n"
+        "Максимум 2 речення.\n"
+        "Ніколи не вигадуєш дані."
+    )
+    context = (
+        f"Сигнал: {signal.direction} {signal.symbol}\n"
+        f"RR: {float(signal.meta.get('rr', 0.0) or 0.0):.1f}\n"
+        f"Проти тренду: {against_bias}\n"
+        f"Bias: {signal.meta.get('daily_bias', 'NEUTRAL')}\n"
+        f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n\n"
+        f"Команда сказала:\n{team_lines}\n\n"
+        f"Системне рішення: {final_action}"
+    )
+    llm_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=120))
     if signal.regime.upper() == "CHOP":
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding(f"Ринок шумний. Фінал: пропускаємо.{bias_tail}", signal))
+        note = llm_note or _enforce_data_grounding(f"Ринок шумний. Фінал: пропускаємо.{bias_tail}", signal)
+        return AgentDecision("lev", "REJECTED", note)
     if has_reject:
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding(f"Приймаю вето ризику. Фінал: пропускаємо.{bias_tail}", signal))
+        note = llm_note or _enforce_data_grounding(f"Приймаю вето ризику. Фінал: пропускаємо.{bias_tail}", signal)
+        return AgentDecision("lev", "REJECTED", note)
     if has_wait:
-        return AgentDecision("lev", "WAIT", _enforce_data_grounding(f"Не форсуємо. Чекаємо підтвердження біля {entry}.{bias_tail}", signal))
+        note = llm_note or _enforce_data_grounding(f"Не форсуємо. Чекаємо підтвердження біля {entry}.{bias_tail}", signal)
+        return AgentDecision("lev", "WAIT", note)
+    note = llm_note or _enforce_data_grounding(f"Контекст нормальний. Фінал: входимо. План: entry {entry}, SL {sl}, TP {tp}.{bias_tail}", signal)
     return AgentDecision(
         "lev",
         "APPROVED",
-        _enforce_data_grounding(f"Контекст нормальний. Фінал: входимо. План: entry {entry}, SL {sl}, TP {tp}.{bias_tail}", signal),
+        note,
     )
 
 
@@ -1277,28 +1397,53 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
     entry = _fmt_level(lv["entry"])
     sl = _fmt_level(lv["sl"])
     tp = _fmt_level(lv["tp"])
+    entry_raw = signal.meta.get("entry_price")
+    sl_raw = signal.meta.get("stop_loss")
+    tp_raw = signal.meta.get("take_profit")
+    system = (
+        "Ти Марко — виконавець плану.\n"
+        "Технічний, точний, конкретний.\n"
+        "Даєш план входу з реальними цифрами.\n"
+        "Говориш коротко, українською.\n"
+        "Максимум 2 речення.\n"
+        "ЗАВЖДИ використовуєш реальні ціни з даних — ніколи не вигадуєш рівні.\n"
+        "Якщо рівнів немає — кажеш 'рівні не отримані'."
+    )
+    context = (
+        f"Символ: {signal.symbol}\n"
+        f"Напрямок: {signal.direction}\n"
+        f"Entry: {entry_raw if entry_raw else 'не отримано'}\n"
+        f"Stop Loss: {sl_raw if sl_raw else 'не отримано'}\n"
+        f"Take Profit: {tp_raw if tp_raw else 'не отримано'}\n"
+        f"RR: {float(signal.meta.get('rr', 0.0) or 0.0):.1f}\n"
+        f"Рішення команди: {final_action}"
+    )
+    llm_note = clean_llm_note(ask_agent("marko", system, context, max_tokens=120))
     if final_action == "ENTER":
+        note = llm_note or _enforce_data_grounding(
+            f"Вхід {signal.direction} {signal.symbol}. Рівні: entry {entry}, SL {sl}, TP {tp}. "
+            f"Супровід за {trail}. Якщо SL пробито — без добору проти руху.",
+            signal,
+        )
         return AgentDecision(
             "marko",
             "APPROVED",
-            _enforce_data_grounding(
-                f"Вхід {signal.direction} {signal.symbol}. Рівні: entry {entry}, SL {sl}, TP {tp}. "
-                f"Супровід за {trail}. Якщо SL пробито — без добору проти руху.",
-                signal,
-            ),
+            note,
             {"trail_mode": trail},
         )
     if final_action == "WAIT":
+        note = llm_note or _enforce_data_grounding(f"Рішення: чекаємо по {signal.symbol} до повторного тригера.", signal)
         return AgentDecision(
             "marko",
             "WAIT",
-            _enforce_data_grounding(f"Рішення: чекаємо по {signal.symbol} до повторного тригера.", signal),
+            note,
             {"trail_mode": trail},
         )
+    note = llm_note or _enforce_data_grounding(f"Рішення: пропускаємо {signal.symbol} за командним рішенням.", signal)
     return AgentDecision(
         "marko",
         "REJECTED",
-        _enforce_data_grounding(f"Рішення: пропускаємо {signal.symbol} за командним рішенням.", signal),
+        note,
         {"trail_mode": trail},
     )
 
