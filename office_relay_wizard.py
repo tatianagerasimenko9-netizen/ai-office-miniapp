@@ -1199,7 +1199,10 @@ async def run() -> None:
     main_entity = await client.get_entity(main_chat_id)
     office_entity = await client.get_entity(office_chat_id)
     agent_bot_tokens: Dict[str, str] = {}
-    agent_bot_tokens = load_agent_bot_tokens()
+    try:
+        agent_bot_tokens = load_agent_bot_tokens() or {}
+    except Exception:
+        agent_bot_tokens = {}
     bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
     me = await client.get_me()
     owner_user_id: Optional[int] = None
