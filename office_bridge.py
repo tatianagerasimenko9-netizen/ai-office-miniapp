@@ -180,6 +180,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def is_kill_zone(utc_now: datetime) -> bool:
+    """
+    True, якщо поточний UTC-час у вікні London/NY Kill Zone.
+    London: 08:00-11:00 UTC
+    New York: 13:00-16:00 UTC
+    """
+    h = int(utc_now.hour)
+    m = int(utc_now.minute)
+    minute_of_day = h * 60 + m
+    london_start = 8 * 60
+    london_end = 11 * 60
+    ny_start = 13 * 60
+    ny_end = 16 * 60
+    in_london = london_start <= minute_of_day < london_end
+    in_ny = ny_start <= minute_of_day < ny_end
+    return in_london or in_ny
+
+
+def _kill_zone_session_name(utc_now: datetime) -> str:
+    minute_of_day = int(utc_now.hour) * 60 + int(utc_now.minute)
+    if 8 * 60 <= minute_of_day < 11 * 60:
+        return "LONDON"
+    if 13 * 60 <= minute_of_day < 16 * 60:
+        return "NEW_YORK"
+    return "OFF_HOURS"
+
+
 def fmt_agent_line(agent_key: str, text: str) -> str:
     # Hidden routing tag for relay multi-bot delivery; stripped before sending to Telegram.
     return f"@@{agent_key}@@{text}"
@@ -788,6 +815,35 @@ def journal_consecutive_loss_streak(db_path: str, *, max_check: int = 12) -> int
     return streak
 
 
+def daily_drawdown_pct(db_path: str) -> float:
+    """
+    Сума PnL% по закритих угодах за поточний день UTC.
+    Повертає додатне значення drawdown (наприклад, 4.2 означає -4.2% за день).
+    """
+    try:
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT pnl_pct FROM trade_journal
+            WHERE status = 'CLOSED'
+              AND ts_close_utc IS NOT NULL
+              AND substr(ts_close_utc, 1, 10) = substr(?, 1, 10)
+              AND pnl_pct IS NOT NULL
+            """,
+            (_now_iso(),),
+        )
+    except Exception:
+        return 0.0
+
+    total = 0.0
+    for r in rows:
+        try:
+            total += float(r[0] or 0.0)
+        except Exception:
+            continue
+    return abs(total) if total < 0 else 0.0
+
+
 def journal_learning_hints_from_tags(tags: Dict[str, int]) -> List[str]:
     mapping = {
         "high_volatility": "зменшити розмір позиції в періоди високої волатильності",
@@ -1179,6 +1235,26 @@ async def office_handle_signal(
     signal: OfficeSignal,
     db_path: str = "office_bridge.db",
 ) -> OfficeVerdict:
+    # Kill Zone gate (UTC-based): trading decision belongs to Bridge, not relay.
+    utc_now = datetime.now(timezone.utc)
+    session_active = is_kill_zone(utc_now)
+    signal.session = _kill_zone_session_name(utc_now)
+    signal.meta["outside_session"] = not session_active
+
+    kz_mode = str(os.getenv("KILL_ZONE_MODE", "strict") or "strict").strip().lower()
+    if kz_mode not in ("strict", "soft"):
+        kz_mode = "strict"
+
+    if not session_active:
+        # For downstream agents / future ChatGPT session filter.
+        signal.meta["chatgpt_session_flag"] = "outside_session"
+        # Soft mode keeps discussion/flow but halves position intent.
+        if kz_mode == "soft":
+            signal.meta["position_size_multiplier"] = 0.5
+            signal.meta["kill_zone_mode"] = "soft"
+        else:
+            signal.meta["kill_zone_mode"] = "strict"
+
     log_event(db_path, "SIGNAL_RECEIVED", {"symbol": signal.symbol, "direction": signal.direction}, signal.signal_id)
     task_id = f"TASK-{signal.signal_id}"
     title = f"Review signal {signal.symbol} {signal.direction}"
@@ -1192,6 +1268,71 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason})
+
+    if not session_active and kz_mode == "strict":
+        log_event(
+            db_path,
+            "KILL_ZONE_BLOCK",
+            {
+                "reason": "blocked: outside_kill_zone",
+                "symbol": signal.symbol,
+                "direction": signal.direction,
+                "utc_now": utc_now.strftime("%H:%M"),
+                "kill_zone_mode": kz_mode,
+                "outside_session": True,
+            },
+            signal.signal_id,
+        )
+        await sender(
+            "Поза Kill Zone (UTC 08:00-11:00 / 13:00-16:00). "
+            "Новий вхід блокуємо. Рішення: пропускаємо."
+        )
+        verdict = OfficeVerdict(
+            "SKIP",
+            [
+                AgentDecision(
+                    "lev",
+                    "REJECTED",
+                    _enforce_data_grounding(
+                        "Поза Kill Zone. Пропускаємо сигнал і чекаємо активну сесію London/NY.",
+                        signal,
+                    ),
+                    {"kill_zone_block": True, "outside_session": True},
+                ),
+            ],
+            "blocked: outside_kill_zone",
+        )
+        prev_agent: Optional[str] = None
+        for idx, d in enumerate(verdict.decisions, start=1):
+            pre = _cross_reply_prefix(prev_agent, d.agent_key)
+            out = f"{pre}{d.note}" if pre else d.note
+            await agent_say(sender, d.agent_key, out)
+            log_message(db_path, signal.signal_id, idx, d.agent_key, out)
+            prev_agent = d.agent_key
+            ok, reason = transition_task(
+                db_path,
+                task_id=task_id,
+                title=title,
+                assignee=d.agent_key,
+                new_status="BLOCKED",
+                payload={"decision": d.decision, "note": d.note, "reason": "blocked: outside_kill_zone"},
+            )
+            if not ok:
+                log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": d.agent_key})
+        ok, reason = transition_task(
+            db_path,
+            task_id=task_id,
+            title=title,
+            assignee="olesya",
+            new_status="DONE",
+            payload={"final_action": verdict.action, "summary": verdict.summary},
+        )
+        if not ok:
+            log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
+        await agent_say(sender, "olesya", "Зафіксувала: сигнал відсіяно поза Kill Zone.", 0.05)
+        log_verdict(db_path, signal, verdict)
+        return verdict
+
     await sender(f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.")
 
     try:
@@ -1208,19 +1349,38 @@ async def office_handle_signal(
 
     cb_disabled = os.getenv("OFFICE_CIRCUIT_DISABLE", "").strip() == "1"
     try:
-        cb_need = max(2, int(os.getenv("OFFICE_CIRCUIT_LOSSES", "3") or "3"))
+        cb_need = max(3, int(os.getenv("OFFICE_CIRCUIT_LOSSES", "3") or "3"))
     except Exception:
         cb_need = 3
-    if not cb_disabled and journal_consecutive_loss_streak(db_path) >= cb_need:
+    try:
+        cb_drawdown = max(0.1, float(os.getenv("OFFICE_CIRCUIT_DRAWDOWN", "4") or "4"))
+    except Exception:
+        cb_drawdown = 4.0
+    loss_streak = journal_consecutive_loss_streak(db_path)
+    dd_pct = daily_drawdown_pct(db_path)
+    streak_hit = loss_streak >= cb_need
+    dd_hit = dd_pct >= cb_drawdown
+    cb_hit = streak_hit or dd_hit
+    if not cb_disabled and cb_hit:
+        if streak_hit and dd_hit:
+            cb_text = f"⚠️ Circuit breaker: {cb_need}+ SL підряд і -{dd_pct:.1f}% за день. Вхід заборонено."
+        elif streak_hit:
+            cb_text = f"⚠️ Circuit breaker: {cb_need}+ SL підряд. Вхід заборонено."
+        else:
+            cb_text = f"⚠️ Circuit breaker: -{dd_pct:.1f}% за день. Вхід заборонено."
         log_event(
             db_path,
             "CIRCUIT_BREAKER",
-            {"streak": cb_need, "symbol": signal.symbol},
+            {
+                "streak_now": loss_streak,
+                "streak_need": cb_need,
+                "daily_drawdown_pct": dd_pct,
+                "daily_drawdown_need": cb_drawdown,
+                "symbol": signal.symbol,
+            },
             signal.signal_id,
         )
-        await sender(
-            f"⚠️ Circuit breaker: {cb_need}+ SL підряд у журналі. Новий вхід не відкриваємо — тільки обговорення / пропуск."
-        )
+        await sender(cb_text)
         # Один крок з Левом: інакше другий REJECTED після BLOCKED ламає FSM задачі (OPEN→BLOCKED→BLOCKED).
         verdict = OfficeVerdict(
             "SKIP",
@@ -1229,10 +1389,10 @@ async def office_handle_signal(
                     "lev",
                     "REJECTED",
                     _enforce_data_grounding(
-                        f"Circuit breaker: {cb_need} збитки підряд. Вхід заборонено, поки серія не перерветься виграшем або BE.",
+                        cb_text,
                         signal,
                     ),
-                    {"circuit_breaker": True},
+                    {"circuit_breaker": True, "streak_now": loss_streak, "daily_drawdown_pct": dd_pct},
                 ),
             ],
             f"Автоматичне блокування після {cb_need}+ SL поспіль (MASTER п.31).",
