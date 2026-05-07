@@ -1914,7 +1914,8 @@ async def office_handle_signal(
         )
         if not ok:
             log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
-        await agent_say(sender, "olesya", "Зафіксувала: сигнал відсіяно поза Kill Zone.", 0.05)
+        olesya_note = _olesya_reply(signal, verdict, db_path)
+        await agent_say(sender, "olesya", olesya_note, 0.05)
         log_verdict(db_path, signal, verdict)
         return verdict
 
@@ -2021,7 +2022,8 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
-    await agent_say(sender, "olesya", "Зафіксувала результат у журнал і статистику.", 0.05)
+    olesya_note = _olesya_reply(signal, verdict, db_path)
+    await agent_say(sender, "olesya", olesya_note, 0.05)
     log_verdict(db_path, signal, verdict)
     return verdict
 
@@ -2193,6 +2195,25 @@ def _simple_ua(agent_key: str, note: str) -> str:
 
 
 def _memory_reply(symbol: str, market: Dict[str, Any]) -> str:
+    system = (
+        "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
+        "Тобі 29 років.\n"
+        "Ти Софія — аналітик історичної пам'яті трейдинг-офісу.\n"
+        "Спокійна, структурна, data-first. Не вигадуєш статистику.\n"
+        "Даєш 1-2 короткі речення без markdown-заголовків і без списків."
+    )
+    context = (
+        f"Символ: {symbol}\n"
+        f"BTC 24г (%): {float(market.get('btc_change_pct', 0.0)):+.2f}\n"
+        f"{symbol} 24г (%): {float(market.get('sym_change_pct', 0.0)):+.2f}\n"
+        f"Волатильність (%): {float(market.get('volatility_pct', 0.0)):.2f}\n"
+        f"Новинний ризик: {market.get('news_risk', 'SAFE')}\n"
+        f"Хвилин до події: {int(market.get('minutes_to_event', 999))}\n"
+        "Задача: коротко сказати, як історично поводитися обережно в подібному контексті."
+    )
+    llm_note = clean_llm_note(ask_agent("memory", system, context, max_tokens=180))
+    if llm_note:
+        return llm_note
     return (
         f"По {symbol} є схожі записи в журналі — без RAG / агрегації точний winrate не цитую. "
         "Звіряй факти, не форсуй вхід."
@@ -2200,13 +2221,55 @@ def _memory_reply(symbol: str, market: Dict[str, Any]) -> str:
 
 
 def _psych_reply(recurring: Dict[str, int]) -> str:
+    system = (
+        "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
+        "Тобі 35 років.\n"
+        "Ти Віктор — психолог команди трейдинг-офісу.\n"
+        "Говориш спокійно, підтримуюче, але дисципліновано.\n"
+        "Даєш коротку практичну пораду по емоціях і самоконтролю (1-2 речення)."
+    )
+    top = ", ".join(f"{k} x{v}" for k, v in sorted(recurring.items(), key=lambda x: (-x[1], x[0]))[:3]) or "немає"
+    context = (
+        f"Повторювані помилки з журналу: {top}\n"
+        f"Кількість повторюваних тегів: {len(recurring)}\n"
+        "Задача: дати команді коротку настанову по дисципліні перед наступним рішенням."
+    )
+    llm_note = clean_llm_note(ask_agent("psych", system, context, max_tokens=170))
+    if llm_note:
+        return llm_note
     if not recurring:
         return "Емоційний фон нормальний. Працюємо спокійно, без поспіху."
-    top = ", ".join(f"{k} x{v}" for k, v in sorted(recurring.items(), key=lambda x: (-x[1], x[0]))[:2])
+    top2 = ", ".join(f"{k} x{v}" for k, v in sorted(recurring.items(), key=lambda x: (-x[1], x[0]))[:2])
     return (
-        f"Бачу повторювані помилки: {top}. "
+        f"Бачу повторювані помилки: {top2}. "
         "Сьогодні тримаємо дисципліну і зменшуємо агресію."
     )
+
+
+def _olesya_reply(signal: OfficeSignal, verdict: OfficeVerdict, db_path: str = "office_bridge.db") -> str:
+    closed = journal_closed_trade_count(db_path)
+    recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
+    system = (
+        "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
+        "Тобі 27 років.\n"
+        "Ти Олеся — аналітик результатів і журналу угод у трейдинг-офісі.\n"
+        "Тон: коротко, по-діловому, data-first. Не вигадуєш чисел.\n"
+        "Даєш 1-2 речення: що зафіксовано і який learning-фокус далі."
+    )
+    context = (
+        f"Сигнал: {signal.symbol} {signal.direction}\n"
+        f"Сесія: {signal.session}\n"
+        f"Режим: {signal.regime}\n"
+        f"Фінальна дія офісу: {verdict.action}\n"
+        f"Підсумок: {verdict.summary}\n"
+        f"К-сть закритих угод у журналі: {closed}\n"
+        f"Повторювані теги помилок (loss): {json.dumps(recurring, ensure_ascii=False)}\n"
+        "Задача: коротко зафіксувати результат і дати фокус на наступні кейси."
+    )
+    llm_note = clean_llm_note(ask_agent("olesya", system, context, max_tokens=180))
+    if llm_note:
+        return llm_note
+    return "Зафіксувала результат у журнал і статистику."
 
 
 def _dev_reply(question: str) -> str:
