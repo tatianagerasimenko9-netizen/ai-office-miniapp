@@ -1023,6 +1023,8 @@ async def office_free_chat(
         "Ти координатор офісу. Визнач хто має відповісти на це повідомлення. "
         "Відповідай ТІЛЬКИ одним словом — ім'ям агента: "
         "lev, maks, marichka, daryna, marko, news, olesya, memory, psych, dev.\n"
+        "Якщо в тексті є пряме звертання до агента (наприклад: 'Дарино', 'Максе', 'Марічко', 'Назаре') — "
+        "повертай саме цього агента.\n"
         "Якщо питання про ринок — maks або marichka.\n"
         "Якщо про ризик/позиції — daryna.\n"
         "Якщо про новини — news.\n"
@@ -1064,6 +1066,7 @@ async def office_free_chat(
     chosen_raw = clean_llm_note(ask_agent("lev", router_system, context, max_tokens=300)).lower().strip()
     allowed = {"lev", "maks", "marichka", "daryna", "marko", "news", "olesya", "memory", "psych", "dev"}
     chosen_agent = chosen_raw if chosen_raw in allowed else "lev"
+    print(f"[debug-router] chosen={chosen_agent}")
     answer_system = (
         f"{personalities.get(chosen_agent, personalities['lev'])}\n\n"
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
