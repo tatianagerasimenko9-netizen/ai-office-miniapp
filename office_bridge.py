@@ -1068,6 +1068,8 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
     liq = fetch_liquidations_proxy(signal.symbol)
     funding_disp = _resolve_funding_disp(signal)
     system = (
+        "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+        "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
         "Тобі 38 років.\n"
         "Ти Макс — ринковий аналітик.\n"
         "Пережив крах 2018 і 2022.\n"
@@ -1132,6 +1134,8 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         pdl = daily[-2]["low"] if isinstance(daily, list) and len(daily) >= 2 else None
         current = daily[-1]["close"] if isinstance(daily, list) and daily else None
         system = (
+            "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+            "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
             "Тобі 26 років.\n"
             "Ти Марічка — дивишся на ринок зверху вниз, від великого до малого.\n"
             "Поки інші дивляться на 15 хвилин — ти бачиш тиждень і день.\n"
@@ -1154,7 +1158,7 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
             f"Поточна ціна BTC: {current}\n"
             f"BTC 24h зміна: {btc:.1f}%"
         )
-        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=300))
+        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=400))
 
         if llm_note:
             note = llm_note
@@ -1206,6 +1210,8 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
     mins = int(signal.meta.get("minutes_to_event", 999))
     system = (
+        "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+        "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
         "Тобі 31 рік.\n"
         "Ти Назар — стежиш за новинами.\n"
         "Трохи параноїдальний за природою але це рятує від збитків.\n"
@@ -1282,6 +1288,8 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
     )
     system = (
+        "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+        "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
         "Тобі 34 роки.\n"
         "Ти Дарина — захищаєш капітал.\n"
         "Особисто пережила злив депозиту.\n"
@@ -1296,7 +1304,7 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Звертайся до колег по іменах — Макс, Марічка, Назар, Дарина, Лев, Марко.\n"
         "Ніколи не вигадуєш стан портфеля."
     )
-    llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=250))
+    llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=350))
     if bool(signal.meta.get("loss_cooldown_active", False)):
         note = llm_note or _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal)
         return AgentDecision(
@@ -1354,6 +1362,10 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
         final_action = "WAIT"
     team_lines = "\n".join([f"{t.agent_key}: {t.text[:120]}" for t in conversation])
     system = (
+        "КРИТИЧНО ВАЖЛИВО: Ти спілкуєшся ВИКЛЮЧНО українською мовою. Жодного слова російською. "
+        "Якщо помічаєш російське слово — заміни на українське. Українська — єдина мова офісу.\n"
+        "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+        "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
         "Тобі 42 роки.\n"
         "Ти Лев — керуєш офісом.\n"
         "Холодна голова в будь-якій ситуації.\n"
@@ -1429,6 +1441,8 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
     sl_raw = signal.meta.get("stop_loss")
     tp_raw = signal.meta.get("take_profit")
     system = (
+        "Говориш ВИКЛЮЧНО українською мовою. Жодного слова російською або англійською "
+        "(крім торгових термінів: entry, SL, TP, RR, OI, funding, BTC).\n"
         "Тобі 29 років.\n"
         "Ти Марко — перетворюєш рішення в конкретний план.\n"
         "Любиш точність і структуру.\n"
