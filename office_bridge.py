@@ -1137,6 +1137,9 @@ def _fmt_level(v: Optional[float]) -> str:
 def clean_llm_note(text: str) -> str:
     if not text:
         return text
+    text = re.sub(r"<invoke[^>]*>.*?</invoke>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<parameter[^>]*>.*?</parameter>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\*{1,3}", "", text)
     text = re.sub(r"\|[^\n]+\|", "", text)
     text = re.sub(r"^#{1,3}\s+", "", text, flags=re.MULTILINE)
@@ -1332,7 +1335,7 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
         f"Ліквідності знизу: {(liq.get('liq_zone_below', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
         f"Поточна ціна: {(liq.get('current_price', 'немає даних') if isinstance(liq, dict) else 'немає даних')}"
     )
-    llm_note = clean_llm_note(ask_agent("maks", system, context, max_tokens=300))
+    llm_note = clean_llm_note(ask_agent("maks", system, context, max_tokens=1000))
     if signal.regime.upper() == "CHOP":
         note = llm_note or f"Ринок шумний ({vol:.2f}%). Я за пропуск. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
@@ -1398,7 +1401,7 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
             f"Поточна ціна BTC: {current}\n"
             f"BTC 24h зміна: {btc:.1f}%"
         )
-        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=400))
+        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=800))
 
         if llm_note:
             note = llm_note
@@ -1485,7 +1488,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         f"Символ: {signal.symbol}\n"
         f"Напрямок: {signal.direction}"
     )
-    llm_note = clean_llm_note(ask_agent("news", system, context, max_tokens=200))
+    llm_note = clean_llm_note(ask_agent("news", system, context, max_tokens=600))
     if risk == "HIGH":
         fallback = (
             f"{'Важлива макро подія' if event_name == 'невідомо' else event_name} "
@@ -1569,7 +1572,7 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Звертайся до колег по іменах — Макс, Марічка, Назар, Дарина, Лев, Марко.\n"
         "Ніколи не вигадуєш стан портфеля."
     )
-    llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=350))
+    llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=800))
     if bool(signal.meta.get("loss_cooldown_active", False)):
         note = llm_note or _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal)
         return AgentDecision(
@@ -1657,7 +1660,7 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
         f"Команда сказала:\n{team_lines}\n\n"
         f"Системне рішення: {final_action}"
     )
-    llm_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=300))
+    llm_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=1500))
     if signal.regime.upper() == "CHOP":
         note = llm_note or _enforce_data_grounding(f"Ринок шумний. Фінал: пропускаємо.{bias_tail}", signal)
         return AgentDecision("lev", "REJECTED", note)
@@ -1737,7 +1740,7 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
         f"RR: {float(signal.meta.get('rr', 0.0) or 0.0):.1f}\n"
         f"Рішення команди: {final_action}"
     )
-    llm_note = clean_llm_note(ask_agent("marko", system, context, max_tokens=250))
+    llm_note = clean_llm_note(ask_agent("marko", system, context, max_tokens=800))
     if final_action == "ENTER":
         note = llm_note or _enforce_data_grounding(
             f"Вхід {signal.direction} {signal.symbol}. Рівні: entry {entry}, SL {sl}, TP {tp}. "
@@ -2329,7 +2332,7 @@ def _memory_reply(symbol: str, market: Dict[str, Any], db_path: str = "office_br
         f"Останній кейс з фідбеком: {json.dumps(fb, ensure_ascii=False)}\n"
         "Задача: коротко сказати, як історично поводитися обережно в подібному контексті."
     )
-    llm_note = clean_llm_note(ask_agent("memory", system, context, max_tokens=180))
+    llm_note = clean_llm_note(ask_agent("memory", system, context, max_tokens=600))
     if llm_note:
         return llm_note
     if fb:
@@ -2360,7 +2363,7 @@ def _psych_reply(recurring: Dict[str, int]) -> str:
         f"Кількість повторюваних тегів: {len(recurring)}\n"
         "Задача: дати команді коротку настанову по дисципліні перед наступним рішенням."
     )
-    llm_note = clean_llm_note(ask_agent("psych", system, context, max_tokens=170))
+    llm_note = clean_llm_note(ask_agent("psych", system, context, max_tokens=600))
     if llm_note:
         return llm_note
     if not recurring:
@@ -2392,7 +2395,7 @@ def _olesya_reply(signal: OfficeSignal, verdict: OfficeVerdict, db_path: str = "
         f"Повторювані теги помилок (loss): {json.dumps(recurring, ensure_ascii=False)}\n"
         "Задача: коротко зафіксувати результат і дати фокус на наступні кейси."
     )
-    llm_note = clean_llm_note(ask_agent("olesya", system, context, max_tokens=180))
+    llm_note = clean_llm_note(ask_agent("olesya", system, context, max_tokens=600))
     if llm_note:
         return llm_note
     return "Зафіксувала результат у журнал і статистику."
