@@ -2056,10 +2056,37 @@ async def run() -> None:
 
     asyncio.create_task(monitor_news())
 
+    async def morning_macro_brief() -> None:
+        """
+        Daily 09:00 Kyiv macro briefing from Maks (LLM + live macro data).
+        """
+        try:
+            from office_market_data import fetch_macro_context
+
+            macro = fetch_macro_context()
+            system = (
+                "Ти Макс, ранковий макро-аналітик трейдинг-офісу. "
+                "Пишеш ТІЛЬКИ українською, просто і конкретно. "
+                "Завдання: коротко пояснити що зараз роблять DXY, S&P500, золото, BTC і що це означає для ризику по крипті сьогодні. "
+                "Формат Telegram: 4-7 коротких речень, без таблиць, без markdown-заголовків."
+            )
+            context = (
+                "Ранковий макро-зріз (live):\n"
+                f"{json.dumps(macro, ensure_ascii=False)}\n"
+                "Дай практичний висновок для команди: risk-on / risk-off / mixed і як діяти з ризиком."
+            )
+            response = clean_llm_note(ask_agent("maks", system, context, max_tokens=300))
+            await send_office(response or "Ранковий макро-зріз тимчасово недоступний.", stream="general")
+        except Exception as exc:
+            print(f"[relay][WARN] morning_macro_brief failed: {type(exc).__name__}: {exc}")
+            await send_office(f"Технічне попередження macro-brief: {exc}", stream="tech")
+
     async def monitor_briefing_scheduler() -> None:
         """MASTER п.28: ранковий брифінг + вечірній debrief за локальним часом."""
+        last_macro_date = ""
         last_morning_date = ""
         last_evening_date = ""
+        bh, bm = _parse_hh_mm(os.getenv("OFFICE_MACRO_BRIEFING_TIME", "09:00"), 9, 0)
         mh, mm = _parse_hh_mm(os.getenv("OFFICE_BRIEFING_MORNING", "08:00"), 8, 0)
         eh, em = _parse_hh_mm(os.getenv("OFFICE_BRIEFING_EVENING", "21:00"), 21, 0)
         http_timeout = aiohttp.ClientTimeout(total=15)
@@ -2072,6 +2099,11 @@ async def run() -> None:
                 now = datetime.now(tz)
                 today = now.strftime("%Y-%m-%d")
                 h, mi = now.hour, now.minute
+
+                if h == bh and mi == bm and last_macro_date != today:
+                    await morning_macro_brief()
+                    last_macro_date = today
+                    print("[relay] auto macro briefing sent")
 
                 if h == mh and mi == mm and last_morning_date != today:
                     async with aiohttp.ClientSession(timeout=http_timeout) as http:
