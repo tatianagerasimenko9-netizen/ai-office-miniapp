@@ -70,7 +70,17 @@ def fetch_open_interest(symbol: str) -> Dict[str, Any]:
             {"symbol": sym, "period": "1h", "limit": 4},
         )
 
-        oi_now = float((now_data or {}).get("openInterest") or 0.0) if isinstance(now_data, dict) else 0.0
+        oi_contracts = float((now_data or {}).get("openInterest") or 0.0) if isinstance(now_data, dict) else 0.0
+        liq = fetch_liquidations_proxy(sym)
+        current_price = float((liq or {}).get("current_price") or 0.0) if isinstance(liq, dict) else 0.0
+        if current_price > 0:
+            oi_now = oi_contracts * current_price
+            oi_unit = "USDT"
+            oi_note = ""
+        else:
+            oi_now = oi_contracts
+            oi_unit = "contracts"
+            oi_note = "(контракти, не USDT)"
         hist: List[Dict[str, Any]] = []
         if isinstance(hist_data, list):
             for item in hist_data:
@@ -83,6 +93,9 @@ def fetch_open_interest(symbol: str) -> Dict[str, Any]:
 
         return {
             "oi": oi_now,
+            "oi_contracts": oi_contracts,
+            "oi_unit": oi_unit,
+            "oi_note": oi_note,
             "symbol": sym,
             "history": hist,
         }

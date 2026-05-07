@@ -1067,6 +1067,15 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
     oi = fetch_open_interest(signal.symbol)
     liq = fetch_liquidations_proxy(signal.symbol)
     funding_disp = _resolve_funding_disp(signal)
+    oi_value = oi.get("oi") if isinstance(oi, dict) else None
+    oi_note = str(oi.get("oi_note", "")).strip() if isinstance(oi, dict) else ""
+    try:
+        oi_display = f"{float(oi_value):.0f} USDT" if oi_value is not None else "немає даних"
+    except Exception:
+        oi_display = str(oi_value) if oi_value is not None else "немає даних"
+    if oi_note:
+        oi_display = f"{oi_display} {oi_note}"
+    oi_history = oi.get("history", []) if isinstance(oi, dict) else []
     system = (
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
@@ -1095,8 +1104,8 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
         f"Волатильність: {vol:.1f}%\n"
         f"BTC 24h: {float(signal.meta.get('btc_change_pct', 0.0) or 0.0):.1f}%\n"
         f"Funding: {funding_disp}\n"
-        f"Відкритий інтерес: {(oi.get('oi', 'немає даних') if isinstance(oi, dict) else 'немає даних')}\n"
-        f"OI тренд: {(oi.get('history', 'немає даних') if isinstance(oi, dict) else 'немає даних')}\n"
+        f"Відкритий інтерес: {oi_display}\n"
+        f"OI тренд (USDT): {oi_history}\n"
         f"Ліквідності зверху: {(liq.get('liq_zone_above', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
         f"Ліквідності знизу: {(liq.get('liq_zone_below', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
         f"Поточна ціна: {(liq.get('current_price', 'немає даних') if isinstance(liq, dict) else 'немає даних')}"
