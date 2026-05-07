@@ -1775,17 +1775,17 @@ def _cross_reply_prefix(prev_key: Optional[str], cur_key: str) -> str:
         return ""
     key = (prev_key, cur_key)
     if key == ("maks", "news"):
-        return "По новинах: "
+        return ""
     if key == ("news", "daryna"):
-        return "По ризику: "
+        return ""
     if key == ("daryna", "memory"):
-        return "По історії: "
+        return ""
     if key == ("memory", "psych"):
-        return "По дисципліні: "
+        return ""
     if key == ("psych", "dev"):
-        return "По техніці: "
+        return ""
     if key == ("dev", "lev"):
-        return "Все ок. "
+        return ""
     if key == ("lev", "marko"):
         return ""
     return ""
