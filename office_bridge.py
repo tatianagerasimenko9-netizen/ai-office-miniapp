@@ -414,6 +414,10 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
+                cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_text TEXT")
+                cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
+                cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS agent_suggested TEXT")
+                cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS learning_note TEXT")
             conn.commit()
         return
 
@@ -499,6 +503,19 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
+        cols = {
+            str(r[1]).strip().lower()
+            for r in conn.execute("PRAGMA table_info(trade_journal)").fetchall()
+            if r and len(r) > 1
+        }
+        if "feedback_text" not in cols:
+            conn.execute("ALTER TABLE trade_journal ADD COLUMN feedback_text TEXT")
+        if "feedback_source" not in cols:
+            conn.execute("ALTER TABLE trade_journal ADD COLUMN feedback_source TEXT")
+        if "agent_suggested" not in cols:
+            conn.execute("ALTER TABLE trade_journal ADD COLUMN agent_suggested TEXT")
+        if "learning_note" not in cols:
+            conn.execute("ALTER TABLE trade_journal ADD COLUMN learning_note TEXT")
         conn.commit()
 
 
@@ -799,6 +816,105 @@ def journal_closed_trade_count(db_path: str) -> int:
         return int(row[0]) if row and row[0] is not None else 0
     except Exception:
         return 0
+
+
+def journal_add_feedback(
+    db_path: str,
+    *,
+    symbol: str,
+    result: Literal["WIN", "LOSS", "PARTIAL"],
+    agent_suggested: str,
+    feedback_text: str,
+    feedback_source: str = "tetiana",
+    learning_note: str = "",
+) -> bool:
+    """
+    Attach user feedback to latest OPEN or recently CLOSED trade by symbol.
+    Returns True when a row was updated.
+    """
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return False
+    row = _fetchone(
+        db_path,
+        """
+        SELECT trade_id
+        FROM trade_journal
+        WHERE symbol = ?
+        ORDER BY
+            CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END,
+            COALESCE(ts_close_utc, ts_open_utc) DESC
+        LIMIT 1
+        """,
+        (sym,),
+    )
+    if not row:
+        return False
+    trade_id = str(row[0] or "").strip()
+    if not trade_id:
+        return False
+    note = str(learning_note or "").strip()
+    if not note:
+        if str(result).upper() == "LOSS":
+            note = "Після стопа не форсувати ре-ентрі, чекати чисте підтвердження."
+        elif str(result).upper() == "WIN":
+            note = "Працював чистий сценарій і дисциплінований менеджмент."
+        else:
+            note = "Часткова фіксація ок, далі потрібне підтвердження продовження."
+    _db_write(
+        db_path,
+        """
+        UPDATE trade_journal SET
+            feedback_text = ?,
+            feedback_source = ?,
+            agent_suggested = ?,
+            learning_note = ?
+        WHERE trade_id = ?
+        """,
+        (feedback_text[:1200], feedback_source[:64], agent_suggested[:32], note[:600], trade_id),
+    )
+    log_event(
+        db_path,
+        "JOURNAL_FEEDBACK",
+        {
+            "trade_id": trade_id,
+            "symbol": sym,
+            "result": str(result).upper(),
+            "feedback_source": feedback_source,
+            "agent_suggested": agent_suggested,
+        },
+        trade_id,
+    )
+    return True
+
+
+def journal_latest_feedback_case(db_path: str, *, symbol: str) -> Dict[str, Any]:
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return {}
+    row = _fetchone(
+        db_path,
+        """
+        SELECT symbol, direction, outcome, feedback_text, agent_suggested, learning_note, setup_name, entry_price
+        FROM trade_journal
+        WHERE symbol = ? AND feedback_text IS NOT NULL AND TRIM(feedback_text) != ''
+        ORDER BY COALESCE(ts_close_utc, ts_open_utc) DESC
+        LIMIT 1
+        """,
+        (sym,),
+    )
+    if not row:
+        return {}
+    return {
+        "symbol": str(row[0] or sym),
+        "direction": str(row[1] or ""),
+        "outcome": str(row[2] or ""),
+        "feedback_text": str(row[3] or ""),
+        "agent_suggested": str(row[4] or ""),
+        "learning_note": str(row[5] or ""),
+        "setup_name": str(row[6] or ""),
+        "entry_price": row[7],
+    }
 
 
 def journal_consecutive_loss_streak(db_path: str, *, max_check: int = 12) -> int:
@@ -2194,7 +2310,8 @@ def _simple_ua(agent_key: str, note: str) -> str:
     return one_line(n)
 
 
-def _memory_reply(symbol: str, market: Dict[str, Any]) -> str:
+def _memory_reply(symbol: str, market: Dict[str, Any], db_path: str = "office_bridge.db") -> str:
+    fb = journal_latest_feedback_case(db_path, symbol=symbol)
     system = (
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
         "Тобі 29 років.\n"
@@ -2209,11 +2326,20 @@ def _memory_reply(symbol: str, market: Dict[str, Any]) -> str:
         f"Волатильність (%): {float(market.get('volatility_pct', 0.0)):.2f}\n"
         f"Новинний ризик: {market.get('news_risk', 'SAFE')}\n"
         f"Хвилин до події: {int(market.get('minutes_to_event', 999))}\n"
+        f"Останній кейс з фідбеком: {json.dumps(fb, ensure_ascii=False)}\n"
         "Задача: коротко сказати, як історично поводитися обережно в подібному контексті."
     )
     llm_note = clean_llm_note(ask_agent("memory", system, context, max_tokens=180))
     if llm_note:
         return llm_note
+    if fb:
+        outcome = str(fb.get("outcome") or "N/A")
+        ftxt = str(fb.get("feedback_text") or "без тексту")
+        lnote = str(fb.get("learning_note") or "працюємо від підтвердження.")
+        return (
+            f"По {symbol} минулий схожий кейс: {outcome}. "
+            f"Фідбек: \"{ftxt}\". Висновок: {lnote}"
+        )
     return (
         f"По {symbol} є схожі записи в журналі — без RAG / агрегації точний winrate не цитую. "
         "Звіряй факти, не форсуй вхід."
@@ -2431,7 +2557,7 @@ async def office_desk_user_question(
     need_psych = bool(recurring) or any(k in q_low for k in ("емоц", "tilt", "стрес", "страх", "псих"))
 
     if need_memory:
-        mem_note = _memory_reply(sym, market)
+        mem_note = _memory_reply(sym, market, db_path)
         mu = _simple_ua("memory", mem_note)
         await agent_say(sender, "memory", f"{_cross_reply_prefix(prev_agent, 'memory')}{mu}", 0.11)
         conversation.append(ConversationTurn("memory", mem_note))

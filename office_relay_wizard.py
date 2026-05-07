@@ -10,7 +10,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -43,6 +43,7 @@ from office_bridge import (
     init_office_db,
     journal_close_trade,
     journal_consecutive_loss_streak,
+    journal_add_feedback,
     journal_learning_hints_from_tags,
     journal_open_trade,
     journal_recurring_mistakes,
@@ -1038,11 +1039,83 @@ def detect_agent_from_text(text: str) -> str:
     return "lev"
 
 
+def is_trade_feedback(text: str) -> bool:
+    keywords = [
+        "відпрацював",
+        "не відпрацював",
+        "вибило",
+        "взяли",
+        "закрили",
+        "стоп",
+        "тейк",
+        "tp",
+        "sl",
+        "в плюс",
+        "в мінус",
+        "профіт",
+        "збиток",
+        "відмінно",
+        "провалився",
+    ]
+    low = str(text or "").lower()
+    return any(k in low for k in keywords)
+
+
+def _feedback_result(text: str) -> str:
+    low = str(text or "").lower()
+    win_keys = ("відпрацював", "взяли", "тейк", "tp", "профіт", "в плюс", "відмінно")
+    loss_keys = ("не відпрацював", "вибило", "стоп", "sl", "збиток", "в мінус", "провалився")
+    if any(k in low for k in win_keys) and not any(k in low for k in loss_keys):
+        return "WIN"
+    if any(k in low for k in loss_keys) and not any(k in low for k in win_keys):
+        return "LOSS"
+    if "tp1" in low or "частк" in low:
+        return "PARTIAL"
+    return "PARTIAL"
+
+
 async def office_free_chat(
     sender,
     text: str,
     db_path: str,
 ) -> None:
+    if is_trade_feedback(text):
+        symbol = _extract_first_usdt_symbol(text)
+        if not symbol:
+            syms = extract_symbols(text)
+            if syms:
+                symbol = syms[0]
+        if not symbol:
+            symbol = "BTCUSDT"
+        agent_suggested = detect_agent_from_text(text)
+        result = _feedback_result(text)
+        result_lit: Literal["WIN", "LOSS", "PARTIAL"] = "PARTIAL"
+        if result == "WIN":
+            result_lit = "WIN"
+        elif result == "LOSS":
+            result_lit = "LOSS"
+        learning_note = ""
+        if result == "LOSS":
+            learning_note = "Минулий кейс завершився стопом: наступний вхід тільки після підтвердження і без форсу."
+        elif result == "WIN":
+            learning_note = "Минулий кейс дав профіт: повторюємо дисципліну і точний таймінг входу."
+        else:
+            learning_note = "Минулий кейс частково відпрацював: далі працюємо від підтвердження продовження."
+        saved = journal_add_feedback(
+            db_path=db_path,
+            symbol=symbol,
+            result=result_lit,
+            agent_suggested=agent_suggested,
+            feedback_text=text,
+            feedback_source="tetiana",
+            learning_note=learning_note,
+        )
+        if saved:
+            await agent_say(sender, "olesya", "Зафіксувала. Додаю в базу для навчання.")
+        else:
+            await agent_say(sender, "olesya", f"Прийняла фідбек по {symbol}, але не знайшла кейс у журналі. Перевір symbol/угоду.")
+        return
+
     language_block = (
         "МОВА: Говориш ВИКЛЮЧНО українською. Це абсолютне правило. "
         "Заборонені слова: сейчас, растет, ничего/ничого, беспокоит/беспокоїть, "
