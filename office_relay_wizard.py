@@ -172,7 +172,7 @@ def load_agent_bot_tokens() -> Dict[str, str]:
     AGENT_BOT_TOKEN_MEMORY (Софія), AGENT_BOT_TOKEN_PSYCH (Віктор),
     AGENT_BOT_TOKEN_DEV (Артем)
     """
-    keys = ("lev", "maks", "news", "daryna", "marko", "olesya", "memory", "psych", "dev")
+    keys = ("lev", "maks", "news", "daryna", "marko", "olesya", "memory", "psych", "dev", "marichka")
     result: Dict[str, str] = {}
     for k in keys:
         v = os.getenv(f"AGENT_BOT_TOKEN_{k.upper()}", "").strip()

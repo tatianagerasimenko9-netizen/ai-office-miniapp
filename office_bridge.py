@@ -137,6 +137,16 @@ AGENTS: Dict[str, AgentProfile] = {
         responsibility="стан API/бота/Mini App, технічні попередження і стабільність",
         photo_hint="Dev console, status monitors, incident board",
     ),
+    "marichka": AgentProfile(
+        key="marichka",
+        name="Марічка",
+        nickname="Марічка",
+        emoji="🧭",
+        role="Daily Bias",
+        character="Спокійна, впевнена, говорить просто і чітко.",
+        responsibility="Аналізує напрямок ринку зверху вниз: Daily -> H4 -> H1 -> M15. Каже по тренду чи проти.",
+        photo_hint="marichka",
+    ),
 }
 
 
@@ -1022,6 +1032,71 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
     return AgentDecision("maks", "APPROVED", _enforce_data_grounding(note, signal), {"min_score": min_score})
 
 
+def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
+    try:
+        btc = float(signal.meta.get("btc_change_pct", 0.0))
+        regime = str(signal.regime or "").upper()
+        direction = str(signal.direction or "").upper()
+
+        if btc > 1.5:
+            bias = "BULLISH"
+        elif btc < -1.5:
+            bias = "BEARISH"
+        else:
+            bias = "NEUTRAL"
+
+        if regime == "CHOP":
+            bias = "NEUTRAL"
+
+        against = (direction == "LONG" and bias == "BEARISH") or (direction == "SHORT" and bias == "BULLISH")
+
+        signal.meta["daily_bias"] = bias
+        signal.meta["against_bias"] = against
+
+        if bias == "BULLISH" and not against:
+            note = (
+                f"Ринок сьогодні росте 📈 BTC за добу +{btc:.1f}%. "
+                f"Твій сигнал по тренду — це добре."
+            )
+        elif bias == "BEARISH" and not against:
+            note = (
+                f"Ринок сьогодні падає 📉 BTC за добу {btc:.1f}%. "
+                f"Твій сигнал по тренду — це добре."
+            )
+        elif bias == "NEUTRAL":
+            note = (
+                f"Ринок зараз без чіткого напрямку 😐 BTC за добу {btc:.1f}%. "
+                f"Торгуємо обережно."
+            )
+        elif bias == "BULLISH" and against:
+            note = (
+                f"Ринок росте, BTC +{btc:.1f}% 📈 Але твій сигнал SHORT — проти тренду. "
+                f"Вдвічі обережніше."
+            )
+        else:
+            note = (
+                f"Ринок падає, BTC {btc:.1f}% 📉 Але твій сигнал LONG — проти тренду. "
+                f"Вдвічі обережніше."
+            )
+
+    except Exception:
+        bias = "NEUTRAL"
+        against = False
+        signal.meta["daily_bias"] = bias
+        signal.meta["against_bias"] = against
+        note = "Напрямок ринку незрозумілий — торгуємо з мінімальним ризиком."
+
+    return AgentDecision(
+        "marichka",
+        "APPROVED" if not against else "WAIT",
+        note,
+        {
+            "daily_bias": bias,
+            "against_bias": against,
+        },
+    )
+
+
 def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     prev = _last_turn(conversation)
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
@@ -1058,6 +1133,8 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     open_total = int(snapshot.get("open_trades_count", 0)) if isinstance(snapshot, dict) else 0
     if open_total > 0:
         risk_levels += f" Відкрито позицій: {open_total}."
+    if signal.meta.get("against_bias", False):
+        risk_levels += " Сигнал проти тренду — розмір позиції вдвічі менше."
     if bool(signal.meta.get("loss_cooldown_active", False)):
         return AgentDecision(
             "daryna",
@@ -1099,18 +1176,20 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
     entry = _fmt_level(lv["entry"])
     sl = _fmt_level(lv["sl"])
     tp = _fmt_level(lv["tp"])
+    against_bias = bool(signal.meta.get("against_bias", False))
+    bias_tail = " Торгуємо проти тренду — підвищена обережність." if against_bias else ""
     has_reject = any("Вето" in t.text or "пропуск" in t.text.lower() or "HIGH RISK" in t.text for t in conversation if t.agent_key in ("maks", "daryna", "news"))
     has_wait = any("Чекаємо" in t.text or "переносимо" in t.text for t in conversation if t.agent_key in ("maks", "daryna"))
     if signal.regime.upper() == "CHOP":
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Ринок шумний. Фінал: пропускаємо.", signal))
+        return AgentDecision("lev", "REJECTED", _enforce_data_grounding(f"Ринок шумний. Фінал: пропускаємо.{bias_tail}", signal))
     if has_reject:
-        return AgentDecision("lev", "REJECTED", _enforce_data_grounding("Приймаю вето ризику. Фінал: пропускаємо.", signal))
+        return AgentDecision("lev", "REJECTED", _enforce_data_grounding(f"Приймаю вето ризику. Фінал: пропускаємо.{bias_tail}", signal))
     if has_wait:
-        return AgentDecision("lev", "WAIT", _enforce_data_grounding(f"Не форсуємо. Чекаємо підтвердження біля {entry}.", signal))
+        return AgentDecision("lev", "WAIT", _enforce_data_grounding(f"Не форсуємо. Чекаємо підтвердження біля {entry}.{bias_tail}", signal))
     return AgentDecision(
         "lev",
         "APPROVED",
-        _enforce_data_grounding(f"Контекст нормальний. Фінал: входимо. План: entry {entry}, SL {sl}, TP {tp}.", signal),
+        _enforce_data_grounding(f"Контекст нормальний. Фінал: входимо. План: entry {entry}, SL {sl}, TP {tp}.{bias_tail}", signal),
     )
 
 
@@ -1177,6 +1256,12 @@ def _decide_chain(signal: OfficeSignal, db_path: str = "office_bridge.db") -> Of
     analyst = _analyst_reply(signal, conversation)
     decisions.append(analyst)
     conversation.append(ConversationTurn(analyst.agent_key, analyst.note))
+
+    bias = _bias_reply(signal, conversation)
+    decisions.append(bias)
+    conversation.append(ConversationTurn(bias.agent_key, bias.note))
+    signal.meta["daily_bias"] = bias.payload.get("daily_bias", "NEUTRAL")
+    signal.meta["against_bias"] = bias.payload.get("against_bias", False)
 
     news = _news_reply(signal, conversation)
     decisions.append(news)
