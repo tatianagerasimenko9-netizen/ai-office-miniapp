@@ -35,6 +35,7 @@ from office_style_qa import polish_agent_message
 
 from office_bridge import (
     OfficeSignal,
+    detect_setup_type,
     fmt_agent_line,
     get_agent_card_text,
     init_office_db,
@@ -1503,6 +1504,7 @@ async def run() -> None:
                     initial_volatility_pct=float(sig.meta.get("volatility_pct", 0.0)),
                     initial_news_risk=str(sig.meta.get("news_risk", "SAFE")),
                 )
+                setup_tag = detect_setup_type(sig)
                 journal_open_trade(
                     db_path,
                     trade_id=sig.signal_id,
@@ -1511,10 +1513,15 @@ async def run() -> None:
                     entry_price=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
                     stop_loss=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
                     take_profit=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
-                    setup_name="relay_signal",
+                    setup_name=setup_tag,
                     timeframe="auto",
                     entry_reason="Desk ENTER after agent chain",
-                    context={"session": sig.session, "regime": sig.regime, "score": sig.score},
+                    context={
+                        "setup_type": setup_tag,
+                        "session": sig.session,
+                        "regime": sig.regime,
+                        "score": sig.score,
+                    },
                 )
                 await office_position_event(
                     sender=sender,

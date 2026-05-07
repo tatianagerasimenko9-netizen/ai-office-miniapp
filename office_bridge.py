@@ -844,6 +844,39 @@ def daily_drawdown_pct(db_path: str) -> float:
     return abs(total) if total < 0 else 0.0
 
 
+def detect_setup_type(signal: OfficeSignal) -> str:
+    """
+    Автотег сетапу з source_text / factor_pack_v2.
+    Порядок пріоритету: Judas -> FVG -> OB -> Asian Range -> Breaker.
+    """
+    def _from_text(raw: str) -> str:
+        text = str(raw or "").lower()
+        if "judas swing" in text or "judas" in text:
+            return "Judas Swing"
+        if "fair value gap" in text or "fvg" in text:
+            return "FVG"
+        if "order block" in text or "ob" in text:
+            return "Order Block"
+        if "asian range" in text or "asian" in text:
+            return "Asian Range"
+        if "breaker" in text:
+            return "Breaker Block"
+        return ""
+
+    try:
+        by_source = _from_text(signal.source_text)
+        if by_source:
+            return by_source
+
+        fp = signal.meta.get("factor_pack_v2")
+        by_fp = _from_text(fp if isinstance(fp, str) else json.dumps(fp or {}, ensure_ascii=False))
+        if by_fp:
+            return by_fp
+    except Exception:
+        return "Unknown"
+    return "Unknown"
+
+
 def live_risk_snapshot(db_path: str) -> Dict[str, Any]:
     """
     Live risk зріз для Risk Manager:
