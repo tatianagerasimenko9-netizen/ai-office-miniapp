@@ -1319,6 +1319,8 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
 def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
     mins = int(signal.meta.get("minutes_to_event", 999))
+    event_name = str(signal.meta.get("news_event_name") or signal.meta.get("news_headline") or "невідомо")
+    currency = str(signal.meta.get("news_currency") or "USD")
     system = (
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
@@ -1343,22 +1345,32 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
         f"Хвилин до події: {mins}\n"
         f"Час події по Києву: {_to_kyiv_time(mins)}\n"
+        f"Назва події: {event_name}\n"
+        f"Валюта/країна: {currency}\n"
         f"Символ: {signal.symbol}\n"
         f"Напрямок: {signal.direction}"
     )
     llm_note = clean_llm_note(ask_agent("news", system, context, max_tokens=200))
     if risk == "HIGH":
+        fallback = (
+            f"{'Важлива макро подія' if event_name == 'невідомо' else event_name} "
+            f"через {mins} хв ({_to_kyiv_time(mins)} за Києвом). Не входимо."
+        )
         return AgentDecision(
             "news",
             "REJECTED",
-            llm_note or _enforce_data_grounding(f"Високий новинний ризик, подія через {mins} хв. Краще пропустити.", signal),
+            llm_note or _enforce_data_grounding(fallback, signal),
             {"news": "HIGH RISK"},
         )
     if risk == "RISK":
+        fallback = (
+            f"{'Новина середньої важливості' if event_name == 'невідомо' else event_name} "
+            f"через {mins} хв ({_to_kyiv_time(mins)} за Києвом). Краще зачекати."
+        )
         return AgentDecision(
             "news",
             "WAIT",
-            llm_note or _enforce_data_grounding(f"Є новинний ризик, подія через {mins} хв. Краще зачекати.", signal),
+            llm_note or _enforce_data_grounding(fallback, signal),
             {"news": "RISK"},
         )
     return AgentDecision(

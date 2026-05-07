@@ -103,6 +103,8 @@ class NewsRisk:
     level: str
     headline: str
     minutes_to_event: int
+    event_name: str = ""
+    currency: str = "USD"
 
 
 def relay_config_path() -> Path:
@@ -547,6 +549,7 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
         data = await resp.json()
     nearest_min = 999
     nearest_title = "no high impact events"
+    nearest_currency = "USD"
     keys = ("fomc", "fed", "rate", "cpi", "nfp", "powell", "inflation")
     for e in (data if isinstance(data, list) else []):
         title = str(e.get("event") or e.get("title") or "")
@@ -563,11 +566,12 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
         if 0 <= mins < nearest_min:
             nearest_min = mins
             nearest_title = title
+            nearest_currency = str(e.get("currency") or e.get("country") or "USD")
     if nearest_min <= 60:
-        return NewsRisk("HIGH RISK", nearest_title, nearest_min)
+        return NewsRisk("HIGH RISK", nearest_title, nearest_min, nearest_title, nearest_currency)
     if nearest_min <= 180:
-        return NewsRisk("RISK", nearest_title, nearest_min)
-    return NewsRisk("SAFE", nearest_title, nearest_min)
+        return NewsRisk("RISK", nearest_title, nearest_min, nearest_title, nearest_currency)
+    return NewsRisk("SAFE", nearest_title, nearest_min, nearest_title, nearest_currency)
 
 
 def looks_like_signal(text: str) -> bool:
