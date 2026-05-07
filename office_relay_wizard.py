@@ -1496,6 +1496,15 @@ async def run() -> None:
 
             # OFFICE interactive desk Q&A (explicit command only -> reduces spam/chaos)
             if src_chat_id is not None and int(src_chat_id) == int(office_chat_id):
+                sender_id = getattr(event, "sender_id", None)
+                print(f"[debug-office] повідомлення від {sender_id}")
+                print(f"[debug-office] owner_user_id={owner_user_id}")
+                print(f"[debug-office] text={text[:50]}")
+                try:
+                    sender_obj_dbg = await event.get_sender()
+                    print(f"[debug-office] is_bot={getattr(sender_obj_dbg, 'bot', None)}")
+                except Exception:
+                    print("[debug-office] is_bot=None")
                 low = (text or "").strip().lower()
                 if (text or "").strip().lower() in ("/status", "!status", "статус", "/статус"):
                     ident = office_db_identity(db_path)
@@ -1534,6 +1543,7 @@ async def run() -> None:
                     print(f"[relay] scenario run: {scenario_key}")
                     return
                 q = _parse_desk_command(text)
+                print(f"[debug-office] q={q}")
                 if q:
                     nonlocal last_desk_qa_mono
                     now_m = time.monotonic()
@@ -1601,6 +1611,7 @@ async def run() -> None:
                 if owner_user_id is not None and sender_id_int != owner_user_id:
                     return
                 agent_key = detect_addressed_agent(text)
+                print(f"[debug-office] going to free chat, agent={agent_key}")
                 async def send_office_fn(msg: str) -> None:
                     await send_office(msg[:3900], stream="general")
                 await office_free_chat(
