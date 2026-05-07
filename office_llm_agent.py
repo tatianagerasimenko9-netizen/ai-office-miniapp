@@ -27,7 +27,7 @@ def ask_agent(
             "content-type": "application/json",
         }
         payload: Dict[str, Any] = {
-            "model": "claude-haiku-4-5-20251001",
+            "model": "claude-sonnet-4-5-20251022",
             "max_tokens": int(max_tokens),
             "system": str(system_prompt or ""),
             "messages": [
