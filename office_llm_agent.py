@@ -127,7 +127,7 @@ def ask_agent(
             for _ in range(max_loops):
                 payload: Dict[str, Any] = {
                     "model": "claude-sonnet-4-6",
-                    "max_tokens": int(max_tokens),
+                    "max_tokens": max(int(max_tokens), 1000),
                     "system": str(system_prompt or ""),
                     "tools": TOOLS,
                     "messages": messages,
