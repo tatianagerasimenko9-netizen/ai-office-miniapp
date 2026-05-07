@@ -1198,6 +1198,9 @@ async def run() -> None:
 
     main_entity = await client.get_entity(main_chat_id)
     office_entity = await client.get_entity(office_chat_id)
+    agent_bot_tokens: Dict[str, str] = {}
+    agent_bot_tokens = load_agent_bot_tokens()
+    bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
     me = await client.get_me()
     owner_user_id: Optional[int] = None
     owner_env = os.getenv("OFFICE_OWNER_USER_ID", "").strip()
@@ -1236,8 +1239,6 @@ async def run() -> None:
     save_relay_config(cfg)
     print(f"[relay] saved config -> {cfg_path.resolve()}")
     print("\nRelay запущено. Залиш це вікно відкритим.")
-    agent_bot_tokens = load_agent_bot_tokens()
-    bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
 
     mini_verify = os.getenv("OFFICE_MINI_VERIFY_URL", "").strip()
     if mini_verify and os.getenv("OFFICE_MINI_VERIFY_DISABLE", "").strip() != "1":
