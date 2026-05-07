@@ -973,6 +973,7 @@ async def office_free_chat(
     agent_key: str,
     db_path: str,
 ) -> None:
+    print(f"[debug-fc] started for {agent_key}")
     language_block = (
         "МОВА: Говориш ВИКЛЮЧНО українською. Це абсолютне правило. "
         "Заборонені слова: сейчас, растет, ничего/ничого, беспокоит/беспокоїть, "
@@ -1026,7 +1027,8 @@ async def office_free_chat(
                 f"BTC ціна: {liq.get('current_price', 'невідомо') if isinstance(liq, dict) else 'невідомо'}\n"
                 f"BTC H4 свічки: {candles}"
             )
-        except Exception:
+        except Exception as e:
+            print(f"[debug-fc] error: {e}")
             market_context = ""
 
     context = (
@@ -1038,8 +1040,10 @@ async def office_free_chat(
         f"Відповідай як {agent_key} — своїм характером і голосом."
     )
     response = clean_llm_note(ask_agent(agent_key, system, context, max_tokens=300))
+    print(f"[debug-fc] response='{response[:100] if response else None}'")
     if response:
         await agent_say(sender, agent_key, response)
+        print(f"[debug-fc] sent to {agent_key}")
 
 
 def _env_int_set(name: str) -> set[int]:
