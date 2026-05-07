@@ -992,13 +992,42 @@ async def office_free_chat(
         "будь-які інші російські слова. "
         "Якщо думка прийшла російською — перекладай правильною українською."
     )
-    system = (
-        f"{language_block}\n"
-        "Тобі 42 роки. Ти Лев — керівник офісу.\n"
-        "Ти координатор AI Trading Desk і сам вирішуєш, хто має відповідати на запит Тетяни.\n"
-        "Якщо треба — відповідаєш сам. Якщо треба — делегуєш, прямо звертаючись до колеги по імені.\n\n"
-        "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
-        "Звертайся до Тетяни по імені. Відповідай природно як людина."
+    personalities = {
+        "lev": f"{language_block}\nТобі 42 роки. Ти Лев — керівник офісу. Холодна голова. Відповідаєш Тетяні коротко і впевнено.",
+        "maks": f"{language_block}\nТобі 38 років. Ти Макс — ринковий аналітик. Бачиш ринок через цифри. Відповідаєш по суті.",
+        "marichka": f"{language_block}\nТобі 26 років. Ти Марічка — аналітик тренду. Говориш образно і просто.",
+        "daryna": (
+            f"{language_block}\n"
+            "Тобі 34 роки. Ти Дарина — захищаєш капітал. Пряма і чесна. "
+            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
+            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
+        ),
+        "marko": f"{language_block}\nТобі 29 років. Ти Марко — технічний виконавець. Точний.",
+        "news": f"{language_block}\nТобі 31 рік. Ти Назар — стежиш за новинами. Обережний.",
+        "olesya": (
+            f"{language_block}\n"
+            "Ти Олеся — ведеш журнал. Тепла і точна. "
+            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
+            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
+        ),
+        "memory": (
+            f"{language_block}\n"
+            "Ти Софія — знаєш історію угод. Говориш тільки фактами з журналу. "
+            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
+            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
+        ),
+        "psych": f"{language_block}\nТи Віктор — психолог команди. Стежиш за дисципліною.",
+        "dev": f"{language_block}\nТи Артем — технічний девелопер. Відповідаєш про систему.",
+    }
+    router_system = (
+        "Ти координатор офісу. Визнач хто має відповісти на це повідомлення. "
+        "Відповідай ТІЛЬКИ одним словом — ім'ям агента: "
+        "lev, maks, marichka, daryna, marko, news, olesya, memory, psych, dev.\n"
+        "Якщо питання про ринок — maks або marichka.\n"
+        "Якщо про ризик/позиції — daryna.\n"
+        "Якщо про новини — news.\n"
+        "Якщо про стратегію — lev.\n"
+        "Якщо до всіх — lev."
     )
 
     market_context = ""
@@ -1030,11 +1059,19 @@ async def office_free_chat(
         "Тетяна написала в офіс:\n"
         f"\"{text}\"\n\n"
         f"{market_context}\n\n"
-        "Відповідай як Лев-координатор офісу."
+        "Спочатку визнач, хто має відповідати, потім відповідь має бути голосом цього агента."
     )
-    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=500))
+    chosen_raw = clean_llm_note(ask_agent("lev", router_system, context, max_tokens=300)).lower().strip()
+    allowed = {"lev", "maks", "marichka", "daryna", "marko", "news", "olesya", "memory", "psych", "dev"}
+    chosen_agent = chosen_raw if chosen_raw in allowed else "lev"
+    answer_system = (
+        f"{personalities.get(chosen_agent, personalities['lev'])}\n\n"
+        "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
+        "Звертайся до Тетяни по імені. Відповідай природно як людина."
+    )
+    response = clean_llm_note(ask_agent(chosen_agent, answer_system, context, max_tokens=1000))
     if response:
-        await agent_say(sender, "lev", response)
+        await agent_say(sender, chosen_agent, response)
 
 
 def _env_int_set(name: str) -> set[int]:
