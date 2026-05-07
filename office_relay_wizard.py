@@ -2011,8 +2011,22 @@ async def run() -> None:
     asyncio.create_task(monitor_source_bridge())
     asyncio.create_task(monitor_office_autosave())
 
+    _last_alert_ts = 0.0
     try:
         await client.run_until_disconnected()
+    except Exception as e:
+        now_ts = time.time()
+        if now_ts - _last_alert_ts >= 300:
+            _last_alert_ts = now_ts
+            try:
+                await send_office(
+                    f"⚠️ Relay впав: {type(e).__name__}: {str(e)[:200]}"
+                    f"\nАвтоперезапуск через 30 сек..."
+                )
+            except Exception as alert_exc:
+                print(f"[relay][WARN] crash alert send failed: {alert_exc}")
+        await asyncio.sleep(30)
+        raise
     finally:
         await bot_http.close()
 
