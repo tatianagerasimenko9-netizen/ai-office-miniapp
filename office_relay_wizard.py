@@ -602,18 +602,56 @@ def looks_like_signal(text: str) -> bool:
 
 
 def _extract_price_hint(text: str, labels: tuple[str, ...]) -> Optional[float]:
+    def _pick_number(chunk: str) -> Optional[float]:
+        for m in re.finditer(r"(\d+(?:[.,]\d+)?)", chunk):
+            raw = m.group(1)
+            start = int(m.start(1))
+            end = int(m.end(1))
+            tail = chunk[end : end + 2]
+            # Skip percentages like 50% or 3.8%
+            if "%" in tail:
+                continue
+            # Prefer decimal-like prices over plain integers (e.g. TP1, 1m).
+            if "." not in raw and "," not in raw:
+                continue
+            try:
+                return float(raw.replace(",", "."))
+            except Exception:
+                continue
+        return None
+
     low = text.lower()
+    for line in text.splitlines():
+        ll = line.lower()
+        for lb in labels:
+            i = ll.find(lb)
+            if i < 0:
+                continue
+            # Common signal formats often place the price BEFORE the label:
+            # "0.01513 (вхід 50%)", "0.01547 (hard stop)".
+            before = line[:i]
+            after = line[i:]
+            nums_before = list(re.finditer(r"(\d+(?:[.,]\d+)?)", before))
+            for m in reversed(nums_before):
+                raw = m.group(1)
+                if "." not in raw and "," not in raw:
+                    continue
+                try:
+                    return float(raw.replace(",", "."))
+                except Exception:
+                    continue
+            val_after = _pick_number(after)
+            if val_after is not None:
+                return val_after
+    # Fallback: previous behavior on whole text windows, but percent-safe.
     for lb in labels:
         i = low.find(lb)
         if i < 0:
             continue
-        window = text[i : i + 80]
-        m = re.search(r"(\d+(?:[.,]\d+)?)", window)
-        if m:
-            try:
-                return float(m.group(1).replace(",", "."))
-            except Exception:
-                continue
+        window = text[max(0, i - 40) : i + 120]
+        val = _pick_number(window)
+        if val is not None:
+            return val
     return None
 
 
