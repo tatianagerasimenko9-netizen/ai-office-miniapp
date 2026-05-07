@@ -1022,6 +1022,10 @@ def clean_llm_note(text: str) -> str:
     if not text:
         return text
     out = re.sub(r"\*{1,3}", "", text)
+    out = re.sub(r"\|[^\n]+\|", "", out)
+    out = re.sub(r"^#{1,3}\s+", "", out, flags=re.MULTILINE)
+    out = re.sub(r"^---+$", "", out, flags=re.MULTILINE)
+    out = re.sub(r"\n{3,}", "\n\n", out)
     patterns = [
         r"^\*{0,2}\w+\s+каж[еє]т?:?\*{0,2}\s*",
         r"^\*{0,2}По\s+\w+:?\*{0,2}\s*",
@@ -1071,6 +1075,7 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
         "Не довіряєш красивим сетапам без підтвердження даними.\n"
         "Коли бачиш аномалію — попереджаєш одразу, різко.\n"
         "Коли все нормально — кажеш коротко і по суті.\n"
+        "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
         "Говориш українською як досвідчений трейдер у чаті — не як бот і не як викладач.\n"
         "Ніколи не вигадуєш цифри.\n"
         "Якщо даних немає — мовчиш."
@@ -1088,7 +1093,7 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
         f"Ліквідності знизу: {(liq.get('liq_zone_below', 'немає даних') if isinstance(liq, dict) else 'немає даних')}\n"
         f"Поточна ціна: {(liq.get('current_price', 'немає даних') if isinstance(liq, dict) else 'немає даних')}"
     )
-    llm_note = clean_llm_note(ask_agent("maks", system, context, max_tokens=120))
+    llm_note = clean_llm_note(ask_agent("maks", system, context, max_tokens=300))
     if signal.regime.upper() == "CHOP":
         note = llm_note or f"Ринок шумний ({vol:.2f}%). Я за пропуск. {level_line}"
         return AgentDecision("maks", "REJECTED", _enforce_data_grounding(note, signal), {"min_score": min_score})
@@ -1131,6 +1136,7 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
             "Терпляча. Не поспішаєш.\n"
             "Якщо ринок проти сигналу — кажеш прямо, навіть якщо всі хочуть входити.\n"
             "Говориш образно і просто — 'ринок тягне вниз як камінь' а не 'bearish trend confirmed'.\n"
+            "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
             "Ніколи не вигадуєш напрямок.\n"
             "Якщо свічок немає — кажеш що не бачиш картини."
         )
@@ -1144,7 +1150,7 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
             f"Поточна ціна BTC: {current}\n"
             f"BTC 24h зміна: {btc:.1f}%"
         )
-        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=120))
+        llm_note = clean_llm_note(ask_agent("marichka", system, context, max_tokens=300))
 
         if llm_note:
             note = llm_note
@@ -1204,6 +1210,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Називаєш подію конкретно — 'виступ Пауела' а не 'подія'.\n"
         "Якщо небезпечно — кричиш.\n"
         "Якщо спокійно — одне речення.\n"
+        "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
         "Ніколи не вигадуєш новини."
     )
     context = (
@@ -1278,6 +1285,7 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Говориш прямо, без пом'якшень.\n"
         "Поважаєш Лева але твоє вето останнє слово по ризику.\n"
         "Після збитків — зупиняєш команду.\n"
+        "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
         "Ніколи не вигадуєш стан портфеля."
     )
     llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=120))
@@ -1346,6 +1354,7 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
         "Коли кажеш 'входимо' — це не обговорюється.\n"
         "Визнаєш помилки без виправдань.\n"
         "Що тебе дратує: повторні помилки, емоційні рішення, overtrading.\n"
+        "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
         "Ніколи не вигадуєш дані.\n"
         "Якщо немає впевненості — чекаєш."
     )
@@ -1417,6 +1426,7 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
         "Коли рівнів немає — кажеш що не можеш дати план без цифр.\n"
         "Іноді жартуєш про ринок — але тільки поза активним сигналом.\n"
         "Говориш технічно але зрозуміло.\n"
+        "Ти пишеш в Telegram — без таблиць, без ## заголовків, без --- ліній. Тільки звичайний текст.\n"
         "Ніколи не вигадуєш ціни."
     )
     context = (
