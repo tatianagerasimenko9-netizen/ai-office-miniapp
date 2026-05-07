@@ -950,16 +950,29 @@ def detect_addressed_agent(text: str) -> str:
     """Detect the addressed office agent by name mention."""
     text_lower = str(text or "").lower()
     agents = {
-        "макс": "maks",
-        "марічка": "marichka",
-        "назар": "news",
         "дарина": "daryna",
+        "дарино": "daryna",
+        "дарині": "daryna",
         "лев": "lev",
+        "леве": "lev",
+        "левe": "lev",
+        "макс": "maks",
+        "максе": "maks",
+        "марічка": "marichka",
+        "марічко": "marichka",
+        "назар": "news",
+        "назаре": "news",
         "марко": "marko",
         "олеся": "olesya",
+        "олесю": "olesya",
+        "олесі": "olesya",
         "софія": "memory",
+        "софіє": "memory",
+        "софії": "memory",
         "віктор": "psych",
+        "вікторе": "psych",
         "артем": "dev",
+        "артеме": "dev",
     }
     for name, key in agents.items():
         if name in text_lower:
@@ -1996,7 +2009,7 @@ async def run() -> None:
                         print(f"[relay] news trigger -> {risk.level} ({risk.minutes_to_event}m)")
                         last_news_level = risk.level
                 except Exception as exc:
-                    print(f"[relay][WARN] monitor_news failed: {exc}")
+                    print(f"[relay][WARN] monitor_news failed: {type(exc).__name__}: {exc}")
                     await send_office(f"Технічне попередження news-монітора: {exc}", stream="tech")
                 await asyncio.sleep(120)
 
