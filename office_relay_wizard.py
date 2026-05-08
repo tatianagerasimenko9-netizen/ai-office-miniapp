@@ -88,6 +88,15 @@ LEV_COMPLETE_RULE = (
     "Завжди доводиш думку до кінця.\n"
     "Ніколи не обриваєш речення на середині.\n"
     "Якщо починаєш аналіз — завершуєш його повністю.\n"
+    "Коли бачиш суперечність між ТФ: НІКОЛИ не даєш два різних сигнали.\n"
+    "Завжди кажеш один чіткий напрямок.\n"
+    "Правило: старший ТФ завжди в пріоритеті. H4 > H1 > M15 > M5.\n"
+    "Якщо молодший ТФ суперечить старшому: кажеш це вголос і вибираєш старший.\n"
+    "Якщо вже є активний сигнал — не даєш новий по тому самому символу.\n"
+    "Даєш UPDATE: що змінилось і що робити.\n"
+    "Ти бачив кризу 2008, 2018, 2022.\n"
+    "Ти знаєш: плутанина вбиває депозит.\n"
+    "Один чіткий напрямок — завжди.\n"
 )
 
 
@@ -2607,6 +2616,7 @@ async def run() -> None:
                 except Exception:
                     pass
             risk_snapshot = live_risk_snapshot(db_path)
+            active_signals = signal_get_active(db_path)
 
             async def _send_agent_turn(agent_key: str, text: str) -> None:
                 if not text:
@@ -2698,7 +2708,9 @@ async def run() -> None:
                 f"Назар: {news_msg}\n"
                 f"Дарина: {daryna_msg}\n"
                 f"Марко: {marko_msg}\n"
-                f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}"
+                f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}\n"
+                f"Активні сигнали: {active_signals}\n"
+                "Якщо по цьому символу вже є активний — дай UPDATE а не новий сигнал."
             )
             lev_final = clean_llm_note(
                 ask_agent(
