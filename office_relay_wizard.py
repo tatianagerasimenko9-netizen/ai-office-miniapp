@@ -240,7 +240,7 @@ def detect_agent_key(message: str) -> Optional[str]:
     return None
 
 
-def split_long_message(text: str, limit: int = 3800) -> List[str]:
+def split_long_message(text: str, limit: int = 2500) -> List[str]:
     """
     Split long text into chunks up to `limit` characters.
     Prefers paragraph boundaries (\\n\\n) to avoid mid-sentence cuts.
@@ -1843,7 +1843,7 @@ async def run() -> None:
                 return None
 
         clean_message = _strip_agent_tag(message)
-        parts = split_long_message(clean_message, limit=3800)
+        parts = split_long_message(clean_message)
         first_id: Optional[int] = None
         for i, part in enumerate(parts):
             prefixed = part if i == 0 else f"...{part}"
