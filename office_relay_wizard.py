@@ -240,6 +240,38 @@ def detect_agent_key(message: str) -> Optional[str]:
     return None
 
 
+def split_long_message(text: str, limit: int = 3800) -> List[str]:
+    """
+    Split long text into chunks up to `limit` characters.
+    Prefers paragraph boundaries (\\n\\n) to avoid mid-sentence cuts.
+    """
+    raw = str(text or "")
+    if len(raw) <= limit:
+        return [raw]
+    parts: List[str] = []
+    paragraphs = raw.split("\n\n")
+    current = ""
+    for para in paragraphs:
+        if len(current) + len(para) + 2 <= limit:
+            current += (("\n\n" if current else "") + para)
+        else:
+            if current:
+                parts.append(current)
+            if len(para) <= limit:
+                current = para
+                continue
+            # Fallback for oversized paragraph.
+            start = 0
+            while start < len(para):
+                chunk = para[start : start + limit]
+                parts.append(chunk)
+                start += limit
+            current = ""
+    if current:
+        parts.append(current)
+    return parts if parts else [raw]
+
+
 async def send_via_bot_api(
     session: aiohttp.ClientSession,
     token: str,
@@ -1685,70 +1717,83 @@ async def run() -> None:
         reply_to_message_id: Optional[int] = None,
         stream: str = "general",
     ) -> Optional[int]:
-        agent_key = detect_agent_key(message)
-        clean_message = _strip_agent_tag(message)
-        thread_id = _thread_for_stream(stream)
-        sym_for_btn = _extract_first_usdt_symbol(clean_message)
-        btn_markup: Optional[Dict[str, Any]] = None
-        if sym_for_btn and sym_for_btn != "BTCUSDT":
-            mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
-            mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
-            btn_markup = {
-                "inline_keyboard": [
-                    [{"text": "📊 Графік", "url": mini_url}],
-                ]
-            }
-        token = agent_bot_tokens.get(agent_key or "")
-        if token:
-            ok, reason, msg_id = await send_via_bot_api(
-                bot_http,
-                token,
-                office_chat_id,
-                clean_message,
-                reply_to_message_id=reply_to_message_id,
-                message_thread_id=thread_id,
-                reply_markup=btn_markup,
-            )
-            if ok:
-                return msg_id
-            # Some bots cannot reply to a specific message id in forum topics
-            # (Telegram returns: "message to be replied not found").
-            # Retry once without reply_to to keep delivery reliable.
-            if "message to be replied not found" in str(reason).lower() and reply_to_message_id is not None:
-                ok2, reason2, msg_id2 = await send_via_bot_api(
+        async def _send_single(
+            text_part: str,
+            *,
+            reply_to: Optional[int],
+            use_markup: bool,
+        ) -> Optional[int]:
+            agent_key = detect_agent_key(message)
+            thread_id = _thread_for_stream(stream)
+            btn_markup: Optional[Dict[str, Any]] = None
+            if use_markup:
+                sym_for_btn = _extract_first_usdt_symbol(text_part)
+                if sym_for_btn and sym_for_btn != "BTCUSDT":
+                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
+                    mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
+                    btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
+            token = agent_bot_tokens.get(agent_key or "")
+            if token:
+                ok, reason, msg_id = await send_via_bot_api(
                     bot_http,
                     token,
                     office_chat_id,
-                    clean_message,
-                    reply_to_message_id=None,
+                    text_part,
+                    reply_to_message_id=reply_to,
                     message_thread_id=thread_id,
                     reply_markup=btn_markup,
                 )
-                if ok2:
-                    print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
-                    return msg_id2
-                reason = f"{reason}; retry_without_reply failed: {reason2}"
-            print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
-        # Cloud/runtime mode: always prefer Bot API fallback via main office bot token.
-        # This avoids Telethon peer resolution issues for non-agent/system messages.
-        if tg_bot_token:
-            ok, reason, msg_id = await send_via_bot_api(
-                bot_http,
-                tg_bot_token,
-                office_chat_id,
-                clean_message,
-                reply_to_message_id=reply_to_message_id,
-                message_thread_id=thread_id,
-                reply_markup=btn_markup,
+                if ok:
+                    return msg_id
+                if "message to be replied not found" in str(reason).lower() and reply_to is not None:
+                    ok2, reason2, msg_id2 = await send_via_bot_api(
+                        bot_http,
+                        token,
+                        office_chat_id,
+                        text_part,
+                        reply_to_message_id=None,
+                        message_thread_id=thread_id,
+                        reply_markup=btn_markup,
+                    )
+                    if ok2:
+                        print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
+                        return msg_id2
+                    reason = f"{reason}; retry_without_reply failed: {reason2}"
+                print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
+            if tg_bot_token:
+                ok, reason, msg_id = await send_via_bot_api(
+                    bot_http,
+                    tg_bot_token,
+                    office_chat_id,
+                    text_part,
+                    reply_to_message_id=reply_to,
+                    message_thread_id=thread_id,
+                    reply_markup=btn_markup,
+                )
+                if ok:
+                    return msg_id
+                print(f"[relay][WARN] fallback bot-send failed: {reason} (trying Telethon client)")
+            sent = await client.send_message(office_entity, text_part[:3900], reply_to=reply_to)
+            try:
+                return int(getattr(sent, "id", 0) or 0) or None
+            except Exception:
+                return None
+
+        clean_message = _strip_agent_tag(message)
+        parts = split_long_message(clean_message, limit=3800)
+        first_id: Optional[int] = None
+        for i, part in enumerate(parts):
+            prefixed = part if i == 0 else f"...{part}"
+            sent_id = await _send_single(
+                prefixed,
+                reply_to=reply_to_message_id if i == 0 else None,
+                use_markup=(i == 0),
             )
-            if ok:
-                return msg_id
-            print(f"[relay][WARN] fallback bot-send failed: {reason} (trying Telethon client)")
-        sent = await client.send_message(office_entity, clean_message[:3900], reply_to=reply_to_message_id)
-        try:
-            return int(getattr(sent, "id", 0) or 0) or None
-        except Exception:
-            return None
+            if i == 0:
+                first_id = sent_id
+            if len(parts) > 1 and i < len(parts) - 1:
+                await asyncio.sleep(0.5)
+        return first_id
 
     try:
         await send_office("Офіс на зв'язку. Готові працювати.")
