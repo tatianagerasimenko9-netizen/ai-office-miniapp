@@ -2450,6 +2450,133 @@ async def run() -> None:
 
     asyncio.create_task(monitor_news())
 
+    async def proactive_market_scan() -> None:
+        """
+        Кожні 15 хвилин агенти самі сканують ринок і якщо знаходять сетап —
+        пишуть Тетяні першими.
+        """
+        try:
+            utc_now = datetime.now(timezone.utc)
+            h = utc_now.hour
+            m = utc_now.minute
+            minute_of_day = h * 60 + m
+            in_london = 480 <= minute_of_day < 660
+            in_ny = 780 <= minute_of_day < 960
+            if not (in_london or in_ny):
+                return  # поза Kill Zone — мовчимо
+
+            from office_market_data import (
+                fetch_atr_context,
+                fetch_funding_rate,
+                fetch_key_levels,
+                fetch_long_short_ratio,
+                fetch_ote_levels,
+                fetch_top_movers,
+            )
+
+            gainers = fetch_top_movers("gainers", limit=5)
+            losers = fetch_top_movers("losers", limit=5)
+            always_watch = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+
+            candidates = always_watch.copy()
+            combined = (gainers or []) + (losers or [])
+            for m_item in combined:
+                sym = str((m_item or {}).get("symbol") or "").upper().strip() if isinstance(m_item, dict) else ""
+                if sym and sym not in candidates:
+                    candidates.append(sym)
+
+            setups_found: List[Dict[str, Any]] = []
+            for symbol in candidates[:8]:
+                try:
+                    atr = fetch_atr_context(symbol)
+                    atr_used = float((atr or {}).get("day_used_pct", 100) or 100)
+                    if atr_used > 85:
+                        continue
+
+                    ls = fetch_long_short_ratio(symbol)
+                    funding = fetch_funding_rate(symbol)
+                    ote = fetch_ote_levels(symbol, "1h")
+                    levels = fetch_key_levels(symbol)
+
+                    funding_pct = float((funding or {}).get("funding_rate_pct", 0) or 0)
+                    ls_ratio = float((ls or {}).get("current_ratio", 1) or 1)
+
+                    has_setup = False
+                    setup_direction = ""
+                    if funding_pct < -0.005 or ls_ratio < 0.8:
+                        has_setup = True
+                        setup_direction = "LONG"
+                    elif funding_pct > 0.01 or ls_ratio > 2.5:
+                        has_setup = True
+                        setup_direction = "SHORT"
+
+                    if has_setup:
+                        setups_found.append(
+                            {
+                                "symbol": symbol,
+                                "direction": setup_direction,
+                                "atr_used": atr.get("day_used_pct") if isinstance(atr, dict) else atr_used,
+                                "funding": funding_pct,
+                                "ls_ratio": ls_ratio,
+                                "ote": ote,
+                                "levels": levels,
+                                "atr": atr,
+                            }
+                        )
+                except Exception:
+                    continue
+
+            if not setups_found:
+                return
+
+            best = min(setups_found, key=lambda x: float(x.get("atr_used") or 100))
+            symbol = str(best.get("symbol") or "BTCUSDT")
+            direction = str(best.get("direction") or "LONG")
+            system = (
+                "Ти Лев — керівник офісу.\n"
+                "Ти щойно знайшов потенційний сетап.\n"
+                "Пишеш Тетяні ПЕРШИМ — вона не питала.\n\n"
+                "Структура повідомлення ОБОВ'ЯЗКОВО:\n"
+                "Тетяно, бачу сетап 👀\n\n"
+                f"{direction} {symbol}\n"
+                "Entry: [ціна або зона]\n"
+                "SL: [ціна] (за [причина])\n"
+                "TP1: [ціна] ([+%])\n"
+                "TP2: [ціна] ([+%])\n"
+                "RR: [число]\n\n"
+                "Підтвердження: [2-3 факти чому]\n"
+                "Умова входу: [коли саме заходити]\n\n"
+                "Коротко. По суті. Чекаю твого рішення."
+            )
+            context = (
+                "Знайдений сетап:\n"
+                f"Символ: {symbol}\n"
+                f"Напрямок: {direction}\n"
+                f"ATR пройдено: {best.get('atr_used')}%\n"
+                f"Funding: {best.get('funding')}%\n"
+                f"L/S ratio: {best.get('ls_ratio')}\n"
+                f"OTE зона: {best.get('ote')}\n"
+                f"Ключові рівні: {best.get('levels')}\n"
+                f"ATR деталі: {best.get('atr')}\n"
+            )
+            response = clean_llm_note(ask_agent("lev", system, context, max_tokens=800))
+            if response:
+                parts = split_long_message(response)
+                for i, part in enumerate(parts):
+                    msg = part if i == 0 else "..." + part
+                    await send_office(msg, stream="general")
+                    if len(parts) > 1:
+                        await asyncio.sleep(1.0)
+        except Exception as e:
+            print(f"[scanner] error: {e}")
+
+    async def monitor_proactive_scanner() -> None:
+        while True:
+            await proactive_market_scan()
+            await asyncio.sleep(900)
+
+    asyncio.create_task(monitor_proactive_scanner())
+
     async def morning_macro_brief() -> None:
         """
         Daily 09:00 Kyiv macro briefing from Maks (LLM + live macro data).
