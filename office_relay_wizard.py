@@ -2525,6 +2525,7 @@ async def run() -> None:
                 fetch_candles,
                 fetch_funding_rate,
                 fetch_key_levels,
+                fetch_liquidations_proxy,
                 fetch_long_short_ratio,
                 fetch_ote_levels,
                 fetch_open_interest,
