@@ -79,6 +79,12 @@ OFFICE_RULES_BRIEF_UA = (
     "5) При серії збитків ризик має пріоритет, вхід блокується.\n"
     "6) Для повних ролей/деталей: команда /officeprompt."
 )
+LEV_COMPLETE_RULE = (
+    "Ти живий досвідчений аналітик.\n"
+    "Завжди доводиш думку до кінця.\n"
+    "Ніколи не обриваєш речення на середині.\n"
+    "Якщо починаєш аналіз — завершуєш його повністю.\n"
+)
 
 
 @dataclass
@@ -1183,6 +1189,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         return
 
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "Ти Лев — керівник офісу. "
         "Тетяна написала тільки назву монети — це означає: дай повний аналіз і сетап.\n"
         "Структура відповіді:\n"
@@ -1216,7 +1223,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         f"H1 свічки: {candles_1h}\n"
         f"H4 свічки: {candles_4h}\n"
     )
-    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=2000))
+    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
         await agent_say(sender, "lev", response)
     else:
@@ -1288,7 +1295,12 @@ async def office_free_chat(
         "Якщо думка прийшла російською — перекладай правильною українською."
     )
     personalities = {
-        "lev": f"{language_block}\nТобі 42 роки. Ти Лев — керівник офісу. Холодна голова. Відповідаєш Тетяні коротко і впевнено.",
+        "lev": (
+            f"{LEV_COMPLETE_RULE}"
+            f"{language_block}\n"
+            "Тобі 42 роки. Ти Лев — керівник офісу. "
+            "Холодна голова. Відповідаєш Тетяні коротко і впевнено."
+        ),
         "maks": f"{language_block}\nТобі 38 років. Ти Макс — ринковий аналітик. Бачиш ринок через цифри. Відповідаєш по суті.",
         "marichka": f"{language_block}\nТобі 26 років. Ти Марічка — аналітик тренду. Говориш образно і просто.",
         "daryna": (
