@@ -197,6 +197,17 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     return {"error": f"unknown_tool:{tool_name}"}
 
 
+def get_model_for_agent(agent_key: str) -> str:
+    """
+    Лев і Дарина — Opus (найважливіші рішення)
+    Решта — Sonnet (оптимально)
+    """
+    opus_agents = {"lev", "daryna"}
+    if str(agent_key or "").strip().lower() in opus_agents:
+        return "claude-opus-4-6"
+    return "claude-sonnet-4-6"
+
+
 def ask_agent(
     agent_key: str,
     system_prompt: str,
@@ -241,7 +252,7 @@ def ask_agent(
         with httpx.Client(timeout=20.0) as client:
             for _ in range(max_loops):
                 payload: Dict[str, Any] = {
-                    "model": "claude-sonnet-4-6",
+                    "model": get_model_for_agent(agent_key),
                     "max_tokens": max(int(max_tokens), 1000),
                     "system": str(system_prompt or ""),
                     "tools": TOOLS,
