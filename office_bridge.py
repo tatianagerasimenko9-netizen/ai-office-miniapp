@@ -1191,6 +1191,14 @@ def _to_kyiv_time_from_utc(event_time_utc: str, mins_fallback: int) -> str:
         return _to_kyiv_time(mins_fallback)
 
 
+LEV_COMPLETE_RULE = (
+    "Ти живий досвідчений аналітик.\n"
+    "Завжди доводиш думку до кінця.\n"
+    "Ніколи не обриваєш речення на середині.\n"
+    "Якщо починаєш аналіз — завершуєш його повністю.\n"
+)
+
+
 TRADING_KNOWLEDGE = """
 ATR І ЗАПАС ХОДУ:
 Завжди перевіряй get_atr_context перед входом.
@@ -1301,6 +1309,7 @@ def _analyst_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -
         oi_display = f"{oi_display} {oi_note}"
     oi_history = oi.get("history", []) if isinstance(oi, dict) else []
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
         "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -1372,6 +1381,7 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         pdl = daily[-2]["low"] if isinstance(daily, list) and len(daily) >= 2 else None
         current = daily[-1]["close"] if isinstance(daily, list) and daily else None
         system = (
+            f"{LEV_COMPLETE_RULE}"
             "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
             "Якщо думка прийшла російською — перекладай перед тим як писати. "
             "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -1458,6 +1468,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     importance = str(signal.meta.get("news_importance") or "low").lower()
     kyiv_time = _to_kyiv_time_from_utc(event_time_utc, mins)
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
         "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -1552,6 +1563,7 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
     )
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
         "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -1630,6 +1642,7 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
         final_action = "WAIT"
     team_lines = "\n".join([f"{t.agent_key}: {t.text[:120]}" for t in conversation])
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
         "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -1712,6 +1725,7 @@ def _executor_reply(signal: OfficeSignal, final_action: str) -> AgentDecision:
     sl_raw = signal.meta.get("stop_loss")
     tp_raw = signal.meta.get("take_profit")
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
         "Якщо думка прийшла російською — перекладай перед тим як писати. "
         "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
@@ -2316,6 +2330,7 @@ def _simple_ua(agent_key: str, note: str) -> str:
 def _memory_reply(symbol: str, market: Dict[str, Any], db_path: str = "office_bridge.db") -> str:
     fb = journal_latest_feedback_case(db_path, symbol=symbol)
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
         "Тобі 29 років.\n"
         "Ти Софія — аналітик історичної пам'яті трейдинг-офісу.\n"
@@ -2351,6 +2366,7 @@ def _memory_reply(symbol: str, market: Dict[str, Any], db_path: str = "office_br
 
 def _psych_reply(recurring: Dict[str, int]) -> str:
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
         "Тобі 35 років.\n"
         "Ти Віктор — психолог команди трейдинг-офісу.\n"
@@ -2379,6 +2395,7 @@ def _olesya_reply(signal: OfficeSignal, verdict: OfficeVerdict, db_path: str = "
     closed = journal_closed_trade_count(db_path)
     recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
     system = (
+        f"{LEV_COMPLETE_RULE}"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
         "Тобі 27 років.\n"
         "Ти Олеся — аналітик результатів і журналу угод у трейдинг-офісі.\n"
