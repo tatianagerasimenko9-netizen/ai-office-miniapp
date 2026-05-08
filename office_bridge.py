@@ -1660,7 +1660,7 @@ def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]
         f"Команда сказала:\n{team_lines}\n\n"
         f"Системне рішення: {final_action}"
     )
-    llm_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=1500))
+    llm_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=2000))
     if signal.regime.upper() == "CHOP":
         note = llm_note or _enforce_data_grounding(f"Ринок шумний. Фінал: пропускаємо.{bias_tail}", signal)
         return AgentDecision("lev", "REJECTED", note)
