@@ -1074,11 +1074,139 @@ def _feedback_result(text: str) -> str:
     return "PARTIAL"
 
 
+def is_symbol_only(text: str) -> bool:
+    """
+    True if text contains only a single coin/pair token.
+    Examples: BTC, ETH, SOLUSDT, SOL USDT, COMP, ORDI.
+    """
+    t = str(text or "").strip().upper()
+    if not t:
+        return False
+    clean = re.sub(r"\s*(USDT|BUSD|USD)?\s*$", "", t).strip()
+    clean = clean.replace(" ", "")
+    return bool(re.match(r"^[A-Z0-9]{2,10}$", clean))
+
+
+def normalize_symbol(text: str) -> str:
+    """BTC -> BTCUSDT, SOL USDT -> SOLUSDT."""
+    t = str(text or "").strip().upper()
+    t = re.sub(r"\s+", "", t)
+    t = re.sub(r"(USDT|BUSD|USD)$", "", t)
+    if not t:
+        return "BTCUSDT"
+    return f"{t}USDT"
+
+
+def extract_symbols_list(text: str) -> List[str]:
+    parts = re.split(r"[,\s]+", str(text or "").strip().upper())
+    symbols: List[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        token = str(p or "").strip()
+        if not token:
+            continue
+        clean = re.sub(r"(USDT|BUSD|USD)$", "", token)
+        if re.match(r"^[A-Z0-9]{2,10}$", clean) and len(clean) >= 2:
+            sym = f"{clean}USDT"
+            if sym not in seen:
+                seen.add(sym)
+                symbols.append(sym)
+    return symbols[:3]
+
+
+async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
+    """
+    Full automatic desk analysis for a symbol when user sends symbol-only text.
+    """
+    _ = db_path  # Reserved for future journaling/learning hooks.
+    await sender(f"🔍 Аналізую {symbol}...")
+    try:
+        from office_market_data import (
+            fetch_atr_context,
+            fetch_candles,
+            fetch_funding_rate,
+            fetch_key_levels,
+            fetch_liquidations_proxy,
+            fetch_long_short_ratio,
+            fetch_open_interest,
+            fetch_ote_levels,
+        )
+    except Exception as exc:
+        await agent_say(sender, "lev", f"Не можу підняти модулі аналізу для {symbol}: {exc}")
+        return
+
+    try:
+        candles_1h = fetch_candles(symbol, "1h", 5)
+        candles_4h = fetch_candles(symbol, "4h", 5)
+        atr = fetch_atr_context(symbol)
+        oi = fetch_open_interest(symbol)
+        liq = fetch_liquidations_proxy(symbol)
+        ls = fetch_long_short_ratio(symbol)
+        levels = fetch_key_levels(symbol)
+        ote = fetch_ote_levels(symbol, "1h")
+        funding = fetch_funding_rate(symbol)
+    except Exception as exc:
+        await agent_say(sender, "lev", f"Не змогла зібрати ринкові дані по {symbol}: {exc}")
+        return
+
+    system = (
+        "Ти Лев — керівник офісу. "
+        "Тетяна написала тільки назву монети — це означає: дай повний аналіз і сетап.\n"
+        "Структура відповіді:\n"
+        "1) Загальна картина (2 речення)\n"
+        "2) Bias: LONG чи SHORT і чому\n"
+        "3) Снайперський вхід:\n"
+        "Entry: [ціна або зона]\n"
+        "SL: [ціна] (за структурою)\n"
+        "TP1: [ціна] (+X%)\n"
+        "TP2: [ціна] (+X%)\n"
+        "RR: [число]\n"
+        "4) Умова входу (коли саме заходити)\n"
+        "5) Що скасовує сетап\n"
+        "Говориш від імені команди. ТІЛЬКИ українською. "
+        "Без таблиць і заголовків ##. "
+        "Якщо ATR >80% — попередити, що сьогодні краще чекати завтра."
+    )
+    context = (
+        f"Монета: {symbol}\n\n"
+        f"Поточна ціна: {(liq.get('current_price') if isinstance(liq, dict) else None)}\n\n"
+        f"ATR стан: {(atr.get('assessment') if isinstance(atr, dict) else None)}\n"
+        f"Пройдено за день: {(atr.get('day_used_pct') if isinstance(atr, dict) else None)}%\n\n"
+        f"Funding: {(funding.get('funding_rate_pct') if isinstance(funding, dict) else None)}%\n\n"
+        f"OI тренд: {(oi.get('history', []) if isinstance(oi, dict) else [])}\n\n"
+        f"Long/Short: {(ls.get('current_ratio') if isinstance(ls, dict) else None)}\n\n"
+        f"Ліквідності:\n"
+        f"Зверху: {(liq.get('liq_zone_above') if isinstance(liq, dict) else None)}\n"
+        f"Знизу: {(liq.get('liq_zone_below') if isinstance(liq, dict) else None)}\n\n"
+        f"Ключові рівні: {(levels.get('levels', []) if isinstance(levels, dict) else [])}\n\n"
+        f"OTE зона: {ote}\n\n"
+        f"H1 свічки: {candles_1h}\n"
+        f"H4 свічки: {candles_4h}\n"
+    )
+    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=2000))
+    if response:
+        await agent_say(sender, "lev", response)
+    else:
+        await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
+
+
 async def office_free_chat(
     sender,
     text: str,
     db_path: str,
 ) -> None:
+    symbols_batch = extract_symbols_list(text)
+    if len(symbols_batch) >= 2:
+        parts = [p for p in re.split(r"[,\s]+", str(text or "").strip().upper()) if p]
+        if parts and len(parts) == len(symbols_batch):
+            for sym in symbols_batch:
+                await full_auto_analysis(sym, sender, db_path)
+            return
+    if is_symbol_only(text):
+        symbol = normalize_symbol(text)
+        await full_auto_analysis(symbol, sender, db_path)
+        return
+
     if is_trade_feedback(text):
         symbol = _extract_first_usdt_symbol(text)
         if not symbol:
