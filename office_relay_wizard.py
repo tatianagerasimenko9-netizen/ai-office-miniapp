@@ -57,6 +57,9 @@ from office_bridge import (
     office_position_event,
     office_run_scenario,
     office_trade_closed,
+    signal_get_active,
+    signal_update,
+    signal_upsert,
     _extract_first_usdt_symbol,
 )
 from office_llm_agent import ask_agent
@@ -1197,6 +1200,47 @@ def extract_symbols_list(text: str) -> List[str]:
     return symbols[:3]
 
 
+def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {
+        "entry_low": None,
+        "entry_high": None,
+        "sl": None,
+        "tp1": None,
+        "tp2": None,
+        "rr": None,
+    }
+    src = str(text or "")
+    nums = re.findall(r"\d+(?:\.\d+)?", src)
+    if nums:
+        pass
+
+    m_entry = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    if m_entry:
+        a = float(m_entry.group(1))
+        b = float(m_entry.group(2))
+        out["entry_low"] = min(a, b)
+        out["entry_high"] = max(a, b)
+    else:
+        m_entry_one = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+        if m_entry_one:
+            v = float(m_entry_one.group(1))
+            out["entry_low"] = v
+            out["entry_high"] = v
+    m_sl = re.search(r"SL:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    if m_sl:
+        out["sl"] = float(m_sl.group(1))
+    m_tp1 = re.search(r"TP1:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    if m_tp1:
+        out["tp1"] = float(m_tp1.group(1))
+    m_tp2 = re.search(r"TP2:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    if m_tp2:
+        out["tp2"] = float(m_tp2.group(1))
+    m_rr = re.search(r"RR:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    if m_rr:
+        out["rr"] = float(m_rr.group(1))
+    return out
+
+
 def _history_reset() -> None:
     global _chat_history, _chat_history_ts
     _chat_history = []
@@ -1274,13 +1318,22 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         "Умова входу (коли саме)\n"
         "Що скасовує сетап (1 речення)\n\n"
         "Спочатку СЕТАП — потім пояснення. Не навпаки.\n"
+        "ОБОВ'ЯЗКОВО додати в кінці:\n"
+        "ЩО РОБИТИ ЗАРАЗ (ціна {current_price}):\n"
+        "→ [ЧЕКАТИ відкату до Entry зони]\n"
+        "або\n"
+        "→ [ВХОДИТИ ЗА РИНКОМ — ціна вже в зоні]\n"
+        "або\n"
+        "→ [ПІЗНО — пропускаємо, чекаємо наступний]\n\n"
+        "Одне з трьох. Чітко. Без варіантів.\n"
         "Говориш від імені команди. ТІЛЬКИ українською. "
         "Без таблиць і заголовків ##. "
         "Якщо ATR >80% — попередити, що сьогодні краще чекати завтра."
     )
+    current_price = liq.get("current_price") if isinstance(liq, dict) else None
     context = (
         f"Монета: {symbol}\n\n"
-        f"Поточна ціна: {(liq.get('current_price') if isinstance(liq, dict) else None)}\n\n"
+        f"Поточна ціна: {current_price}\n\n"
         f"ATR стан: {(atr.get('assessment') if isinstance(atr, dict) else None)}\n"
         f"Пройдено за день: {(atr.get('day_used_pct') if isinstance(atr, dict) else None)}%\n\n"
         f"Funding: {(funding.get('funding_rate_pct') if isinstance(funding, dict) else None)}%\n\n"
@@ -1293,6 +1346,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         f"OTE зона: {ote}\n\n"
         f"H1 свічки: {candles_1h}\n"
         f"H4 свічки: {candles_4h}\n"
+        f"current_price: {current_price}\n"
     )
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
@@ -2532,6 +2586,8 @@ async def run() -> None:
             best = min(setups_found, key=lambda x: float(x.get("atr_used") or 100))
             symbol = str(best.get("symbol") or "BTCUSDT")
             direction = str(best.get("direction") or "LONG")
+            liq_now = fetch_liquidations_proxy(symbol)
+            current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
             system = (
                 "Ти Лев — керівник офісу.\n"
                 "Ти щойно знайшов потенційний сетап.\n"
@@ -2546,21 +2602,47 @@ async def run() -> None:
                 "RR: [число]\n\n"
                 "Підтвердження: [2-3 факти чому]\n"
                 "Умова входу: [коли саме заходити]\n\n"
+                "ОБОВ'ЯЗКОВО додати в кінці:\n"
+                "ЩО РОБИТИ ЗАРАЗ (ціна {current_price}):\n"
+                "→ [ЧЕКАТИ відкату до Entry зони]\n"
+                "або\n"
+                "→ [ВХОДИТИ ЗА РИНКОМ — ціна вже в зоні]\n"
+                "або\n"
+                "→ [ПІЗНО — пропускаємо, чекаємо наступний]\n\n"
+                "Одне з трьох. Чітко. Без варіантів.\n\n"
                 "Коротко. По суті. Чекаю твого рішення."
             )
             context = (
                 "Знайдений сетап:\n"
                 f"Символ: {symbol}\n"
                 f"Напрямок: {direction}\n"
+                f"Поточна ціна: {current_price}\n"
                 f"ATR пройдено: {best.get('atr_used')}%\n"
                 f"Funding: {best.get('funding')}%\n"
                 f"L/S ratio: {best.get('ls_ratio')}\n"
                 f"OTE зона: {best.get('ote')}\n"
                 f"Ключові рівні: {best.get('levels')}\n"
                 f"ATR деталі: {best.get('atr')}\n"
+                f"current_price: {current_price}\n"
             )
             response = clean_llm_note(ask_agent("lev", system, context, max_tokens=800))
             if response:
+                parsed = _parse_signal_levels_from_text(response)
+                signal_id = f"proactive-{symbol}-{int(time.time())}"
+                signal_upsert(
+                    db_path,
+                    signal_id=signal_id,
+                    symbol=symbol,
+                    direction=direction,
+                    entry_low=parsed.get("entry_low"),
+                    entry_high=parsed.get("entry_high"),
+                    sl=parsed.get("sl"),
+                    tp1=parsed.get("tp1"),
+                    tp2=parsed.get("tp2"),
+                    rr=parsed.get("rr"),
+                    status="ACTIVE",
+                    analysis_note="",
+                )
                 parts = split_long_message(response)
                 for i, part in enumerate(parts):
                     msg = part if i == 0 else "..." + part
@@ -2576,6 +2658,141 @@ async def run() -> None:
             await asyncio.sleep(900)
 
     asyncio.create_task(monitor_proactive_scanner())
+
+    async def monitor_active_signals() -> None:
+        while True:
+            try:
+                active_rows = signal_get_active(db_path)
+                for row in active_rows:
+                    try:
+                        signal_id = str(row.get("signal_id") or "")
+                        symbol = str(row.get("symbol") or "")
+                        direction = str(row.get("direction") or "LONG").upper()
+                        status = str(row.get("status") or "ACTIVE").upper()
+                        entry_low = row.get("entry_low")
+                        entry_high = row.get("entry_high")
+                        sl = row.get("sl")
+                        tp1 = row.get("tp1")
+                        tp2 = row.get("tp2")
+                        ts_created = str(row.get("ts_created") or "")
+                        if not signal_id or not symbol:
+                            continue
+
+                        now_utc = datetime.now(timezone.utc)
+                        try:
+                            created_dt = datetime.fromisoformat(ts_created.replace("Z", "+00:00"))
+                            if created_dt.tzinfo is None:
+                                created_dt = created_dt.replace(tzinfo=timezone.utc)
+                        except Exception:
+                            created_dt = now_utc
+
+                        if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
+                            signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
+                            await send_office(
+                                f"Сетап по {symbol} не відпрацював — ціна не дійшла до зони входу. Фіксую для навчання.",
+                                stream="general",
+                            )
+                            continue
+
+                        liq_now = fetch_liquidations_proxy(symbol)
+                        current_price = float((liq_now or {}).get("current_price") or 0.0) if isinstance(liq_now, dict) else 0.0
+                        if current_price <= 0:
+                            continue
+
+                        e_low = float(entry_low) if entry_low is not None else None
+                        e_high = float(entry_high) if entry_high is not None else None
+                        sl_v = float(sl) if sl is not None else None
+                        tp1_v = float(tp1) if tp1 is not None else None
+                        tp2_v = float(tp2) if tp2 is not None else None
+
+                        if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
+                            signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
+                            await send_office(
+                                f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
+                                f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}",
+                                stream="general",
+                            )
+                            continue
+
+                        if status in ("ACTIVE", "HIT_ENTRY") and tp1_v is not None:
+                            hit_tp1 = (direction == "LONG" and current_price >= tp1_v) or (
+                                direction == "SHORT" and current_price <= tp1_v
+                            )
+                            if hit_tp1:
+                                signal_update(db_path, signal_id=signal_id, status="HIT_TP1", outcome="PARTIAL")
+                                be_level = None
+                                if e_high is not None:
+                                    be_level = e_high * (1.001 if direction == "LONG" else 0.999)
+                                await send_office(
+                                    f"{symbol} досяг TP1 {tp1_v} ✅\n"
+                                    "Рекомендую: перенести SL в беззбиток і тримати до TP2.\n"
+                                    f"Тетяно, {symbol} досяг TP1. Рекомендую перенести SL в беззбиток на рівень {be_level}.",
+                                    stream="general",
+                                )
+                                continue
+
+                        if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
+                            hit_sl = (direction == "LONG" and current_price <= sl_v) or (
+                                direction == "SHORT" and current_price >= sl_v
+                            )
+                            if hit_sl:
+                                analysis_note = ""
+                                try:
+                                    n_risk = "SAFE"
+                                    if news_api_key:
+                                        timeout_news = aiohttp.ClientTimeout(total=10)
+                                        async with aiohttp.ClientSession(timeout=timeout_news) as s_news:
+                                            n = await fetch_news_risk(s_news, news_api_key)
+                                            n_risk = str(n.level)
+                                    system = (
+                                        "Аналізуй чому вибило стоп. Перевір:\n"
+                                        "1) Чи були новини в цей момент?\n"
+                                        "2) Чи була маніпуляція (sweep)?\n"
+                                        "3) Чи правильна була точка входу?\n"
+                                        "4) Яка сесія була активна?\n"
+                                        "5) Що можна покращити наступного разу?\n"
+                                        "Говориш українською. Конкретно."
+                                    )
+                                    hour = now_utc.hour
+                                    sess = "LONDON" if 8 <= hour < 11 else ("NEW_YORK" if 13 <= hour < 16 else "OFF_HOURS")
+                                    context = (
+                                        f"Сигнал: {direction} {symbol}\n"
+                                        f"Entry: {e_low}-{e_high}\n"
+                                        f"SL: {sl_v}\n"
+                                        f"Час сигналу: {ts_created}\n"
+                                        f"Час вибивання: {now_utc.isoformat()}\n"
+                                        f"Поточна ціна: {current_price}\n"
+                                        f"Новинний ризик зараз: {n_risk}\n"
+                                        f"Сесія: {sess}"
+                                    )
+                                    analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=700))
+                                except Exception:
+                                    analysis_note = ""
+                                signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
+                                await send_office(f"{symbol} вибило по стопу {sl_v} ❌\nАналізую чому...", stream="general")
+                                if analysis_note:
+                                    for part in split_long_message(analysis_note):
+                                        await send_office(part, stream="general")
+                                continue
+
+                        if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:
+                            hit_tp2 = (direction == "LONG" and current_price >= tp2_v) or (
+                                direction == "SHORT" and current_price <= tp2_v
+                            )
+                            if hit_tp2:
+                                signal_update(db_path, signal_id=signal_id, status="HIT_TP2", outcome="WIN")
+                                await send_office(
+                                    f"{symbol} досяг TP2 {tp2_v} 🎯\nВідмінний результат! Фіксуємо і шукаємо наступний сетап.",
+                                    stream="general",
+                                )
+                                continue
+                    except Exception as exc_row:
+                        print(f"[signals] row monitor failed: {exc_row}")
+            except Exception as exc:
+                print(f"[signals] monitor failed: {exc}")
+            await asyncio.sleep(300)
+
+    asyncio.create_task(monitor_active_signals())
 
     async def morning_macro_brief() -> None:
         """

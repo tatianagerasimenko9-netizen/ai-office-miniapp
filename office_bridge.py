@@ -409,11 +409,33 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_signals (
+                        signal_id TEXT PRIMARY KEY,
+                        symbol TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        entry_low DOUBLE PRECISION,
+                        entry_high DOUBLE PRECISION,
+                        sl DOUBLE PRECISION,
+                        tp1 DOUBLE PRECISION,
+                        tp2 DOUBLE PRECISION,
+                        rr DOUBLE PRECISION,
+                        status TEXT DEFAULT 'ACTIVE',
+                        ts_created TEXT NOT NULL,
+                        ts_updated TEXT,
+                        outcome TEXT,
+                        analysis_note TEXT
+                    )
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_status ON office_signals(status)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_symbol ON office_signals(symbol)")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_text TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS agent_suggested TEXT")
@@ -498,11 +520,33 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS office_signals (
+                signal_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                entry_low REAL,
+                entry_high REAL,
+                sl REAL,
+                tp1 REAL,
+                tp2 REAL,
+                rr REAL,
+                status TEXT DEFAULT 'ACTIVE',
+                ts_created TEXT NOT NULL,
+                ts_updated TEXT,
+                outcome TEXT,
+                analysis_note TEXT
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_status ON office_signals(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_symbol ON office_signals(symbol)")
         cols = {
             str(r[1]).strip().lower()
             for r in conn.execute("PRAGMA table_info(trade_journal)").fetchall()
@@ -915,6 +959,113 @@ def journal_latest_feedback_case(db_path: str, *, symbol: str) -> Dict[str, Any]
         "setup_name": str(row[6] or ""),
         "entry_price": row[7],
     }
+
+
+def signal_upsert(
+    db_path: str,
+    *,
+    signal_id: str,
+    symbol: str,
+    direction: str,
+    entry_low: Optional[float],
+    entry_high: Optional[float],
+    sl: Optional[float],
+    tp1: Optional[float],
+    tp2: Optional[float],
+    rr: Optional[float],
+    status: str = "ACTIVE",
+    analysis_note: str = "",
+) -> None:
+    _db_write(
+        db_path,
+        """
+        INSERT INTO office_signals(
+            signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+            status, ts_created, ts_updated, outcome, analysis_note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+        ON CONFLICT(signal_id) DO UPDATE SET
+            symbol = excluded.symbol,
+            direction = excluded.direction,
+            entry_low = excluded.entry_low,
+            entry_high = excluded.entry_high,
+            sl = excluded.sl,
+            tp1 = excluded.tp1,
+            tp2 = excluded.tp2,
+            rr = excluded.rr,
+            status = excluded.status,
+            ts_updated = excluded.ts_updated,
+            analysis_note = excluded.analysis_note
+        """,
+        (
+            signal_id,
+            symbol,
+            direction,
+            entry_low,
+            entry_high,
+            sl,
+            tp1,
+            tp2,
+            rr,
+            status,
+            _now_iso(),
+            _now_iso(),
+            analysis_note or "",
+        ),
+    )
+
+
+def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+               status, ts_created, ts_updated, outcome, analysis_note
+        FROM office_signals
+        WHERE status IN ('ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+        ORDER BY ts_created DESC
+        """,
+        (),
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "signal_id": r[0],
+                "symbol": r[1],
+                "direction": r[2],
+                "entry_low": r[3],
+                "entry_high": r[4],
+                "sl": r[5],
+                "tp1": r[6],
+                "tp2": r[7],
+                "rr": r[8],
+                "status": r[9],
+                "ts_created": r[10],
+                "ts_updated": r[11],
+                "outcome": r[12],
+                "analysis_note": r[13],
+            }
+        )
+    return out
+
+
+def signal_update(
+    db_path: str,
+    *,
+    signal_id: str,
+    status: str,
+    outcome: str = "",
+    analysis_note: str = "",
+) -> None:
+    _db_write(
+        db_path,
+        """
+        UPDATE office_signals
+        SET status = ?, ts_updated = ?, outcome = ?, analysis_note = COALESCE(NULLIF(?, ''), analysis_note)
+        WHERE signal_id = ?
+        """,
+        (status, _now_iso(), outcome or None, analysis_note or "", signal_id),
+    )
 
 
 def journal_consecutive_loss_streak(db_path: str, *, max_check: int = 12) -> int:
