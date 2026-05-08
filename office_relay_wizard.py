@@ -1261,17 +1261,19 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         f"{LEV_COMPLETE_RULE}"
         "Ти Лев — керівник офісу. "
         "Тетяна написала тільки назву монети — це означає: дай повний аналіз і сетап.\n"
-        "Структура відповіді:\n"
-        "1) Загальна картина (2 речення)\n"
-        "2) Bias: LONG чи SHORT і чому\n"
-        "3) Снайперський вхід:\n"
+        "Структура відповіді ОБОВ'ЯЗКОВО така:\n\n"
+        "ПЕРШИЙ блок — сетап одразу:\n"
+        "[LONG/SHORT] від [ціна]\n"
         "Entry: [ціна або зона]\n"
-        "SL: [ціна] (за структурою)\n"
-        "TP1: [ціна] (+X%)\n"
-        "TP2: [ціна] (+X%)\n"
-        "RR: [число]\n"
-        "4) Умова входу (коли саме заходити)\n"
-        "5) Що скасовує сетап\n"
+        "SL: [ціна] (за [причина])\n"
+        "TP1: [ціна] ([+%])\n"
+        "TP2: [ціна] ([+%])\n"
+        "RR: [число]\n\n"
+        "ДРУГИЙ блок — коротке пояснення:\n"
+        "Чому цей напрямок (2-3 речення)\n"
+        "Умова входу (коли саме)\n"
+        "Що скасовує сетап (1 речення)\n\n"
+        "Спочатку СЕТАП — потім пояснення. Не навпаки.\n"
         "Говориш від імені команди. ТІЛЬКИ українською. "
         "Без таблиць і заголовків ##. "
         "Якщо ATR >80% — попередити, що сьогодні краще чекати завтра."
@@ -1294,7 +1296,11 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
     )
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
-        await agent_say(sender, "lev", response)
+        parts = split_long_message(response)
+        for i, part in enumerate(parts):
+            await agent_say(sender, "lev", part if i == 0 else "..." + part)
+            if len(parts) > 1:
+                await asyncio.sleep(1.0)
     else:
         await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
 
