@@ -57,6 +57,7 @@ from office_bridge import (
     office_position_event,
     office_run_scenario,
     office_trade_closed,
+    live_risk_snapshot,
     signal_get_active,
     signal_update,
     signal_upsert,
@@ -2521,10 +2522,12 @@ async def run() -> None:
 
             from office_market_data import (
                 fetch_atr_context,
+                fetch_candles,
                 fetch_funding_rate,
                 fetch_key_levels,
                 fetch_long_short_ratio,
                 fetch_ote_levels,
+                fetch_open_interest,
                 fetch_top_movers,
             )
 
@@ -2587,68 +2590,141 @@ async def run() -> None:
             symbol = str(best.get("symbol") or "BTCUSDT")
             direction = str(best.get("direction") or "LONG")
             liq_now = fetch_liquidations_proxy(symbol)
+            oi_now = fetch_open_interest(symbol)
+            candles_h4 = fetch_candles(symbol, "4h", 6)
+            candles_d = fetch_candles(symbol, "1d", 4)
             current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
-            system = (
-                "Ти Лев — керівник офісу.\n"
-                "Ти щойно знайшов потенційний сетап.\n"
-                "Пишеш Тетяні ПЕРШИМ — вона не питала.\n\n"
-                "Структура повідомлення ОБОВ'ЯЗКОВО:\n"
-                "Тетяно, бачу сетап 👀\n\n"
-                f"{direction} {symbol}\n"
-                "Entry: [ціна або зона]\n"
-                "SL: [ціна] (за [причина])\n"
-                "TP1: [ціна] ([+%])\n"
-                "TP2: [ціна] ([+%])\n"
-                "RR: [число]\n\n"
-                "Підтвердження: [2-3 факти чому]\n"
-                "Умова входу: [коли саме заходити]\n\n"
-                "ОБОВ'ЯЗКОВО додати в кінці:\n"
-                "ЩО РОБИТИ ЗАРАЗ (ціна {current_price}):\n"
-                "→ [ЧЕКАТИ відкату до Entry зони]\n"
-                "або\n"
-                "→ [ВХОДИТИ ЗА РИНКОМ — ціна вже в зоні]\n"
-                "або\n"
-                "→ [ПІЗНО — пропускаємо, чекаємо наступний]\n\n"
-                "Одне з трьох. Чітко. Без варіантів.\n\n"
-                "Коротко. По суті. Чекаю твого рішення."
-            )
-            context = (
-                "Знайдений сетап:\n"
-                f"Символ: {symbol}\n"
-                f"Напрямок: {direction}\n"
-                f"Поточна ціна: {current_price}\n"
-                f"ATR пройдено: {best.get('atr_used')}%\n"
-                f"Funding: {best.get('funding')}%\n"
-                f"L/S ratio: {best.get('ls_ratio')}\n"
-                f"OTE зона: {best.get('ote')}\n"
-                f"Ключові рівні: {best.get('levels')}\n"
-                f"ATR деталі: {best.get('atr')}\n"
-                f"current_price: {current_price}\n"
-            )
-            response = clean_llm_note(ask_agent("lev", system, context, max_tokens=800))
-            if response:
-                parsed = _parse_signal_levels_from_text(response)
-                signal_id = f"proactive-{symbol}-{int(time.time())}"
-                signal_upsert(
-                    db_path,
-                    signal_id=signal_id,
-                    symbol=symbol,
-                    direction=direction,
-                    entry_low=parsed.get("entry_low"),
-                    entry_high=parsed.get("entry_high"),
-                    sl=parsed.get("sl"),
-                    tp1=parsed.get("tp1"),
-                    tp2=parsed.get("tp2"),
-                    rr=parsed.get("rr"),
-                    status="ACTIVE",
-                    analysis_note="",
-                )
-                parts = split_long_message(response)
+            news_risk = "SAFE"
+            news_mins = 999
+            if news_api_key:
+                try:
+                    timeout_news = aiohttp.ClientTimeout(total=10)
+                    async with aiohttp.ClientSession(timeout=timeout_news) as s_news:
+                        n = await fetch_news_risk(s_news, news_api_key)
+                        news_risk = str(n.level)
+                        news_mins = int(n.minutes_to_event)
+                except Exception:
+                    pass
+            risk_snapshot = live_risk_snapshot(db_path)
+
+            async def _send_agent_turn(agent_key: str, text: str) -> None:
+                if not text:
+                    return
+                parts = split_long_message(text)
                 for i, part in enumerate(parts):
                     msg = part if i == 0 else "..." + part
-                    await send_office(msg, stream="general")
+                    await send_office(fmt_agent_line(agent_key, msg), stream="general")
                     if len(parts) > 1:
                         await asyncio.sleep(1.0)
+
+            await _send_agent_turn("lev", f"Тетяно, бачу сетап 👀\n{direction} {symbol} — команда, аналіз.")
+            await asyncio.sleep(1.5)
+
+            maks_ctx = (
+                f"Символ: {symbol}\nНапрямок: {direction}\nПоточна ціна: {current_price}\n"
+                f"OI: {oi_now}\nFunding: {best.get('funding')}%\nL/S: {best.get('ls_ratio')}\n"
+                f"Ліквідації: {liq_now}"
+            )
+            maks_msg = clean_llm_note(
+                ask_agent(
+                    "maks",
+                    "Ти Макс. Дай коротко ринкові дані: OI/funding/liquidations і висновок по імпульсу. Українською.",
+                    maks_ctx,
+                    max_tokens=700,
+                )
+            )
+            await _send_agent_turn("maks", maks_msg or "OI/funding/ліквідації підтверджують робочий сценарій.")
+            await asyncio.sleep(1.5)
+
+            mar_ctx = f"Символ: {symbol}\nНапрямок: {direction}\nH4: {candles_h4}\nDaily: {candles_d}"
+            mar_msg = clean_llm_note(
+                ask_agent(
+                    "marichka",
+                    "Ти Марічка. Дай bias по H4/Daily, коротко і чітко. Українською.",
+                    mar_ctx,
+                    max_tokens=700,
+                )
+            )
+            await _send_agent_turn("marichka", mar_msg or "На H4/Daily структура підтверджує поточний напрямок.")
+            await asyncio.sleep(1.5)
+
+            news_ctx = f"Новинний ризик: {news_risk}\nХвилин до події: {news_mins}\nСимвол: {symbol}"
+            news_msg = clean_llm_note(
+                ask_agent(
+                    "news",
+                    "Ти Назар. Оціни новинний фон для входу зараз, 1-2 речення, українською.",
+                    news_ctx,
+                    max_tokens=500,
+                )
+            )
+            await _send_agent_turn("news", news_msg or "Новинний фон керований, критичних тригерів поруч немає.")
+            await asyncio.sleep(1.5)
+
+            daryna_ctx = (
+                f"Символ: {symbol}\nНапрямок: {direction}\nATR: {best.get('atr')}\n"
+                f"Live risk snapshot: {risk_snapshot}\nНовини: {news_risk}"
+            )
+            daryna_msg = clean_llm_note(
+                ask_agent(
+                    "daryna",
+                    "Ти Дарина. Дай ризик-висновок і вето/допуск коротко, українською.",
+                    daryna_ctx,
+                    max_tokens=600,
+                )
+            )
+            await _send_agent_turn("daryna", daryna_msg or "Ризик контрольований, можна працювати тільки по плану.")
+            await asyncio.sleep(1.5)
+
+            marko_ctx = (
+                f"Символ: {symbol}\nНапрямок: {direction}\nПоточна ціна: {current_price}\n"
+                f"OTE: {best.get('ote')}\nКлючові рівні: {best.get('levels')}\n"
+                "Дай execution-план з Entry/SL/TP1/TP2/RR і блоком 'ЩО РОБИТИ ЗАРАЗ'."
+            )
+            marko_msg = clean_llm_note(
+                ask_agent(
+                    "marko",
+                    "Ти Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR + що робити зараз. Українською.",
+                    marko_ctx,
+                    max_tokens=900,
+                )
+            )
+            await _send_agent_turn("marko", marko_msg or f"ЩО РОБИТИ ЗАРАЗ (ціна {current_price}): чекаємо підтвердження в зоні Entry.")
+            await asyncio.sleep(1.5)
+
+            team_pack = (
+                f"Макс: {maks_msg}\n"
+                f"Марічка: {mar_msg}\n"
+                f"Назар: {news_msg}\n"
+                f"Дарина: {daryna_msg}\n"
+                f"Марко: {marko_msg}\n"
+                f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}"
+            )
+            lev_final = clean_llm_note(
+                ask_agent(
+                    "lev",
+                    "Ти Лев. На базі реплік команди дай фінальне рішення: ВХІД/ЧЕКАЄМО/ПРОПУСК і чіткий next action. Українською.",
+                    team_pack,
+                    max_tokens=900,
+                )
+            )
+            await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+
+            parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
+            signal_id = f"proactive-{symbol}-{int(time.time())}"
+            signal_upsert(
+                db_path,
+                signal_id=signal_id,
+                symbol=symbol,
+                direction=direction,
+                entry_low=parsed.get("entry_low"),
+                entry_high=parsed.get("entry_high"),
+                sl=parsed.get("sl"),
+                tp1=parsed.get("tp1"),
+                tp2=parsed.get("tp2"),
+                rr=parsed.get("rr"),
+                status="ACTIVE",
+                analysis_note=lev_final or "",
+            )
         except Exception as e:
             print(f"[scanner] error: {e}")
 
