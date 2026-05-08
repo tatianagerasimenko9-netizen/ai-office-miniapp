@@ -65,6 +65,10 @@ ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
 CHECKLIST_PATH = ROOT_DIR / "OFFICE_CHECKLIST_STATUS_UA.md"
 RUNBOOK_PATH = ROOT_DIR / "RUNBOOK_UA.md"
+MAX_HISTORY = 5
+HISTORY_TTL_SEC = 30 * 60
+_chat_history: List[Dict[str, str]] = []
+_chat_history_ts: float = 0.0
 
 OFFICE_RULES_BRIEF_UA = (
     "Правила офісу (коротко):\n"
@@ -1040,25 +1044,29 @@ def detect_agent_from_text(text: str) -> str:
 
 
 def is_trade_feedback(text: str) -> bool:
-    keywords = [
-        "відпрацював",
-        "не відпрацював",
-        "вибило",
-        "взяли",
-        "закрили",
-        "стоп",
-        "тейк",
-        "tp",
-        "sl",
-        "в плюс",
-        "в мінус",
-        "профіт",
-        "збиток",
-        "відмінно",
-        "провалився",
-    ]
-    low = str(text or "").lower()
-    return any(k in low for k in keywords)
+    t = str(text or "").lower()
+    has_symbol = bool(
+        re.search(r"\b[a-z0-9]{2,10}usdt\b", t)
+        or any(a in t for a in ["btc", "eth", "sol", "bnb", "xrp", "ada", "dot", "avax"])
+    )
+    has_result = any(
+        k in t
+        for k in [
+            "відпрацював",
+            "не відпрацював",
+            "вибило",
+            "стоп вибило",
+            "в плюс",
+            "в мінус",
+            "профіт",
+            "збиток",
+            "закрили",
+            "закрив",
+            "+%",
+            "-%",
+        ]
+    )
+    return has_symbol and has_result
 
 
 def _feedback_result(text: str) -> str:
@@ -1112,6 +1120,31 @@ def extract_symbols_list(text: str) -> List[str]:
                 seen.add(sym)
                 symbols.append(sym)
     return symbols[:3]
+
+
+def _history_reset() -> None:
+    global _chat_history, _chat_history_ts
+    _chat_history = []
+    _chat_history_ts = 0.0
+
+
+def _history_add(role: str, content: str) -> None:
+    global _chat_history, _chat_history_ts
+    txt = str(content or "").strip()
+    if role not in ("user", "assistant") or not txt:
+        return
+    _chat_history.append({"role": role, "content": txt[:2000]})
+    if len(_chat_history) > MAX_HISTORY:
+        _chat_history = _chat_history[-MAX_HISTORY:]
+    _chat_history_ts = time.time()
+
+
+def _history_prepare() -> List[Dict[str, str]]:
+    global _chat_history, _chat_history_ts
+    now = time.time()
+    if _chat_history_ts > 0 and (now - _chat_history_ts) > HISTORY_TTL_SEC:
+        _history_reset()
+    return list(_chat_history)
 
 
 async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
@@ -1195,6 +1228,9 @@ async def office_free_chat(
     text: str,
     db_path: str,
 ) -> None:
+    history = _history_prepare()
+    _history_add("user", text)
+
     symbols_batch = extract_symbols_list(text)
     if len(symbols_batch) >= 2:
         parts = [p for p in re.split(r"[,\s]+", str(text or "").strip().upper()) if p]
@@ -1316,8 +1352,17 @@ async def office_free_chat(
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
-    response = clean_llm_note(ask_agent(chosen_agent, answer_system, context, max_tokens=1500))
+    response = clean_llm_note(
+        ask_agent(
+            chosen_agent,
+            answer_system,
+            context,
+            max_tokens=1500,
+            messages_history=history,
+        )
+    )
     if response:
+        _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
 
 
@@ -1935,6 +1980,7 @@ async def run() -> None:
                 f"[relay] matched message id={event.id} chat_id={src_chat_id}"
                 + (" (scanner-forced)" if from_scanner else "")
             )
+            _history_reset()
             sig = parse_signal(text, event.id)
             if news_api_key:
                 news_timeout = aiohttp.ClientTimeout(total=10)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -202,6 +202,7 @@ def ask_agent(
     system_prompt: str,
     user_context: str,
     max_tokens: int = 150,
+    messages_history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """
     Lightweight Anthropic adapter for agent-style replies.
@@ -217,7 +218,16 @@ def ask_agent(
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-        messages: List[Dict[str, Any]] = [
+        messages: List[Dict[str, Any]] = []
+        for item in (messages_history or []):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            content_txt = str(item.get("content") or "").strip()
+            if role not in ("user", "assistant") or not content_txt:
+                continue
+            messages.append({"role": role, "content": content_txt[:5000]})
+        messages.append(
             {
                 "role": "user",
                 "content": (
@@ -225,7 +235,7 @@ def ask_agent(
                     f"context:\n{user_context}"
                 ),
             }
-        ]
+        )
         max_loops = 5
 
         with httpx.Client(timeout=20.0) as client:
