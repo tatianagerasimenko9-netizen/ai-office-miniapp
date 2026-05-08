@@ -252,8 +252,10 @@ def ask_agent(
 
         with httpx.Client(timeout=20.0) as client:
             for _ in range(max_loops):
+                model_name = get_model_for_agent(agent_key)
+                timeout_sec = 60.0 if "opus" in model_name else 25.0
                 payload: Dict[str, Any] = {
-                    "model": get_model_for_agent(agent_key),
+                    "model": model_name,
                     "max_tokens": max(int(max_tokens), 1000),
                     "system": str(system_prompt or ""),
                     "tools": TOOLS,
@@ -263,7 +265,7 @@ def ask_agent(
                     "https://api.anthropic.com/v1/messages",
                     headers=headers,
                     json=payload,
-                    timeout=25.0,
+                    timeout=timeout_sec,
                 )
                 resp.raise_for_status()
                 data = resp.json()
