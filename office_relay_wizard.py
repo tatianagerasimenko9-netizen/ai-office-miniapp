@@ -317,6 +317,43 @@ async def send_via_bot_api(
         return False, f"exception: {exc}", None
 
 
+async def send_via_bot_streaming(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    text: str,
+    thread_id: Optional[int] = None,
+    reply_to: Optional[int] = None,
+) -> Tuple[bool, str, Optional[int]]:
+    """
+    Streaming повідомлення через sendMessageDraft.
+    Telegram показує текст в реальному часі поки агент "думає".
+    """
+    url = f"https://api.telegram.org/bot{token}/sendMessageDraft"
+    payload: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text[:3900],
+        "disable_web_page_preview": True,
+    }
+    if thread_id:
+        payload["message_thread_id"] = int(thread_id)
+    if reply_to:
+        payload["reply_to_message_id"] = int(reply_to)
+    try:
+        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            data = await resp.json()
+            if bool(data.get("ok")):
+                msg_id = ((data.get("result") or {}) if isinstance(data, dict) else {}).get("message_id")
+                try:
+                    msg_id = int(msg_id) if msg_id is not None else None
+                except Exception:
+                    msg_id = None
+                return True, "ok", msg_id
+            return False, str(data), None
+    except Exception as e:
+        return False, str(e), None
+
+
 async def check_bot_api_access(
     session: aiohttp.ClientSession,
     token: str,
@@ -1734,15 +1771,35 @@ async def run() -> None:
                     btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
             token = agent_bot_tokens.get(agent_key or "")
             if token:
-                ok, reason, msg_id = await send_via_bot_api(
-                    bot_http,
-                    token,
-                    office_chat_id,
-                    text_part,
-                    reply_to_message_id=reply_to,
-                    message_thread_id=thread_id,
-                    reply_markup=btn_markup,
-                )
+                try:
+                    ok, reason, msg_id = await send_via_bot_streaming(
+                        bot_http,
+                        token,
+                        office_chat_id,
+                        text_part,
+                        thread_id=thread_id,
+                        reply_to=reply_to,
+                    )
+                    if not ok:
+                        ok, reason, msg_id = await send_via_bot_api(
+                            bot_http,
+                            token,
+                            office_chat_id,
+                            text_part,
+                            reply_to_message_id=reply_to,
+                            message_thread_id=thread_id,
+                            reply_markup=btn_markup,
+                        )
+                except Exception:
+                    ok, reason, msg_id = await send_via_bot_api(
+                        bot_http,
+                        token,
+                        office_chat_id,
+                        text_part,
+                        reply_to_message_id=reply_to,
+                        message_thread_id=thread_id,
+                        reply_markup=btn_markup,
+                    )
                 if ok:
                     return msg_id
                 if "message to be replied not found" in str(reason).lower() and reply_to is not None:
