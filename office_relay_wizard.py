@@ -97,23 +97,16 @@ LEV_COMPLETE_RULE = (
     "Ти бачив кризу 2008, 2018, 2022.\n"
     "Ти знаєш: плутанина вбиває депозит.\n"
     "Один чіткий напрямок — завжди.\n"
+    "Ніколи не виводь в чат таблиці свічок, OHLCV дані, списки цін з часом.\n"
+    "Тільки висновок — що це означає.\n"
 )
 LEV_CONCISE_RULE = (
-    "Твій формат відповіді — тільки:\n"
-    "1. Фінальне рішення: ВХІД/ПРОПУСК/ЧЕКАЄМО\n"
-    "2. Якщо ВХІД:\n"
-    "   Entry: [ціна]\n"
-    "   SL: [ціна]\n"
-    "   TP1: [ціна]\n"
-    "   TP2: [ціна]\n"
-    "   RR: [число]\n"
-    "3. Одне речення чому.\n\n"
-    "ЗАБОРОНЕНО:\n"
-    "- довгі пояснення\n"
-    "- таблиці свічок\n"
-    "- повтори того що вже сказала команда\n"
-    "- оновлення кожні 15 хвилин по одній монеті\n"
+    "Твій формат — тільки:\n"
+    "Рішення: ВХІД/ПРОПУСК/ЧЕКАЄМО\n"
+    "Entry/SL/TP1/TP2/RR якщо ВХІД.\n"
+    "Одне речення чому.\n"
     "Максимум 150 слів.\n"
+    "Не повторюй команду.\n"
 )
 
 
@@ -2032,6 +2025,7 @@ async def run() -> None:
         print("[relay] mode: strict source filter (MAIN chat only)")
     active_positions: Dict[str, ActivePosition] = {}
     last_news_level = "SAFE"
+    _last_signal_time: Dict[str, float] = {}
     last_daily_report_date = ""
     news_api_key = os.getenv("NEWS_API_KEY", "").strip()
     if not news_api_key:
@@ -2589,6 +2583,11 @@ async def run() -> None:
             setups_found: List[Dict[str, Any]] = []
             for symbol in candidates[:8]:
                 try:
+                    last_ts = float(_last_signal_time.get(symbol, 0.0) or 0.0)
+                    if (time.time() - last_ts) < 7200:
+                        continue
+                    if symbol == "BTCUSDT" and any("BTC" in str(s.get("symbol") or "") for s in setups_found):
+                        continue
                     atr = fetch_atr_context(symbol)
                     atr_used = float((atr or {}).get("day_used_pct", 100) or 100)
                     if atr_used > 85:
@@ -2635,8 +2634,8 @@ async def run() -> None:
             direction = str(best.get("direction") or "LONG")
             liq_now = fetch_liquidations_proxy(symbol)
             oi_now = fetch_open_interest(symbol)
+            candles_h1 = fetch_candles(symbol, "1h", 6)
             candles_h4 = fetch_candles(symbol, "4h", 6)
-            candles_d = fetch_candles(symbol, "1d", 4)
             current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
             news_risk = "SAFE"
             news_mins = 999
@@ -2697,8 +2696,9 @@ async def run() -> None:
             mar_ctx = (
                 f"Символ: {symbol}\n"
                 f"Напрямок: {direction}\n"
+                f"{_tf_snapshot('H1', candles_h1)}\n"
                 f"{_tf_snapshot('H4', candles_h4)}\n"
-                f"{_tf_snapshot('D1', candles_d)}"
+                "Без сирих OHLCV: дай тільки висновок."
             )
             mar_msg = clean_llm_note(
                 ask_agent(
@@ -2794,6 +2794,7 @@ async def run() -> None:
                 status="ACTIVE",
                 analysis_note=lev_final or "",
             )
+            _last_signal_time[symbol] = time.time()
         except Exception as e:
             print(f"[scanner] error: {e}")
 
