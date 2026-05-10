@@ -2571,9 +2571,10 @@ async def run() -> None:
                 fetch_top_movers,
             )
 
+            EXCLUDED_FROM_SCANNER = {"BTCUSDT", "ETHUSDT"}
             gainers = fetch_top_movers("gainers", 5)
             losers = fetch_top_movers("losers", 5)
-            always_watch = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+            always_watch: List[str] = []
 
             candidates = always_watch.copy()
             combined = (gainers or []) + (losers or [])
@@ -2585,6 +2586,8 @@ async def run() -> None:
             setups_found: List[Dict[str, Any]] = []
             for symbol in candidates[:8]:
                 try:
+                    if symbol in EXCLUDED_FROM_SCANNER:
+                        continue
                     last_ts = float(_last_signal_time.get(symbol, 0.0) or 0.0)
                     if (time.time() - last_ts) < 7200:
                         continue
@@ -2690,7 +2693,7 @@ async def run() -> None:
                     "maks",
                     "Ти Макс. Дай коротко ринкові дані: OI/funding/liquidations і висновок по імпульсу. Українською.",
                     maks_ctx,
-                    max_tokens=700,
+                    max_tokens=500,
                 )
             )
             await _send_agent_turn("maks", maks_msg or "OI/funding/ліквідації підтверджують робочий сценарій.")
@@ -2708,7 +2711,7 @@ async def run() -> None:
                     "marichka",
                     "Ти Марічка. Дай bias по H4/Daily, коротко і чітко. Українською.",
                     mar_ctx,
-                    max_tokens=700,
+                    max_tokens=500,
                 )
             )
             await _send_agent_turn("marichka", mar_msg or "На H4/Daily структура підтверджує поточний напрямок.")
@@ -2720,7 +2723,7 @@ async def run() -> None:
                     "news",
                     "Ти Назар. Оціни новинний фон для входу зараз, 1-2 речення, українською.",
                     news_ctx,
-                    max_tokens=500,
+                    max_tokens=300,
                 )
             )
             await _send_agent_turn("news", news_msg or "Новинний фон керований, критичних тригерів поруч немає.")
@@ -2735,7 +2738,7 @@ async def run() -> None:
                     "daryna",
                     "Ти Дарина. Дай ризик-висновок і вето/допуск коротко, українською.",
                     daryna_ctx,
-                    max_tokens=600,
+                    max_tokens=500,
                 )
             )
             await _send_agent_turn("daryna", daryna_msg or "Ризик контрольований, можна працювати тільки по плану.")
@@ -2751,7 +2754,7 @@ async def run() -> None:
                     "marko",
                     "Ти Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR + що робити зараз. Українською.",
                     marko_ctx,
-                    max_tokens=900,
+                    max_tokens=600,
                 )
             )
             await _send_agent_turn("marko", marko_msg or f"ЩО РОБИТИ ЗАРАЗ (ціна {current_price}): чекаємо підтвердження в зоні Entry.")
