@@ -2547,6 +2547,7 @@ async def run() -> None:
             minute_of_day = h * 60 + m
             in_london = 480 <= minute_of_day < 660
             in_ny = 780 <= minute_of_day < 960
+            print(f"[scanner] tick UTC={utc_now.hour}:{utc_now.minute} in_ny={in_ny} in_london={in_london}")
             if not (in_london or in_ny):
                 return  # поза Kill Zone — мовчимо
 
