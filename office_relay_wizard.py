@@ -60,6 +60,7 @@ from office_bridge import (
     office_trade_closed,
     live_risk_snapshot,
     signal_get_active,
+    signal_get_by_symbol,
     signal_update,
     signal_upsert,
     _extract_first_usdt_symbol,
@@ -1605,7 +1606,17 @@ async def office_free_chat(
         "psych": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Ти Віктор — психолог команди. Стежиш за дисципліною."
+            "Тобі 45 років. Ти Віктор. "
+            "Психолог команди. "
+            "Знаєш що кожна людина торгує своїми грошима — для когось це $100, для когось $100,000. "
+            "Сума не важлива — важливий стан. "
+            "Говориш рідко але влучно. "
+            "Після збитків — зупиняєш від форсу. "
+            "Перед великим входом — підтримуєш. "
+            "Після WIN серій — нагадуєш про дисципліну. "
+            "Бачиш коли людина в стресі і реагуєш. "
+            "Говориш тільки українською. "
+            "Без таблиць."
         ),
         "dev": (
             f"{LEV_RULE}"
@@ -1645,17 +1656,27 @@ async def office_free_chat(
         f"{market_context}\n\n"
         "Відповідь має бути голосом правильного агента."
     )
-    text_lower = str(text or "").lower()
-    if (
-        ("позиція" in text_lower or "лонг" in text_lower or "шорт" in text_lower)
-        and not extract_symbols_list(text)
-    ):
+    symbols_in_text = extract_symbols_list(text)
+    if symbols_in_text:
+        active_by_symbol = signal_get_by_symbol(db_path, symbols_in_text[0])
+        if active_by_symbol:
+            context = (
+                f"Активна позиція Тетяни: {active_by_symbol.get('symbol')} {active_by_symbol.get('direction')}\n"
+                f"Entry: {active_by_symbol.get('entry_low')}\n"
+                f"SL: {active_by_symbol.get('sl')}\n"
+                f"TP1: {active_by_symbol.get('tp1')}\n"
+                + context
+            )
+    if not symbols_in_text:
         active = signal_get_active(db_path)
         if active:
             last_symbol = str(active[0].get("symbol", "") or "").strip().upper()
             if last_symbol:
                 context = (
-                    f"Активна позиція: {last_symbol} {active[0].get('direction')}\n"
+                    f"Активна позиція Тетяни: {last_symbol} {active[0].get('direction')}\n"
+                    f"Entry: {active[0].get('entry_low')}\n"
+                    f"SL: {active[0].get('sl')}\n"
+                    f"TP1: {active[0].get('tp1')}\n"
                     + context
                 )
     chosen_agent = detect_agent_from_text(text)

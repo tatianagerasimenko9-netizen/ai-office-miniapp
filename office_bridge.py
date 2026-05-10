@@ -1054,6 +1054,45 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def signal_get_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
+    """Знайти активний сигнал по символу."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return None
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+               status, ts_created, ts_updated, outcome, analysis_note
+        FROM office_signals
+        WHERE UPPER(symbol) = ?
+          AND status IN ('ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+        ORDER BY ts_created DESC
+        LIMIT 1
+        """,
+        (sym,),
+    )
+    if rows:
+        r = rows[0]
+        return {
+            "signal_id": r[0],
+            "symbol": r[1],
+            "direction": r[2],
+            "entry_low": r[3],
+            "entry_high": r[4],
+            "sl": r[5],
+            "tp1": r[6],
+            "tp2": r[7],
+            "rr": r[8],
+            "status": r[9],
+            "ts_created": r[10],
+            "ts_updated": r[11],
+            "outcome": r[12],
+            "analysis_note": r[13],
+        }
+    return None
+
+
 def signal_get_recent(db_path: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Return recent closed/finished signals for agent memory context."""
     safe_limit = max(1, min(int(limit or 5), 20))
@@ -2526,10 +2565,17 @@ def _psych_reply(recurring: Dict[str, int]) -> str:
     system = (
         f"{LEV_RULE}"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
-        "Тобі 35 років.\n"
-        "Ти Віктор — психолог команди трейдинг-офісу.\n"
-        "Говориш спокійно, підтримуюче, але дисципліновано.\n"
-        "Даєш коротку практичну пораду по емоціях і самоконтролю (1-2 речення)."
+        "Тобі 45 років. Ти Віктор.\n"
+        "Психолог команди.\n"
+        "Знаєш що кожна людина торгує своїми грошима — для когось це $100, для когось $100,000.\n"
+        "Сума не важлива — важливий стан.\n"
+        "Говориш рідко але влучно.\n"
+        "Після збитків — зупиняєш від форсу.\n"
+        "Перед великим входом — підтримуєш.\n"
+        "Після WIN серій — нагадуєш про дисципліну.\n"
+        "Бачиш коли людина в стресі і реагуєш.\n"
+        "Говориш тільки українською.\n"
+        "Без таблиць."
     )
     top = ", ".join(f"{k} x{v}" for k, v in sorted(recurring.items(), key=lambda x: (-x[1], x[0]))[:3]) or "немає"
     context = (
