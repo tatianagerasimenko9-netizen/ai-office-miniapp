@@ -47,6 +47,7 @@ from office_bridge import (
     journal_learning_hints_from_tags,
     journal_open_trade,
     journal_recurring_mistakes,
+    journal_total_closed,
     log_event,
     office_db_identity,
     office_desk_user_question,
@@ -75,6 +76,7 @@ _chat_history: List[Dict[str, str]] = []
 _chat_history_ts: float = 0.0
 _last_signal_time: Dict[str, float] = {}
 _last_notified: Dict[str, float] = {}
+_risk_committee_last_sent: float = 0.0
 
 OFFICE_RULES_BRIEF_UA = (
     "Правила офісу (коротко):\n"
@@ -92,6 +94,7 @@ LEV_RULE = (
     "Одне речення після якщо треба. "
     "Старший ТФ в пріоритеті. "
     "Є активний сигнал — UPDATE не новий. "
+    "Спочатку Entry/SL/TP/RR — потім все інше. "
     "Говориш тільки українською. "
     "Без таблиць і заголовків."
 )
@@ -3072,6 +3075,7 @@ async def run() -> None:
 
     async def monitor_risk_committee() -> None:
         """MASTER п.30: один нагадувальний пост на день при серії SL або багатьох денних лоссах."""
+        global _risk_committee_last_sent
         last_sent_day = ""
         while True:
             try:
@@ -3094,6 +3098,13 @@ async def run() -> None:
                 day_losses = _journal_today_loss_count(db_path)
                 streak = journal_consecutive_loss_streak(db_path)
                 if day_losses >= need_day or streak >= need_streak:
+                    total = journal_total_closed(db_path)
+                    if total < 5:
+                        await asyncio.sleep(120)
+                        continue
+                    if (time.time() - _risk_committee_last_sent) < 86400:
+                        await asyncio.sleep(120)
+                        continue
                     log_event(
                         db_path,
                         "RISK_COMMITTEE",
@@ -3106,6 +3117,7 @@ async def run() -> None:
                         "Короткий обов’язковий розбір: що повторюється, де форс, що вимкнути до завтра."
                     )
                     last_sent_day = today
+                    _risk_committee_last_sent = time.time()
                     print("[relay] risk committee notice sent")
             except Exception as exc:
                 print(f"[relay][WARN] monitor_risk_committee failed: {exc}")
