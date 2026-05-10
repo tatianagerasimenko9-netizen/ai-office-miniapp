@@ -199,10 +199,9 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_model_for_agent(agent_key: str) -> str:
     """
-    Лев — Opus (найважливіші рішення)
-    Решта — Sonnet (оптимально)
+    Всі агенти — Sonnet (економний режим)
     """
-    opus_agents = {"lev"}
+    opus_agents = set()
     if str(agent_key or "").strip().lower() in opus_agents:
         return "claude-opus-4-6"
     return "claude-sonnet-4-6"
@@ -221,7 +220,7 @@ def ask_agent(
     """
     try:
         agent_norm = str(agent_key or "").strip().lower()
-        token_cap = 400 if agent_norm == "lev" else 600
+        token_cap = 700 if agent_norm == "lev" else 600
         safe_max_tokens = max(64, min(int(max_tokens), token_cap))
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
@@ -272,6 +271,9 @@ def ask_agent(
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                stop_reason = data.get("stop_reason", "unknown")
+                if stop_reason == "max_tokens":
+                    print(f"[llm] {agent_key} hit max_tokens limit!")
 
                 content = data.get("content")
                 if not isinstance(content, list):
