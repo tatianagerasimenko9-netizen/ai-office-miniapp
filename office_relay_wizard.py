@@ -1753,8 +1753,8 @@ async def office_free_chat(
     )
     if chosen_agent == "lev" and response:
         lines = [l for l in response.split('\n') if l.strip()]
-        if len(lines) > 16:
-            response = '\n'.join(lines[:16])
+        if len(lines) > 12:
+            response = '\n'.join(lines[:12])
     if response:
         _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
