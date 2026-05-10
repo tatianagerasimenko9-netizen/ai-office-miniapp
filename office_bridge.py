@@ -1628,65 +1628,29 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     currency = str(signal.meta.get("news_currency") or "USD")
     importance = str(signal.meta.get("news_importance") or "low").lower()
     kyiv_time = _to_kyiv_time_from_utc(event_time_utc, mins)
-    system = (
-        f"{LEV_RULE}"
-        "МОВА: Ти спілкуєшся ТІЛЬКИ українською. Це абсолютне правило без винятків. "
-        "Якщо думка прийшла російською — перекладай перед тим як писати. "
-        "Заборонені слова: растут/растет/растемо, может/може (рос), безопасні, заканчується, "
-        "жди, мой та будь-які інші російські слова. "
-        "Дозволені іноземні слова тільки: entry, SL, TP, RR, OI, funding, BTC, short, long — "
-        "і лише як торгові терміни.\n"
-        "Тобі 31 рік.\n"
-        "Ти Назар — стежиш за новинами.\n"
-        "Трохи параноїдальний за природою але це рятує від збитків.\n"
-        "Знаєш що одна новина може знищити будь-який красивий сетап.\n"
-        "Завжди кажеш час по Києву.\n"
-        "Називаєш подію конкретно — 'виступ Пауела' а не 'подія'.\n"
-        "Пояснюєш простою мовою, що це означає для входу в позицію.\n"
-        "Якщо небезпечно — кричиш.\n"
-        "Якщо спокійно — одне речення.\n"
-        "Ти пишеш в Telegram груповий чат. Без таблиць, без заголовків ##, без ліній ---. "
-        "Звертайся до Тетяни по імені коли доречно. "
-        "Звертайся до колег по іменах — Макс, Марічка, Назар, Дарина, Лев, Марко.\n"
-        "Ніколи не вигадуєш новини."
+    news_note = (
+        "Новинний фон чистий. Входити можна."
+        if mins >= 999
+        else f"Увага! {event_name} через {mins} хв о {kyiv_time} за Києвом."
     )
-    context = (
-        f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
-        f"Хвилин до події: {mins}\n"
-        f"Час по Києву: {kyiv_time}\n"
-        f"Назва події: {event_name}\n"
-        f"Валюта: {currency}\n"
-        f"Важливість: {importance}\n"
-        f"Символ: {signal.symbol}\n"
-        f"Напрямок: {signal.direction}"
-    )
-    llm_note = clean_llm_note(ask_agent("news", system, context, max_tokens=600))
     if risk == "HIGH":
-        fallback = (
-            f"{'Важлива макро подія' if event_name == 'невідомо' else event_name} "
-            f"через {mins} хв ({kyiv_time} за Києвом). Не входимо."
-        )
         return AgentDecision(
             "news",
             "REJECTED",
-            llm_note or _enforce_data_grounding(fallback, signal),
+            _enforce_data_grounding(news_note, signal),
             {"news": "HIGH RISK"},
         )
     if risk == "RISK":
-        fallback = (
-            f"{'Новина середньої важливості' if event_name == 'невідомо' else event_name} "
-            f"через {mins} хв ({kyiv_time} за Києвом). Можна торгувати, але обережно."
-        )
         return AgentDecision(
             "news",
             "WAIT",
-            llm_note or _enforce_data_grounding(fallback, signal),
+            _enforce_data_grounding(news_note, signal),
             {"news": "RISK"},
         )
     return AgentDecision(
         "news",
         "APPROVED",
-        llm_note or _enforce_data_grounding("Критичних новин поруч немає.", signal),
+        _enforce_data_grounding(news_note, signal),
         {"news": "SAFE"},
     )
 

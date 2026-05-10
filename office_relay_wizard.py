@@ -9,7 +9,7 @@ import random
 import re
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 try:
@@ -2645,6 +2645,8 @@ async def run() -> None:
             current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
             news_risk = "SAFE"
             news_mins = 999
+            news_event_name = "подія"
+            news_kyiv_time = ""
             if news_api_key:
                 try:
                     timeout_news = aiohttp.ClientTimeout(total=10)
@@ -2652,6 +2654,10 @@ async def run() -> None:
                         n = await fetch_news_risk(s_news, news_api_key)
                         news_risk = str(n.level)
                         news_mins = int(n.minutes_to_event)
+                        news_event_name = str(n.event_name or n.headline or "подія")
+                        if news_mins >= 0:
+                            kyiv_now = datetime.now(timezone.utc) + timedelta(hours=3)
+                            news_kyiv_time = (kyiv_now + timedelta(minutes=news_mins)).strftime("%H:%M")
                 except Exception:
                     pass
             risk_snapshot = live_risk_snapshot(db_path)
@@ -2716,13 +2722,12 @@ async def run() -> None:
             await _send_agent_turn("marichka", mar_msg or "На H4/Daily структура підтверджує поточний напрямок.")
             await asyncio.sleep(1.5)
 
-            news_ctx = f"Новинний ризик: {news_risk}\nХвилин до події: {news_mins}\nСимвол: {symbol}"
-            news_msg = clean_llm_note(
-                ask_agent(
-                    "news",
-                    "Ти Назар. Оціни новинний фон для входу зараз, 1-2 речення, українською.",
-                    news_ctx,
-                    max_tokens=300,
+            news_msg = (
+                "Новинний фон чистий. Входити можна."
+                if news_mins >= 999
+                else (
+                    f"Увага! {news_event_name} через {news_mins} хв "
+                    f"о {news_kyiv_time or 'за Києвом'} за Києвом."
                 )
             )
             news_msg = _trim_lines(news_msg, 3)
@@ -2784,7 +2789,7 @@ async def run() -> None:
                     max_tokens=200,
                 )
             )
-            lev_final = _trim_lines(lev_final, 5)
+            lev_final = _trim_lines(lev_final, 7)
             await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
