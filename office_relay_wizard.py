@@ -74,6 +74,7 @@ HISTORY_TTL_SEC = 30 * 60
 _chat_history: List[Dict[str, str]] = []
 _chat_history_ts: float = 0.0
 _last_signal_time: Dict[str, float] = {}
+_last_notified: Dict[str, float] = {}
 
 OFFICE_RULES_BRIEF_UA = (
     "Правила офісу (коротко):\n"
@@ -1216,6 +1217,35 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
         "rr": None,
     }
     src = str(text or "")
+
+    def _to_float(raw: str) -> Optional[float]:
+        try:
+            s = str(raw or "").replace(" ", "").replace(",", "")
+            return float(s)
+        except Exception:
+            return None
+
+    def _extract_line_value(label: str, line_text: str, hint: Optional[float] = None) -> Optional[float]:
+        pat = rf"{label}\s*:\s*([^\n\r]+)"
+        m = re.search(pat, line_text, flags=re.IGNORECASE)
+        if not m:
+            return None
+        chunk = str(m.group(1) or "")
+        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", chunk)
+        values: List[float] = []
+        for n in nums:
+            v = _to_float(n)
+            if v is not None:
+                values.append(v)
+        if not values:
+            return None
+        # Ignore percentage-like tail values if a realistic price exists.
+        if hint is not None:
+            near = [v for v in values if 0.5 * hint <= v <= 1.5 * hint]
+            if near:
+                return near[0]
+        big = [v for v in values if v >= 10]
+        return big[0] if big else values[0]
     nums = re.findall(r"\d+(?:\.\d+)?", src)
     if nums:
         pass
@@ -1232,15 +1262,16 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
             v = float(m_entry_one.group(1))
             out["entry_low"] = v
             out["entry_high"] = v
-    m_sl = re.search(r"SL:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
-    if m_sl:
-        out["sl"] = float(m_sl.group(1))
-    m_tp1 = re.search(r"TP1:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
-    if m_tp1:
-        out["tp1"] = float(m_tp1.group(1))
-    m_tp2 = re.search(r"TP2:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
-    if m_tp2:
-        out["tp2"] = float(m_tp2.group(1))
+    entry_hint = out["entry_low"] or out["entry_high"]
+    sl_v = _extract_line_value("SL", src, hint=entry_hint)
+    if sl_v is not None:
+        out["sl"] = sl_v
+    tp1_v = _extract_line_value("TP1", src, hint=entry_hint)
+    if tp1_v is not None:
+        out["tp1"] = tp1_v
+    tp2_v = _extract_line_value("TP2", src, hint=entry_hint)
+    if tp2_v is not None:
+        out["tp2"] = tp2_v
     m_rr = re.search(r"RR:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
     if m_rr:
         out["rr"] = float(m_rr.group(1))
@@ -2794,6 +2825,14 @@ async def run() -> None:
             fetch_candles,
         )
         _ = fetch_candles
+        def _allow_notify(sym: str, event: str) -> bool:
+            key = f"{str(sym or '').upper()}::{event}"
+            now_ts = time.time()
+            last_ts = float(_last_notified.get(key, 0.0) or 0.0)
+            if (now_ts - last_ts) < 1800:
+                return False
+            _last_notified[key] = now_ts
+            return True
         while True:
             try:
                 active_rows = signal_get_active(db_path)
@@ -2822,10 +2861,11 @@ async def run() -> None:
 
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
                             signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
-                            await send_office(
-                                f"Сетап по {symbol} не відпрацював — ціна не дійшла до зони входу. Фіксую для навчання.",
-                                stream="general",
-                            )
+                            if _allow_notify(symbol, "EXPIRED"):
+                                await send_office(
+                                    f"Сетап по {symbol} не відпрацював — ціна не дійшла до зони входу. Фіксую для навчання.",
+                                    stream="general",
+                                )
                             continue
 
                         liq_now = fetch_liquidations_proxy(symbol)
@@ -2841,11 +2881,12 @@ async def run() -> None:
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
-                            await send_office(
-                                f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
-                                f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}",
-                                stream="general",
-                            )
+                            if _allow_notify(symbol, "HIT_ENTRY"):
+                                await send_office(
+                                    f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
+                                    f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}",
+                                    stream="general",
+                                )
                             continue
 
                         if status in ("ACTIVE", "HIT_ENTRY") and tp1_v is not None:
@@ -2857,12 +2898,13 @@ async def run() -> None:
                                 be_level = None
                                 if e_high is not None:
                                     be_level = e_high * (1.001 if direction == "LONG" else 0.999)
-                                await send_office(
-                                    f"{symbol} досяг TP1 {tp1_v} ✅\n"
-                                    "Рекомендую: перенести SL в беззбиток і тримати до TP2.\n"
-                                    f"Тетяно, {symbol} досяг TP1. Рекомендую перенести SL в беззбиток на рівень {be_level}.",
-                                    stream="general",
-                                )
+                                if _allow_notify(symbol, "HIT_TP1"):
+                                    await send_office(
+                                        f"{symbol} досяг TP1 {tp1_v} ✅\n"
+                                        "Рекомендую: перенести SL в беззбиток і тримати до TP2.\n"
+                                        f"Тетяно, {symbol} досяг TP1. Рекомендую перенести SL в беззбиток на рівень {be_level}.",
+                                        stream="general",
+                                    )
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
@@ -2904,10 +2946,11 @@ async def run() -> None:
                                 except Exception:
                                     analysis_note = ""
                                 signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
-                                await send_office(f"{symbol} вибило по стопу {sl_v} ❌\nАналізую чому...", stream="general")
-                                if analysis_note:
-                                    for part in split_long_message(analysis_note):
-                                        await send_office(part, stream="general")
+                                if _allow_notify(symbol, "HIT_SL"):
+                                    await send_office(f"{symbol} вибило по стопу {sl_v} ❌\nАналізую чому...", stream="general")
+                                    if analysis_note:
+                                        for part in split_long_message(analysis_note):
+                                            await send_office(part, stream="general")
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:
@@ -2916,10 +2959,11 @@ async def run() -> None:
                             )
                             if hit_tp2:
                                 signal_update(db_path, signal_id=signal_id, status="HIT_TP2", outcome="WIN")
-                                await send_office(
-                                    f"{symbol} досяг TP2 {tp2_v} 🎯\nВідмінний результат! Фіксуємо і шукаємо наступний сетап.",
-                                    stream="general",
-                                )
+                                if _allow_notify(symbol, "HIT_TP2"):
+                                    await send_office(
+                                        f"{symbol} досяг TP2 {tp2_v} 🎯\nВідмінний результат! Фіксуємо і шукаємо наступний сетап.",
+                                        stream="general",
+                                    )
                                 continue
                     except Exception as exc_row:
                         print(f"[signals] row monitor failed: {exc_row}")
