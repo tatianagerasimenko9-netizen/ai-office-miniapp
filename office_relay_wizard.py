@@ -98,6 +98,23 @@ LEV_COMPLETE_RULE = (
     "Ти знаєш: плутанина вбиває депозит.\n"
     "Один чіткий напрямок — завжди.\n"
 )
+LEV_CONCISE_RULE = (
+    "Твій формат відповіді — тільки:\n"
+    "1. Фінальне рішення: ВХІД/ПРОПУСК/ЧЕКАЄМО\n"
+    "2. Якщо ВХІД:\n"
+    "   Entry: [ціна]\n"
+    "   SL: [ціна]\n"
+    "   TP1: [ціна]\n"
+    "   TP2: [ціна]\n"
+    "   RR: [число]\n"
+    "3. Одне речення чому.\n\n"
+    "ЗАБОРОНЕНО:\n"
+    "- довгі пояснення\n"
+    "- таблиці свічок\n"
+    "- повтори того що вже сказала команда\n"
+    "- оновлення кожні 15 хвилин по одній монеті\n"
+    "Максимум 150 слів.\n"
+)
 
 
 @dataclass
@@ -1311,7 +1328,21 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         await agent_say(sender, "lev", f"Не змогла зібрати ринкові дані по {symbol}: {exc}")
         return
 
+    def _tf_snapshot(label: str, candles: Any) -> str:
+        if not isinstance(candles, list) or len(candles) < 2:
+            return f"{label}: n/a"
+        try:
+            last_price = float((candles[-1] or {}).get("close"))
+            prev_price = float((candles[-2] or {}).get("close"))
+            if prev_price == 0:
+                return f"{label}: {last_price:.6f} (+0.0%)"
+            change = (last_price - prev_price) / prev_price * 100.0
+            return f"{label}: {last_price:.6f} ({change:+.1f}%)"
+        except Exception:
+            return f"{label}: n/a"
+
     system = (
+        f"{LEV_CONCISE_RULE}"
         f"{LEV_COMPLETE_RULE}"
         "Ти Лев — керівник офісу. "
         "Тетяна написала тільки назву монети — це означає: дай повний аналіз і сетап.\n"
@@ -1341,6 +1372,8 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         "Якщо ATR >80% — попередити, що сьогодні краще чекати завтра."
     )
     current_price = liq.get("current_price") if isinstance(liq, dict) else None
+    h1_snapshot = _tf_snapshot("H1", candles_1h)
+    h4_snapshot = _tf_snapshot("H4", candles_4h)
     context = (
         f"Монета: {symbol}\n\n"
         f"Поточна ціна: {current_price}\n\n"
@@ -1354,8 +1387,8 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         f"Знизу: {(liq.get('liq_zone_below') if isinstance(liq, dict) else None)}\n\n"
         f"Ключові рівні: {(levels.get('levels', []) if isinstance(levels, dict) else [])}\n\n"
         f"OTE зона: {ote}\n\n"
-        f"H1 свічки: {candles_1h}\n"
-        f"H4 свічки: {candles_4h}\n"
+        f"{h1_snapshot}\n"
+        f"{h4_snapshot}\n"
         f"current_price: {current_price}\n"
     )
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
@@ -1435,6 +1468,7 @@ async def office_free_chat(
     )
     personalities = {
         "lev": (
+            f"{LEV_CONCISE_RULE}"
             f"{LEV_COMPLETE_RULE}"
             f"{language_block}\n"
             "Тобі 42 роки. Ти Лев — керівник офісу. "
@@ -2618,6 +2652,19 @@ async def run() -> None:
             risk_snapshot = live_risk_snapshot(db_path)
             active_signals = signal_get_active(db_path)
 
+            def _tf_snapshot(label: str, candles: Any) -> str:
+                if not isinstance(candles, list) or len(candles) < 2:
+                    return f"{label}: n/a"
+                try:
+                    last_price = float((candles[-1] or {}).get("close"))
+                    prev_price = float((candles[-2] or {}).get("close"))
+                    if prev_price == 0:
+                        return f"{label}: {last_price:.6f} (+0.0%)"
+                    change = (last_price - prev_price) / prev_price * 100.0
+                    return f"{label}: {last_price:.6f} ({change:+.1f}%)"
+                except Exception:
+                    return f"{label}: n/a"
+
             async def _send_agent_turn(agent_key: str, text: str) -> None:
                 if not text:
                     return
@@ -2647,7 +2694,12 @@ async def run() -> None:
             await _send_agent_turn("maks", maks_msg or "OI/funding/ліквідації підтверджують робочий сценарій.")
             await asyncio.sleep(1.5)
 
-            mar_ctx = f"Символ: {symbol}\nНапрямок: {direction}\nH4: {candles_h4}\nDaily: {candles_d}"
+            mar_ctx = (
+                f"Символ: {symbol}\n"
+                f"Напрямок: {direction}\n"
+                f"{_tf_snapshot('H4', candles_h4)}\n"
+                f"{_tf_snapshot('D1', candles_d)}"
+            )
             mar_msg = clean_llm_note(
                 ask_agent(
                     "marichka",
@@ -2712,10 +2764,14 @@ async def run() -> None:
                 f"Активні сигнали: {active_signals}\n"
                 "Якщо по цьому символу вже є активний — дай UPDATE а не новий сигнал."
             )
+            lev_final_system = (
+                f"{LEV_CONCISE_RULE}"
+                "Ти Лев. На базі реплік команди дай фінальне рішення: ВХІД/ЧЕКАЄМО/ПРОПУСК і чіткий next action. Українською."
+            )
             lev_final = clean_llm_note(
                 ask_agent(
                     "lev",
-                    "Ти Лев. На базі реплік команди дай фінальне рішення: ВХІД/ЧЕКАЄМО/ПРОПУСК і чіткий next action. Українською.",
+                    lev_final_system,
                     team_pack,
                     max_tokens=900,
                 )
@@ -2744,7 +2800,7 @@ async def run() -> None:
     async def monitor_proactive_scanner() -> None:
         while True:
             await proactive_market_scan()
-            await asyncio.sleep(900)
+            await asyncio.sleep(3600)
 
     asyncio.create_task(monitor_proactive_scanner())
 
@@ -2834,6 +2890,7 @@ async def run() -> None:
                                             n = await fetch_news_risk(s_news, news_api_key)
                                             n_risk = str(n.level)
                                     system = (
+                                        f"{LEV_CONCISE_RULE}"
                                         "Аналізуй чому вибило стоп. Перевір:\n"
                                         "1) Чи були новини в цей момент?\n"
                                         "2) Чи була маніпуляція (sweep)?\n"
@@ -2879,7 +2936,7 @@ async def run() -> None:
                         print(f"[signals] row monitor failed: {exc_row}")
             except Exception as exc:
                 print(f"[signals] monitor failed: {exc}")
-            await asyncio.sleep(300)
+            await asyncio.sleep(1800)
 
     asyncio.create_task(monitor_active_signals())
 

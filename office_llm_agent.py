@@ -199,10 +199,10 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_model_for_agent(agent_key: str) -> str:
     """
-    Лев і Дарина — Opus (найважливіші рішення)
+    Лев — Opus (найважливіші рішення)
     Решта — Sonnet (оптимально)
     """
-    opus_agents = {"lev", "daryna"}
+    opus_agents = {"lev"}
     if str(agent_key or "").strip().lower() in opus_agents:
         return "claude-opus-4-6"
     return "claude-sonnet-4-6"
@@ -220,6 +220,9 @@ def ask_agent(
     Returns empty string on any failure (graceful fallback).
     """
     try:
+        agent_norm = str(agent_key or "").strip().lower()
+        token_cap = 400 if agent_norm == "lev" else 600
+        safe_max_tokens = max(64, min(int(max_tokens), token_cap))
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return ""
@@ -256,7 +259,7 @@ def ask_agent(
                 timeout_sec = 60.0 if "opus" in model_name else 25.0
                 payload: Dict[str, Any] = {
                     "model": model_name,
-                    "max_tokens": max(int(max_tokens), 1000),
+                    "max_tokens": safe_max_tokens,
                     "system": str(system_prompt or ""),
                     "tools": TOOLS,
                     "messages": messages,
