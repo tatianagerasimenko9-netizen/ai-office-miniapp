@@ -1755,6 +1755,20 @@ async def office_free_chat(
         lines = [l for l in response.split('\n') if l.strip()]
         if len(lines) > 18:
             response = '\n'.join(lines[:18])
+        if response.rstrip().endswith(("…", "...")):
+            tail = clean_llm_note(
+                ask_agent(
+                    "lev",
+                    answer_system,
+                    context + "\n\nЗаверши попередню думку одним коротким реченням: що робити зараз.",
+                    max_tokens=120,
+                    db_path=db_path,
+                )
+            )
+            if tail:
+                tail_line = str(tail).strip().split("\n")[0].strip()
+                if tail_line:
+                    response = f"{response}\n{tail_line}"
     if response:
         _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
