@@ -862,6 +862,11 @@ def journal_closed_trade_count(db_path: str) -> int:
         return 0
 
 
+def journal_total_closed(db_path: str = "office_bridge.db") -> int:
+    """Повертає кількість закритих угод."""
+    return journal_closed_trade_count(db_path)
+
+
 def journal_add_feedback(
     db_path: str,
     *,
