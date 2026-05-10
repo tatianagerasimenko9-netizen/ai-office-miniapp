@@ -88,6 +88,11 @@ OFFICE_RULES_BRIEF_UA = (
     "5) При серії збитків ризик має пріоритет, вхід блокується.\n"
     "6) Для повних ролей/деталей: команда /officeprompt."
 )
+# У чаті «BUSDT» часто означає пару BU/USDT на Binance (BUUSDT), а не рядок BASE+USDT.
+_CHAT_USDT_PAIR_ALIASES: Dict[str, str] = {
+    "BUSDT": "BUUSDT",
+}
+
 LEV_RULE = (
     "Тобі 42 роки. Ти Лев. "
     "20 років на ринках. "
@@ -1174,6 +1179,10 @@ def extract_symbols(text: str) -> List[str]:
         if re.search(rf"\b{re.escape(key)}\b", up) and sym not in seen:
             seen.add(sym)
             found.append(sym)
+    for raw_ticker, pair_sym in _CHAT_USDT_PAIR_ALIASES.items():
+        if re.search(rf"\b{re.escape(raw_ticker)}\b", up) and pair_sym not in seen:
+            seen.add(pair_sym)
+            found.append(pair_sym)
     return found
 
 
@@ -1268,11 +1277,15 @@ def extract_symbols_list(text: str) -> List[str]:
         if not token:
             continue
         clean = re.sub(r"(USDT|BUSD|USD)$", "", token)
-        if re.match(r"^[A-Z0-9]{2,10}$", clean) and len(clean) >= 2:
+        if clean in _CHAT_USDT_PAIR_ALIASES:
+            sym = _CHAT_USDT_PAIR_ALIASES[clean]
+        elif re.match(r"^[A-Z0-9]{2,10}$", clean) and len(clean) >= 2:
             sym = f"{clean}USDT"
-            if sym not in seen:
-                seen.add(sym)
-                symbols.append(sym)
+        else:
+            continue
+        if sym not in seen:
+            seen.add(sym)
+            symbols.append(sym)
     return symbols[:3]
 
 
@@ -1631,7 +1644,15 @@ async def office_free_chat(
         try:
             from office_market_data import fetch_candles, fetch_liquidations_proxy
 
-            symbols = extract_symbols(text)
+            symbols = list(extract_symbols(text))
+            if not symbols:
+                symbols = list(extract_symbols_list(text))
+            if not symbols and "позиція" in low:
+                act_mc = signal_get_active(db_path)
+                if act_mc:
+                    s0 = str(act_mc[0].get("symbol") or "").strip().upper()
+                    if s0:
+                        symbols = [s0]
             if not symbols:
                 symbols = ["BTCUSDT"]
             lines: List[str] = ["Поточний контекст ринку:"]
