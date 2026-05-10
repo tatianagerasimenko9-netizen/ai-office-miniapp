@@ -1740,7 +1740,7 @@ async def office_free_chat(
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
-    free_chat_tokens = 1000 if chosen_agent == "lev" else 2000
+    free_chat_tokens = 1200 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
         ask_agent(
             chosen_agent,
@@ -1753,8 +1753,8 @@ async def office_free_chat(
     )
     if chosen_agent == "lev" and response:
         lines = [l for l in response.split('\n') if l.strip()]
-        if len(lines) > 12:
-            response = '\n'.join(lines[:12])
+        if len(lines) > 18:
+            response = '\n'.join(lines[:18])
     if response:
         _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
