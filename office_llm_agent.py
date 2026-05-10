@@ -263,6 +263,24 @@ def ask_agent(
                     "tools": TOOLS,
                     "messages": messages,
                 }
+                lev_memory_store_id = os.getenv("LEV_MEMORY_STORE_ID", "").strip()
+                sofia_memory_store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
+                if agent_norm == "lev" and lev_memory_store_id:
+                    payload["resources"] = [
+                        {
+                            "type": "memory_store",
+                            "memory_store_id": lev_memory_store_id,
+                            "access": "read_write",
+                        }
+                    ]
+                elif agent_norm == "memory" and sofia_memory_store_id:
+                    payload["resources"] = [
+                        {
+                            "type": "memory_store",
+                            "memory_store_id": sofia_memory_store_id,
+                            "access": "read_write",
+                        }
+                    ]
                 resp = client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers=headers,

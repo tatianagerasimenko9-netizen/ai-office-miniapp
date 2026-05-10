@@ -195,46 +195,61 @@ def _safe_json_write(path: Path, payload: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-async def init_sofia_memory_store() -> str:
-    """Create or reuse Sofia memory store."""
+async def init_office_memory_stores() -> Dict[str, str]:
+    """Create or reuse Office memory stores for Lev and Sofia."""
     import httpx
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
+    lev_store_id = os.getenv("LEV_MEMORY_STORE_ID", "").strip()
+    sofia_store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
+    result: Dict[str, str] = {
+        "lev": lev_store_id,
+        "memory": sofia_store_id,
+    }
 
-    if store_id:
-        print(f"[memory] Sofia store: {store_id}")
-        return store_id
+    if lev_store_id:
+        print(f"[memory] Lev store: {lev_store_id}")
+    if sofia_store_id:
+        print(f"[memory] Sofia store: {sofia_store_id}")
     if not api_key:
-        print("[memory] ANTHROPIC_API_KEY is missing; skip Sofia store init")
-        return ""
+        print("[memory] ANTHROPIC_API_KEY is missing; skip memory stores init")
+        return result
 
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/memory_stores",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "anthropic-beta": "managed-agents-2026-04-01",
-                    "content-type": "application/json",
-                },
-                json={"name": "sofia_trading_memory"},
-                timeout=15.0,
-            )
-            if not resp.is_success:
-                print(f"[memory] Store create failed: {resp.status_code} {resp.text[:500]}")
-                return ""
-            data = resp.json()
-            new_id = str(data.get("id", "") or "").strip()
-            if new_id:
-                print(f"[memory] Created Sofia store: {new_id}")
-                print(f"[memory] Add to Render env: SOFIA_MEMORY_STORE_ID={new_id}")
-                return new_id
-            print("[memory] Store create response has no id")
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "managed-agents-2026-04-01",
+                "content-type": "application/json",
+            }
+            required = [
+                ("lev", "lev_trading_decisions", "LEV_MEMORY_STORE_ID"),
+                ("memory", "sofia_trading_memory", "SOFIA_MEMORY_STORE_ID"),
+            ]
+            for key, store_name, env_name in required:
+                if result.get(key):
+                    continue
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/memory_stores",
+                    headers=headers,
+                    json={"name": store_name},
+                    timeout=15.0,
+                )
+                if not resp.is_success:
+                    print(f"[memory] Store create failed for {key}: {resp.status_code} {resp.text[:500]}")
+                    continue
+                data = resp.json()
+                new_id = str(data.get("id", "") or "").strip()
+                if new_id:
+                    result[key] = new_id
+                    print(f"[memory] Created {key} store: {new_id}")
+                    print(f"[memory] Add to Render env: {env_name}={new_id}")
+                else:
+                    print(f"[memory] Store create response has no id for {key}")
     except Exception as e:
-        print(f"[memory] Store init failed: {e}")
-    return ""
+        print(f"[memory] Stores init failed: {e}")
+    return result
 
 
 def load_agent_bot_tokens() -> Dict[str, str]:
@@ -1785,8 +1800,10 @@ async def run() -> None:
         f"fingerprint={_db_ident.get('fingerprint')} "
         f"(звір з Mini App /api/summary → db_identity)"
     )
-    sofia_store_id = await init_sofia_memory_store()
-    if sofia_store_id:
+    memory_stores = await init_office_memory_stores()
+    if memory_stores.get("lev"):
+        print("[memory] Lev Memory Store is ready")
+    if memory_stores.get("memory"):
         print("[memory] Sofia Memory Store is ready")
     _tzp = _briefing_tzinfo()
     _tzn = getattr(_tzp, "key", None) or ("UTC" if _tzp is timezone.utc else repr(_tzp))
