@@ -1479,8 +1479,8 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
     if response:
         lines = response.split('\n')
         lines = [l for l in lines if l.strip()]
-        if len(lines) > 10:
-            response = '\n'.join(lines[:10])
+        if len(lines) > 16:
+            response = '\n'.join(lines[:16])
         parts = split_long_message(response)
         for i, part in enumerate(parts):
             await agent_say(sender, "lev", part if i == 0 else "..." + part)
@@ -1491,6 +1491,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             "не входжу",
             "не входимо",
             "пропуск",
+            "пропускаю",
             "пропускаємо",
             "немає входу",
             "no entry",
@@ -1739,7 +1740,7 @@ async def office_free_chat(
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
-    free_chat_tokens = 800 if chosen_agent == "lev" else 2000
+    free_chat_tokens = 1000 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
         ask_agent(
             chosen_agent,
@@ -1752,8 +1753,8 @@ async def office_free_chat(
     )
     if chosen_agent == "lev" and response:
         lines = [l for l in response.split('\n') if l.strip()]
-        if len(lines) > 8:
-            response = '\n'.join(lines[:8])
+        if len(lines) > 16:
+            response = '\n'.join(lines[:16])
     if response:
         _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
