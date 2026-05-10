@@ -220,7 +220,7 @@ def ask_agent(
     """
     try:
         agent_norm = str(agent_key or "").strip().lower()
-        token_cap = 1000 if agent_norm == "lev" else 800
+        token_cap = 1000 if agent_norm == "lev" else 900
         safe_max_tokens = max(64, min(int(max_tokens), token_cap))
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
