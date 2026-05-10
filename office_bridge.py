@@ -1293,6 +1293,9 @@ def _fmt_level(v: Optional[float]) -> str:
 def clean_llm_note(text: str) -> str:
     if not text:
         return text
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"```", "", text)
+    text = re.sub(r"^>\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"<invoke[^>]*>.*?</invoke>", "", text, flags=re.DOTALL)
     text = re.sub(r"<parameter[^>]*>.*?</parameter>", "", text, flags=re.DOTALL)
     text = re.sub(r"<[^>]+>", "", text)
