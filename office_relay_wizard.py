@@ -73,6 +73,7 @@ MAX_HISTORY = 5
 HISTORY_TTL_SEC = 30 * 60
 _chat_history: List[Dict[str, str]] = []
 _chat_history_ts: float = 0.0
+_last_signal_time: Dict[str, float] = {}
 
 OFFICE_RULES_BRIEF_UA = (
     "Правила офісу (коротко):\n"
@@ -97,8 +98,11 @@ LEV_COMPLETE_RULE = (
     "Ти бачив кризу 2008, 2018, 2022.\n"
     "Ти знаєш: плутанина вбиває депозит.\n"
     "Один чіткий напрямок — завжди.\n"
-    "Ніколи не виводь в чат таблиці свічок, OHLCV дані, списки цін з часом.\n"
-    "Тільки висновок — що це означає.\n"
+    "Ніколи не виводь в чат:\n"
+    "- таблиці свічок з часом і цінами\n"
+    "- OHLCV дані\n"
+    "- списки цін з timestamp\n"
+    "Тільки висновок що це означає.\n"
 )
 LEV_CONCISE_RULE = (
     "Твій формат — тільки:\n"
@@ -2025,7 +2029,6 @@ async def run() -> None:
         print("[relay] mode: strict source filter (MAIN chat only)")
     active_positions: Dict[str, ActivePosition] = {}
     last_news_level = "SAFE"
-    _last_signal_time: Dict[str, float] = {}
     last_daily_report_date = ""
     news_api_key = os.getenv("NEWS_API_KEY", "").strip()
     if not news_api_key:
@@ -2569,8 +2572,8 @@ async def run() -> None:
                 fetch_top_movers,
             )
 
-            gainers = fetch_top_movers("gainers", limit=5)
-            losers = fetch_top_movers("losers", limit=5)
+            gainers = fetch_top_movers("gainers", 5)
+            losers = fetch_top_movers("losers", 5)
             always_watch = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
             candidates = always_watch.copy()
@@ -2586,6 +2589,7 @@ async def run() -> None:
                     last_ts = float(_last_signal_time.get(symbol, 0.0) or 0.0)
                     if (time.time() - last_ts) < 7200:
                         continue
+                    _last_signal_time[symbol] = time.time()
                     if symbol == "BTCUSDT" and any("BTC" in str(s.get("symbol") or "") for s in setups_found):
                         continue
                     atr = fetch_atr_context(symbol)
@@ -2794,7 +2798,6 @@ async def run() -> None:
                 status="ACTIVE",
                 analysis_note=lev_final or "",
             )
-            _last_signal_time[symbol] = time.time()
         except Exception as e:
             print(f"[scanner] error: {e}")
 
