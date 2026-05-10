@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 import math
 from typing import Any, Dict, List, Union
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 JSONLike = Union[Dict[str, Any], List[Any]]
@@ -14,7 +15,14 @@ JSONLike = Union[Dict[str, Any], List[Any]]
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
     qs = urlencode(params)
     full_url = f"{url}?{qs}" if qs else url
-    with urlopen(full_url, timeout=12) as resp:
+    req = Request(
+        full_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json,text/plain,*/*",
+        },
+    )
+    with urlopen(req, timeout=12) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw)
 
@@ -469,7 +477,10 @@ def fetch_top_movers(direction: str, limit: int = 5) -> List[Dict[str, Any]]:
 
 def _fetch_yahoo_change(symbol: str) -> Union[float, None]:
     try:
-        data = _http_get_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}", {})
+        data = _http_get_json(
+            f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}",
+            {"interval": "1d", "range": "5d"},
+        )
         if not isinstance(data, dict):
             return None
         chart = data.get("chart")
@@ -495,6 +506,30 @@ def _fetch_yahoo_change(symbol: str) -> Union[float, None]:
         return None
 
 
+def _fetch_stooq_change(symbol: str) -> Union[float, None]:
+    try:
+        parsed = urlparse(
+            f"https://stooq.com/q/d/l/?{urlencode({'s': symbol, 'i': 'd'})}"
+        )
+        url = parsed.geturl()
+        with urlopen(url, timeout=12) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if len(lines) < 3:
+            return None
+        prev_parts = [x.strip() for x in lines[-2].split(",")]
+        curr_parts = [x.strip() for x in lines[-1].split(",")]
+        if len(prev_parts) < 5 or len(curr_parts) < 5:
+            return None
+        prev_close = float(prev_parts[4])
+        curr_close = float(curr_parts[4])
+        if not math.isfinite(prev_close) or not math.isfinite(curr_close) or prev_close == 0:
+            return None
+        return ((curr_close - prev_close) / prev_close) * 100.0
+    except Exception:
+        return None
+
+
 def fetch_macro_context() -> Dict[str, Any]:
     """
     Macro context snapshot: BTC, Gold, SP500, DXY and correlation note.
@@ -512,6 +547,13 @@ def fetch_macro_context() -> Dict[str, Any]:
         gold_change = _fetch_yahoo_change("GC=F")
         sp500_change = _fetch_yahoo_change("^GSPC")
         dxy_change = _fetch_yahoo_change("DX-Y.NYB")
+
+        if gold_change is None:
+            gold_change = _fetch_stooq_change("gc.f")
+        if sp500_change is None:
+            sp500_change = _fetch_stooq_change("^spx")
+        if dxy_change is None:
+            dxy_change = _fetch_stooq_change("dx.f")
 
         note = "Нейтральний макро фон"
         if dxy_change is not None and dxy_change > 0:

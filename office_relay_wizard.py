@@ -1651,13 +1651,15 @@ async def office_free_chat(
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
+    free_chat_tokens = 500 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
         ask_agent(
             chosen_agent,
             answer_system,
             context,
-            max_tokens=2000,
+            max_tokens=free_chat_tokens,
             messages_history=history,
+            db_path=db_path,
         )
     )
     if response:
