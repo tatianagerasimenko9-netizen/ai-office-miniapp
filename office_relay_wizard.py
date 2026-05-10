@@ -1399,6 +1399,10 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
             parsed.get("tp1") is not None or parsed.get("tp2") is not None
         ):
+            candles_check = fetch_candles(symbol, "1h", 1)
+            if not candles_check:
+                await sender(f"{symbol} — символ не знайдено на Binance.")
+                return
             direction = "LONG"
             up = response.upper()
             if "SHORT" in up or "ШОРТ" in up:
@@ -2723,7 +2727,7 @@ async def run() -> None:
                     "maks",
                     "Ти Макс. Дай коротко ринкові дані: OI/funding/liquidations і висновок по імпульсу. Українською.",
                     maks_ctx,
-                    max_tokens=500,
+                    max_tokens=600,
                 )
             )
             maks_msg = _trim_lines(maks_msg, 4)
@@ -2742,7 +2746,7 @@ async def run() -> None:
                     "marichka",
                     "Ти Марічка. Дай bias по H4/Daily, коротко і чітко. Українською.",
                     mar_ctx,
-                    max_tokens=500,
+                    max_tokens=600,
                 )
             )
             mar_msg = _trim_lines(mar_msg, 4)
@@ -2770,7 +2774,7 @@ async def run() -> None:
                     "daryna",
                     "Ти Дарина. Дай ризик-висновок і вето/допуск коротко, українською.",
                     daryna_ctx,
-                    max_tokens=500,
+                    max_tokens=600,
                 )
             )
             daryna_msg = _trim_lines(daryna_msg, 4)
@@ -2787,7 +2791,7 @@ async def run() -> None:
                     "marko",
                     "Ти Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR + що робити зараз. Українською.",
                     marko_ctx,
-                    max_tokens=600,
+                    max_tokens=700,
                 )
             )
             marko_msg = _trim_lines(marko_msg, 5)
@@ -2813,7 +2817,7 @@ async def run() -> None:
                     "lev",
                     lev_final_system,
                     team_pack,
-                    max_tokens=200,
+                    max_tokens=300,
                 )
             )
             lev_final = _trim_lines(lev_final, 7)
