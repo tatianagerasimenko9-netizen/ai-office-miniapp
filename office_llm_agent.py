@@ -265,15 +265,16 @@ def ask_agent(
                 }
                 lev_memory_store_id = os.getenv("LEV_MEMORY_STORE_ID", "").strip()
                 sofia_memory_store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
-                if agent_norm == "lev" and lev_memory_store_id:
-                    payload["resources"] = [
-                        {
-                            "type": "memory_store",
-                            "memory_store_id": lev_memory_store_id,
-                            "access": "read_write",
-                        }
-                    ]
-                elif agent_norm == "memory" and sofia_memory_store_id:
+                # Тимчасово для debug:
+                # if agent_norm == "lev" and lev_memory_store_id:
+                #     payload["resources"] = [
+                #         {
+                #             "type": "memory_store",
+                #             "memory_store_id": lev_memory_store_id,
+                #             "access": "read_write",
+                #         }
+                #     ]
+                if agent_norm == "memory" and sofia_memory_store_id:
                     payload["resources"] = [
                         {
                             "type": "memory_store",
@@ -287,6 +288,8 @@ def ask_agent(
                     json=payload,
                     timeout=timeout_sec,
                 )
+                print(f"[debug-api] status={resp.status_code}")
+                print(f"[debug-api] body={resp.text[:200]}")
                 resp.raise_for_status()
                 data = resp.json()
                 stop_reason = data.get("stop_reason", "unknown")
