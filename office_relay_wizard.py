@@ -1424,7 +1424,11 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                 status="ACTIVE",
                 analysis_note=response,
             )
-            await sender(f"Сигнал по {symbol} збережено. Моніторинг активовано.")
+            await agent_say(
+                sender,
+                "olesya",
+                f"Сигнал {symbol} {direction} зафіксовано в журнал. Моніторинг активовано 24/7.",
+            )
     else:
         await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
 
@@ -2321,6 +2325,25 @@ async def run() -> None:
                         "regime": sig.regime,
                         "score": sig.score,
                     },
+                )
+                signal_upsert(
+                    db_path,
+                    signal_id=sig.signal_id,
+                    symbol=sig.symbol,
+                    direction=sig.direction,
+                    entry_low=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
+                    entry_high=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
+                    sl=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
+                    tp1=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
+                    tp2=None,
+                    rr=(float(sig.meta.get("rr")) if sig.meta.get("rr") else None),
+                    status="ACTIVE",
+                    analysis_note=str(verdict.summary or ""),
+                )
+                await agent_say(
+                    sender,
+                    "olesya",
+                    f"Сигнал {sig.symbol} {sig.direction} зафіксовано. Стежу 24/7.",
                 )
                 await office_position_event(
                     sender=sender,
