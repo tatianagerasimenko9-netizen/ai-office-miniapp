@@ -1645,13 +1645,26 @@ async def office_free_chat(
         f"{market_context}\n\n"
         "Відповідь має бути голосом правильного агента."
     )
+    text_lower = str(text or "").lower()
+    if (
+        ("позиція" in text_lower or "лонг" in text_lower or "шорт" in text_lower)
+        and not extract_symbols_list(text)
+    ):
+        active = signal_get_active(db_path)
+        if active:
+            last_symbol = str(active[0].get("symbol", "") or "").strip().upper()
+            if last_symbol:
+                context = (
+                    f"Активна позиція: {last_symbol} {active[0].get('direction')}\n"
+                    + context
+                )
     chosen_agent = detect_agent_from_text(text)
     answer_system = (
         f"{personalities.get(chosen_agent, personalities['lev'])}\n\n"
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
-    free_chat_tokens = 500 if chosen_agent == "lev" else 2000
+    free_chat_tokens = 800 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
         ask_agent(
             chosen_agent,
