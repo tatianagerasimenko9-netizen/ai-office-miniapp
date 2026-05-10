@@ -104,14 +104,38 @@ LEV_COMPLETE_RULE = (
     "- списки цін з timestamp\n"
     "Тільки висновок що це означає.\n"
 )
-LEV_CONCISE_RULE = (
-    "Твій формат — тільки:\n"
-    "Рішення: ВХІД/ПРОПУСК/ЧЕКАЄМО\n"
-    "Entry/SL/TP1/TP2/RR якщо ВХІД.\n"
-    "Одне речення чому.\n"
-    "Максимум 150 слів.\n"
-    "Не повторюй команду.\n"
-)
+LEV_CONCISE_RULE = """
+ФОРМАТ ВІДПОВІДІ — ЗАВЖДИ ТАК:
+
+LABUSDT — ЛОНГ
+Entry: 4.95–5.05
+SL: 4.78
+TP1: 5.37 (+6.3%)
+TP2: 5.60 (+10.9%)
+RR: 1:2.8
+Зараз: ЧЕКАЄМО відкат до Entry зони
+
+BTCUSDT — ШОРТ
+Entry: 80,200–80,400
+SL: 80,620
+TP1: 79,300
+TP2: 78,500
+RR: 1:2.1
+Зараз: ВХОДИМО — ціна в зоні
+
+ПОЯСНЕННЯ (тільки якщо критично важливо,
+максимум 1 речення):
+70% шортів — паливо для сквізу вгору.
+
+ЗАБОРОНЕНО:
+- довгі абзаци з поясненнями
+- "Макро: BTC нейтральний..."
+- "Структура бичача, рух поступовий..."
+- будь-який текст ДО сетапу
+- вода і загальні слова
+
+Спочатку — сетап. Потім — одне речення.
+Більше нічого."""
 
 
 @dataclass
@@ -2809,6 +2833,11 @@ async def run() -> None:
     asyncio.create_task(monitor_proactive_scanner())
 
     async def monitor_active_signals() -> None:
+        from office_market_data import (
+            fetch_liquidations_proxy,
+            fetch_candles,
+        )
+        _ = fetch_candles
         while True:
             try:
                 active_rows = signal_get_active(db_path)
