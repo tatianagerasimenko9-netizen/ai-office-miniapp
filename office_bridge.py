@@ -1298,7 +1298,7 @@ def clean_llm_note(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\*{1,3}", "", text)
     text = re.sub(r"\|[^\n]+\|", "", text)
-    text = re.sub(r"^#{1,3}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^#{1,3}\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
     patterns = [

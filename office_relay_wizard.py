@@ -2696,6 +2696,7 @@ async def run() -> None:
                     max_tokens=500,
                 )
             )
+            maks_msg = _trim_lines(maks_msg, 4)
             await _send_agent_turn("maks", maks_msg or "OI/funding/ліквідації підтверджують робочий сценарій.")
             await asyncio.sleep(1.5)
 
@@ -2714,6 +2715,7 @@ async def run() -> None:
                     max_tokens=500,
                 )
             )
+            mar_msg = _trim_lines(mar_msg, 4)
             await _send_agent_turn("marichka", mar_msg or "На H4/Daily структура підтверджує поточний напрямок.")
             await asyncio.sleep(1.5)
 
@@ -2726,6 +2728,7 @@ async def run() -> None:
                     max_tokens=300,
                 )
             )
+            news_msg = _trim_lines(news_msg, 3)
             await _send_agent_turn("news", news_msg or "Новинний фон керований, критичних тригерів поруч немає.")
             await asyncio.sleep(1.5)
 
@@ -2741,6 +2744,7 @@ async def run() -> None:
                     max_tokens=500,
                 )
             )
+            daryna_msg = _trim_lines(daryna_msg, 4)
             await _send_agent_turn("daryna", daryna_msg or "Ризик контрольований, можна працювати тільки по плану.")
             await asyncio.sleep(1.5)
 
@@ -2757,6 +2761,7 @@ async def run() -> None:
                     max_tokens=600,
                 )
             )
+            marko_msg = _trim_lines(marko_msg, 5)
             await _send_agent_turn("marko", marko_msg or f"ЩО РОБИТИ ЗАРАЗ (ціна {current_price}): чекаємо підтвердження в зоні Entry.")
             await asyncio.sleep(1.5)
 
@@ -2782,7 +2787,7 @@ async def run() -> None:
                     max_tokens=200,
                 )
             )
-            lev_final = _trim_lines(lev_final, max_lines=6)
+            lev_final = _trim_lines(lev_final, 5)
             await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
