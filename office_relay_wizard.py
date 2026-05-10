@@ -638,7 +638,8 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
     to_s = from_s
     url = "https://financialmodelingprep.com/stable/economic-calendar"
     params = {"from": from_s, "to": to_s, "apikey": api_key}
-    async with session.get(url, params=params) as resp:
+    news_timeout = aiohttp.ClientTimeout(total=15)
+    async with session.get(url, params=params, timeout=news_timeout) as resp:
         if resp.status != 200:
             return NewsRisk("SAFE", f"news status {resp.status}", 999, "", "", "USD", "low")
         data = await resp.json()
