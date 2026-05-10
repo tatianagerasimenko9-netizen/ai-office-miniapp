@@ -88,9 +88,9 @@ OFFICE_RULES_BRIEF_UA = (
     "5) При серії збитків ризик має пріоритет, вхід блокується.\n"
     "6) Для повних ролей/деталей: команда /officeprompt."
 )
-# У чаті «BUSDT» часто означає пару BU/USDT на Binance (BUUSDT), а не рядок BASE+USDT.
+# У чаті «BUSDT» у Тетяни = UBUSDT (UB/USDT). Не BUUSDT — інший діапазон цін.
 _CHAT_USDT_PAIR_ALIASES: Dict[str, str] = {
-    "BUSDT": "BUUSDT",
+    "BUSDT": "UBUSDT",
 }
 
 LEV_RULE = (
@@ -1740,6 +1740,11 @@ async def office_free_chat(
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
         "Звертайся до Тетяни по імені. Відповідай природно як людина."
     )
+    if chosen_agent == "lev":
+        answer_system += (
+            "\nСимвол BUSDT у повідомленнях Тетяни = UBUSDT на Binance Futures. "
+            "Не стверджуй, що тікера немає; не плутай з BUUSDT (інший актив і ціна)."
+        )
     free_chat_tokens = 1200 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
         ask_agent(
@@ -1755,7 +1760,10 @@ async def office_free_chat(
         lines = [l for l in response.split('\n') if l.strip()]
         if len(lines) > 18:
             response = '\n'.join(lines[:18])
-        if response.rstrip().endswith(("…", "...")):
+        tail_needed = response.rstrip().endswith(("…", "...")) or response.rstrip().lower().endswith(
+            (" зі", " далі", "далі…", "далі...")
+        )
+        if tail_needed:
             tail = clean_llm_note(
                 ask_agent(
                     "lev",
