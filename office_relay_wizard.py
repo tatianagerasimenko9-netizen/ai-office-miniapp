@@ -1394,6 +1394,33 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             await agent_say(sender, "lev", part if i == 0 else "..." + part)
             if len(parts) > 1:
                 await asyncio.sleep(1.0)
+
+        parsed = _parse_signal_levels_from_text(response)
+        if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
+            parsed.get("tp1") is not None or parsed.get("tp2") is not None
+        ):
+            direction = "LONG"
+            up = response.upper()
+            if "SHORT" in up or "ШОРТ" in up:
+                direction = "SHORT"
+            elif "LONG" in up or "ЛОНГ" in up:
+                direction = "LONG"
+            signal_id = f"manual-{symbol}-{int(time.time())}"
+            signal_upsert(
+                db_path,
+                signal_id=signal_id,
+                symbol=symbol,
+                direction=direction,
+                entry_low=parsed.get("entry_low"),
+                entry_high=parsed.get("entry_high"),
+                sl=parsed.get("sl"),
+                tp1=parsed.get("tp1"),
+                tp2=parsed.get("tp2"),
+                rr=parsed.get("rr"),
+                status="ACTIVE",
+                analysis_note=response,
+            )
+            await sender(f"Сигнал по {symbol} збережено. Моніторинг активовано.")
     else:
         await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
 
@@ -2867,11 +2894,6 @@ async def run() -> None:
 
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
                             signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
-                            if _allow_notify(symbol, "EXPIRED"):
-                                await send_office(
-                                    f"Сетап по {symbol} не відпрацював — ціна не дійшла до зони входу. Фіксую для навчання.",
-                                    stream="general",
-                                )
                             continue
 
                         liq_now = fetch_liquidations_proxy(symbol)
