@@ -195,6 +195,48 @@ def _safe_json_write(path: Path, payload: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+async def init_sofia_memory_store() -> str:
+    """Create or reuse Sofia memory store."""
+    import httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
+
+    if store_id:
+        print(f"[memory] Sofia store: {store_id}")
+        return store_id
+    if not api_key:
+        print("[memory] ANTHROPIC_API_KEY is missing; skip Sofia store init")
+        return ""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/memory_stores",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "anthropic-beta": "managed-agents-2026-04-01",
+                    "content-type": "application/json",
+                },
+                json={"name": "sofia_trading_memory"},
+                timeout=15.0,
+            )
+            if not resp.is_success:
+                print(f"[memory] Store create failed: {resp.status_code} {resp.text[:500]}")
+                return ""
+            data = resp.json()
+            new_id = str(data.get("id", "") or "").strip()
+            if new_id:
+                print(f"[memory] Created Sofia store: {new_id}")
+                print(f"[memory] Add to Render env: SOFIA_MEMORY_STORE_ID={new_id}")
+                return new_id
+            print("[memory] Store create response has no id")
+    except Exception as e:
+        print(f"[memory] Store init failed: {e}")
+    return ""
+
+
 def load_agent_bot_tokens() -> Dict[str, str]:
     """
     Optional multi-bot mode via env vars:
@@ -1743,6 +1785,9 @@ async def run() -> None:
         f"fingerprint={_db_ident.get('fingerprint')} "
         f"(звір з Mini App /api/summary → db_identity)"
     )
+    sofia_store_id = await init_sofia_memory_store()
+    if sofia_store_id:
+        print("[memory] Sofia Memory Store is ready")
     _tzp = _briefing_tzinfo()
     _tzn = getattr(_tzp, "key", None) or ("UTC" if _tzp is timezone.utc else repr(_tzp))
     print(f"[relay] briefing TZ active: {_tzn} (OFFICE_BRIEFING_TZ; пакет tzdata у venv допомагає на Windows)")
