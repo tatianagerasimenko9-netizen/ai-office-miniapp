@@ -2673,12 +2673,9 @@ async def run() -> None:
             async def _send_agent_turn(agent_key: str, text: str) -> None:
                 if not text:
                     return
-                parts = split_long_message(text)
-                for i, part in enumerate(parts):
-                    msg = part if i == 0 else "..." + part
-                    await send_office(fmt_agent_line(agent_key, msg), stream="general")
-                    if len(parts) > 1:
-                        await asyncio.sleep(1.0)
+                # Text is already shortened by _trim_lines.
+                msg = fmt_agent_line(agent_key, text)
+                await send_office(msg[:3800], stream="general")
 
             await _send_agent_turn("lev", f"Тетяно, бачу сетап 👀\n{direction} {symbol} — команда, аналіз.")
             await asyncio.sleep(1.5)
