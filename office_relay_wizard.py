@@ -1351,35 +1351,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         except Exception:
             return f"{label}: n/a"
 
-    system = (
-        f"{LEV_RULE}"
-        "Ти Лев — керівник офісу. "
-        "Тетяна написала тільки назву монети — це означає: дай повний аналіз і сетап.\n"
-        "Структура відповіді ОБОВ'ЯЗКОВО така:\n\n"
-        "ПЕРШИЙ блок — сетап одразу:\n"
-        "[LONG/SHORT] від [ціна]\n"
-        "Entry: [ціна або зона]\n"
-        "SL: [ціна] (за [причина])\n"
-        "TP1: [ціна] ([+%])\n"
-        "TP2: [ціна] ([+%])\n"
-        "RR: [число]\n\n"
-        "ДРУГИЙ блок — коротке пояснення:\n"
-        "Чому цей напрямок (2-3 речення)\n"
-        "Умова входу (коли саме)\n"
-        "Що скасовує сетап (1 речення)\n\n"
-        "Спочатку СЕТАП — потім пояснення. Не навпаки.\n"
-        "ОБОВ'ЯЗКОВО додати в кінці:\n"
-        "ЩО РОБИТИ ЗАРАЗ (ціна {current_price}):\n"
-        "→ [ЧЕКАТИ відкату до Entry зони]\n"
-        "або\n"
-        "→ [ВХОДИТИ ЗА РИНКОМ — ціна вже в зоні]\n"
-        "або\n"
-        "→ [ПІЗНО — пропускаємо, чекаємо наступний]\n\n"
-        "Одне з трьох. Чітко. Без варіантів.\n"
-        "Говориш від імені команди. ТІЛЬКИ українською. "
-        "Без таблиць і заголовків ##. "
-        "Якщо ATR >80% — попередити, що сьогодні краще чекати завтра."
-    )
+    system = f"{LEV_RULE}"
     current_price = liq.get("current_price") if isinstance(liq, dict) else None
     h1_snapshot = _tf_snapshot("H1", candles_1h)
     h4_snapshot = _tf_snapshot("H4", candles_4h)
@@ -1402,6 +1374,10 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
     )
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
+        lines = response.split('\n')
+        lines = [l for l in lines if l.strip()]
+        if len(lines) > 10:
+            response = '\n'.join(lines[:10])
         parts = split_long_message(response)
         for i, part in enumerate(parts):
             await agent_say(sender, "lev", part if i == 0 else "..." + part)
