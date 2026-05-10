@@ -1054,6 +1054,36 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def signal_get_recent(db_path: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Return recent closed/finished signals for agent memory context."""
+    safe_limit = max(1, min(int(limit or 5), 20))
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT symbol, direction, outcome, analysis_note, ts_updated, ts_created
+        FROM office_signals
+        WHERE COALESCE(NULLIF(outcome, ''), '') != ''
+           OR status IN ('STOPPED', 'HIT_TP2', 'EXPIRED')
+        ORDER BY COALESCE(ts_updated, ts_created) DESC
+        LIMIT ?
+        """,
+        (safe_limit,),
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "symbol": str(r[0] or "").strip().upper(),
+                "direction": str(r[1] or "").strip().upper(),
+                "outcome": str(r[2] or "").strip().upper(),
+                "analysis_note": str(r[3] or "").strip(),
+                "ts_updated": r[4],
+                "ts_created": r[5],
+            }
+        )
+    return out
+
+
 def signal_update(
     db_path: str,
     *,

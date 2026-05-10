@@ -1495,9 +1495,6 @@ async def office_free_chat(
     text: str,
     db_path: str,
 ) -> None:
-    agent_key = detect_agent_from_text(text)
-    print(f"[debug-fc] agent={agent_key}")
-    print(f"[debug-fc] text={text[:50]}")
     history = _history_prepare()
     _history_add("user", text)
 

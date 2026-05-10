@@ -213,6 +213,7 @@ def ask_agent(
     user_context: str,
     max_tokens: int = 150,
     messages_history: Optional[List[Dict[str, str]]] = None,
+    db_path: Optional[str] = None,
 ) -> str:
     """
     Lightweight Anthropic adapter for agent-style replies.
@@ -225,6 +226,24 @@ def ask_agent(
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return ""
+        context_text = str(user_context or "")
+        if agent_norm == "lev":
+            recent_db_path = str(db_path or "").strip() or os.getenv("DATABASE_URL", "").strip() or os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip() or "office_bridge.db"
+            try:
+                from office_bridge import signal_get_recent  # local import to avoid import cycle at module load
+
+                recent = signal_get_recent(recent_db_path, limit=5)
+                if recent:
+                    memory_lines: List[str] = ["Останні угоди:"]
+                    for s in recent:
+                        symbol = str(s.get("symbol") or "").strip().upper()
+                        direction = str(s.get("direction") or "").strip().upper()
+                        outcome = str(s.get("outcome") or "").strip().upper() or "UNKNOWN"
+                        note = str(s.get("analysis_note") or "").strip().replace("\n", " ")
+                        memory_lines.append(f"{symbol} {direction} -> {outcome} {note[:50]}")
+                    context_text = "\n".join(memory_lines) + "\n\n" + context_text
+            except Exception:
+                pass
 
         headers = {
             "x-api-key": api_key,
@@ -246,7 +265,7 @@ def ask_agent(
                 "role": "user",
                 "content": (
                     f"agent_key: {agent_key}\n"
-                    f"context:\n{user_context}"
+                    f"context:\n{context_text}"
                 ),
             }
         )
@@ -263,17 +282,7 @@ def ask_agent(
                     "tools": TOOLS,
                     "messages": messages,
                 }
-                lev_memory_store_id = os.getenv("LEV_MEMORY_STORE_ID", "").strip()
                 sofia_memory_store_id = os.getenv("SOFIA_MEMORY_STORE_ID", "").strip()
-                # Тимчасово для debug:
-                # if agent_norm == "lev" and lev_memory_store_id:
-                #     payload["resources"] = [
-                #         {
-                #             "type": "memory_store",
-                #             "memory_store_id": lev_memory_store_id,
-                #             "access": "read_write",
-                #         }
-                #     ]
                 if agent_norm == "memory" and sofia_memory_store_id:
                     payload["resources"] = [
                         {
@@ -288,8 +297,6 @@ def ask_agent(
                     json=payload,
                     timeout=timeout_sec,
                 )
-                print(f"[debug-api] status={resp.status_code}")
-                print(f"[debug-api] body={resp.text[:200]}")
                 resp.raise_for_status()
                 data = resp.json()
                 stop_reason = data.get("stop_reason", "unknown")
