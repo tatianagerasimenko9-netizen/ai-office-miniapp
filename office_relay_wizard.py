@@ -285,6 +285,13 @@ def split_long_message(text: str, limit: int = 2500) -> List[str]:
     return parts if parts else [raw]
 
 
+def _trim_lines(text: str, max_lines: int = 6) -> str:
+    lines = [l for l in str(text or "").split("\n") if l.strip()]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    return "\n".join(lines).strip()
+
+
 async def send_via_bot_api(
     session: aiohttp.ClientSession,
     token: str,
@@ -2769,9 +2776,10 @@ async def run() -> None:
                     "lev",
                     lev_final_system,
                     team_pack,
-                    max_tokens=900,
+                    max_tokens=200,
                 )
             )
+            lev_final = _trim_lines(lev_final, max_lines=6)
             await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
@@ -2814,6 +2822,13 @@ async def run() -> None:
                 return False
             _last_notified[key] = now_ts
             return True
+
+        def _lev_msg(sym: str, happened: str, action_now: str, sl_after: str) -> str:
+            return (
+                f"Тетяно, {sym}: {happened}\n"
+                f"Що робити зараз: {action_now}\n"
+                f"SL після дії: {sl_after}"
+            )
         while True:
             try:
                 active_rows = signal_get_active(db_path)
@@ -2880,13 +2895,50 @@ async def run() -> None:
                                 if e_high is not None:
                                     be_level = e_high * (1.001 if direction == "LONG" else 0.999)
                                 if _allow_notify(symbol, "HIT_TP1"):
-                                    await send_office(
-                                        f"{symbol} досяг TP1 {tp1_v} ✅\n"
-                                        "Рекомендую: перенести SL в беззбиток і тримати до TP2.\n"
-                                        f"Тетяно, {symbol} досяг TP1. Рекомендую перенести SL в беззбиток на рівень {be_level}.",
-                                        stream="general",
+                                    be_txt = f"{be_level:.6f}" if isinstance(be_level, (int, float)) else "BE"
+                                    lev_note = _lev_msg(
+                                        symbol,
+                                        f"ціна досягла TP1 {tp1_v}",
+                                        f"фіксуй 50%, перенеси SL у BE, решту тримай до TP2 {tp2_v}",
+                                        be_txt,
                                     )
+                                    await send_office(lev_note, stream="general")
                                 continue
+
+                        if status == "HIT_ENTRY" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
+                            if _allow_notify(symbol, "ADD_ON"):
+                                add_note = _lev_msg(
+                                    symbol,
+                                    f"ціна повернулась в entry-зону {e_low}-{e_high}",
+                                    "можливий добір позиції малим обсягом у зоні",
+                                    f"{sl_v}",
+                                )
+                                await send_office(add_note, stream="general")
+
+                        if status == "HIT_TP1" and tp2_v is not None:
+                            try:
+                                c4 = fetch_candles(symbol, "4h", 3)
+                            except Exception:
+                                c4 = []
+                            if isinstance(c4, list) and len(c4) >= 2:
+                                try:
+                                    prev_close = float((c4[-2] or {}).get("close") or 0.0)
+                                    last_close = float((c4[-1] or {}).get("close") or 0.0)
+                                except Exception:
+                                    prev_close = 0.0
+                                    last_close = 0.0
+                                if prev_close > 0:
+                                    change_pct = (last_close - prev_close) / prev_close * 100.0
+                                    rev_long = direction == "LONG" and change_pct <= -0.5 and current_price < tp2_v
+                                    rev_short = direction == "SHORT" and change_pct >= 0.5 and current_price > tp2_v
+                                    if (rev_long or rev_short) and _allow_notify(symbol, "REVERSAL_WARN"):
+                                        rev_note = _lev_msg(
+                                            symbol,
+                                            f"4H свічка дала розворот {change_pct:+.2f}% після TP1",
+                                            "розглянь фіксацію ще 50% поки в плюсі",
+                                            f"{sl_v}",
+                                        )
+                                        await send_office(rev_note, stream="general")
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
                             hit_sl = (direction == "LONG" and current_price <= sl_v) or (
@@ -2923,12 +2975,19 @@ async def run() -> None:
                                         f"Новинний ризик зараз: {n_risk}\n"
                                         f"Сесія: {sess}"
                                     )
-                                    analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=700))
+                                    analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=200))
+                                    analysis_note = _trim_lines(analysis_note, max_lines=6)
                                 except Exception:
                                     analysis_note = ""
                                 signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
                                 if _allow_notify(symbol, "HIT_SL"):
-                                    await send_office(f"{symbol} вибило по стопу {sl_v} ❌\nАналізую чому...", stream="general")
+                                    stop_note = _lev_msg(
+                                        symbol,
+                                        f"SL перебитий на {sl_v}, структура зламана",
+                                        "повний вихід з позиції зараз",
+                                        "позиція закрита",
+                                    )
+                                    await send_office(stop_note, stream="general")
                                     if analysis_note:
                                         for part in split_long_message(analysis_note):
                                             await send_office(part, stream="general")
