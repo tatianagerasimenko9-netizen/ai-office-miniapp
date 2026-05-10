@@ -88,9 +88,9 @@ OFFICE_RULES_BRIEF_UA = (
     "5) При серії збитків ризик має пріоритет, вхід блокується.\n"
     "6) Для повних ролей/деталей: команда /officeprompt."
 )
-# UBUSDT (UB/USDT) і «BUSDT» у чаті (BU/USDT на біржі — BUUSDT) — різні пари, не змішувати.
+# UBUSDT і BUSDT — різні контракти на Binance Futures (обидва тікери існують; BUUSDT немає).
 _CHAT_USDT_PAIR_ALIASES: Dict[str, str] = {
-    "BUSDT": "BUUSDT",
+    "BUSDT": "BUSDT",
 }
 
 LEV_RULE = (
@@ -1742,10 +1742,9 @@ async def office_free_chat(
     )
     if chosen_agent == "lev":
         answer_system += (
-            "\nДва окремі інструменти: UBUSDT (UB/USDT) і BUUSDT (BU/USDT). "
-            "Якщо в тексті явно UB / UBUSDT — працюй з UBUSDT. "
-            "Якщо написано BUSDT без U на початку бази — для даних використовуй BUUSDT. "
-            "Не змішуй діапазони цін і entry між ними; не кажи, що тікера не існує, якщо пара є на Binance."
+            "\nДва окремі інструменти на Binance Futures: UBUSDT і BUSDT (тікер саме BUSDT, не BUUSDT). "
+            "Якщо в тексті UB / UBUSDT — дані та сетап по UBUSDT. "
+            "Якщо BUSDT — по BUSDT. Не змішуй ціни й entry між ними."
         )
     free_chat_tokens = 1200 if chosen_agent == "lev" else 2000
     response = clean_llm_note(
