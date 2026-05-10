@@ -1344,6 +1344,27 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
             v = float(m_entry_one.group(1))
             out["entry_low"] = v
             out["entry_high"] = v
+        else:
+            m_entry_no_colon = re.search(
+                r"Entry\s+([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+                src,
+                flags=re.IGNORECASE,
+            )
+            if m_entry_no_colon:
+                a = float(m_entry_no_colon.group(1))
+                b = float(m_entry_no_colon.group(2))
+                out["entry_low"] = min(a, b)
+                out["entry_high"] = max(a, b)
+            else:
+                m_entry_one_no_colon = re.search(
+                    r"Entry\s+([0-9]+(?:\.[0-9]+)?)",
+                    src,
+                    flags=re.IGNORECASE,
+                )
+                if m_entry_one_no_colon:
+                    v = float(m_entry_one_no_colon.group(1))
+                    out["entry_low"] = v
+                    out["entry_high"] = v
     entry_hint = out["entry_low"] or out["entry_high"]
     sl_v = _extract_line_value("SL", src, hint=entry_hint)
     if sl_v is not None:
@@ -1466,10 +1487,18 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             if len(parts) > 1:
                 await asyncio.sleep(1.0)
 
-        levels = _parse_signal_levels_from_text(response)
-        print(f"[signal-parse] response[:200]={response[:200]}")
-        print(f"[signal-parse] parsed levels={levels}")
-        parsed = levels
+        no_entry_phrases = [
+            "не входжу",
+            "не входимо",
+            "пропуск",
+            "пропускаємо",
+            "немає входу",
+            "no entry",
+        ]
+        if any(p in response.lower() for p in no_entry_phrases):
+            return
+
+        parsed = _parse_signal_levels_from_text(response)
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
             parsed.get("tp1") is not None or parsed.get("tp2") is not None
         ):
@@ -1721,6 +1750,10 @@ async def office_free_chat(
             db_path=db_path,
         )
     )
+    if chosen_agent == "lev" and response:
+        lines = [l for l in response.split('\n') if l.strip()]
+        if len(lines) > 8:
+            response = '\n'.join(lines[:8])
     if response:
         _history_add("assistant", f"{chosen_agent}: {response}")
         await agent_say(sender, chosen_agent, response)
