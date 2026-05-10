@@ -1466,7 +1466,10 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             if len(parts) > 1:
                 await asyncio.sleep(1.0)
 
-        parsed = _parse_signal_levels_from_text(response)
+        levels = _parse_signal_levels_from_text(response)
+        print(f"[signal-parse] response[:200]={response[:200]}")
+        print(f"[signal-parse] parsed levels={levels}")
+        parsed = levels
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
             parsed.get("tp1") is not None or parsed.get("tp2") is not None
         ):
@@ -1495,6 +1498,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                 status="ACTIVE",
                 analysis_note=response,
             )
+            print(f"[signal] saved {symbol} {direction}")
             await agent_say(
                 sender,
                 "olesya",
