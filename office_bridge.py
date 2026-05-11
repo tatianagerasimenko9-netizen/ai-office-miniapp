@@ -1026,7 +1026,7 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
         SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
-        WHERE status IN ('ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+        WHERE status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
         ORDER BY ts_created DESC
         """,
         (),
@@ -1066,7 +1066,7 @@ def signal_get_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
         WHERE UPPER(symbol) = ?
-          AND status IN ('ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+          AND status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
         ORDER BY ts_created DESC
         LIMIT 1
         """,

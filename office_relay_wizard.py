@@ -1308,11 +1308,19 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
             return None
 
     def _extract_line_value(label: str, line_text: str, hint: Optional[float] = None) -> Optional[float]:
-        pat = rf"{label}\s*:\s*([^\n\r]+)"
-        m = re.search(pat, line_text, flags=re.IGNORECASE)
-        if not m:
+        patterns = [
+            rf"{label}\s*:\s*([^\n\r]+)",
+            rf"{label}\s*[—–\-]\s*([^\n\r]+)",
+            rf"{label}\s+([0-9][\d,]*(?:\.\d+)?[^\n\r]*)",
+        ]
+        chunk = ""
+        for pat in patterns:
+            m = re.search(pat, line_text, flags=re.IGNORECASE)
+            if m:
+                chunk = str(m.group(1) or "")
+                break
+        if not chunk:
             return None
-        chunk = str(m.group(1) or "")
         nums = re.findall(r"\d[\d,]*(?:\.\d+)?", chunk)
         values: List[float] = []
         for n in nums:
@@ -1332,14 +1340,31 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
     if nums:
         pass
 
-    m_entry = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    # «Entry твій:», «Entry у тебе:» тощо — між Entry і двокрапкою може бути короткий текст.
+    m_entry = re.search(
+        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+        src,
+        flags=re.IGNORECASE,
+    )
+    if not m_entry:
+        m_entry = re.search(
+            r"Entry:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+            src,
+            flags=re.IGNORECASE,
+        )
     if m_entry:
         a = float(m_entry.group(1))
         b = float(m_entry.group(2))
         out["entry_low"] = min(a, b)
         out["entry_high"] = max(a, b)
     else:
-        m_entry_one = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+        m_entry_one = re.search(
+            r"Entry[^:\n]{0,24}:\s*([0-9]+(?:\.[0-9]+)?)",
+            src,
+            flags=re.IGNORECASE,
+        )
+        if not m_entry_one:
+            m_entry_one = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
         if m_entry_one:
             v = float(m_entry_one.group(1))
             out["entry_low"] = v
@@ -1477,11 +1502,15 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
     )
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
+        # Повна відповідь для парсингу рівнів (обрізка до N рядків лише для Telegram).
+        response_for_parse = response
         lines = response.split('\n')
         lines = [l for l in lines if l.strip()]
         if len(lines) > 16:
-            response = '\n'.join(lines[:16])
-        parts = split_long_message(response)
+            response_send = '\n'.join(lines[:16])
+        else:
+            response_send = response
+        parts = split_long_message(response_send)
         for i, part in enumerate(parts):
             await agent_say(sender, "lev", part if i == 0 else "..." + part)
             if len(parts) > 1:
@@ -1496,10 +1525,42 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             "немає входу",
             "no entry",
         ]
-        if any(p in response.lower() for p in no_entry_phrases):
-            return
 
-        parsed = _parse_signal_levels_from_text(response)
+        levels = _parse_signal_levels_from_text(response_for_parse)
+        print("[parse-debug] full response:")
+        print(response_for_parse)
+        print(f"[parse-debug] levels: {levels}")
+        parsed = levels
+        if any(p in response_for_parse.lower() for p in no_entry_phrases):
+            # Пропуск не видаляємо: якщо є зона очікування, ставимо WATCHING.
+            if parsed.get("entry_low") is not None:
+                direction_watch = "LONG"
+                up_watch = response_for_parse.upper()
+                if "SHORT" in up_watch or "ШОРТ" in up_watch:
+                    direction_watch = "SHORT"
+                elif "LONG" in up_watch or "ЛОНГ" in up_watch:
+                    direction_watch = "LONG"
+                signal_id = f"watch-{symbol}-{int(time.time())}"
+                signal_upsert(
+                    db_path,
+                    signal_id=signal_id,
+                    symbol=symbol,
+                    direction=direction_watch,
+                    entry_low=parsed.get("entry_low"),
+                    entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
+                    sl=parsed.get("sl"),
+                    tp1=parsed.get("tp1"),
+                    tp2=parsed.get("tp2"),
+                    rr=parsed.get("rr"),
+                    status="WATCHING",
+                    analysis_note=response_for_parse,
+                )
+                await agent_say(
+                    sender,
+                    "olesya",
+                    f"Сигнал {symbol} {direction_watch} переведено в WATCHING. Чекаємо відкат у зону входу.",
+                )
+            return
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
             parsed.get("tp1") is not None or parsed.get("tp2") is not None
         ):
@@ -1508,7 +1569,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                 await sender(f"{symbol} — символ не знайдено на Binance.")
                 return
             direction = "LONG"
-            up = response.upper()
+            up = response_for_parse.upper()
             if "SHORT" in up or "ШОРТ" in up:
                 direction = "SHORT"
             elif "LONG" in up or "ЛОНГ" in up:
@@ -1526,7 +1587,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                 tp2=parsed.get("tp2"),
                 rr=parsed.get("rr"),
                 status="ACTIVE",
-                analysis_note=response,
+                analysis_note=response_for_parse,
             )
             print(f"[signal] saved {symbol} {direction}")
             await agent_say(
@@ -3074,6 +3135,11 @@ async def run() -> None:
                 f"SL після дії: {sl_after}"
             )
         while True:
+            utc_now = datetime.now(timezone.utc)
+            minute_of_day = utc_now.hour * 60 + utc_now.minute
+            in_london = 480 <= minute_of_day < 660
+            in_ny = 780 <= minute_of_day < 960
+            fast_poll = in_london or in_ny
             try:
                 active_rows = signal_get_active(db_path)
                 for row in active_rows:
@@ -3113,6 +3179,21 @@ async def run() -> None:
                         sl_v = float(sl) if sl is not None else None
                         tp1_v = float(tp1) if tp1 is not None else None
                         tp2_v = float(tp2) if tp2 is not None else None
+
+                        if status == "WATCHING" and e_low is not None:
+                            watch_high = e_high if e_high is not None else e_low
+                            if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
+                                signal_update(db_path, signal_id=signal_id, status="ACTIVE")
+                                if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
+                                    await send_office(
+                                        f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ!\n"
+                                        f"Зараз {current_price}\n"
+                                        f"Entry зона: {e_low}–{watch_high}\n"
+                                        f"SL: {sl_v}\n"
+                                        "Це той відкат що чекали — входь!",
+                                        stream="general",
+                                    )
+                                continue
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
@@ -3248,7 +3329,7 @@ async def run() -> None:
                         print(f"[signals] row monitor failed: {exc_row}")
             except Exception as exc:
                 print(f"[signals] monitor failed: {exc}")
-            await asyncio.sleep(1800)
+            await asyncio.sleep(120 if fast_poll else 900)
 
     asyncio.create_task(monitor_active_signals())
 
