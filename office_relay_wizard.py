@@ -1527,9 +1527,6 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         ]
 
         levels = _parse_signal_levels_from_text(response_for_parse)
-        print("[parse-debug] full response:")
-        print(response_for_parse)
-        print(f"[parse-debug] levels: {levels}")
         parsed = levels
         if any(p in response_for_parse.lower() for p in no_entry_phrases):
             # Пропуск не видаляємо: якщо є зона очікування, ставимо WATCHING.
@@ -3086,7 +3083,7 @@ async def run() -> None:
                     "lev",
                     lev_final_system,
                     team_pack,
-                    max_tokens=700,
+                    max_tokens=600,
                 )
             )
             lev_final = _trim_lines(lev_final, 7)
