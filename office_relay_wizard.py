@@ -1549,10 +1549,10 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             f"{any(p in response_for_parse.lower() for p in no_entry_phrases)}"
         )
         low_resp = response_for_parse.lower()
-        has_skip = any(p in low_resp for p in ("пропуск", "пропускаю", "пропускаємо"))
         if any(p in low_resp for p in no_entry_phrases):
-            # Пропуск не видаляємо: якщо є зона очікування, ставимо WATCHING.
-            if has_skip and parsed.get("entry_low") is not None:
+            # no-entry не означає "нічого не робити":
+            # якщо є зона, зберігаємо WATCHING замість ACTIVE.
+            if parsed.get("entry_low") is not None:
                 print(f"[watching-debug] saving WATCHING for {symbol}")
                 direction_watch = "LONG"
                 up_watch = response_for_parse.upper()
