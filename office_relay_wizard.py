@@ -1390,6 +1390,17 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                     v = float(m_entry_one_no_colon.group(1))
                     out["entry_low"] = v
                     out["entry_high"] = v
+    # Шукаємо «зону очікування» / «повернення в/до» для сценарію WATCHING.
+    zone_pattern = re.search(
+        r"(?:зон[уі]|повернення\s+(?:в|до))\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+        src,
+        flags=re.IGNORECASE,
+    )
+    if zone_pattern and out["entry_low"] is None:
+        a = float(zone_pattern.group(1).replace(",", "."))
+        b = float(zone_pattern.group(2).replace(",", "."))
+        out["entry_low"] = min(a, b)
+        out["entry_high"] = max(a, b)
     entry_hint = out["entry_low"] or out["entry_high"]
     sl_v = _extract_line_value("SL", src, hint=entry_hint)
     if sl_v is not None:
@@ -1528,9 +1539,11 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
 
         levels = _parse_signal_levels_from_text(response_for_parse)
         parsed = levels
-        if any(p in response_for_parse.lower() for p in no_entry_phrases):
+        low_resp = response_for_parse.lower()
+        has_skip = any(p in low_resp for p in ("пропуск", "пропускаю", "пропускаємо"))
+        if any(p in low_resp for p in no_entry_phrases):
             # Пропуск не видаляємо: якщо є зона очікування, ставимо WATCHING.
-            if parsed.get("entry_low") is not None:
+            if has_skip and parsed.get("entry_low") is not None:
                 direction_watch = "LONG"
                 up_watch = response_for_parse.upper()
                 if "SHORT" in up_watch or "ШОРТ" in up_watch:
@@ -1555,7 +1568,8 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                 await agent_say(
                     sender,
                     "olesya",
-                    f"Сигнал {symbol} {direction_watch} переведено в WATCHING. Чекаємо відкат у зону входу.",
+                    f"Зона {symbol} {parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} в WATCHING. "
+                    "Повідомлю як ціна дійде.",
                 )
             return
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
