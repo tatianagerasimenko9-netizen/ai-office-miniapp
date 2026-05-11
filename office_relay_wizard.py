@@ -2991,7 +2991,7 @@ async def run() -> None:
                     "maks",
                     "Ти Макс. Дай коротко ринкові дані: OI/funding/liquidations і висновок по імпульсу. Українською.",
                     maks_ctx,
-                    max_tokens=600,
+                    max_tokens=900,
                 )
             )
             maks_msg = _trim_lines(maks_msg, 4)
@@ -3010,7 +3010,7 @@ async def run() -> None:
                     "marichka",
                     "Ти Марічка. Дай bias по H4/Daily, коротко і чітко. Українською.",
                     mar_ctx,
-                    max_tokens=600,
+                    max_tokens=900,
                 )
             )
             mar_msg = _trim_lines(mar_msg, 4)
@@ -3038,7 +3038,7 @@ async def run() -> None:
                     "daryna",
                     "Ти Дарина. Дай ризик-висновок і вето/допуск коротко, українською.",
                     daryna_ctx,
-                    max_tokens=600,
+                    max_tokens=900,
                 )
             )
             daryna_msg = _trim_lines(daryna_msg, 4)
@@ -3055,13 +3055,18 @@ async def run() -> None:
                     "marko",
                     "Ти Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR + що робити зараз. Українською.",
                     marko_ctx,
-                    max_tokens=700,
+                    max_tokens=900,
                 )
             )
             marko_msg = _trim_lines(marko_msg, 5)
             await _send_agent_turn("marko", marko_msg or f"ЩО РОБИТИ ЗАРАЗ (ціна {current_price}): чекаємо підтвердження в зоні Entry.")
             await asyncio.sleep(1.5)
 
+            active_signals_short = []
+            for s in active_signals[:6]:
+                active_signals_short.append(
+                    f"{str(s.get('symbol') or '')}:{str(s.get('status') or '')}"
+                )
             team_pack = (
                 f"Макс: {maks_msg}\n"
                 f"Марічка: {mar_msg}\n"
@@ -3069,7 +3074,7 @@ async def run() -> None:
                 f"Дарина: {daryna_msg}\n"
                 f"Марко: {marko_msg}\n"
                 f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}\n"
-                f"Активні сигнали: {active_signals}\n"
+                f"Активні сигнали (коротко): {active_signals_short}\n"
                 "Якщо по цьому символу вже є активний — дай UPDATE а не новий сигнал."
             )
             lev_final_system = (
@@ -3081,7 +3086,7 @@ async def run() -> None:
                     "lev",
                     lev_final_system,
                     team_pack,
-                    max_tokens=300,
+                    max_tokens=700,
                 )
             )
             lev_final = _trim_lines(lev_final, 7)
