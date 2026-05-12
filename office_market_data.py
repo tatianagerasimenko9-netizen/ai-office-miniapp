@@ -316,6 +316,128 @@ def fetch_pd_array(symbol: str, tf: str = "4h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
+    """
+    Ринкова структура на swing highs/lows (спрощено під ICT):
+
+    - BOS (Break of Structure): у бичій структурі close вище попереднього swing high;
+      у ведмежій — close нижче попереднього swing low → продовження тренду.
+    - HH/HL або LH/LL: структура активна, без пробою останнього значного рівня.
+    - CHOCH (Change of Character): коли немає чіткої HH/HL чи LH/LL — перехідний стан.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        tf_s = str(tf or "1h").strip().lower() or "1h"
+
+        candles = fetch_candles(sym, tf_s, 20)
+        if not isinstance(candles, list) or len(candles) < 6:
+            return {}
+
+        closes: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+        for c in candles:
+            if not isinstance(c, dict):
+                return {}
+            closes.append(float(c.get("close") or 0.0))
+            highs.append(float(c.get("high") or 0.0))
+            lows.append(float(c.get("low") or 0.0))
+
+        swing_highs: List[tuple[int, float]] = []
+        swing_lows: List[tuple[int, float]] = []
+
+        for i in range(2, len(candles) - 2):
+            if (
+                highs[i] > highs[i - 1]
+                and highs[i] > highs[i - 2]
+                and highs[i] > highs[i + 1]
+                and highs[i] > highs[i + 2]
+            ):
+                swing_highs.append((i, highs[i]))
+            if (
+                lows[i] < lows[i - 1]
+                and lows[i] < lows[i - 2]
+                and lows[i] < lows[i + 1]
+                and lows[i] < lows[i + 2]
+            ):
+                swing_lows.append((i, lows[i]))
+
+        if len(swing_highs) < 2 or len(swing_lows) < 2:
+            return {
+                "symbol": sym,
+                "tf": tf_s,
+                "structure": "UNCLEAR",
+                "description": "Недостатньо даних",
+            }
+
+        sh1 = swing_highs[-2][1]
+        sh2 = swing_highs[-1][1]
+        sl1 = swing_lows[-2][1]
+        sl2 = swing_lows[-1][1]
+        current = closes[-1]
+
+        bullish_structure = sh2 > sh1 and sl2 > sl1
+        bearish_structure = sh2 < sh1 and sl2 < sl1
+
+        result: Dict[str, Any] = {
+            "symbol": sym,
+            "tf": tf_s,
+            "last_sh": sh2,
+            "last_sl": sl2,
+            "prev_sh": sh1,
+            "prev_sl": sl1,
+            "current_price": current,
+        }
+
+        if bullish_structure:
+            result["structure"] = "BULLISH"
+            result["trend"] = "UP"
+            if current > sh1:
+                result["event"] = "BOS_BULLISH"
+                result["description"] = (
+                    f"BOS вгору — пробило SH {sh1:.4f}. "
+                    f"Тренд продовжується вгору. "
+                    f"Шукаємо LONG від підтримок."
+                )
+            else:
+                result["event"] = "HH_HL"
+                result["description"] = (
+                    f"Higher High + Higher Low — бичача структура активна."
+                )
+        elif bearish_structure:
+            result["structure"] = "BEARISH"
+            result["trend"] = "DOWN"
+            if current < sl1:
+                result["event"] = "BOS_BEARISH"
+                result["description"] = (
+                    f"BOS вниз — пробило SL {sl1:.4f}. "
+                    f"Тренд продовжується вниз. "
+                    f"Шукаємо SHORT від опорів."
+                )
+            else:
+                result["event"] = "LH_LL"
+                result["description"] = (
+                    f"Lower High + Lower Low — ведмежа структура активна."
+                )
+        else:
+            result["structure"] = "TRANSITION"
+            result["event"] = "CHOCH"
+            result["description"] = (
+                f"CHOCH — зміна характеру ринку. "
+                f"Можливий розворот тренду. "
+                f"Чекаємо підтвердження."
+            )
+
+        return result
+    except Exception as e:
+        print(f"[structure] error {symbol}: {e}")
+        return {}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.

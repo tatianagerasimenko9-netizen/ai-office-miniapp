@@ -18,6 +18,7 @@ from office_market_data import (
     fetch_open_interest,
     fetch_ote_levels,
     fetch_pd_array,
+    fetch_market_structure,
     fetch_recent_liquidations,
     fetch_session_levels,
     fetch_top_movers,
@@ -160,6 +161,26 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_market_structure",
+        "description": (
+            "ICT Market Structure — BOS і CHOCH. "
+            "BOS (Break of Structure) = тренд продовжується. "
+            "CHOCH (Change of Character) = тренд міняється. "
+            "Визначає swing highs/lows і поточний тренд."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+                "timeframe": {
+                    "type": "string",
+                    "description": "Таймфрейм klines, за замовчуванням 1h (1h 4h 15m)",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_top_movers",
         "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
         "input_schema": {
@@ -238,6 +259,9 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_pd_array":
         tf_pd = str((tool_input or {}).get("timeframe") or "4h").strip().lower() or "4h"
         return fetch_pd_array(sym, tf_pd)
+    if tool_name == "get_market_structure":
+        tf_ms = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
+        return fetch_market_structure(sym, tf_ms)
     if tool_name == "get_top_movers":
         direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
         limit = int((tool_input or {}).get("limit") or 5)
