@@ -1354,6 +1354,8 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
         "rr": None,
     }
     src = str(text or "")
+    # Прибрати backticks (Markdown) — щоб зона парсилась стабільно.
+    src = src.replace("`", "")
 
     def _to_float(raw: str) -> Optional[float]:
         try:
@@ -1465,13 +1467,12 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                         out["entry_low"] = v
                         out["entry_high"] = v
     # Шукаємо зону очікування: OTE зона, «чекаю зону:», повернення в зону тощо.
-    # Після двокрапки інколи йдуть Markdown-лапки `2270–2273` — пропускаємо їх.
+    # Після двокрапки можуть бути лапки; тире інколи з пробілами: «2270 – 2273».
     zone_pattern = re.search(
         r"(?:зона|зони|зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
         r"|жд[уеи]\s+повернення\s+в\s+зон[уі]|"
-        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона|чекаю\s+зону:)"
-        r"\s*[`'‘’‚‛\"«»\u2018\u2019\u201c\u201d]*\s*"
-        r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона|чекаю\s+зону:)\s*"
+        r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212\s]+\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
     )
