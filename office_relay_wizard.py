@@ -1410,10 +1410,11 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                     if v is not None:
                         out["entry_low"] = v
                         out["entry_high"] = v
-    # Шукаємо «зону очікування» / «повернення в/до» для сценарію WATCHING.
+    # Шукаємо «зону очікування» / «повернення в/до» / «OTE … зона N–M» (Лев часто пише «зона», не «зону»).
     zone_pattern = re.search(
-        r"(?:зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
-        r"|жд[уеи]\s+повернення\s+в\s+зон[уі])\s+"
+        r"(?:зона|зони|зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
+        r"|жд[уеи]\s+повернення\s+в\s+зон[уі]|"
+        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона)\s+"
         r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
@@ -1562,12 +1563,6 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
 
         levels = _parse_signal_levels_from_text(response_for_parse)
         parsed = levels
-        print("=" * 60)
-        print(f"[real-response-debug] symbol={symbol}")
-        print("[real-response-debug] full text:")
-        print(response)
-        print(f"[real-response-debug] levels parsed: {levels}")
-        print("=" * 60)
         print(
             f"[watching-debug] response has пропуск: "
             f"{'пропуск' in response_for_parse.lower()}"

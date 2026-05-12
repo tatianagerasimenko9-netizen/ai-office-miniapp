@@ -26,6 +26,9 @@ def main() -> int:
         "Entry: 0.1453–0.1474 (OTE зона)",
         "Жду повернення в зону 0.1445–0.1469",
         "Entry: 0.03826\u22120.03860",  # Unicode minus U+2212
+        # Реальні фрагменти з Render [real-response-debug] (Лев без рядка Entry:)
+        "OTE SHORT зона 4698\u20134704 технічно відпрацьована",
+        "BNBUSDT — ПРОПУСК. OTE зона 655.47\u2013656.34 вже внизу",
     ]
     failed = 0
     for t in tests:
