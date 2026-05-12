@@ -3340,15 +3340,27 @@ async def run() -> None:
                             watch_high = e_high if e_high is not None else e_low
                             if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
                                 signal_update(db_path, signal_id=signal_id, status="ACTIVE")
-                                if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
-                                    await send_office(
-                                        f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ!\n"
-                                        f"Зараз {current_price}\n"
-                                        f"Entry зона: {e_low}–{watch_high}\n"
-                                        f"SL: {sl_v}\n"
-                                        "Це той відкат що чекали — входь!",
-                                        stream="general",
-                                    )
+                                missing_levels = sl_v is None and tp1_v is None and tp2_v is None
+                                if missing_levels:
+                                    if _allow_notify(symbol, "WATCHING_REANALYZE"):
+                                        await send_office(
+                                            f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ WATCHING.\n"
+                                            "Рівні SL/TP відсутні, запускаю повний аналіз зараз...",
+                                            stream="general",
+                                        )
+                                    async def _watching_sender(msg: str) -> None:
+                                        await send_office(msg, stream="general")
+                                    await full_auto_analysis(symbol=symbol, sender=_watching_sender, db_path=db_path)
+                                else:
+                                    if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
+                                        await send_office(
+                                            f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ!\n"
+                                            f"Зараз {current_price}\n"
+                                            f"Entry зона: {e_low}–{watch_high}\n"
+                                            f"SL: {sl_v}\n"
+                                            "Це той відкат що чекали — входь!",
+                                            stream="general",
+                                        )
                                 continue
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
