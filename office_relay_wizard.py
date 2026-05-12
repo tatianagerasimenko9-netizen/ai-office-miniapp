@@ -1562,6 +1562,12 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
 
         levels = _parse_signal_levels_from_text(response_for_parse)
         parsed = levels
+        print("=" * 60)
+        print(f"[real-response-debug] symbol={symbol}")
+        print("[real-response-debug] full text:")
+        print(response)
+        print(f"[real-response-debug] levels parsed: {levels}")
+        print("=" * 60)
         print(
             f"[watching-debug] response has пропуск: "
             f"{'пропуск' in response_for_parse.lower()}"
