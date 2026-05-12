@@ -66,6 +66,8 @@ from office_bridge import (
     signal_update,
     signal_upsert,
     _extract_first_usdt_symbol,
+    _now_kyiv_hm,
+    _to_kyiv_time_from_utc,
 )
 from office_llm_agent import ask_agent
 
@@ -2912,6 +2914,7 @@ async def run() -> None:
             h = utc_now.hour
             m = utc_now.minute
             minute_of_day = h * 60 + m
+            # Kill Zone за UTC ринку (London/NY вікна); локальний OFFICE_BRIEFING_TZ лише для текстів часу в чаті.
             in_london = 480 <= minute_of_day < 660
             in_ny = 780 <= minute_of_day < 960
             print(f"[scanner] tick UTC={utc_now.hour}:{utc_now.minute} in_ny={in_ny} in_london={in_london}")
@@ -3137,8 +3140,10 @@ async def run() -> None:
                         news_mins = int(n.minutes_to_event)
                         news_event_name = str(n.event_name or n.headline or "подія")
                         if news_mins >= 0:
-                            kyiv_now = datetime.now(timezone.utc) + timedelta(hours=3)
-                            news_kyiv_time = (kyiv_now + timedelta(minutes=news_mins)).strftime("%H:%M")
+                            news_kyiv_time = _to_kyiv_time_from_utc(
+                                str(getattr(n, "event_time_utc", "") or ""),
+                                news_mins,
+                            )
                 except Exception:
                     pass
             risk_snapshot = live_risk_snapshot(db_path)
@@ -3332,6 +3337,7 @@ async def run() -> None:
         while True:
             utc_now = datetime.now(timezone.utc)
             minute_of_day = utc_now.hour * 60 + utc_now.minute
+            # Kill Zone за UTC (ренок); fast_poll не змішувати з київським часом у повідомленнях.
             in_london = 480 <= minute_of_day < 660
             in_ny = 780 <= minute_of_day < 960
             fast_poll = in_london or in_ny
@@ -3557,10 +3563,11 @@ async def run() -> None:
                                         f"Entry: {e_low}-{e_high}\n"
                                         f"SL: {sl_v}\n"
                                         f"Час сигналу: {ts_created}\n"
-                                        f"Час вибивання: {now_utc.isoformat()}\n"
+                                        f"Час вибивання (UTC): {now_utc.isoformat()}\n"
+                                        f"Час вибивання за Києвом: {_now_kyiv_hm()}\n"
                                         f"Поточна ціна: {current_price}\n"
                                         f"Новинний ризик зараз: {n_risk}\n"
-                                        f"Сесія: {sess}"
+                                        f"Сесія Kill Zone (UTC): {sess}"
                                     )
                                     analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=200))
                                     analysis_note = _trim_lines(analysis_note, max_lines=6)

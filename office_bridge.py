@@ -23,6 +23,16 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tupl
 from urllib.parse import urlparse
 
 try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[misc, assignment]
+
+try:
+    import tzdata  # noqa: F401  # IANA zones для ZoneInfo (Windows)
+except ImportError:
+    pass
+
+try:
     import psycopg
 except Exception:  # pragma: no cover - optional in local sqlite mode
     psycopg = None  # type: ignore[assignment]
@@ -1486,11 +1496,25 @@ def _resolve_funding_disp(signal: OfficeSignal) -> str:
         return str(funding_raw)
 
 
+def _office_kyiv_tzinfo():
+    """Час у повідомленнях (Назар, брифінги): Europe/Kyiv + DST. Kill Zone логіка окремо лишається в UTC."""
+    if ZoneInfo is None:
+        return timezone.utc
+    name = os.getenv("OFFICE_BRIEFING_TZ", "Europe/Kyiv").strip()
+    if not name:
+        return timezone.utc
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.utc
+
+
 def _to_kyiv_time(mins: int) -> str:
-    now = datetime.now(timezone.utc)
-    event = now + timedelta(minutes=int(mins))
-    kyiv = event + timedelta(hours=3)
-    return kyiv.strftime("%H:%M")
+    """Година:хвилина за Києвом: UTC-зараз + mins, потім astimezone(Kyiv)."""
+    tz = _office_kyiv_tzinfo()
+    now_utc = datetime.now(timezone.utc)
+    event_utc = now_utc + timedelta(minutes=int(mins))
+    return event_utc.astimezone(tz).strftime("%H:%M")
 
 
 def _to_kyiv_time_from_utc(event_time_utc: str, mins_fallback: int) -> str:
@@ -1501,10 +1525,13 @@ def _to_kyiv_time_from_utc(event_time_utc: str, mins_fallback: int) -> str:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        kyiv = dt.astimezone(timezone.utc) + timedelta(hours=3)
-        return kyiv.strftime("%H:%M")
+        return dt.astimezone(_office_kyiv_tzinfo()).strftime("%H:%M")
     except Exception:
         return _to_kyiv_time(mins_fallback)
+
+
+def _now_kyiv_hm() -> str:
+    return datetime.now(timezone.utc).astimezone(_office_kyiv_tzinfo()).strftime("%H:%M")
 
 
 LEV_RULE = (
@@ -2178,7 +2205,7 @@ async def office_morning_briefing(
 ) -> None:
     await sender(
         f"🌅 *#Загальний · Ранковий брифінг*\n"
-        f"Сесія: `{session}` · Режим: `{market_state}` · BTC: `{btc_bias}`"
+        f"Час за Києвом: `{_now_kyiv_hm()}` · Сесія: `{session}` · Режим: `{market_state}` · BTC: `{btc_bias}`"
     )
     await agent_say(sender, "lev", "Фокус дня: дисципліна і чисті входи. Без форсу.", 0.08)
     await agent_say(sender, "maks", "Я на якості. Все нижче порога — відсікаю без емоцій.", 0.08)
@@ -2199,7 +2226,7 @@ async def office_evening_debrief(
     js = (journal_summary or "").strip()[:650]
     await sender(
         f"🌆 *#Загальний · Вечірній debrief*\n"
-        f"BTC 24г `{btc_change_pct:+.2f}%`\n"
+        f"Час за Києвом: `{_now_kyiv_hm()}` · BTC 24г `{btc_change_pct:+.2f}%`\n"
         f"{js}"
     )
     await agent_say(sender, "olesya", "День на столі зафіксовано. Завтра продовжимо з тим самим фокусом на дисципліні.", 0.07)
@@ -2283,14 +2310,15 @@ async def office_handle_signal(
                 "symbol": signal.symbol,
                 "direction": signal.direction,
                 "utc_now": utc_now.strftime("%H:%M"),
+                "kyiv_now": _now_kyiv_hm(),
                 "kill_zone_mode": kz_mode,
                 "outside_session": True,
             },
             signal.signal_id,
         )
         await sender(
-            "Поза Kill Zone (UTC 08:00-11:00 / 13:00-16:00). "
-            "Новий вхід блокуємо. Рішення: пропускаємо."
+            "Поза Kill Zone (вікна за **UTC** ринку: London 08:00–11:00, NY 13:00–16:00). "
+            f"Зараз за Києвом: `{_now_kyiv_hm()}`. Новий вхід блокуємо. Рішення: пропускаємо."
         )
         verdict = OfficeVerdict(
             "SKIP",
@@ -2491,10 +2519,11 @@ async def office_news_trigger(
     short_headline = "Важлива макроподія в календарі."
     if str(headline or "").strip():
         short_headline = "Подія в календарі потребує обережності."
+    t_ky = _to_kyiv_time(max(0, int(minutes_to_event)))
     await agent_say(
         sender,
         "news",
-        f"{risk_ua}: подія через {minutes_to_event} хв. {short_headline}",
+        f"{risk_ua}: подія через {minutes_to_event} хв (~о {t_ky} за Києвом). {short_headline}",
         0.02,
     )
     if risk_level == "HIGH RISK":
