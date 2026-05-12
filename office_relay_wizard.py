@@ -3347,7 +3347,6 @@ async def run() -> None:
                         if status == "WATCHING" and e_low is not None:
                             watch_high = e_high if e_high is not None else e_low
                             if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
-                                signal_update(db_path, signal_id=signal_id, status="ACTIVE")
                                 missing_levels = sl_v is None and tp1_v is None and tp2_v is None
                                 if missing_levels:
                                     if _allow_notify(symbol, "WATCHING_REANALYZE"):
@@ -3360,6 +3359,7 @@ async def run() -> None:
                                         await send_office(msg, stream="general")
                                     await full_auto_analysis(symbol=symbol, sender=_watching_sender, db_path=db_path)
                                 else:
+                                    signal_update(db_path, signal_id=signal_id, status="ACTIVE")
                                     if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
                                         await send_office(
                                             f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ!\n"
@@ -3413,7 +3413,13 @@ async def run() -> None:
                                     await send_office(lev_note, stream="general")
                                 continue
 
-                        if status == "HIT_ENTRY" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
+                        if (
+                            status == "HIT_ENTRY"
+                            and e_low is not None
+                            and e_high is not None
+                            and sl_v is not None
+                            and e_low <= current_price <= e_high
+                        ):
                             if _allow_notify(symbol, "ADD_ON"):
                                 add_note = _lev_msg(
                                     symbol,
