@@ -2967,6 +2967,109 @@ async def run() -> None:
 
     asyncio.create_task(monitor_news())
 
+    last_marichka_evening_date = ""
+
+    async def run_marichka_evening() -> None:
+        """Вечірній top-down по BTC/ETH/SOL для OFFICE."""
+        from office_market_data import (
+            fetch_candles,
+            fetch_fvg,
+            fetch_market_structure,
+            fetch_pd_array,
+            fetch_session_levels,
+        )
+
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        for symbol in symbols:
+            try:
+                daily = fetch_candles(symbol, "1d", 3)
+                if not isinstance(daily, list) or len(daily) < 2:
+                    continue
+                prev_day = daily[-2]
+                today = daily[-1]
+                if not isinstance(prev_day, dict) or not isinstance(today, dict):
+                    continue
+                pdh = float(prev_day.get("high") or 0.0)
+                pdl = float(prev_day.get("low") or 0.0)
+                pdc = float(prev_day.get("close") or 0.0)
+                today_h = float(today.get("high") or 0.0)
+                today_l = float(today.get("low") or 0.0)
+                today_c = float(today.get("close") or 0.0)
+
+                h4 = fetch_candles(symbol, "4h", 10)
+                session = fetch_session_levels(symbol)
+                fvg_data = fetch_fvg(symbol, "4h")
+                structure = fetch_market_structure(symbol, "4h")
+                pd_arr = fetch_pd_array(symbol, "1d")
+
+                context = (
+                    f"Символ: {symbol}\n"
+                    f"Час: вечірній аналіз (розклад OFFICE_BRIEFING_TZ, ціль 21:00 Київ).\n\n"
+                    f"ДЕННА СВІЧКА (поточна доба на біржі):\n"
+                    f"High: {today_h}\nLow: {today_l}\nClose: {today_c}\n\n"
+                    f"PDH (вчора High): {pdh}\nPDL (вчора Low): {pdl}\nPDC (вчора Close): {pdc}\n\n"
+                    f"Структура 4H: {structure}\n"
+                    f"FVG 4H: {fvg_data}\n"
+                    f"PD Array (1d): {pd_arr}\n"
+                    f"Сесійні рівні: {session}\n"
+                    f"H4 останні свічки (к-ть): {len(h4) if isinstance(h4, list) else 0}\n"
+                )
+
+                system = (
+                    "Ти Марічка.\n"
+                    "Вечірній top-down аналіз.\n"
+                    "Коротко і по суті:\n\n"
+                    f"1. Що зробила денна свічка (бичача/ведмежа/невизначена)\n"
+                    f"2. PDH {pdh:.4f} і PDL {pdl:.4f} — ключові рівні на завтра\n"
+                    "3. FVG на H4 — незаповнені зони (якщо релевантно)\n"
+                    "4. Bias на завтра: LONG/SHORT/НЕЙТРАЛЬНО\n"
+                    "5. Plan A: якщо ціна йде вгору\n"
+                    "6. Plan B: якщо ціна йде вниз\n"
+                    "7. На що чекати вранці (Asian Range)\n\n"
+                    "Максимум 10 речень. Без води. Українською."
+                )
+
+                response = clean_llm_note(
+                    ask_agent(
+                        "marichka",
+                        system,
+                        context,
+                        max_tokens=600,
+                    )
+                )
+                if response:
+                    header = f"🌙 МАРІЧКА | Вечірній аналіз {symbol}"
+                    await send_office(f"{header}\n{response[:3800]}", stream="general")
+                    await asyncio.sleep(2.0)
+            except Exception as exc:
+                print(f"[marichka-evening] {symbol}: {exc}")
+                continue
+
+    async def marichka_evening_briefing() -> None:
+        """Щодня ~21:00 за OFFICE_BRIEFING_TZ (дефолт Europe/Kyiv) — вечірній брифінг Марічки."""
+        nonlocal last_marichka_evening_date
+        while True:
+            try:
+                if os.getenv("OFFICE_MARICHKA_EVENING_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                today = now.strftime("%Y-%m-%d")
+                # Вікно 5 хв, щоб не пропустити хвилину при sleep(30).
+                if now.hour == 21 and now.minute < 5 and last_marichka_evening_date != today:
+                    await run_marichka_evening()
+                    last_marichka_evening_date = today
+                    print("[relay] marichka evening briefing sent")
+                    await asyncio.sleep(3660)
+                else:
+                    await asyncio.sleep(30)
+            except Exception as exc:
+                print(f"[marichka-evening] scheduler: {exc}")
+                await asyncio.sleep(60)
+
+    asyncio.create_task(marichka_evening_briefing())
+
     async def proactive_market_scan() -> None:
         """
         Кожні 15 хвилин агенти самі сканують ринок і якщо знаходять сетап —
