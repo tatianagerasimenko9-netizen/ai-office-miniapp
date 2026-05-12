@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 import math
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -62,6 +62,89 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
             )
         return out
     except Exception:
+        return {}
+
+
+def fetch_session_levels(symbol: str) -> Dict[str, Any]:
+    """
+    High/low сесій Asia / London / NY за останні ~24 год (15m, UTC),
+    та PDH / PDL / PDC попереднього дня (1d).
+
+    Вікна UTC:
+    Asia:   00:00 – 08:00  (година h: 0 <= h < 8)
+    London: 08:00 – 16:00  (8 <= h < 16)
+    NY:     13:00 – 21:00  (13 <= h < 21; перетин з London 13–16 — свічка враховується в обох)
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+
+        candles = fetch_candles(sym, "15m", 96)
+        if not isinstance(candles, list) or not candles:
+            return {}
+
+        sessions = {
+            "asia": (0, 8),
+            "london": (8, 16),
+            "ny": (13, 21),
+        }
+
+        def _candle_hour_utc(c: Dict[str, Any]) -> Optional[int]:
+            ts = c.get("ts")
+            if not isinstance(ts, str) or not ts.strip():
+                return None
+            try:
+                dt = datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return int(dt.hour)
+            except Exception:
+                return None
+
+        result: Dict[str, Any] = {
+            "symbol": sym,
+            "asof_utc": now.isoformat(),
+            "sessions_utc": {
+                "asia": "00:00-08:00",
+                "london": "08:00-16:00",
+                "ny": "13:00-21:00",
+            },
+        }
+
+        for sess_name, (h_start, h_end) in sessions.items():
+            highs: List[float] = []
+            lows: List[float] = []
+            for c in candles:
+                if not isinstance(c, dict):
+                    continue
+                hour = _candle_hour_utc(c)
+                if hour is None:
+                    continue
+                if h_start <= hour < h_end:
+                    try:
+                        highs.append(float(c.get("high") or 0.0))
+                        lows.append(float(c.get("low") or 0.0))
+                    except (TypeError, ValueError):
+                        continue
+            if highs and lows:
+                result[f"{sess_name}_high"] = max(highs)
+                result[f"{sess_name}_low"] = min(lows)
+
+        daily = fetch_candles(sym, "1d", 3)
+        if isinstance(daily, list) and len(daily) >= 2:
+            prev = daily[-2]
+            if isinstance(prev, dict):
+                result["pdh"] = float(prev.get("high") or 0.0)
+                result["pdl"] = float(prev.get("low") or 0.0)
+                result["pdc"] = float(prev.get("close") or 0.0)
+
+        return result
+    except Exception as e:
+        print(f"[session] error {symbol}: {e}")
         return {}
 
 

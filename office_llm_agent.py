@@ -17,6 +17,7 @@ from office_market_data import (
     fetch_open_interest,
     fetch_ote_levels,
     fetch_recent_liquidations,
+    fetch_session_levels,
     fetch_top_movers,
     fetch_top_traders_ratio,
 )
@@ -103,6 +104,23 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_session_levels",
+        "description": (
+            "Отримати сесійні рівні Asia/London/NY (high/low за UTC-вікнами на 15m за ~24 год) "
+            "та PDH/PDL/PDC попереднього дня для символу. База для ICT і снайперських зон."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Символ, наприклад BTCUSDT, ETHUSDT",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_top_movers",
         "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
         "input_schema": {
@@ -173,6 +191,8 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_ote_levels":
         tf = str((tool_input or {}).get("timeframe") or "4h").strip().lower()
         return {"symbol": sym, "timeframe": tf, "ote": fetch_ote_levels(sym, tf)}
+    if tool_name == "get_session_levels":
+        return fetch_session_levels(sym)
     if tool_name == "get_top_movers":
         direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
         limit = int((tool_input or {}).get("limit") or 5)
