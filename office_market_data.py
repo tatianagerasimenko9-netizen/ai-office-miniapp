@@ -438,6 +438,81 @@ def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_order_blocks(symbol: str, tf: str = "1h") -> Dict[str, Any]:
+    """
+    Order Blocks (спрощено під ICT):
+
+    - Bullish OB: остання ведмежа свічка перед сильною бичачою, що пробиває її high.
+    - Bearish OB: остання бичача свічка перед сильною ведмежою, що пробиває її low.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        tf_s = str(tf or "1h").strip().lower() or "1h"
+
+        candles = fetch_candles(sym, tf_s, 20)
+        if not isinstance(candles, list) or len(candles) < 5:
+            return {}
+
+        result: Dict[str, Any] = {
+            "symbol": sym,
+            "tf": tf_s,
+            "bullish_ob": None,
+            "bearish_ob": None,
+            "description": "",
+        }
+        descriptions: List[str] = []
+
+        for i in range(1, len(candles) - 2):
+            c = candles[i]
+            c_next = candles[i + 1]
+            if not isinstance(c, dict) or not isinstance(c_next, dict):
+                continue
+
+            o = float(c.get("open") or 0.0)
+            cl = float(c.get("close") or 0.0)
+            h = float(c.get("high") or 0.0)
+            l = float(c.get("low") or 0.0)
+
+            o_next = float(c_next.get("open") or 0.0)
+            cl_next = float(c_next.get("close") or 0.0)
+
+            is_bearish = cl < o
+            next_bullish_strong = cl_next > o_next and cl_next > h
+
+            if is_bearish and next_bullish_strong:
+                result["bullish_ob"] = {
+                    "high": h,
+                    "low": l,
+                    "open": o,
+                    "close": cl,
+                    "index": i,
+                }
+                descriptions.append(f"Bullish OB: зона {l:.4f}–{h:.4f}")
+
+            is_bullish = cl > o
+            next_bearish_strong = cl_next < o_next and cl_next < l
+
+            if is_bullish and next_bearish_strong:
+                result["bearish_ob"] = {
+                    "high": h,
+                    "low": l,
+                    "open": o,
+                    "close": cl,
+                    "index": i,
+                }
+                descriptions.append(f"Bearish OB: зона {l:.4f}–{h:.4f}")
+
+        result["description"] = " | ".join(descriptions) if descriptions else "Order Blocks не знайдено"
+        return result
+    except Exception as e:
+        print(f"[ob] error {symbol}: {e}")
+        return {}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.

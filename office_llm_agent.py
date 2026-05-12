@@ -16,6 +16,7 @@ from office_market_data import (
     fetch_liquidations_proxy,
     fetch_macro_context,
     fetch_open_interest,
+    fetch_order_blocks,
     fetch_ote_levels,
     fetch_pd_array,
     fetch_market_structure,
@@ -181,6 +182,26 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_order_blocks",
+        "description": (
+            "ICT Order Blocks — зони де інституції відкривали позиції. "
+            "Bullish OB = зона для LONG входу. "
+            "Bearish OB = зона для SHORT входу. "
+            "Ціна часто повертається до OB."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+                "timeframe": {
+                    "type": "string",
+                    "description": "Таймфрейм klines, за замовчуванням 1h (1h 4h 15m)",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_top_movers",
         "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
         "input_schema": {
@@ -262,6 +283,9 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_market_structure":
         tf_ms = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_market_structure(sym, tf_ms)
+    if tool_name == "get_order_blocks":
+        tf_ob = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
+        return fetch_order_blocks(sym, tf_ob)
     if tool_name == "get_top_movers":
         direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
         limit = int((tool_input or {}).get("limit") or 5)
