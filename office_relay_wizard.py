@@ -2986,6 +2986,7 @@ async def run() -> None:
                                 "days": len(candles_d),
                                 "low": weekly_low,
                                 "high": weekly_high,
+                                "weekly_range": weekly_range,
                             }
                         )
                 except Exception:
@@ -3050,11 +3051,18 @@ async def run() -> None:
                     continue
 
             if accumulation:
-                for acc in accumulation[:3]:
+                # Quiet mode: announce max 1 accumulation candidate per scan.
+                accumulation.sort(key=lambda x: float(x.get("weekly_range") or 999.0))
+                for acc in accumulation[:1]:
                     acc_symbol = str(acc.get("symbol") or "")
                     acc_low = float(acc.get("low") or 0.0)
                     acc_high = float(acc.get("high") or 0.0)
                     acc_days = int(acc.get("days") or 7)
+                    acc_key = f"ACC::{acc_symbol}"
+                    last_acc_ts = float(_last_signal_time.get(acc_key, 0.0) or 0.0)
+                    if (time.time() - last_acc_ts) < 6 * 3600:
+                        continue
+                    _last_signal_time[acc_key] = time.time()
                     await send_office(
                         fmt_agent_line(
                             "lev",
@@ -3364,6 +3372,18 @@ async def run() -> None:
                                 continue
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
+                            missing_levels_active = sl_v is None or (tp1_v is None and tp2_v is None)
+                            if missing_levels_active:
+                                if _allow_notify(symbol, "ACTIVE_REANALYZE"):
+                                    await send_office(
+                                        f"⚠️ {symbol}: ціна в entry-зоні, але рівні SL/TP неповні. "
+                                        "Запускаю уточнюючий аналіз перед входом.",
+                                        stream="general",
+                                    )
+                                async def _active_sender(msg: str) -> None:
+                                    await send_office(msg, stream="general")
+                                await full_auto_analysis(symbol=symbol, sender=_active_sender, db_path=db_path)
+                                continue
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
                             if _allow_notify(symbol, "HIT_ENTRY"):
                                 await send_office(
