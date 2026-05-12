@@ -1302,7 +1302,22 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
 
     def _to_float(raw: str) -> Optional[float]:
         try:
-            s = str(raw or "").replace(" ", "").replace(",", "")
+            s = str(raw or "").replace(" ", "")
+            if "," in s and "." in s:
+                # If both separators exist, assume commas are thousand separators.
+                s = s.replace(",", "")
+            elif "," in s:
+                # Heuristic requested:
+                # - big values (e.g. 80,000) => remove comma
+                # - small values (e.g. 0,1453) => decimal comma
+                test = s.replace(",", ".")
+                v_test = float(test)
+                if abs(v_test) >= 1000:
+                    s = s.replace(",", "")
+                elif abs(v_test) < 100:
+                    s = s.replace(",", ".")
+                else:
+                    s = s.replace(",", "")
             return float(s)
         except Exception:
             return None
@@ -1342,65 +1357,70 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
 
     # «Entry твій:», «Entry у тебе:» тощо — між Entry і двокрапкою може бути короткий текст.
     m_entry = re.search(
-        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
     )
     if not m_entry:
         m_entry = re.search(
-            r"Entry:\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+            r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
             src,
             flags=re.IGNORECASE,
         )
     if m_entry:
-        a = float(m_entry.group(1))
-        b = float(m_entry.group(2))
-        out["entry_low"] = min(a, b)
-        out["entry_high"] = max(a, b)
+        a = _to_float(m_entry.group(1))
+        b = _to_float(m_entry.group(2))
+        if a is not None and b is not None:
+            out["entry_low"] = min(a, b)
+            out["entry_high"] = max(a, b)
     else:
         m_entry_one = re.search(
-            r"Entry[^:\n]{0,24}:\s*([0-9]+(?:\.[0-9]+)?)",
+            r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)",
             src,
             flags=re.IGNORECASE,
         )
         if not m_entry_one:
-            m_entry_one = re.search(r"Entry:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+            m_entry_one = re.search(r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)", src, flags=re.IGNORECASE)
         if m_entry_one:
-            v = float(m_entry_one.group(1))
-            out["entry_low"] = v
-            out["entry_high"] = v
+            v = _to_float(m_entry_one.group(1))
+            if v is not None:
+                out["entry_low"] = v
+                out["entry_high"] = v
         else:
             m_entry_no_colon = re.search(
-                r"Entry\s+([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
+                r"Entry\s+([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
                 src,
                 flags=re.IGNORECASE,
             )
             if m_entry_no_colon:
-                a = float(m_entry_no_colon.group(1))
-                b = float(m_entry_no_colon.group(2))
-                out["entry_low"] = min(a, b)
-                out["entry_high"] = max(a, b)
+                a = _to_float(m_entry_no_colon.group(1))
+                b = _to_float(m_entry_no_colon.group(2))
+                if a is not None and b is not None:
+                    out["entry_low"] = min(a, b)
+                    out["entry_high"] = max(a, b)
             else:
                 m_entry_one_no_colon = re.search(
-                    r"Entry\s+([0-9]+(?:\.[0-9]+)?)",
+                    r"Entry\s+([0-9]+(?:[.,][0-9]+)?)",
                     src,
                     flags=re.IGNORECASE,
                 )
                 if m_entry_one_no_colon:
-                    v = float(m_entry_one_no_colon.group(1))
-                    out["entry_low"] = v
-                    out["entry_high"] = v
+                    v = _to_float(m_entry_one_no_colon.group(1))
+                    if v is not None:
+                        out["entry_low"] = v
+                        out["entry_high"] = v
     # Шукаємо «зону очікування» / «повернення в/до» для сценарію WATCHING.
     zone_pattern = re.search(
-        r"(?:зон[уі]|повернення\s+(?:в|до))\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"(?:зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до))\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
     )
     if zone_pattern and out["entry_low"] is None:
-        a = float(zone_pattern.group(1).replace(",", "."))
-        b = float(zone_pattern.group(2).replace(",", "."))
-        out["entry_low"] = min(a, b)
-        out["entry_high"] = max(a, b)
+        a = _to_float(zone_pattern.group(1))
+        b = _to_float(zone_pattern.group(2))
+        if a is not None and b is not None:
+            out["entry_low"] = min(a, b)
+            out["entry_high"] = max(a, b)
     entry_hint = out["entry_low"] or out["entry_high"]
     sl_v = _extract_line_value("SL", src, hint=entry_hint)
     if sl_v is not None:
@@ -2888,26 +2908,104 @@ async def run() -> None:
             )
 
             EXCLUDED_FROM_SCANNER = {"BTCUSDT", "ETHUSDT"}
+            ticker24_map: Dict[str, Dict[str, float]] = {}
+            try:
+                timeout_scan = aiohttp.ClientTimeout(total=12)
+                async with aiohttp.ClientSession(timeout=timeout_scan) as s_scan:
+                    async with s_scan.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as r_scan:
+                        rows_24 = await r_scan.json()
+                if isinstance(rows_24, list):
+                    for it in rows_24:
+                        if not isinstance(it, dict):
+                            continue
+                        sym = str(it.get("symbol") or "").upper().strip()
+                        if not sym.endswith("USDT") or sym in EXCLUDED_FROM_SCANNER:
+                            continue
+                        try:
+                            qv = float(it.get("quoteVolume") or 0.0)
+                            ch = float(it.get("priceChangePercent") or 0.0)
+                        except Exception:
+                            continue
+                        ticker24_map[sym] = {
+                            "quote_volume": qv,
+                            "change_pct": ch,
+                        }
+            except Exception:
+                ticker24_map = {}
+
+            by_volume = sorted(
+                ticker24_map.items(),
+                key=lambda kv: float((kv[1] or {}).get("quote_volume") or 0.0),
+                reverse=True,
+            )
+            top_volume_syms = [s for s, _ in by_volume[:30]]
             gainers = fetch_top_movers("gainers", 5)
             losers = fetch_top_movers("losers", 5)
-            always_watch: List[str] = []
-
-            candidates = always_watch.copy()
+            candidates: List[str] = []
+            for sym in top_volume_syms:
+                if sym and sym not in candidates:
+                    candidates.append(sym)
             combined = (gainers or []) + (losers or [])
             for m_item in combined:
                 sym = str((m_item or {}).get("symbol") or "").upper().strip() if isinstance(m_item, dict) else ""
                 if sym and sym not in candidates:
                     candidates.append(sym)
+            candidates = [s for s in candidates if s not in EXCLUDED_FROM_SCANNER][:50]
+
+            accumulation: List[Dict[str, Any]] = []
+            for symbol in top_volume_syms:
+                if symbol in EXCLUDED_FROM_SCANNER:
+                    continue
+                try:
+                    candles_d = fetch_candles(symbol, "1d", 7)
+                    if not isinstance(candles_d, list) or len(candles_d) < 3:
+                        continue
+                    highs = [float((c or {}).get("high") or 0.0) for c in candles_d]
+                    lows = [float((c or {}).get("low") or 0.0) for c in candles_d]
+                    if not highs or not lows:
+                        continue
+                    weekly_high = max(highs)
+                    weekly_low = min(lows)
+                    if weekly_low <= 0:
+                        continue
+                    weekly_range = (weekly_high - weekly_low) / weekly_low * 100.0
+                    oi = fetch_open_interest(symbol)
+                    hist = (oi or {}).get("history") if isinstance(oi, dict) else []
+                    oi_rising = False
+                    if isinstance(hist, list) and len(hist) >= 2:
+                        try:
+                            first_oi = float((hist[0] or {}).get("oi") or 0.0)
+                            last_oi = float((hist[-1] or {}).get("oi") or 0.0)
+                            oi_rising = last_oi > first_oi > 0
+                        except Exception:
+                            oi_rising = False
+                    if weekly_range < 15.0 and oi_rising:
+                        accumulation.append(
+                            {
+                                "symbol": symbol,
+                                "days": len(candles_d),
+                                "low": weekly_low,
+                                "high": weekly_high,
+                            }
+                        )
+                except Exception:
+                    continue
 
             setups_found: List[Dict[str, Any]] = []
-            for symbol in candidates[:8]:
+            for symbol in candidates[:10]:
                 try:
                     if symbol in EXCLUDED_FROM_SCANNER:
+                        continue
+                    t24 = ticker24_map.get(symbol, {})
+                    quote_volume = float((t24 or {}).get("quote_volume") or 0.0)
+                    change_pct = float((t24 or {}).get("change_pct") or 0.0)
+                    if quote_volume <= 3_000_000:
+                        continue
+                    if abs(change_pct) >= 20.0:
                         continue
                     last_ts = float(_last_signal_time.get(symbol, 0.0) or 0.0)
                     if (time.time() - last_ts) < 7200:
                         continue
-                    _last_signal_time[symbol] = time.time()
                     if symbol == "BTCUSDT" and any("BTC" in str(s.get("symbol") or "") for s in setups_found):
                         continue
                     atr = fetch_atr_context(symbol)
@@ -2943,10 +3041,42 @@ async def run() -> None:
                                 "ote": ote,
                                 "levels": levels,
                                 "atr": atr,
+                                "quote_volume": quote_volume,
+                                "change_pct": change_pct,
                             }
                         )
+                        _last_signal_time[symbol] = time.time()
                 except Exception:
                     continue
+
+            if accumulation:
+                for acc in accumulation[:3]:
+                    acc_symbol = str(acc.get("symbol") or "")
+                    acc_low = float(acc.get("low") or 0.0)
+                    acc_high = float(acc.get("high") or 0.0)
+                    acc_days = int(acc.get("days") or 7)
+                    await send_office(
+                        fmt_agent_line(
+                            "lev",
+                            f"{acc_symbol} — накопичення {acc_days} днів. "
+                            f"Зона {acc_low:.6f}–{acc_high:.6f}. WATCHING до пробою вгору.",
+                        ),
+                        stream="general",
+                    )
+                    signal_upsert(
+                        db_path,
+                        signal_id=f"watch-acc-{acc_symbol}-{int(time.time())}",
+                        symbol=acc_symbol,
+                        direction="LONG",
+                        entry_low=acc_low,
+                        entry_high=acc_high,
+                        sl=None,
+                        tp1=None,
+                        tp2=None,
+                        rr=None,
+                        status="WATCHING",
+                        analysis_note=f"Accumulation {acc_days}d range {acc_low:.6f}-{acc_high:.6f}",
+                    )
 
             if not setups_found:
                 return
