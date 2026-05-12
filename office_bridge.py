@@ -19,7 +19,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 try:
@@ -1091,6 +1091,81 @@ def signal_get_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
             "analysis_note": r[13],
         }
     return None
+
+
+def signal_get_latest_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
+    """Останній запис office_signals для символу (будь-який статус). Для cooldown після деплою."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return None
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+               status, ts_created, ts_updated, outcome, analysis_note
+        FROM office_signals
+        WHERE UPPER(symbol) = ?
+        ORDER BY ts_created DESC
+        LIMIT 1
+        """,
+        (sym,),
+    )
+    if not rows:
+        return None
+    r = rows[0]
+    return {
+        "signal_id": r[0],
+        "symbol": r[1],
+        "direction": r[2],
+        "entry_low": r[3],
+        "entry_high": r[4],
+        "sl": r[5],
+        "tp1": r[6],
+        "tp2": r[7],
+        "rr": r[8],
+        "status": r[9],
+        "ts_created": r[10],
+        "ts_updated": r[11],
+        "outcome": r[12],
+        "analysis_note": r[13],
+    }
+
+
+def signal_should_skip_proactive_scan(
+    db_path: str,
+    symbol: str,
+    *,
+    cooldown_hours: float = 4.0,
+) -> Tuple[bool, str]:
+    """
+    Не запускати проактивний деск по символу, якщо вже є активний сигнал
+    або нещодавно був будь-який запис (антиспам після редеплою, коли скидається RAM).
+    """
+    latest = signal_get_latest_by_symbol(db_path, symbol)
+    if not latest:
+        return False, ""
+    st = str(latest.get("status") or "").strip().upper()
+    if st in ("WATCHING", "ACTIVE", "HIT_ENTRY", "HIT_TP1"):
+        return True, f"active_status={st}"
+    ts_raw = latest.get("ts_created")
+    if ts_raw is None:
+        return False, ""
+    try:
+        if isinstance(ts_raw, datetime):
+            created = ts_raw
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        else:
+            ts_s = str(ts_raw).strip().replace("Z", "+00:00")
+            created = datetime.fromisoformat(ts_s)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+        if age_h < float(cooldown_hours):
+            return True, f"cooldown_{age_h:.2f}h_lt_{cooldown_hours}h"
+    except Exception:
+        return False, ""
+    return False, ""
 
 
 def signal_get_recent(db_path: str, limit: int = 5) -> List[Dict[str, Any]]:

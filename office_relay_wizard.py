@@ -61,6 +61,7 @@ from office_bridge import (
     live_risk_snapshot,
     signal_get_active,
     signal_get_by_symbol,
+    signal_should_skip_proactive_scan,
     signal_update,
     signal_upsert,
     _extract_first_usdt_symbol,
@@ -1357,13 +1358,13 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
 
     # «Entry твій:», «Entry у тебе:» тощо — між Entry і двокрапкою може бути короткий текст.
     m_entry = re.search(
-        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
     )
     if not m_entry:
         m_entry = re.search(
-            r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+            r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
             src,
             flags=re.IGNORECASE,
         )
@@ -1388,7 +1389,7 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                 out["entry_high"] = v
         else:
             m_entry_no_colon = re.search(
-                r"Entry\s+([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+                r"Entry\s+([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
                 src,
                 flags=re.IGNORECASE,
             )
@@ -1411,7 +1412,9 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                         out["entry_high"] = v
     # Шукаємо «зону очікування» / «повернення в/до» для сценарію WATCHING.
     zone_pattern = re.search(
-        r"(?:зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до))\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—]\s*([0-9]+(?:[.,][0-9]+)?)",
+        r"(?:зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
+        r"|жд[уеи]\s+повернення\s+в\s+зон[уі])\s+"
+        r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
     )
@@ -3092,6 +3095,10 @@ async def run() -> None:
             best = min(setups_found, key=lambda x: float(x.get("atr_used") or 100))
             symbol = str(best.get("symbol") or "BTCUSDT")
             direction = str(best.get("direction") or "LONG")
+            skip_pro, skip_reason = signal_should_skip_proactive_scan(db_path, symbol)
+            if skip_pro:
+                print(f"[scanner] proactive skip {symbol}: {skip_reason}")
+                return
             liq_now = fetch_liquidations_proxy(symbol)
             oi_now = fetch_open_interest(symbol)
             candles_h1 = fetch_candles(symbol, "1h", 6)
