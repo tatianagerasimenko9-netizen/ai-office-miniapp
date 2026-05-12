@@ -36,6 +36,8 @@ from office_style_qa import polish_agent_message
 from office_bridge import (
     OfficeSignal,
     agent_say,
+    briefing_get_last,
+    briefing_save,
     clean_llm_note,
     detect_setup_type,
     fmt_agent_line,
@@ -3040,6 +3042,10 @@ async def run() -> None:
                 if response:
                     header = f"🌙 МАРІЧКА | Вечірній аналіз {symbol}"
                     await send_office(f"{header}\n{response[:3800]}", stream="general")
+                    try:
+                        briefing_save(db_path, symbol, "evening", response)
+                    except Exception as save_exc:
+                        print(f"[marichka-evening] briefing_save {symbol}: {save_exc}")
                     await asyncio.sleep(2.0)
             except Exception as exc:
                 print(f"[marichka-evening] {symbol}: {exc}")
@@ -3097,10 +3103,13 @@ async def run() -> None:
                 asia_low = sess_d.get("asia_low", "N/A")
                 current = float(last_c.get("close") or 0.0)
 
+                evening_plan = briefing_get_last(db_path, symbol, "evening")
+
                 tail = candles_1h[-3:] if len(candles_1h) >= 3 else candles_1h
                 context = (
                     f"Символ: {symbol}\n"
                     f"Час: ранкове підтвердження (OFFICE_BRIEFING_TZ, ціль 08:00 Київ).\n\n"
+                    f"Вечірній план (вчора 21:00):\n{evening_plan or 'немає даних'}\n\n"
                     f"Asian Range:\nHigh: {asia_high}\nLow: {asia_low}\n\n"
                     f"Поточна ціна (close останньої 1h): {current}\n"
                     f"Структура 1H: {structure}\n"

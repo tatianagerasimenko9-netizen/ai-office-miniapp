@@ -439,6 +439,17 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS office_briefings (
+                        id SERIAL PRIMARY KEY,
+                        symbol TEXT,
+                        type TEXT,
+                        content TEXT,
+                        ts_created TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -446,6 +457,10 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_status ON office_signals(status)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_symbol ON office_signals(symbol)")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_office_briefings_symbol_type "
+                    "ON office_briefings(symbol, type)"
+                )
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_text TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS agent_suggested TEXT")
@@ -550,6 +565,17 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS office_briefings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                type TEXT,
+                content TEXT,
+                ts_created TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -557,6 +583,10 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_ts_close ON trade_journal(ts_close_utc)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_status ON office_signals(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_signals_symbol ON office_signals(symbol)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_office_briefings_symbol_type "
+            "ON office_briefings(symbol, type)"
+        )
         cols = {
             str(r[1]).strip().lower()
             for r in conn.execute("PRAGMA table_info(trade_journal)").fetchall()
@@ -571,6 +601,30 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
         if "learning_note" not in cols:
             conn.execute("ALTER TABLE trade_journal ADD COLUMN learning_note TEXT")
         conn.commit()
+
+
+def briefing_save(db_path: str, symbol: str, type_: str, content: str) -> None:
+    """Зберегти брифінг в БД."""
+    _execute(
+        db_path,
+        "INSERT INTO office_briefings (symbol, type, content) VALUES (?, ?, ?)",
+        (symbol, type_, content),
+    )
+
+
+def briefing_get_last(db_path: str, symbol: str, type_: str) -> Optional[str]:
+    """Отримати останній брифінг."""
+    row = _fetchone(
+        db_path,
+        (
+            "SELECT content FROM office_briefings WHERE symbol = ? AND type = ? "
+            "ORDER BY id DESC LIMIT 1"
+        ),
+        (symbol, type_),
+    )
+    if not row or row[0] is None:
+        return None
+    return str(row[0])
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:
