@@ -22,6 +22,7 @@ from office_market_data import (
     fetch_order_blocks,
     fetch_ote_levels,
     fetch_pd_array,
+    fetch_probability_score,
     fetch_recent_liquidations,
     fetch_session_levels,
     fetch_top_movers,
@@ -184,6 +185,22 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_probability_score",
+        "description": (
+            "Probability Engine — розраховує ймовірність напрямку руху. "
+            "Повертає LONG %/SHORT %/NO TRADE % на основі 7 confluence факторів: "
+            "funding, L/S ratio, OI, regime, structure, PD array, liquidity sweep. "
+            "Використовуй ПЕРЕД рішенням про вхід."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_market_regime",
         "description": (
             "Визначити поточний режим ринку: TREND_UP/DOWN, RANGE, EXPANSION, "
@@ -317,6 +334,8 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_pd_array":
         tf_pd = str((tool_input or {}).get("timeframe") or "4h").strip().lower() or "4h"
         return fetch_pd_array(sym, tf_pd)
+    if tool_name == "get_probability_score":
+        return fetch_probability_score(sym)
     if tool_name == "get_market_structure":
         tf_ms = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_market_structure(sym, tf_ms)

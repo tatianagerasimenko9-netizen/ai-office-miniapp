@@ -716,6 +716,211 @@ def fetch_market_regime(symbol: str) -> Dict[str, Any]:
         return {"regime": "UNKNOWN", "symbol": str(symbol or "").upper().strip()}
 
 
+def fetch_probability_score(symbol: str) -> Dict[str, Any]:
+    """
+    Probability Engine — грубий confluence-скоринг LONG vs SHORT vs NO TRADE.
+    Не прогноз, а узгодженість факторів (funding, L/S, OI, regime, structure, PD, sweep).
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {
+                "symbol": "",
+                "recommendation": "NO_TRADE",
+                "reason": "Порожній символ",
+                "long_prob": 0,
+                "short_prob": 0,
+                "no_trade_prob": 100,
+            }
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+
+        atr = fetch_atr_context(sym)
+        ls = fetch_long_short_ratio(sym)
+        funding = fetch_funding_rate(sym)
+        oi = fetch_open_interest(sym)
+        regime = fetch_market_regime(sym)
+        structure = fetch_market_structure(sym, "1h")
+        sweep = fetch_liquidity_sweep(sym, "1h")
+        pd_arr = fetch_pd_array(sym, "4h")
+
+        atr_d = atr if isinstance(atr, dict) else {}
+        ls_d = ls if isinstance(ls, dict) else {}
+        funding_d = funding if isinstance(funding, dict) else {}
+        oi_d = oi if isinstance(oi, dict) else {}
+        regime_d = regime if isinstance(regime, dict) else {}
+        structure_d = structure if isinstance(structure, dict) else {}
+        sweep_d = sweep if isinstance(sweep, dict) else {}
+        pd_d = pd_arr if isinstance(pd_arr, dict) else {}
+
+        long_score = 0
+        short_score = 0
+        factors_long: List[str] = []
+        factors_short: List[str] = []
+
+        day_used = float(atr_d.get("day_used_pct") or 100.0)
+        if day_used > 85.0:
+            return {
+                "symbol": sym,
+                "long_prob": 0,
+                "short_prob": 0,
+                "no_trade_prob": 100,
+                "confidence": "LOW",
+                "recommendation": "NO_TRADE",
+                "reason": f"ATR {day_used:.0f}% — немає запасу ходу",
+                "factors_long": [],
+                "factors_short": [],
+            }
+
+        fr_raw = funding_d.get("funding_rate_pct")
+        fr = float(fr_raw) if fr_raw is not None else 0.0
+        if fr < -0.01:
+            long_score += 15
+            factors_long.append(f"Funding від'ємний {fr:.3f}% (шорти переплачують)")
+        elif fr > 0.01:
+            short_score += 15
+            factors_short.append(f"Funding позитивний {fr:.3f}% (лонги переплачують)")
+
+        ls_ratio = float(ls_d.get("current_ratio") or 1.0)
+        if ls_ratio > 2.0:
+            short_score += 20
+            factors_short.append(f"L/S {ls_ratio:.2f} — натовп у лонгах (пастка)")
+        elif ls_ratio < 0.7:
+            long_score += 20
+            factors_long.append(f"L/S {ls_ratio:.2f} — натовп у шортах (squeeze)")
+
+        oi_hist = oi_d.get("history", [])
+        if isinstance(oi_hist, list) and len(oi_hist) >= 3:
+            oi_vals: List[float] = []
+            for x in oi_hist[-3:]:
+                if not isinstance(x, dict):
+                    continue
+                v = float(x.get("oi_usdt") or x.get("oi") or 0.0)
+                oi_vals.append(v)
+            if len(oi_vals) >= 3:
+                oi_growing = oi_vals[-1] > oi_vals[-2] > oi_vals[-3]
+                oi_falling = oi_vals[-1] < oi_vals[-2] < oi_vals[-3]
+                if oi_growing:
+                    pass
+                if oi_falling:
+                    short_score += 10
+                    factors_short.append("OI падає — позиції закриваються")
+
+        regime_val = str(regime_d.get("regime") or "")
+        if regime_val == "TREND_UP":
+            long_score += 25
+            factors_long.append("Режим TREND_UP на 4H")
+        elif regime_val == "TREND_DOWN":
+            short_score += 25
+            factors_short.append("Режим TREND_DOWN на 4H")
+        elif regime_val == "MANIPULATION":
+            if sweep_d.get("bsl_sweep"):
+                short_score += 20
+                factors_short.append("BSL sweep — можливий SHORT")
+            elif sweep_d.get("ssl_sweep"):
+                long_score += 20
+                factors_long.append("SSL sweep — можливий LONG")
+        elif regime_val in ("LOW_LIQUIDITY", "RANGE"):
+            return {
+                "symbol": sym,
+                "long_prob": 0,
+                "short_prob": 0,
+                "no_trade_prob": 100,
+                "confidence": "LOW",
+                "recommendation": "NO_TRADE",
+                "reason": f"Режим {regime_val} — не торгуємо",
+                "factors_long": [],
+                "factors_short": [],
+            }
+
+        struct_event = str(structure_d.get("event") or "")
+        if struct_event == "BOS_BULLISH":
+            long_score += 20
+            factors_long.append("BOS вгору — структура бичача")
+        elif struct_event == "BOS_BEARISH":
+            short_score += 20
+            factors_short.append("BOS вниз — структура ведмежа")
+        elif struct_event == "CHOCH":
+            long_score = max(0, long_score - 10)
+            short_score = max(0, short_score - 10)
+
+        pd_zone = str(pd_d.get("zone") or "")
+        if pd_zone == "PREMIUM":
+            short_score += 15
+            factors_short.append("Ціна в Premium зоні — шукаємо SHORT")
+        elif pd_zone == "DISCOUNT":
+            long_score += 15
+            factors_long.append("Ціна в Discount зоні — шукаємо LONG")
+
+        if sweep_d.get("ssl_sweep"):
+            long_score += 15
+            lvl = sweep_d.get("sweep_level")
+            factors_long.append(f"SSL sweep на {lvl} — LONG після маніпуляції")
+        if sweep_d.get("bsl_sweep"):
+            short_score += 15
+            lvl = sweep_d.get("sweep_level")
+            factors_short.append(f"BSL sweep на {lvl} — SHORT після маніпуляції")
+
+        total = long_score + short_score
+        if total == 0:
+            long_p = short_p = 30
+            no_trade_p = 40
+        else:
+            long_p = int(long_score / total * 70)
+            short_p = int(short_score / total * 70)
+            no_trade_p = 30
+
+        total_p = long_p + short_p + no_trade_p
+        if total_p > 100:
+            factor = 100.0 / float(total_p)
+            long_p = int(long_p * factor)
+            short_p = int(short_p * factor)
+            no_trade_p = 100 - long_p - short_p
+
+        max_score = max(long_score, short_score)
+        if max_score >= 60:
+            confidence = "HIGH"
+        elif max_score >= 35:
+            confidence = "MEDIUM"
+        else:
+            confidence = "LOW"
+
+        if no_trade_p >= 50 or max_score < 25:
+            recommendation = "NO_TRADE"
+        elif long_score > short_score:
+            recommendation = "LONG"
+        else:
+            recommendation = "SHORT"
+
+        return {
+            "symbol": sym,
+            "long_prob": long_p,
+            "short_prob": short_p,
+            "no_trade_prob": no_trade_p,
+            "confidence": confidence,
+            "recommendation": recommendation,
+            "long_score": long_score,
+            "short_score": short_score,
+            "factors_long": factors_long,
+            "factors_short": factors_short,
+            "regime": regime_val,
+            "reason": f"LONG {long_p}% / SHORT {short_p}% / NO TRADE {no_trade_p}%",
+        }
+    except Exception as e:
+        print(f"[prob] error {symbol}: {e}")
+        return {
+            "symbol": str(symbol or "").upper().strip(),
+            "recommendation": "NO_TRADE",
+            "reason": "Помилка розрахунку",
+            "long_prob": 0,
+            "short_prob": 0,
+            "no_trade_prob": 100,
+            "confidence": "LOW",
+            "factors_long": [],
+            "factors_short": [],
+        }
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.

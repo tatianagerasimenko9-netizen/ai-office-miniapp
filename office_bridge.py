@@ -1548,6 +1548,7 @@ LEV_RULE = """
 80% часу — спостереження.
 
 ПЕРЕД КОЖНИМ ВХОДОМ ОБОВ'ЯЗКОВО:
+0. get_probability_score — спочатку ймовірність напрямку. NO_TRADE або confidence LOW = ПРОПУСК.
 1. get_market_regime — режим ринку
 2. get_session_levels — Asia/London/NY рівні
 3. get_liquidity_sweep — чи був sweep
