@@ -148,6 +148,79 @@ def fetch_session_levels(symbol: str) -> Dict[str, Any]:
         return {}
 
 
+def fetch_liquidity_sweep(symbol: str, tf: str = "1h") -> Dict[str, Any]:
+    """
+    Грубий ICT-подібний sweep ліквідності на останніх свічках:
+
+    - BSL (buy-side liquidity / стопи над хаями): wick пробив max(high[-3], high[-2]),
+      close повернувся нижче цього рівня → ймовірний bearish reaction.
+    - SSL (sell-side liquidity під лоями): wick нижче min(low[-3], low[-2]),
+      close вище цього рівня → ймовірний bullish reaction.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        tf_s = str(tf or "1h").strip().lower() or "1h"
+
+        candles = fetch_candles(sym, tf_s, 10)
+        if not isinstance(candles, list) or len(candles) < 3:
+            return {}
+
+        c1 = candles[-3]
+        c2 = candles[-2]
+        c3 = candles[-1]
+        if not all(isinstance(c, dict) for c in (c1, c2, c3)):
+            return {}
+
+        h1 = float(c1.get("high") or 0.0)
+        h2 = float(c2.get("high") or 0.0)
+        l1 = float(c1.get("low") or 0.0)
+        l2 = float(c2.get("low") or 0.0)
+        c3_high = float(c3.get("high") or 0.0)
+        c3_low = float(c3.get("low") or 0.0)
+        c3_close = float(c3.get("close") or 0.0)
+        _ = float(c3.get("open") or 0.0)  # зарезервовано для розширення (тіло/дісплейсмент)
+
+        result: Dict[str, Any] = {
+            "symbol": sym,
+            "tf": tf_s,
+            "bsl_sweep": False,
+            "ssl_sweep": False,
+            "sweep_level": None,
+            "description": "",
+        }
+
+        prev_high = max(h1, h2)
+        if prev_high > 0 and c3_high > prev_high and c3_close < prev_high:
+            result["bsl_sweep"] = True
+            result["sweep_level"] = prev_high
+            result["description"] = (
+                f"BSL sweep {prev_high:.4f} — пробила хай і повернулась. Можливий SHORT сетап."
+            )
+
+        prev_low = min(l1, l2)
+        if prev_low > 0 and c3_low < prev_low and c3_close > prev_low:
+            result["ssl_sweep"] = True
+            result["sweep_level"] = prev_low
+            ssl_desc = (
+                f"SSL sweep {prev_low:.4f} — пробила лоу і повернулась. Можливий LONG сетап."
+            )
+            if result["bsl_sweep"]:
+                result["description"] = (str(result.get("description") or "").strip() + " | " + ssl_desc).strip(
+                    " |"
+                )
+            else:
+                result["description"] = ssl_desc
+
+        return result
+    except Exception as e:
+        print(f"[sweep] error {symbol}: {e}")
+        return {}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.
