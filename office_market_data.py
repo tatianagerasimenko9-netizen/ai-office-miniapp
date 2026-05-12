@@ -438,6 +438,113 @@ def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_order_book_walls(symbol: str, min_size_usdt: float = 500_000.0) -> Dict[str, Any]:
+    """
+    Order book depth — великі рівні bid/ask (агреговані як «стіни» у notional USDT).
+
+    Binance GET /fapi/v1/depth limit=100 — рівні з price*qty >= min_size_usdt.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {"symbol": "", "description": "DOM недоступний"}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+
+        try:
+            min_sz = float(min_size_usdt)
+        except (TypeError, ValueError):
+            min_sz = 500_000.0
+        if min_sz <= 0:
+            min_sz = 500_000.0
+
+        raw = _http_get_json(
+            "https://fapi.binance.com/fapi/v1/depth",
+            {"symbol": sym, "limit": 100},
+        )
+        if not isinstance(raw, dict):
+            return {"symbol": sym, "description": "DOM недоступний"}
+
+        bids = raw.get("bids")
+        asks = raw.get("asks")
+        if not isinstance(bids, list) or not isinstance(asks, list):
+            return {"symbol": sym, "description": "DOM недоступний"}
+
+        whale_bids: List[Dict[str, Any]] = []
+        whale_asks: List[Dict[str, Any]] = []
+
+        for bid in bids:
+            if not isinstance(bid, (list, tuple)) or len(bid) < 2:
+                continue
+            try:
+                price = float(bid[0])
+                qty = float(bid[1])
+            except (TypeError, ValueError):
+                continue
+            size_usdt = price * qty
+            if size_usdt >= min_sz:
+                whale_bids.append(
+                    {
+                        "price": price,
+                        "qty": qty,
+                        "size_usdt": round(size_usdt / 1000.0, 1),
+                        "size_str": f"${size_usdt / 1000.0:.0f}K",
+                    }
+                )
+
+        for ask in asks:
+            if not isinstance(ask, (list, tuple)) or len(ask) < 2:
+                continue
+            try:
+                price = float(ask[0])
+                qty = float(ask[1])
+            except (TypeError, ValueError):
+                continue
+            size_usdt = price * qty
+            if size_usdt >= min_sz:
+                whale_asks.append(
+                    {
+                        "price": price,
+                        "qty": qty,
+                        "size_usdt": round(size_usdt / 1000.0, 1),
+                        "size_str": f"${size_usdt / 1000.0:.0f}K",
+                    }
+                )
+
+        whale_bids.sort(key=lambda x: float(x.get("size_usdt") or 0.0), reverse=True)
+        whale_asks.sort(key=lambda x: float(x.get("size_usdt") or 0.0), reverse=True)
+
+        biggest_bid = whale_bids[0] if whale_bids else None
+        biggest_ask = whale_asks[0] if whale_asks else None
+
+        descriptions: List[str] = []
+        if biggest_bid:
+            descriptions.append(
+                f"Кит BID {biggest_bid['size_str']} на {biggest_bid['price']} — підтримка"
+            )
+        if biggest_ask:
+            descriptions.append(
+                f"Кит ASK {biggest_ask['size_str']} на {biggest_ask['price']} — опір"
+            )
+
+        return {
+            "symbol": sym,
+            "whale_bids": whale_bids[:5],
+            "whale_asks": whale_asks[:5],
+            "biggest_support": biggest_bid,
+            "biggest_resistance": biggest_ask,
+            "total_whale_bids": len(whale_bids),
+            "total_whale_asks": len(whale_asks),
+            "description": " | ".join(descriptions) if descriptions else "Великих ордерів не знайдено",
+        }
+    except Exception as e:
+        print(f"[dom] error {symbol}: {e}")
+        return {
+            "symbol": str(symbol or "").upper().strip(),
+            "description": "DOM недоступний",
+        }
+
+
 def fetch_order_blocks(symbol: str, tf: str = "1h") -> Dict[str, Any]:
     """
     Order Blocks (спрощено під ICT):

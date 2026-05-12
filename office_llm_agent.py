@@ -20,6 +20,7 @@ from office_market_data import (
     fetch_market_regime,
     fetch_market_structure,
     fetch_open_interest,
+    fetch_order_book_walls,
     fetch_order_blocks,
     fetch_ote_levels,
     fetch_pd_array,
@@ -234,6 +235,27 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_order_book_walls",
+        "description": (
+            "Order Book DOM — стакан ордерів китів. "
+            "Знаходить великі bid/ask ордери >500K USDT. "
+            "Whale BID = рівень підтримки китів. "
+            "Whale ASK = рівень опору китів. "
+            "Використовуй для підтвердження рівнів."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+                "min_size_usdt": {
+                    "type": "number",
+                    "description": "Мінімальний notional у USDT для «стіни», за замовчуванням 500000",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_order_blocks",
         "description": (
             "ICT Order Blocks — зони де інституції відкривали позиції. "
@@ -361,6 +383,13 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_market_structure(sym, tf_ms)
     if tool_name == "get_market_regime":
         return fetch_market_regime(sym)
+    if tool_name == "get_order_book_walls":
+        min_w = (tool_input or {}).get("min_size_usdt")
+        try:
+            min_usdt = float(min_w) if min_w is not None else 500_000.0
+        except (TypeError, ValueError):
+            min_usdt = 500_000.0
+        return fetch_order_book_walls(sym, min_usdt)
     if tool_name == "get_order_blocks":
         tf_ob = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_order_blocks(sym, tf_ob)

@@ -121,6 +121,10 @@ LEV_RULE = """
 6. get_order_blocks — Order Block зони
 7. get_fvg — Fair Value Gap
 8. get_atr_context — запас ходу >30%
+9. get_order_book_walls — стакан китів.
+   Whale BID = підтримка.
+   Whale ASK = опір.
+   SL завжди ЗА стіною кита.
 
 ПРАВИЛА (неготіабельно):
 - LOW_LIQUIDITY або ATR >90% = ПРОПУСК
