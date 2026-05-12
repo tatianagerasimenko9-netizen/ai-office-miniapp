@@ -17,6 +17,7 @@ from office_market_data import (
     fetch_macro_context,
     fetch_open_interest,
     fetch_ote_levels,
+    fetch_pd_array,
     fetch_recent_liquidations,
     fetch_session_levels,
     fetch_top_movers,
@@ -140,6 +141,25 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_pd_array",
+        "description": (
+            "ICT Premium/Discount Array. Визначає чи ціна в Premium (шорт) "
+            "або Discount (лонг) зоні відносно останнього імпульсу. "
+            "Equilibrium = 50% від імпульсу. OTE зона = 61.8-78.6% Fibonacci."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+                "timeframe": {
+                    "type": "string",
+                    "description": "Таймфрейм klines, за замовчуванням 4h (4h 1h 15m)",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_top_movers",
         "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
         "input_schema": {
@@ -215,6 +235,9 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_liquidity_sweep":
         tf_sw = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_liquidity_sweep(sym, tf_sw)
+    if tool_name == "get_pd_array":
+        tf_pd = str((tool_input or {}).get("timeframe") or "4h").strip().lower() or "4h"
+        return fetch_pd_array(sym, tf_pd)
     if tool_name == "get_top_movers":
         direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
         limit = int((tool_input or {}).get("limit") or 5)

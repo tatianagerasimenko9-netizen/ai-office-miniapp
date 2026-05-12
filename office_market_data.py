@@ -221,6 +221,101 @@ def fetch_liquidity_sweep(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_pd_array(symbol: str, tf: str = "4h") -> Dict[str, Any]:
+    """
+    Premium/Discount Array.
+    Визначає де знаходиться ціна відносно останнього значного імпульсу
+    (найбільший діапазон high-low серед попередніх свічок, без останньої):
+    - Premium (>50% від імпульсу, вище EQ) — зона шорту
+    - Discount (<50%, нижче EQ) — зона лонгу
+    - Equilibrium (~50%, біля EQ) — нейтральна зона
+    OTE (61.8–78.6% Fib) від того ж імпульсу.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        tf_s = str(tf or "4h").strip().lower() or "4h"
+
+        candles = fetch_candles(sym, tf_s, 20)
+        if not isinstance(candles, list) or len(candles) < 5:
+            return {}
+
+        max_range = 0.0
+        impulse_high = 0.0
+        impulse_low = 0.0
+
+        for i in range(len(candles) - 1):
+            c = candles[i]
+            if not isinstance(c, dict):
+                continue
+            h = float(c.get("high") or 0.0)
+            l = float(c.get("low") or 0.0)
+            rng = h - l
+            if rng > max_range:
+                max_range = rng
+                impulse_high = h
+                impulse_low = l
+
+        if impulse_high <= 0 or impulse_low <= 0 or impulse_high <= impulse_low:
+            return {}
+
+        last = candles[-1]
+        if not isinstance(last, dict):
+            return {}
+        current_price = float(last.get("close") or 0.0)
+        if current_price <= 0:
+            return {}
+
+        eq = (impulse_high + impulse_low) / 2.0
+        span = impulse_high - impulse_low
+        ote_low = impulse_low + span * 0.618
+        ote_high = impulse_low + span * 0.786
+
+        # тонка смуга навколо 50% — уникнути «фальшивого Discount» через float noise
+        eps = max(span * 1e-6, span / 10_000.0, current_price * 1e-10)
+        if current_price > eq + eps:
+            zone = "PREMIUM"
+            bias = "SHORT"
+            description = (
+                f"Ціна в Premium зоні ({current_price:.4f} > EQ {eq:.4f}). "
+                f"Шукаємо SHORT від рівнів опору."
+            )
+        elif current_price < eq - eps:
+            zone = "DISCOUNT"
+            bias = "LONG"
+            description = (
+                f"Ціна в Discount зоні ({current_price:.4f} < EQ {eq:.4f}). "
+                f"Шукаємо LONG від рівнів підтримки."
+            )
+        else:
+            zone = "EQUILIBRIUM"
+            bias = "NEUTRAL"
+            description = (
+                f"Ціна біля Equilibrium ({current_price:.4f} ≈ EQ {eq:.4f}). "
+                f"Нейтрально — чекаємо дислокації в Premium/Discount."
+            )
+
+        return {
+            "symbol": sym,
+            "tf": tf_s,
+            "current_price": current_price,
+            "impulse_high": impulse_high,
+            "impulse_low": impulse_low,
+            "equilibrium": round(eq, 4),
+            "ote_low": round(ote_low, 4),
+            "ote_high": round(ote_high, 4),
+            "zone": zone,
+            "bias": bias,
+            "description": description,
+        }
+    except Exception as e:
+        print(f"[pd_array] error {symbol}: {e}")
+        return {}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.
