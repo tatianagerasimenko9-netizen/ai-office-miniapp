@@ -103,7 +103,9 @@ LEV_RULE = (
     "Є активний сигнал — UPDATE не новий. "
     "Спочатку Entry/SL/TP/RR — потім все інше. "
     "Говориш тільки українською. "
-    "Без таблиць і заголовків."
+    "Без таблиць і заголовків. "
+    "Якщо кажеш ПРОПУСК — ЗАВЖДИ додай рядок «Чекаю зону:» і діапазон ціна_low–ціна_high "
+    "(це зона де буде сетап). БЕЗ цього рядка — не кажи ПРОПУСК."
 )
 
 
@@ -1410,11 +1412,11 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                     if v is not None:
                         out["entry_low"] = v
                         out["entry_high"] = v
-    # Шукаємо «зону очікування» / «повернення в/до» / «OTE … зона N–M» (Лев часто пише «зона», не «зону»).
+    # Шукаємо зону очікування: OTE зона, «чекаю зону:», повернення в зону тощо.
     zone_pattern = re.search(
         r"(?:зона|зони|зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
         r"|жд[уеи]\s+повернення\s+в\s+зон[уі]|"
-        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона)\s+"
+        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона|чекаю\s+зону:)\s*"
         r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
         src,
         flags=re.IGNORECASE,
@@ -1563,21 +1565,15 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
 
         levels = _parse_signal_levels_from_text(response_for_parse)
         parsed = levels
-        print(
-            f"[watching-debug] response has пропуск: "
-            f"{'пропуск' in response_for_parse.lower()}"
-        )
-        print(f"[watching-debug] entry_low: {levels.get('entry_low')}")
-        print(
-            f"[watching-debug] no_entry check: "
-            f"{any(p in response_for_parse.lower() for p in no_entry_phrases)}"
-        )
+        if levels.get("entry_low"):
+            print(f"[signal] {symbol} levels OK: {levels}")
+        else:
+            print(f"[signal] {symbol} no levels in response")
         low_resp = response_for_parse.lower()
         if any(p in low_resp for p in no_entry_phrases):
             # no-entry не означає "нічого не робити":
             # якщо є зона, зберігаємо WATCHING замість ACTIVE.
             if parsed.get("entry_low") is not None:
-                print(f"[watching-debug] saving WATCHING for {symbol}")
                 direction_watch = "LONG"
                 up_watch = response_for_parse.upper()
                 if "SHORT" in up_watch or "ШОРТ" in up_watch:
