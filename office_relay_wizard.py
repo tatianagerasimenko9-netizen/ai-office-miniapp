@@ -9,7 +9,7 @@ import random
 import re
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 try:
@@ -3069,6 +3069,96 @@ async def run() -> None:
                 await asyncio.sleep(60)
 
     asyncio.create_task(marichka_evening_briefing())
+
+    async def run_marichka_morning() -> None:
+        """Ранкове підтвердження плану (Asian vs ціна, структура, ATR) — BTC/ETH/SOL."""
+        from office_market_data import (
+            fetch_atr_context,
+            fetch_candles,
+            fetch_market_structure,
+            fetch_session_levels,
+        )
+
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        for symbol in symbols:
+            try:
+                candles_1h = fetch_candles(symbol, "1h", 8)
+                if not isinstance(candles_1h, list) or not candles_1h:
+                    continue
+                last_c = candles_1h[-1]
+                if not isinstance(last_c, dict):
+                    continue
+                session = fetch_session_levels(symbol)
+                structure = fetch_market_structure(symbol, "1h")
+                atr = fetch_atr_context(symbol)
+
+                sess_d = session if isinstance(session, dict) else {}
+                asia_high = sess_d.get("asia_high", "N/A")
+                asia_low = sess_d.get("asia_low", "N/A")
+                current = float(last_c.get("close") or 0.0)
+
+                tail = candles_1h[-3:] if len(candles_1h) >= 3 else candles_1h
+                context = (
+                    f"Символ: {symbol}\n"
+                    f"Час: ранкове підтвердження (OFFICE_BRIEFING_TZ, ціль 08:00 Київ).\n\n"
+                    f"Asian Range:\nHigh: {asia_high}\nLow: {asia_low}\n\n"
+                    f"Поточна ціна (close останньої 1h): {current}\n"
+                    f"Структура 1H: {structure}\n"
+                    f"ATR (контекст доби): {atr}\n"
+                    f"Останні свічки 1H (до 3): {tail}\n"
+                )
+
+                system = (
+                    "Ти Марічка.\n"
+                    "Ранкове підтвердження плану.\n"
+                    "Коротко:\n\n"
+                    f"1. Asian Range: {asia_high}–{asia_low}. Де ціна відкрилась відносно Asian Range?\n"
+                    "2. Вечірній план підтверджується чи скасовується?\n"
+                    "3. На що звернути увагу в London сесію (08:00–11:00 UTC)\n"
+                    "4. Bias на день підтверджено чи змінився?\n\n"
+                    "Максимум 6 речень. Конкретні ціни. Українською."
+                )
+
+                response = clean_llm_note(
+                    ask_agent(
+                        "marichka",
+                        system,
+                        context,
+                        max_tokens=400,
+                    )
+                )
+                if response:
+                    header = f"🌅 МАРІЧКА | Ранок {symbol}"
+                    await send_office(f"{header}\n{response[:3800]}", stream="general")
+                    await asyncio.sleep(2.0)
+            except Exception as exc:
+                print(f"[marichka-morning] {symbol}: {exc}")
+                continue
+
+    async def marichka_morning_briefing() -> None:
+        """Щодня ~08:00 за OFFICE_BRIEFING_TZ — ранкове підтвердження Марічки."""
+        last_marichka_morning_date: Optional[date] = None
+
+        while True:
+            try:
+                if os.getenv("OFFICE_MARICHKA_MORNING_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                today = now.date()
+                if now.hour == 8 and now.minute < 5 and last_marichka_morning_date != today:
+                    await run_marichka_morning()
+                    last_marichka_morning_date = today
+                    print("[relay] marichka morning briefing sent")
+                    await asyncio.sleep(3660)
+                else:
+                    await asyncio.sleep(30)
+            except Exception as exc:
+                print(f"[marichka-morning] scheduler: {exc}")
+                await asyncio.sleep(60)
+
+    asyncio.create_task(marichka_morning_briefing())
 
     async def proactive_market_scan() -> None:
         """
