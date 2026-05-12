@@ -612,6 +612,110 @@ def fetch_fvg(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_market_regime(symbol: str) -> Dict[str, Any]:
+    """
+    Поточний режим ринку (спрощена евристика для вибору стратегії):
+
+    TREND_UP / TREND_DOWN — послідовні 4h closes;
+    RANGE — вузький діапазон останніх 24×1h відносно ціни;
+    EXPANSION — сплеск обсягу + низький day_used_pct;
+    MANIPULATION — sweep попереднього high/low на 1h;
+    LOW_LIQUIDITY — екстремальний day_used_pct (розтягнута доба vs ATR).
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {"regime": "UNKNOWN"}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+
+        candles_1h = fetch_candles(sym, "1h", 24)
+        candles_4h = fetch_candles(sym, "4h", 10)
+        atr_data = fetch_atr_context(sym)
+
+        if not isinstance(candles_1h, list) or not isinstance(candles_4h, list):
+            return {"regime": "UNKNOWN", "symbol": sym}
+        if len(candles_1h) < 6 or len(candles_4h) < 5:
+            return {"regime": "UNKNOWN", "symbol": sym}
+
+        atr_ad = atr_data if isinstance(atr_data, dict) else {}
+        day_used = float(atr_ad.get("day_used_pct") or 50.0)
+
+        volumes = [float(c.get("volume") or 0.0) for c in candles_1h[-6:] if isinstance(c, dict)]
+        avg_vol = sum(volumes) / len(volumes) if volumes else 0.0
+        last_vol = volumes[-1] if volumes else 0.0
+        vol_spike = (last_vol > avg_vol * 2.5) if avg_vol > 0 else False
+
+        prices_4h = [float(c.get("close") or 0.0) for c in candles_4h if isinstance(c, dict)]
+        if len(prices_4h) >= 5:
+            trend_up = all(prices_4h[i] > prices_4h[i - 1] for i in range(-4, 0))
+            trend_down = all(prices_4h[i] < prices_4h[i - 1] for i in range(-4, 0))
+        else:
+            trend_up = False
+            trend_down = False
+
+        highs_24h = [float(c.get("high") or 0.0) for c in candles_1h if isinstance(c, dict)]
+        lows_24h = [float(c.get("low") or 0.0) for c in candles_1h if isinstance(c, dict)]
+        range_24h = max(highs_24h) - min(lows_24h) if highs_24h and lows_24h else 0.0
+        last1 = candles_1h[-1]
+        if not isinstance(last1, dict):
+            return {"regime": "UNKNOWN", "symbol": sym}
+        current = float(last1.get("close") or 0.0)
+        range_pct = (range_24h / current * 100.0) if current > 0 else 0.0
+
+        last = candles_1h[-1]
+        prev = candles_1h[-2]
+        if not isinstance(last, dict) or not isinstance(prev, dict):
+            return {"regime": "UNKNOWN", "symbol": sym}
+        last_h = float(last.get("high") or 0.0)
+        last_l = float(last.get("low") or 0.0)
+        last_c = float(last.get("close") or 0.0)
+        prev_h = float(prev.get("high") or 0.0)
+        prev_l = float(prev.get("low") or 0.0)
+
+        bsl_sweep = last_h > prev_h and last_c < prev_h
+        ssl_sweep = last_l < prev_l and last_c > prev_l
+        manipulation = bsl_sweep or ssl_sweep
+
+        if day_used > 150:
+            regime = "LOW_LIQUIDITY"
+            description = "ATR перевищено — монета мертва. Не торгуємо до нового дня."
+        elif manipulation:
+            regime = "MANIPULATION"
+            sweep_type = "BSL" if bsl_sweep else "SSL"
+            description = f"{sweep_type} sweep виявлено. Можливий розворот після маніпуляції."
+        elif vol_spike and day_used < 50:
+            regime = "EXPANSION"
+            description = "Сильний об'єм + малий ATR. Ринок починає великий рух."
+        elif trend_up:
+            regime = "TREND_UP"
+            description = "Висхідний тренд на 4H. Шукаємо LONG від підтримок."
+        elif trend_down:
+            regime = "TREND_DOWN"
+            description = "Низхідний тренд на 4H. Шукаємо SHORT від опорів."
+        elif range_pct < 3:
+            regime = "RANGE"
+            description = f"Боковик — діапазон {range_pct:.1f}%. Mean-reversion стратегія."
+        else:
+            regime = "NEUTRAL"
+            description = "Нейтральний ринок."
+
+        return {
+            "symbol": sym,
+            "regime": regime,
+            "description": description,
+            "day_used_pct": day_used,
+            "vol_spike": vol_spike,
+            "manipulation": manipulation,
+            "trend_up": trend_up,
+            "trend_down": trend_down,
+            "range_pct": round(range_pct, 2),
+        }
+    except Exception as e:
+        print(f"[regime] error {symbol}: {e}")
+        return {"regime": "UNKNOWN", "symbol": str(symbol or "").upper().strip()}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.

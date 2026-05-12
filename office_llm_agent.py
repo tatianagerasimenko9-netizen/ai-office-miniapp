@@ -16,11 +16,12 @@ from office_market_data import (
     fetch_liquidity_sweep,
     fetch_liquidations_proxy,
     fetch_macro_context,
+    fetch_market_regime,
+    fetch_market_structure,
     fetch_open_interest,
     fetch_order_blocks,
     fetch_ote_levels,
     fetch_pd_array,
-    fetch_market_structure,
     fetch_recent_liquidations,
     fetch_session_levels,
     fetch_top_movers,
@@ -183,6 +184,21 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_market_regime",
+        "description": (
+            "Визначити поточний режим ринку: TREND_UP/DOWN, RANGE, EXPANSION, "
+            "MANIPULATION, LOW_LIQUIDITY, NEUTRAL. Від режиму залежить стратегія входу. "
+            "LOW_LIQUIDITY = не торгуємо."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_order_blocks",
         "description": (
             "ICT Order Blocks — зони де інституції відкривали позиції. "
@@ -304,6 +320,8 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_market_structure":
         tf_ms = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_market_structure(sym, tf_ms)
+    if tool_name == "get_market_regime":
+        return fetch_market_regime(sym)
     if tool_name == "get_order_blocks":
         tf_ob = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_order_blocks(sym, tf_ob)
