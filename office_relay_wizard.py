@@ -3387,9 +3387,9 @@ async def run() -> None:
                                         "Запускаю уточнюючий аналіз перед входом.",
                                         stream="general",
                                     )
-                                async def _active_sender(msg: str) -> None:
-                                    await send_office(msg, stream="general")
-                                await full_auto_analysis(symbol=symbol, sender=_active_sender, db_path=db_path)
+                                    async def _active_sender(msg: str) -> None:
+                                        await send_office(msg, stream="general")
+                                    await full_auto_analysis(symbol=symbol, sender=_active_sender, db_path=db_path)
                                 continue
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
                             if _allow_notify(symbol, "HIT_ENTRY"):
