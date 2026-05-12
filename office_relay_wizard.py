@@ -3306,6 +3306,7 @@ async def run() -> None:
             fast_poll = in_london or in_ny
             try:
                 active_rows = signal_get_active(db_path)
+                processed_watching_symbols: set[str] = set()
                 for row in active_rows:
                     try:
                         signal_id = str(row.get("signal_id") or "")
@@ -3345,19 +3346,25 @@ async def run() -> None:
                         tp2_v = float(tp2) if tp2 is not None else None
 
                         if status == "WATCHING" and e_low is not None:
+                            sym_u = symbol.upper()
+                            if sym_u in processed_watching_symbols:
+                                continue
+                            processed_watching_symbols.add(sym_u)
                             watch_high = e_high if e_high is not None else e_low
                             if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
                                 missing_levels = sl_v is None and tp1_v is None and tp2_v is None
                                 if missing_levels:
+                                    # Anti-spam: rerun heavy analysis only on notify window, not every poll.
                                     if _allow_notify(symbol, "WATCHING_REANALYZE"):
                                         await send_office(
                                             f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ WATCHING.\n"
                                             "Рівні SL/TP відсутні, запускаю повний аналіз зараз...",
                                             stream="general",
                                         )
-                                    async def _watching_sender(msg: str) -> None:
-                                        await send_office(msg, stream="general")
-                                    await full_auto_analysis(symbol=symbol, sender=_watching_sender, db_path=db_path)
+                                        async def _watching_sender(msg: str) -> None:
+                                            await send_office(msg, stream="general")
+                                        await full_auto_analysis(symbol=symbol, sender=_watching_sender, db_path=db_path)
+                                    # If cooldown is active, do nothing (silent wait in zone).
                                 else:
                                     signal_update(db_path, signal_id=signal_id, status="ACTIVE")
                                     if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
