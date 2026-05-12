@@ -62,6 +62,7 @@ from office_bridge import (
     signal_get_active,
     signal_get_by_symbol,
     signal_should_skip_proactive_scan,
+    signal_touch_updated,
     signal_update,
     signal_upsert,
     _extract_first_usdt_symbol,
@@ -1468,11 +1469,18 @@ def _history_prepare() -> List[Dict[str, str]]:
     return list(_chat_history)
 
 
-async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
+async def full_auto_analysis(
+    symbol: str,
+    sender,
+    db_path: str,
+    *,
+    watching_signal_id: Optional[str] = None,
+) -> bool:
     """
     Full automatic desk analysis for a symbol when user sends symbol-only text.
+
+    Returns True if an existing WATCHING row was expired (Lev SKIP — зупинка циклу).
     """
-    _ = db_path  # Reserved for future journaling/learning hooks.
     await sender(f"🔍 Аналізую {symbol}...")
     try:
         from office_market_data import (
@@ -1487,7 +1495,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         )
     except Exception as exc:
         await agent_say(sender, "lev", f"Не можу підняти модулі аналізу для {symbol}: {exc}")
-        return
+        return False
 
     try:
         candles_1h = fetch_candles(symbol, "1h", 5)
@@ -1501,7 +1509,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
         funding = fetch_funding_rate(symbol)
     except Exception as exc:
         await agent_say(sender, "lev", f"Не змогла зібрати ринкові дані по {symbol}: {exc}")
-        return
+        return False
 
     def _tf_snapshot(label: str, candles: Any) -> str:
         if not isinstance(candles, list) or len(candles) < 2:
@@ -1571,8 +1579,22 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             print(f"[signal] {symbol} no levels in response")
         low_resp = response_for_parse.lower()
         if any(p in low_resp for p in no_entry_phrases):
+            if watching_signal_id:
+                signal_update(
+                    db_path,
+                    signal_id=watching_signal_id,
+                    status="EXPIRED",
+                    outcome="SKIP_WATCH",
+                    analysis_note="Lev SKIP при WATCHING — зупинка циклу повторного аналізу",
+                )
+                await agent_say(
+                    sender,
+                    "olesya",
+                    f"{symbol}: Лев дав ПРОПУСК — WATCHING закрито (EXPIRED), без повторного аналізу в зоні.",
+                )
+                return True
             # no-entry не означає "нічого не робити":
-            # якщо є зона, зберігаємо WATCHING замість ACTIVE.
+            # якщо є зона, зберігаємо WATCHING замість ACTIVE (ручний / офіс без прив'язки до рядка WATCHING).
             if parsed.get("entry_low") is not None:
                 direction_watch = "LONG"
                 up_watch = response_for_parse.upper()
@@ -1601,14 +1623,14 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
                     f"Зона {symbol} {parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} в WATCHING. "
                     "Повідомлю як ціна дійде.",
                 )
-            return
+            return False
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
             parsed.get("tp1") is not None or parsed.get("tp2") is not None
         ):
             candles_check = fetch_candles(symbol, "1h", 1)
             if not candles_check:
                 await sender(f"{symbol} — символ не знайдено на Binance.")
-                return
+                return False
             direction = "LONG"
             up = response_for_parse.upper()
             if "SHORT" in up or "ШОРТ" in up:
@@ -1638,6 +1660,7 @@ async def full_auto_analysis(symbol: str, sender, db_path: str) -> None:
             )
     else:
         await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
+    return False
 
 
 async def office_free_chat(
@@ -3285,16 +3308,20 @@ async def run() -> None:
         from office_market_data import (
             fetch_liquidations_proxy,
             fetch_candles,
+            fetch_atr_context,
         )
         _ = fetch_candles
         def _allow_notify(sym: str, event: str) -> bool:
             key = f"{str(sym or '').upper()}::{event}"
             now_ts = time.time()
             last_ts = float(_last_notified.get(key, 0.0) or 0.0)
-            if (now_ts - last_ts) < 1800:
+            window = 14400 if event == "WATCHING_REANALYZE" else 1800
+            if (now_ts - last_ts) < window:
                 return False
             _last_notified[key] = now_ts
             return True
+
+        WATCHING_COOLDOWN_SEC = 4 * 3600
 
         def _lev_msg(sym: str, happened: str, action_now: str, sl_after: str) -> str:
             return (
@@ -3354,11 +3381,40 @@ async def run() -> None:
                             if sym_u in processed_watching_symbols:
                                 continue
                             processed_watching_symbols.add(sym_u)
+                            try:
+                                atr_row = fetch_atr_context(symbol)
+                                day_used_row = float((atr_row or {}).get("day_used_pct", 0) or 0)
+                                if day_used_row > 90:
+                                    signal_update(
+                                        db_path,
+                                        signal_id=signal_id,
+                                        status="EXPIRED",
+                                        outcome="ATR_DEAD",
+                                        analysis_note="WATCHING: ATR day_used_pct>90",
+                                    )
+                                    continue
+                            except Exception:
+                                pass
+
                             watch_high = e_high if e_high is not None else e_low
                             if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
                                 missing_levels = sl_v is None and tp1_v is None and tp2_v is None
                                 if missing_levels:
-                                    # Anti-spam: rerun heavy analysis only on notify window, not every poll.
+                                    ts_upd_s = str(row.get("ts_updated") or "")
+                                    ts_cre_s = str(row.get("ts_created") or "")
+                                    if ts_upd_s and ts_cre_s:
+                                        try:
+                                            upd_dt_w = datetime.fromisoformat(ts_upd_s.replace("Z", "+00:00"))
+                                            if upd_dt_w.tzinfo is None:
+                                                upd_dt_w = upd_dt_w.replace(tzinfo=timezone.utc)
+                                            cre_dt_w = datetime.fromisoformat(ts_cre_s.replace("Z", "+00:00"))
+                                            if cre_dt_w.tzinfo is None:
+                                                cre_dt_w = cre_dt_w.replace(tzinfo=timezone.utc)
+                                            if upd_dt_w > cre_dt_w + timedelta(seconds=30):
+                                                if (now_utc - upd_dt_w).total_seconds() < WATCHING_COOLDOWN_SEC:
+                                                    continue
+                                        except Exception:
+                                            pass
                                     if _allow_notify(symbol, "WATCHING_REANALYZE"):
                                         await send_office(
                                             f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ WATCHING.\n"
@@ -3367,8 +3423,14 @@ async def run() -> None:
                                         )
                                         async def _watching_sender(msg: str) -> None:
                                             await send_office(msg, stream="general")
-                                        await full_auto_analysis(symbol=symbol, sender=_watching_sender, db_path=db_path)
-                                    # If cooldown is active, do nothing (silent wait in zone).
+                                        expired_w = await full_auto_analysis(
+                                            symbol=symbol,
+                                            sender=_watching_sender,
+                                            db_path=db_path,
+                                            watching_signal_id=signal_id,
+                                        )
+                                        if not expired_w:
+                                            signal_touch_updated(db_path, signal_id=signal_id)
                                 else:
                                     signal_update(db_path, signal_id=signal_id, status="ACTIVE")
                                     if _allow_notify(symbol, "WATCHING_HIT_ZONE"):

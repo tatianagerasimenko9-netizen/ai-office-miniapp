@@ -1217,6 +1217,19 @@ def signal_update(
     )
 
 
+def signal_touch_updated(db_path: str, *, signal_id: str) -> None:
+    """Оновити лише ts_updated (після спроби full_auto по WATCHING — антиспам у моніторі)."""
+    _db_write(
+        db_path,
+        """
+        UPDATE office_signals
+        SET ts_updated = ?
+        WHERE signal_id = ?
+        """,
+        (_now_iso(), signal_id),
+    )
+
+
 def journal_consecutive_loss_streak(db_path: str, *, max_check: int = 12) -> int:
     """
     Скільки останніх закритих угод підряд мають outcome LOSS (для circuit breaker, п.31).
