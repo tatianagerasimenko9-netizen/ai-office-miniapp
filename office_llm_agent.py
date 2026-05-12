@@ -9,6 +9,7 @@ import httpx
 from office_market_data import (
     fetch_atr_context,
     fetch_candles,
+    fetch_edge_score,
     fetch_funding_rate,
     fetch_fvg,
     fetch_key_levels,
@@ -185,6 +186,23 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_edge_score",
+        "description": (
+            "Edge Detector — визначає чи є статистична перевага для входу. "
+            "Score 0-100. Grade A+/B/C. "
+            "A+ (score>=60, 3+ факторів) = вхід. "
+            "B або C = чекаємо або пропускаємо. "
+            "7 факторів: ATR, sweep, BOS/CHOCH, OTE, OB, FVG, session confluence."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_probability_score",
         "description": (
             "Probability Engine — розраховує ймовірність напрямку руху. "
@@ -336,6 +354,8 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_pd_array(sym, tf_pd)
     if tool_name == "get_probability_score":
         return fetch_probability_score(sym)
+    if tool_name == "get_edge_score":
+        return fetch_edge_score(sym)
     if tool_name == "get_market_structure":
         tf_ms = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_market_structure(sym, tf_ms)

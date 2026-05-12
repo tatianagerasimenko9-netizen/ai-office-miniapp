@@ -112,6 +112,7 @@ LEV_RULE = """
 
 ПЕРЕД КОЖНИМ ВХОДОМ ОБОВ'ЯЗКОВО:
 0. get_probability_score — спочатку ймовірність напрямку. NO_TRADE або confidence LOW = ПРОПУСК.
+0.5. get_edge_score — Edge Detector. Grade C або score < 60 = ПРОПУСК. Тільки A+ сетапи заслуговують входу.
 1. get_market_regime — режим ринку
 2. get_session_levels — Asia/London/NY рівні
 3. get_liquidity_sweep — чи був sweep
@@ -142,6 +143,7 @@ RR: [число]
 Режим: [режим]
 Sweep: [так/ні]
 Структура: [BOS/CHOCH/HH-HL/LH-LL]
+Edge: [A+/B/C] ([score]/100)
 Зараз: [ВХОДЬ/ЧЕКАЙ/ПРОПУСКАЄМО]
 
 Одне речення чому. Більше нічого.

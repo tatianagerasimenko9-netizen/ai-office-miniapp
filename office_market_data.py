@@ -921,6 +921,178 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
         }
 
 
+def fetch_edge_score(symbol: str) -> Dict[str, Any]:
+    """
+    Edge Detector — чи є confluence для статистичної переваги перед входом.
+
+    Накопичує score 0–100 і кількість «підтверджених» факторів.
+    A+: score >= 60 і confirmed >= 3 (has_edge=True); B / C — слабко або без edge.
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {
+                "symbol": "",
+                "edge_score": 0,
+                "grade": "C",
+                "has_edge": False,
+                "confirmed_factors": 0,
+                "verdict": "Немає символу",
+                "factors": [],
+                "recommendation": "NO_TRADE",
+            }
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+
+        atr = fetch_atr_context(sym)
+        sweep = fetch_liquidity_sweep(sym, "1h")
+        structure = fetch_market_structure(sym, "1h")
+        pd_arr = fetch_pd_array(sym, "4h")
+        ob = fetch_order_blocks(sym, "1h")
+        fvg = fetch_fvg(sym, "1h")
+        session = fetch_session_levels(sym)
+        prob = fetch_probability_score(sym)
+
+        atr_d = atr if isinstance(atr, dict) else {}
+        sweep_d = sweep if isinstance(sweep, dict) else {}
+        structure_d = structure if isinstance(structure, dict) else {}
+        pd_d = pd_arr if isinstance(pd_arr, dict) else {}
+        ob_d = ob if isinstance(ob, dict) else {}
+        fvg_d = fvg if isinstance(fvg, dict) else {}
+        session_d = session if isinstance(session, dict) else {}
+        prob_d = prob if isinstance(prob, dict) else {}
+
+        edge_score = 0
+        edge_factors: List[str] = []
+        confirmed = 0
+        direction = str(prob_d.get("recommendation") or "")
+
+        day_used = float(atr_d.get("day_used_pct") or 100.0)
+        if day_used < 50:
+            edge_score += 15
+            edge_factors.append(f"ATR залишок {100 - day_used:.0f}% — є куди йти")
+            confirmed += 1
+        elif day_used < 70:
+            edge_score += 8
+            edge_factors.append(f"ATR залишок {100 - day_used:.0f}% — помірний запас")
+
+        if sweep_d.get("bsl_sweep") or sweep_d.get("ssl_sweep"):
+            edge_score += 20
+            lvl = sweep_d.get("sweep_level")
+            edge_factors.append(f"Sweep підтверджено @ {lvl} — маніпуляція відпрацьована")
+            confirmed += 1
+
+        struct_event = str(structure_d.get("event") or "")
+        if struct_event in ("BOS_BULLISH", "BOS_BEARISH"):
+            edge_score += 20
+            edge_factors.append(f"{struct_event} — структурне підтвердження")
+            confirmed += 1
+        elif struct_event == "CHOCH":
+            edge_score += 10
+            edge_factors.append("CHOCH — зміна характеру")
+
+        ote_low = pd_d.get("ote_low")
+        ote_high = pd_d.get("ote_high")
+        current = float(pd_d.get("current_price") or 0.0)
+
+        if ote_low is not None and ote_high is not None and current > 0:
+            ol = float(ote_low)
+            oh = float(ote_high)
+            if ol <= current <= oh:
+                edge_score += 20
+                edge_factors.append(f"Ціна в OTE зоні {ol}–{oh} — снайперська точка")
+                confirmed += 1
+
+        curr_f = current
+
+        if direction == "LONG" and ob_d.get("bullish_ob"):
+            bull_ob = ob_d["bullish_ob"]
+            if isinstance(bull_ob, dict):
+                ob_low = float(bull_ob.get("low") or 0.0)
+                ob_high = float(bull_ob.get("high") or 0.0)
+                if curr_f > 0 and ob_low <= curr_f <= ob_high:
+                    edge_score += 15
+                    edge_factors.append(f"Ціна в Bullish OB {ob_low}–{ob_high}")
+                    confirmed += 1
+        elif direction == "SHORT" and ob_d.get("bearish_ob"):
+            bear_ob = ob_d["bearish_ob"]
+            if isinstance(bear_ob, dict):
+                ob_low = float(bear_ob.get("low") or 0.0)
+                ob_high = float(bear_ob.get("high") or 0.0)
+                if curr_f > 0 and ob_low <= curr_f <= ob_high:
+                    edge_score += 15
+                    edge_factors.append(f"Ціна в Bearish OB {ob_low}–{ob_high}")
+                    confirmed += 1
+
+        if direction == "LONG" and fvg_d.get("bullish_fvg"):
+            bfvg = fvg_d["bullish_fvg"]
+            if isinstance(bfvg, dict):
+                fvg_l = float(bfvg.get("low") or 0.0)
+                fvg_h = float(bfvg.get("high") or 0.0)
+                if curr_f > 0 and fvg_l <= curr_f <= fvg_h:
+                    edge_score += 10
+                    edge_factors.append(f"Ціна в Bullish FVG {fvg_l}–{fvg_h}")
+                    confirmed += 1
+        elif direction == "SHORT" and fvg_d.get("bearish_fvg"):
+            bfv = fvg_d["bearish_fvg"]
+            if isinstance(bfv, dict):
+                fvg_l = float(bfv.get("low") or 0.0)
+                fvg_h = float(bfv.get("high") or 0.0)
+                if curr_f > 0 and fvg_l <= curr_f <= fvg_h:
+                    edge_score += 10
+                    edge_factors.append(f"Ціна в Bearish FVG {fvg_l}–{fvg_h}")
+                    confirmed += 1
+
+        ny_low = float(session_d.get("ny_low") or 0.0)
+        london_low = float(session_d.get("london_low") or 0.0)
+
+        if curr_f > 0 and ny_low > 0:
+            near_ny_low = abs(curr_f - ny_low) / ny_low < 0.005
+            near_london_low = london_low > 0 and abs(curr_f - london_low) / london_low < 0.005
+            if near_ny_low or near_london_low:
+                edge_score += 15
+                edge_factors.append("Ціна біля сесійного low — confluence зона")
+                confirmed += 1
+
+        edge_score = min(edge_score, 100)
+
+        if edge_score >= 60 and confirmed >= 3:
+            grade = "A+"
+            has_edge = True
+            verdict = "EDGE є — вхід можливий"
+        elif edge_score >= 40 and confirmed >= 2:
+            grade = "B"
+            has_edge = False
+            verdict = "Слабкий edge — чекаємо"
+        else:
+            grade = "C"
+            has_edge = False
+            verdict = "Немає edge — ПРОПУСК"
+
+        return {
+            "symbol": sym,
+            "edge_score": edge_score,
+            "grade": grade,
+            "has_edge": has_edge,
+            "confirmed_factors": confirmed,
+            "verdict": verdict,
+            "factors": edge_factors,
+            "recommendation": direction,
+        }
+    except Exception as e:
+        print(f"[edge] error {symbol}: {e}")
+        return {
+            "symbol": str(symbol or "").upper().strip(),
+            "edge_score": 0,
+            "grade": "C",
+            "has_edge": False,
+            "confirmed_factors": 0,
+            "verdict": "Помилка розрахунку",
+            "factors": [],
+            "recommendation": "NO_TRADE",
+        }
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.
