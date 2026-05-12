@@ -10,6 +10,7 @@ from office_market_data import (
     fetch_atr_context,
     fetch_candles,
     fetch_funding_rate,
+    fetch_fvg,
     fetch_key_levels,
     fetch_long_short_ratio,
     fetch_liquidity_sweep,
@@ -202,6 +203,26 @@ TOOLS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "get_fvg",
+        "description": (
+            "Fair Value Gap — незаповнені цінові гапи. "
+            "Bullish FVG = зона підтримки знизу. "
+            "Bearish FVG = зона опору зверху. "
+            "Ціна часто повертається щоб заповнити FVG."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Наприклад BTCUSDT"},
+                "timeframe": {
+                    "type": "string",
+                    "description": "Таймфрейм klines, за замовчуванням 1h (1h 4h 15m)",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "get_top_movers",
         "description": "Топ монети які найбільше ростуть або падають сьогодні на Binance.",
         "input_schema": {
@@ -286,6 +307,9 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "get_order_blocks":
         tf_ob = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
         return fetch_order_blocks(sym, tf_ob)
+    if tool_name == "get_fvg":
+        tf_fvg = str((tool_input or {}).get("timeframe") or "1h").strip().lower() or "1h"
+        return fetch_fvg(sym, tf_fvg)
     if tool_name == "get_top_movers":
         direction = str((tool_input or {}).get("direction") or "").strip().lower() or "gainers"
         limit = int((tool_input or {}).get("limit") or 5)

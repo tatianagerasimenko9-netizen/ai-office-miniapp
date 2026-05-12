@@ -513,6 +513,105 @@ def fetch_order_blocks(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def fetch_fvg(symbol: str, tf: str = "1h") -> Dict[str, Any]:
+    """
+    Fair Value Gap — незаповнені гапи між high/low сусідніх свічок (3-свічкова схема).
+
+    - Bullish FVG: low свічки i+1 вище high свічки i−1 (імбаланс вгору).
+    - Bearish FVG: high свічки i+1 нижче low свічки i−1 (імбаланс вниз).
+    """
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        tf_s = str(tf or "1h").strip().lower() or "1h"
+
+        candles = fetch_candles(sym, tf_s, 20)
+        if not isinstance(candles, list) or len(candles) < 3:
+            return {}
+
+        last = candles[-1]
+        if not isinstance(last, dict):
+            return {}
+        current_price = float(last.get("close") or 0.0)
+
+        bullish_fvgs: List[Dict[str, Any]] = []
+        bearish_fvgs: List[Dict[str, Any]] = []
+
+        for i in range(1, len(candles) - 1):
+            prev = candles[i - 1]
+            next_ = candles[i + 1]
+            if not isinstance(prev, dict) or not isinstance(next_, dict):
+                continue
+
+            prev_high = float(prev.get("high") or 0.0)
+            prev_low = float(prev.get("low") or 0.0)
+            next_high = float(next_.get("high") or 0.0)
+            next_low = float(next_.get("low") or 0.0)
+
+            if next_low > prev_high and prev_high > 0:
+                gap_size = next_low - prev_high
+                gap_pct = gap_size / prev_high * 100.0
+                if gap_pct > 0.1:
+                    fvg: Dict[str, Any] = {
+                        "type": "BULLISH",
+                        "high": next_low,
+                        "low": prev_high,
+                        "gap_pct": round(gap_pct, 3),
+                        "index": i,
+                        "filled": (current_price < next_low and current_price > prev_high),
+                    }
+                    bullish_fvgs.append(fvg)
+
+            if next_high < prev_low and prev_low > 0:
+                gap_size = prev_low - next_high
+                gap_pct = gap_size / prev_low * 100.0
+                if gap_pct > 0.1:
+                    fvg = {
+                        "type": "BEARISH",
+                        "high": prev_low,
+                        "low": next_high,
+                        "gap_pct": round(gap_pct, 3),
+                        "index": i,
+                        "filled": (current_price < prev_low and current_price > next_high),
+                    }
+                    bearish_fvgs.append(fvg)
+
+        active_bull = [f for f in bullish_fvgs if not f["filled"]]
+        active_bear = [f for f in bearish_fvgs if not f["filled"]]
+
+        active_bull.sort(key=lambda x: abs(current_price - float(x["low"])))
+        active_bear.sort(key=lambda x: abs(current_price - float(x["high"])))
+
+        descriptions: List[str] = []
+        if active_bull:
+            closest = active_bull[0]
+            descriptions.append(
+                f"Bullish FVG: {float(closest['low']):.4f}–{float(closest['high']):.4f} ({closest['gap_pct']}%)"
+            )
+        if active_bear:
+            closest = active_bear[0]
+            descriptions.append(
+                f"Bearish FVG: {float(closest['low']):.4f}–{float(closest['high']):.4f} ({closest['gap_pct']}%)"
+            )
+
+        return {
+            "symbol": sym,
+            "tf": tf_s,
+            "current_price": current_price,
+            "bullish_fvg": active_bull[0] if active_bull else None,
+            "bearish_fvg": active_bear[0] if active_bear else None,
+            "all_bullish": active_bull[:3],
+            "all_bearish": active_bear[:3],
+            "description": " | ".join(descriptions) if descriptions else "FVG не знайдено",
+        }
+    except Exception as e:
+        print(f"[fvg] error {symbol}: {e}")
+        return {}
+
+
 def fetch_btc_candles(tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Backward-compatible wrapper for BTC candles.
