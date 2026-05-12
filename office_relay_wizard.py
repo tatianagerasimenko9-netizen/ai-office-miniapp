@@ -1365,17 +1365,21 @@ def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
                 # If both separators exist, assume commas are thousand separators.
                 s = s.replace(",", "")
             elif "," in s:
-                # Heuristic requested:
-                # - big values (e.g. 80,000) => remove comma
-                # - small values (e.g. 0,1453) => decimal comma
-                test = s.replace(",", ".")
-                v_test = float(test)
-                if abs(v_test) >= 1000:
+                # US-style thousands: 80,328 / 1,234,567 — завжди прибираємо коми.
+                if re.fullmatch(r"\d{1,3}(?:,\d{3})+", s):
                     s = s.replace(",", "")
-                elif abs(v_test) < 100:
-                    s = s.replace(",", ".")
                 else:
-                    s = s.replace(",", "")
+                    # Heuristic requested:
+                    # - big values (e.g. 80,000) => remove comma
+                    # - small values (e.g. 0,1453) => decimal comma
+                    test = s.replace(",", ".")
+                    v_test = float(test)
+                    if abs(v_test) >= 1000:
+                        s = s.replace(",", "")
+                    elif abs(v_test) < 100:
+                        s = s.replace(",", ".")
+                    else:
+                        s = s.replace(",", "")
             return float(s)
         except Exception:
             return None
