@@ -3604,28 +3604,13 @@ SYMBOL
 
     asyncio.create_task(session_announcer())
 
-    _proactive_kz_session_banner_key: Optional[str] = None
-
     async def proactive_market_scan() -> None:
         """
         Кожні 15 хвилин агенти самі сканують ринок і якщо знаходять сетап —
         пишуть Тетяні першими.
+        Kill Zone / сесійні банери — лише в session_announcer(), щоб не дублювати чат.
         """
-        nonlocal _proactive_kz_session_banner_key
         try:
-            tz_k = _briefing_tzinfo()
-            now_k = datetime.now(tz_k)
-            kh = now_k.hour
-            in_ldn_kz_kyiv = 11 <= kh < 14
-            in_ny_kz_kyiv = 16 <= kh < 19
-            if in_ldn_kz_kyiv or in_ny_kz_kyiv:
-                day_k = now_k.strftime("%Y-%m-%d")
-                seg_k = "LDN_KZ" if in_ldn_kz_kyiv else "NY_KZ"
-                banner_key = f"{day_k}:{seg_k}"
-                if _proactive_kz_session_banner_key != banner_key:
-                    _proactive_kz_session_banner_key = banner_key
-                    await send_office(get_session_status_kyiv(), stream="general")
-
             utc_now = datetime.now(timezone.utc)
             h = utc_now.hour
             m = utc_now.minute
