@@ -70,6 +70,8 @@ from office_bridge import (
     signal_upsert,
     tv_signal_fetch_unprocessed,
     tv_signal_mark_processed,
+    victor_recent_sl_streak,
+    VICTOR_RULE,
     _extract_first_usdt_symbol,
     _now_kyiv_hm,
     _to_kyiv_time_from_utc,
@@ -1926,19 +1928,8 @@ async def office_free_chat(
             "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
         ),
         "psych": (
-            f"{LEV_RULE}"
+            f"{VICTOR_RULE}\n"
             f"{language_block}\n"
-            "Тобі 45 років. Ти Віктор. "
-            "Психолог команди. "
-            "Знаєш що кожна людина торгує своїми грошима — для когось це $100, для когось $100,000. "
-            "Сума не важлива — важливий стан. "
-            "Говориш рідко але влучно. "
-            "Після збитків — зупиняєш від форсу. "
-            "Перед великим входом — підтримуєш. "
-            "Після WIN серій — нагадуєш про дисципліну. "
-            "Бачиш коли людина в стресі і реагуєш. "
-            "Говориш тільки українською. "
-            "Без таблиць."
         ),
         "dev": (
             f"{LEV_RULE}"
@@ -3885,6 +3876,32 @@ SYMBOL
 
     asyncio.create_task(monitor_proactive_scanner())
 
+    _victor_sl_streak_prev = -1
+
+    async def check_victor_trigger() -> None:
+        nonlocal _victor_sl_streak_prev
+        try:
+            sl_streak = victor_recent_sl_streak(db_path, 5)
+            if sl_streak < 3:
+                _victor_sl_streak_prev = sl_streak
+                return
+            crossed = sl_streak >= 3 and _victor_sl_streak_prev < 3
+            if crossed:
+                response = clean_llm_note(
+                    ask_agent(
+                        "psych",
+                        VICTOR_RULE,
+                        f"Ситуація: {sl_streak} стопів підряд. Тетяна може бути в стресі.",
+                        max_tokens=150,
+                        db_path=db_path,
+                    )
+                )
+                if response:
+                    await send_office(response, stream="general")
+            _victor_sl_streak_prev = sl_streak
+        except Exception as e:
+            print(f"[victor] error: {e}")
+
     async def monitor_active_signals() -> None:
         from office_market_data import (
             fetch_liquidations_proxy,
@@ -4162,6 +4179,7 @@ SYMBOL
                                     if analysis_note:
                                         for part in split_long_message(analysis_note):
                                             await send_office(part, stream="general")
+                                await check_victor_trigger()
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:

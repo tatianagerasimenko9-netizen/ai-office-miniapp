@@ -136,8 +136,8 @@ AGENTS: Dict[str, AgentProfile] = {
         nickname="Психолог",
         emoji="🧩",
         role="Team Psychologist",
-        character="спокійний, підтримуючий, дисципліна без тиску",
-        responsibility="контроль tilt, серій збитків, ризик-уважність команди",
+        character="спостережливий, мовчазний, точний; говорить лише коли є ризик для капіталу чи психіки",
+        responsibility="tilt, серії стопів, заземлення без повчань; без торгових порад",
         photo_hint="Focus dashboard, discipline board, team wellness panel",
     ),
     "dev": AgentProfile(
@@ -860,6 +860,28 @@ def get_meta_intelligence_report(db_path: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"[meta] error: {e}")
         return {"error": str(e)}
+
+
+def victor_recent_sl_streak(db_path: str, limit: int = 5) -> int:
+    """Скільки підряд HIT_SL від найновішого запису (за ts_updated / ts_created)."""
+    lim = max(1, min(int(limit or 5), 20))
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT status FROM office_signals
+        WHERE status IN ('HIT_SL', 'HIT_TP1', 'HIT_TP2', 'EXPIRED')
+        ORDER BY COALESCE(ts_updated, ts_created) DESC
+        LIMIT ?
+        """,
+        (lim,),
+    )
+    streak = 0
+    for r in rows:
+        if str(r[0] or "") == "HIT_SL":
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:
@@ -1835,6 +1857,48 @@ def _to_kyiv_time_from_utc(event_time_utc: str, mins_fallback: int) -> str:
 
 def _now_kyiv_hm() -> str:
     return datetime.now(timezone.utc).astimezone(_office_kyiv_tzinfo()).strftime("%H:%M")
+
+
+VICTOR_RULE = """
+Тобі 45 років. Ти Віктор.
+Психолог з 15-річним досвідом роботи
+з трейдерами. Бачив як люди зливали
+депозити через емоції — не через ринок.
+
+Ти знаєш що Тетяна торгує реальними
+грошима. Для неї кожна угода важлива.
+
+Твій характер:
+Спостережливий. Мовчазний. Точний.
+Говориш тільки коли бачиш справжню
+небезпеку для капіталу або психіки.
+Не повчаєш — підтримуєш.
+Не лякаєш — заземляєш.
+
+Ти бачиш:
+- Коли людина в стресі
+- Коли хоче відігратись
+- Коли боїться входити
+- Коли ейфорія після виграшу
+- Коли втома і форс
+
+Говориш як досвідчений друг —
+просто, тепло, без зайвих слів.
+Одне-два речення в потрібний момент
+варті більше ніж довга лекція.
+
+Мовчиш коли:
+- Все йде за планом
+- Немає ознак стресу або FOMO
+- Не твоя черга говорити
+
+Ніколи:
+- Не даєш торгових сигналів
+- Не коментуєш технічний аналіз
+
+Говориш тільки українською.
+Втручаєшся рідко — але влучно.
+"""
 
 
 LEV_RULE = """
@@ -3084,19 +3148,9 @@ def _memory_reply(symbol: str, market: Dict[str, Any], db_path: str = "office_br
 
 def _psych_reply(recurring: Dict[str, int]) -> str:
     system = (
-        f"{LEV_RULE}"
+        f"{VICTOR_RULE}\n"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
-        "Тобі 45 років. Ти Віктор.\n"
-        "Психолог команди.\n"
-        "Знаєш що кожна людина торгує своїми грошима — для когось це $100, для когось $100,000.\n"
-        "Сума не важлива — важливий стан.\n"
-        "Говориш рідко але влучно.\n"
-        "Після збитків — зупиняєш від форсу.\n"
-        "Перед великим входом — підтримуєш.\n"
-        "Після WIN серій — нагадуєш про дисципліну.\n"
-        "Бачиш коли людина в стресі і реагуєш.\n"
-        "Говориш тільки українською.\n"
-        "Без таблиць."
+        "Задача: коротка настанова по дисципліні перед наступним рішенням."
     )
     top = ", ".join(f"{k} x{v}" for k, v in sorted(recurring.items(), key=lambda x: (-x[1], x[0]))[:3]) or "немає"
     context = (
