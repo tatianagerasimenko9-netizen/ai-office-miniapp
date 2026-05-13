@@ -1190,6 +1190,7 @@ def trade_journal_get_stats(db_path: str) -> Dict[str, Any]:
             "breakevens": 0,
             "open": 0,
             "avg_pnl_pct": None,
+            "win_rate": 50.0,
         }
     return {
         "total": int(row[0] or 0),
@@ -1198,6 +1199,12 @@ def trade_journal_get_stats(db_path: str) -> Dict[str, Any]:
         "breakevens": int(row[3] or 0),
         "open": int(row[4] or 0),
         "avg_pnl_pct": float(row[5]) if row[5] is not None else None,
+        "win_rate": round(
+            (100.0 * int(row[1] or 0) / max(1, int(row[1] or 0) + int(row[2] or 0)))
+            if (int(row[1] or 0) + int(row[2] or 0)) > 0
+            else 50.0,
+            1,
+        ),
     }
 
 

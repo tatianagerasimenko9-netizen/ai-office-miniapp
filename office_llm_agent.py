@@ -375,7 +375,8 @@ def _run_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         tf_pd = str((tool_input or {}).get("timeframe") or "4h").strip().lower() or "4h"
         return fetch_pd_array(sym, tf_pd)
     if tool_name == "get_probability_score":
-        return fetch_probability_score(sym)
+        _dbp = (os.getenv("OFFICE_DB_PATH") or os.getenv("DATABASE_URL") or "").strip() or None
+        return fetch_probability_score(sym, _dbp)
     if tool_name == "get_edge_score":
         return fetch_edge_score(sym)
     if tool_name == "get_market_structure":

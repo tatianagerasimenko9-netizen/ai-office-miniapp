@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 import math
 from typing import Any, Dict, List, Optional, Union
@@ -10,6 +11,13 @@ from urllib.request import Request, urlopen
 
 
 JSONLike = Union[Dict[str, Any], List[Any]]
+
+_PROBABILITY_PHASE4_DEFAULT: Dict[str, Any] = {
+    "expected_value": 0.0,
+    "ev_positive": False,
+    "sweep_probability": 15,
+    "fake_breakout_prob": 20,
+}
 
 
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
@@ -719,15 +727,93 @@ def fetch_fvg(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+def _ticker_24h_change_pct(symbol: str) -> float:
+    """Добова зміна % з Binance USDT-M ticker."""
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        data = _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": sym})
+        if isinstance(data, dict):
+            return float(data.get("priceChangePercent") or 0.0)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _parse_econ_dt(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    s = str(value).strip()
+    for p in (
+        lambda x: datetime.fromisoformat(x.replace("Z", "+00:00")),
+        lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"),
+        lambda x: datetime.strptime(x, "%Y-%m-%d"),
+    ):
+        try:
+            dt = p(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+def _news_chaos_sync() -> tuple[bool, str]:
+    """
+    NEWS CHAOS: важлива макро-подія за FMP — за <30 хв або щойно (до 15 хв тому).
+    """
+    key = os.getenv("NEWS_API_KEY", "").strip()
+    if not key:
+        return False, ""
+    keys_hi = ("fomc", "fed", "rate", "cpi", "nfp", "powell", "inflation", "ecb", "boj")
+    try:
+        now = datetime.now(timezone.utc)
+        from_s = now.strftime("%Y-%m-%d")
+        data = _http_get_json(
+            "https://financialmodelingprep.com/stable/economic-calendar",
+            {"from": from_s, "to": from_s, "apikey": key},
+        )
+        if not isinstance(data, list):
+            return False, ""
+        for e in data:
+            if not isinstance(e, dict):
+                continue
+            title = str(e.get("event") or e.get("title") or "")
+            if not title:
+                continue
+            impact = str(e.get("impact") or e.get("importance") or "").lower().strip()
+            important = "high" in impact or "medium" in impact or "med" in impact
+            if not important and not any(k in title.lower() for k in keys_hi):
+                continue
+            dt = _parse_econ_dt(str(e.get("date") or e.get("time") or ""))
+            if dt is None:
+                continue
+            mins = int((dt - now).total_seconds() / 60)
+            if 0 <= mins <= 30:
+                return True, title[:120]
+            if -15 <= mins < 0:
+                return True, title[:120]
+    except Exception as exc:
+        print(f"[regime-news] {exc}")
+    return False, ""
+
+
 def fetch_market_regime(symbol: str) -> Dict[str, Any]:
     """
-    Поточний режим ринку (спрощена евристика для вибору стратегії):
+    Поточний режим ринку (евристика для вибору стратегії):
 
-    TREND_UP / TREND_DOWN — послідовні 4h closes;
-    RANGE — вузький діапазон останніх 24×1h відносно ціни;
+    NEWS_CHAOS — важлива макроподія скоро / щойно (не торгуємо);
+    PANIC — day_used_pct ATR > 200% (не торгуємо);
+    EUPHORIA — сильна доба + перегрітий L/S (обережно з лонгами);
+    COMPRESSION — вузький range_pct і низький day_used (стискання);
+    LIQUIDITY_HUNT — BSL/SSL sweep і повернення ціни (чекаємо підтвердження);
+    LOW_LIQUIDITY — високий day_used_pct;
     EXPANSION — сплеск обсягу + низький day_used_pct;
-    MANIPULATION — sweep попереднього high/low на 1h;
-    LOW_LIQUIDITY — екстремальний day_used_pct (розтягнута доба vs ATR).
+    TREND_UP / TREND_DOWN — послідовні 4h closes;
+    RANGE — вузький діапазон 24×1h;
+    NEUTRAL.
     """
     try:
         sym = str(symbol or "").upper().strip()
@@ -784,13 +870,54 @@ def fetch_market_regime(symbol: str) -> Dict[str, Any]:
         ssl_sweep = last_l < prev_l and last_c > prev_l
         manipulation = bsl_sweep or ssl_sweep
 
-        if day_used > 150:
+        ls_data = fetch_long_short_ratio(sym)
+        ls_ratio = float(ls_data.get("current_ratio") or 1.0) if isinstance(ls_data, dict) else 1.0
+        change_pct_24h = _ticker_24h_change_pct(sym)
+        news_chaos, news_title = _news_chaos_sync()
+
+        if manipulation:
+            controller = "Маркетмейкер"
+        elif vol_spike and trend_up:
+            controller = "Інституції"
+        elif ls_ratio > 2.5:
+            controller = "Ритейл (натовп)"
+        else:
+            controller = "Алгоритми"
+
+        regime = "NEUTRAL"
+        description = "Нейтральний ринок."
+
+        if news_chaos:
+            regime = "NEWS_CHAOS"
+            description = (
+                "Новинний хаос: важлива подія за <30 хв або щойно (<15 хв). Не торгуємо. "
+                + (news_title or "")
+            )
+        elif day_used > 200.0:
+            regime = "PANIC"
+            description = "ATR доби > 200% — паніка / екстрем. Не торгуємо."
+        elif change_pct_24h > 15.0 and ls_ratio > 3.0:
+            regime = "EUPHORIA"
+            description = (
+                f"Ейфорія: доба +{change_pct_24h:.1f}%, L/S {ls_ratio:.2f}. "
+                "Небезпечно входити в лонг."
+            )
+        elif range_pct < 1.5 and day_used < 30.0:
+            regime = "COMPRESSION"
+            description = (
+                f"Компресія: вузький діапазон {range_pct:.2f}% і ATR day_used {day_used:.0f}% "
+                "(<30%) — стискання перед імпульсом."
+            )
+        elif manipulation:
+            regime = "LIQUIDITY_HUNT"
+            sweep_type = "BSL" if bsl_sweep else "SSL"
+            description = (
+                f"{sweep_type}: sweep ліквідності й повернення ціни. "
+                "Чекаємо підтвердження розвороту."
+            )
+        elif day_used > 150.0:
             regime = "LOW_LIQUIDITY"
             description = "ATR перевищено — монета мертва. Не торгуємо до нового дня."
-        elif manipulation:
-            regime = "MANIPULATION"
-            sweep_type = "BSL" if bsl_sweep else "SSL"
-            description = f"{sweep_type} sweep виявлено. Можливий розворот після маніпуляції."
         elif vol_spike and day_used < 50:
             regime = "EXPANSION"
             description = "Сильний об'єм + малий ATR. Ринок починає великий рух."
@@ -814,19 +941,26 @@ def fetch_market_regime(symbol: str) -> Dict[str, Any]:
             "day_used_pct": day_used,
             "vol_spike": vol_spike,
             "manipulation": manipulation,
+            "bsl_sweep": bsl_sweep,
+            "ssl_sweep": ssl_sweep,
             "trend_up": trend_up,
             "trend_down": trend_down,
             "range_pct": round(range_pct, 2),
+            "controller": controller,
+            "ls_ratio": round(ls_ratio, 3),
+            "change_pct_24h": round(change_pct_24h, 2),
+            "news_chaos": bool(news_chaos),
         }
     except Exception as e:
         print(f"[regime] error {symbol}: {e}")
         return {"regime": "UNKNOWN", "symbol": str(symbol or "").upper().strip()}
 
 
-def fetch_probability_score(symbol: str) -> Dict[str, Any]:
+def fetch_probability_score(symbol: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Probability Engine — грубий confluence-скоринг LONG vs SHORT vs NO TRADE.
     Не прогноз, а узгодженість факторів (funding, L/S, OI, regime, structure, PD, sweep).
+    Додає expected_value / sweep_probability / fake_breakout_prob (Фаза 4).
     """
     try:
         sym = str(symbol or "").upper().strip()
@@ -838,6 +972,7 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
                 "long_prob": 0,
                 "short_prob": 0,
                 "no_trade_prob": 100,
+                **_PROBABILITY_PHASE4_DEFAULT,
             }
         if not sym.endswith("USDT"):
             sym = f"{sym}USDT"
@@ -860,6 +995,49 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
         sweep_d = sweep if isinstance(sweep, dict) else {}
         pd_d = pd_arr if isinstance(pd_arr, dict) else {}
 
+        def _phase4_metrics() -> Dict[str, Any]:
+            rv = str(regime_d.get("regime") or "")
+            vol_sp = bool(regime_d.get("vol_spike"))
+            b_manip = bool(regime_d.get("manipulation"))
+            bsl = bool(regime_d.get("bsl_sweep") or sweep_d.get("bsl_sweep"))
+            ssl = bool(regime_d.get("ssl_sweep") or sweep_d.get("ssl_sweep"))
+            if bsl or ssl:
+                sw_p = 75
+            elif b_manip:
+                sw_p = 50
+            else:
+                sw_p = 15
+            if rv == "RANGE" and vol_sp:
+                fk = 70
+            elif rv in ("MANIPULATION", "LIQUIDITY_HUNT"):
+                fk = 80
+            else:
+                fk = 20
+            dbp = (
+                (db_path or "").strip()
+                or os.getenv("OFFICE_DB_PATH", "").strip()
+                or os.getenv("DATABASE_URL", "").strip()
+                or "office_bridge.db"
+            )
+            wr = 0.5
+            try:
+                from office_bridge import trade_journal_get_stats
+
+                stats = trade_journal_get_stats(dbp)
+                wr = float(stats.get("win_rate", 50.0)) / 100.0
+            except Exception:
+                pass
+            avg_rr = 2.0
+            ev = (wr * avg_rr) - (1.0 - wr)
+            return {
+                "expected_value": round(float(ev), 2),
+                "ev_positive": bool(ev > 0),
+                "sweep_probability": int(sw_p),
+                "fake_breakout_prob": int(fk),
+            }
+
+        phase4 = _phase4_metrics()
+
         long_score = 0
         short_score = 0
         factors_long: List[str] = []
@@ -877,6 +1055,7 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
                 "reason": f"ATR {day_used:.0f}% — немає запасу ходу",
                 "factors_long": [],
                 "factors_short": [],
+                **phase4,
             }
 
         fr_raw = funding_d.get("funding_rate_pct")
@@ -920,14 +1099,18 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
         elif regime_val == "TREND_DOWN":
             short_score += 25
             factors_short.append("Режим TREND_DOWN на 4H")
-        elif regime_val == "MANIPULATION":
-            if sweep_d.get("bsl_sweep"):
+        elif regime_val == "EUPHORIA":
+            short_score += 35
+            factors_short.append("Режим EUPHORIA — перегріті лонги, небезпечно входити в LONG")
+            long_score = max(0, long_score - 25)
+        elif regime_val in ("LIQUIDITY_HUNT", "MANIPULATION"):
+            if sweep_d.get("bsl_sweep") or regime_d.get("bsl_sweep"):
                 short_score += 20
                 factors_short.append("BSL sweep — можливий SHORT")
-            elif sweep_d.get("ssl_sweep"):
+            elif sweep_d.get("ssl_sweep") or regime_d.get("ssl_sweep"):
                 long_score += 20
                 factors_long.append("SSL sweep — можливий LONG")
-        elif regime_val in ("LOW_LIQUIDITY", "RANGE"):
+        elif regime_val in ("LOW_LIQUIDITY", "RANGE", "NEWS_CHAOS", "PANIC"):
             return {
                 "symbol": sym,
                 "long_prob": 0,
@@ -938,6 +1121,7 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
                 "reason": f"Режим {regime_val} — не торгуємо",
                 "factors_long": [],
                 "factors_short": [],
+                **phase4,
             }
 
         struct_event = str(structure_d.get("event") or "")
@@ -1012,6 +1196,7 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
             "factors_short": factors_short,
             "regime": regime_val,
             "reason": f"LONG {long_p}% / SHORT {short_p}% / NO TRADE {no_trade_p}%",
+            **phase4,
         }
     except Exception as e:
         print(f"[prob] error {symbol}: {e}")
@@ -1025,6 +1210,7 @@ def fetch_probability_score(symbol: str) -> Dict[str, Any]:
             "confidence": "LOW",
             "factors_long": [],
             "factors_short": [],
+            **_PROBABILITY_PHASE4_DEFAULT,
         }
 
 
@@ -1058,7 +1244,8 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
         ob = fetch_order_blocks(sym, "1h")
         fvg = fetch_fvg(sym, "1h")
         session = fetch_session_levels(sym)
-        prob = fetch_probability_score(sym)
+        _dbp = (os.getenv("OFFICE_DB_PATH") or os.getenv("DATABASE_URL") or "").strip() or None
+        prob = fetch_probability_score(sym, _dbp)
 
         atr_d = atr if isinstance(atr, dict) else {}
         sweep_d = sweep if isinstance(sweep, dict) else {}
