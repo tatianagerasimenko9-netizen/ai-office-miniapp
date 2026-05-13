@@ -1701,6 +1701,107 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def check_portfolio_correlation(db_path: str) -> Dict[str, Any]:
+    """
+    Спрощений «кореляційний» фільтр: частка LONG/SHORT серед активних сигналів.
+    """
+    try:
+        active = signal_get_active(db_path)
+        if not active:
+            return {
+                "safe": True,
+                "message": "Немає позицій",
+            }
+
+        longs = [s for s in active if str(s.get("direction") or "").upper() == "LONG"]
+        shorts = [s for s in active if str(s.get("direction") or "").upper() == "SHORT"]
+
+        total = len(active)
+        long_pct = len(longs) / total * 100.0
+        short_pct = len(shorts) / total * 100.0
+
+        if long_pct > 70:
+            return {
+                "safe": False,
+                "warning": "КОНЦЕНТРАЦІЯ",
+                "message": (
+                    f"{len(longs)} з {total} "
+                    f"позицій — лонги "
+                    f"({long_pct:.0f}%). "
+                    f"Це одна велика ставка вгору. "
+                    f"Зменш розмір або зачекай."
+                ),
+                "longs": len(longs),
+                "shorts": len(shorts),
+            }
+        if short_pct > 70:
+            return {
+                "safe": False,
+                "warning": "КОНЦЕНТРАЦІЯ",
+                "message": (
+                    f"{len(shorts)} з {total} "
+                    f"позицій — шорти "
+                    f"({short_pct:.0f}%). "
+                    f"Це одна велика ставка вниз. "
+                    f"Зменш розмір або зачекай."
+                ),
+                "longs": len(longs),
+                "shorts": len(shorts),
+            }
+
+        return {
+            "safe": True,
+            "longs": len(longs),
+            "shorts": len(shorts),
+            "total": total,
+        }
+
+    except Exception as e:
+        print(f"[correlation] error: {e}")
+        return {"safe": True}
+
+
+def check_drawdown_alert(
+    db_path: str,
+    max_drawdown_pct: float = 4.0,
+) -> Dict[str, Any]:
+    """
+    Ризик-комітет: кількість HIT_SL за останні 24 год.
+    Поріг за замовчуванням — 4 (параметр max_drawdown_pct як ціле «сімейство» ліміту).
+    """
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT COUNT(*) FROM office_signals
+            WHERE status = 'HIT_SL'
+              AND ts_updated IS NOT NULL
+              AND ts_updated > ?
+            """,
+            (cutoff,),
+        )
+        losses = int(rows[0][0]) if rows and rows[0] else 0
+        threshold = max(1, int(max_drawdown_pct))
+
+        if losses >= threshold:
+            return {
+                "safe": False,
+                "losses": losses,
+                "message": (
+                    f"⚠️ {losses} збитки за день. "
+                    f"Денний ліміт досягнуто. "
+                    f"Торгівля зупинена до завтра."
+                ),
+            }
+
+        return {"safe": True, "losses": losses}
+
+    except Exception as e:
+        print(f"[drawdown] error: {e}")
+        return {"safe": True, "losses": 0}
+
+
 def signal_get_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
     """Знайти активний сигнал по символу."""
     sym = str(symbol or "").strip().upper()

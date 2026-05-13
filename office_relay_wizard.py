@@ -38,6 +38,8 @@ from office_bridge import (
     agent_say,
     briefing_get_last,
     briefing_save,
+    check_drawdown_alert,
+    check_portfolio_correlation,
     clean_llm_note,
     detect_setup_type,
     fmt_agent_line,
@@ -1822,6 +1824,10 @@ async def full_auto_analysis(
             # no-entry не означає "нічого не робити":
             # якщо є зона, зберігаємо WATCHING замість ACTIVE (ручний / офіс без прив'язки до рядка WATCHING).
             if parsed.get("entry_low") is not None:
+                correlation = check_portfolio_correlation(db_path)
+                if not correlation.get("safe"):
+                    await agent_say(sender, "daryna", correlation["message"])
+                    return False
                 direction_watch = "LONG"
                 up_watch = response_for_parse.upper()
                 if "SHORT" in up_watch or "ШОРТ" in up_watch:
@@ -1863,6 +1869,10 @@ async def full_auto_analysis(
                 direction = "SHORT"
             elif "LONG" in up or "ЛОНГ" in up:
                 direction = "LONG"
+            correlation = check_portfolio_correlation(db_path)
+            if not correlation.get("safe"):
+                await agent_say(sender, "daryna", correlation["message"])
+                return False
             signal_id = f"manual-{symbol}-{int(time.time())}"
             signal_upsert(
                 db_path,
@@ -3622,6 +3632,14 @@ SYMBOL
             if not (in_london or in_ny):
                 return  # поза Kill Zone — мовчимо
 
+            drawdown = check_drawdown_alert(db_path)
+            if not drawdown.get("safe"):
+                await send_office(drawdown["message"], stream="general")
+                return  # зупиняємо сканер
+
+            async def _scan_sender(msg: str) -> None:
+                await send_office(msg[:3800], stream="general")
+
             from office_market_data import (
                 fetch_atr_context,
                 fetch_candles,
@@ -3795,6 +3813,10 @@ SYMBOL
                     last_acc_ts = float(_last_signal_time.get(acc_key, 0.0) or 0.0)
                     if (time.time() - last_acc_ts) < 24 * 3600:
                         continue
+                    correlation = check_portfolio_correlation(db_path)
+                    if not correlation.get("safe"):
+                        await agent_say(_scan_sender, "daryna", correlation["message"])
+                        continue
                     _last_signal_time[acc_key] = time.time()
                     await send_office(
                         fmt_agent_line(
@@ -3820,6 +3842,11 @@ SYMBOL
                     )
 
             if not setups_found:
+                return
+
+            correlation = check_portfolio_correlation(db_path)
+            if not correlation.get("safe"):
+                await agent_say(_scan_sender, "daryna", correlation["message"])
                 return
 
             best = min(setups_found, key=lambda x: float(x.get("atr_used") or 100))
