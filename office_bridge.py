@@ -204,8 +204,17 @@ AGENT_SHARED_COMMUNICATION_UA = """ПРАВИЛА КОМУНІКАЦІЇ (одн
 
 def _with_shared_comm_ua(system: str) -> str:
     """Єдині правила комунікації + оригінальний system для LLM."""
+    no_self_naming = (
+        "ВАЖЛИВО: Ти вже підписаний своїм іменем "
+        "перед повідомленням. НЕ називай себе "
+        "у тексті відповіді. "
+        "НЕ пиши 'Лев тут', 'Олеся на місці', "
+        "'Марічка каже' тощо. "
+        "Просто говори від себе без самоназивання."
+    )
     base = str(system or "").strip()
-    return f"{AGENT_SHARED_COMMUNICATION_UA}\n\n{base}" if base else AGENT_SHARED_COMMUNICATION_UA
+    shared = f"{AGENT_SHARED_COMMUNICATION_UA}\n\n{no_self_naming}"
+    return f"{shared}\n\n{base}" if base else shared
 
 
 @dataclass
