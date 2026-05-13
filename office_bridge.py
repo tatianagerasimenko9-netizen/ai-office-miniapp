@@ -2218,6 +2218,35 @@ def _fmt_level(v: Optional[float]) -> str:
     return f"{v:.6f}".rstrip("0").rstrip(".")
 
 
+def clean_self_naming(text: str, agent_key: str) -> str:
+    """Прибирає самоназивання агента (підпис уже дає fmt_agent_line)."""
+    if not text or not str(text).strip():
+        return text
+    agent_names = {
+        "lev": ["лев", "lev"],
+        "maks": ["макс", "maks", "max"],
+        "marichka": ["марічка", "marichka"],
+        "news": ["назар", "nazar"],
+        "daryna": ["дарина", "daryna"],
+        "marko": ["марко", "marko"],
+        "olesya": ["олеся", "olesya"],
+        "memory": ["софія", "sofia"],
+        "psych": ["віктор", "viktor"],
+        "dev": ["артем", "artem"],
+    }
+    key = str(agent_key or "").strip().lower()
+    names = agent_names.get(key, [])
+    out = str(text)
+    for name in names:
+        if not name:
+            continue
+        escaped = re.escape(name)
+        # "Ім'я:" / "Ім'я," на початку рядка; дозволяємо зірки markdown навколо імені
+        pattern = rf"^\*{0,2}\s*{escaped}\s*\*{0,2}\s*[:,]\s*"
+        out = re.sub(pattern, "", out, flags=re.IGNORECASE)
+    return out.strip()
+
+
 def clean_llm_note(text: str) -> str:
     if not text:
         return text

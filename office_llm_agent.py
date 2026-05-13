@@ -551,7 +551,14 @@ def ask_agent(
                             text_parts.append(txt.strip())
 
                 if not tool_uses:
-                    return "\n".join(text_parts).strip()
+                    response = "\n".join(text_parts).strip()
+                    try:
+                        from office_bridge import clean_self_naming
+
+                        response = clean_self_naming(response, agent_norm)
+                    except Exception:
+                        pass
+                    return response
 
                 tool_results: List[Dict[str, Any]] = []
                 for tu in tool_uses:
