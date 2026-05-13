@@ -4203,7 +4203,14 @@ TradingView надіслав сигнал.
 
 Якщо ICT підтверджує TradingView —
 дай повний сетап з Entry/SL/TP/RR.
-Якщо ні — скажи чому відхиляєш."""
+Якщо ні — скажи чому відхиляєш.
+
+Говориш тільки українською.
+Жодних англійських слів.
+Edge Score → перевага
+Grade C → слабка
+BSL sweep → маніпуляція вгорі
+PDH → вчорашній максимум"""
 
             context = f"""
 TradingView сигнал (id={row_id}):
@@ -4216,7 +4223,7 @@ TradingView сигнал (id={row_id}):
 """
 
             response = clean_llm_note(
-                ask_agent("lev", system, context, max_tokens=600, db_path=db_path)
+                ask_agent("lev", system, context, max_tokens=800, db_path=db_path)
             )
 
             if response:
