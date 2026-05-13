@@ -693,6 +693,11 @@ def _briefing_tzinfo():
         return timezone.utc
 
 
+def format_kyiv_time(dt: datetime) -> str:
+    """Час для Telegram без двокрапки HH:MM (інакше клієнт лінкує як URL)."""
+    return f"{dt.hour} год {dt.minute:02d} хв"
+
+
 def get_session_status_kyiv() -> str:
     """
     Повертає поточний статус сесій у зрозумілому форматі за Києвом
@@ -701,7 +706,7 @@ def get_session_status_kyiv() -> str:
     tz = _briefing_tzinfo()
     now = datetime.now(tz)
     h = now.hour
-    time_str = now.strftime("%H:%M")
+    time_safe = format_kyiv_time(now)
 
     sessions: List[str] = []
     if 3 <= h < 11:
@@ -712,14 +717,14 @@ def get_session_status_kyiv() -> str:
         sessions.append("🇺🇸 Нью-Йорк відкритий")
 
     if 11 <= h < 14:
-        sessions.append("⚡ KILL ZONE Лондон (11:00–14:00 за Києвом)")
+        sessions.append("⚡ KILL ZONE Лондон (з 11 год до 14 год за Києвом)")
     elif 16 <= h < 19:
-        sessions.append("⚡ KILL ZONE Нью-Йорк (16:00–19:00 за Києвом)")
+        sessions.append("⚡ KILL ZONE Нью-Йорк (з 16 год до 19 год за Києвом)")
 
     if not sessions:
         sessions.append("😴 Між сесіями — тихо")
 
-    return f"🕐 Зараз {time_str} за Києвом\n" + "\n".join(sessions)
+    return f"🕐 Зараз {time_safe} за Києвом\n" + "\n".join(sessions)
 
 
 def _session_label_from_hour(h: int) -> str:
@@ -3350,23 +3355,23 @@ SYMBOL
                     if now.hour == 3:
                         msg = (
                             "🌏 Азіатська сесія відкрилась\n"
-                            f"🕐 {now.strftime('%H:%M')} за Києвом"
+                            f"🕐 {format_kyiv_time(now)} за Києвом"
                         )
                     elif now.hour == 11:
                         msg = (
                             "🇬🇧 Лондон відкрився\n"
-                            "⚡ Kill Zone почалась (11:00–14:00 за Києвом)\n"
+                            "⚡ Kill Zone почалась (з 11 год до 14 год за Києвом)\n"
                             "Шукаємо сетапи..."
                         )
                     elif now.hour == 14:
                         msg = (
                             "🇬🇧 Лондон Kill Zone закрилась\n"
-                            "Між сесіями до 16:00"
+                            "Між сесіями до 16 год"
                         )
                     elif now.hour == 16:
                         msg = (
                             "🇺🇸 Нью-Йорк відкрився\n"
-                            "⚡ Kill Zone почалась (16:00–19:00 за Києвом)\n"
+                            "⚡ Kill Zone почалась (з 16 год до 19 год за Києвом)\n"
                             "Шукаємо сетапи..."
                         )
                     elif now.hour == 19:
