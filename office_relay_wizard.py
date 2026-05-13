@@ -3465,128 +3465,269 @@ async def run() -> None:
 
     last_marichka_evening_date = ""
 
-    async def run_marichka_evening() -> None:
-        """Вечірній огляд: динамічний список USDT + активні сигнали (до 20 пар)."""
-        from office_market_data import (
-            fetch_candles,
-            fetch_fvg,
-            fetch_market_structure,
-            fetch_pd_array,
-            fetch_session_levels,
-        )
+    async def run_evening_homework() -> None:
+        """
+        Щовечора о 21:00 команда готує домашнє завдання на завтра.
 
-        symbols = await _marichka_dynamic_symbols()
-        system_evening = """Ти Марічка. 26 років.
-Говориш просто як подруга.
+        Структура:
+        1. Марічка сканує ринок (топ монети)
+        2. Знаходить кандидатів
+        3. Для кожного — повний top-down
+        4. Лев дає фінальний план на завтра
+        """
+        try:
+            from office_market_data import (
+                fetch_atr_context,
+                fetch_candles,
+                fetch_fvg,
+                fetch_liquidity_sweep,
+                fetch_long_short_ratio,
+                fetch_market_structure,
+                fetch_open_interest,
+                fetch_order_blocks,
+                fetch_order_book_walls,
+                fetch_pd_array,
+                fetch_session_levels,
+            )
 
-ВЕЧІРНІЙ АНАЛІЗ — top-down по кожній монеті:
+            symbols = await _marichka_dynamic_symbols()
+            candidates: List[Dict[str, Any]] = []
 
-1. ТИЖНЕВИЙ ГРАФІК:
-   Куди іде монета глобально?
-   Вгору / вниз / боковик?
-
-2. ДЕННИЙ ГРАФІК:
-   Що зробила сьогоднішня свічка?
-   Закрилась вище/нижче вчорашнього
-   максимуму/мінімуму?
-
-3. 4-ГОДИННИЙ:
-   Яка структура?
-   Де незаповнені розриви?
-
-4. ГОДИННИЙ:
-   Де зона входу на завтра?
-
-5. ВИСНОВОК:
-   Напрямок на завтра: вгору/вниз/нейтрально
-   Зона входу: X–Y (якщо є)
-   Чекаємо: (що має статись для входу)
-
-ПИШИ ТІЛЬКИ якщо є конкретний сетап.
-Якщо нічого цікавого — мовчи.
-Максимум 3-4 монети за вечір.
-Жодних англійських слів."""
-        for symbol in symbols:
-            try:
-                daily = fetch_candles(symbol, "1d", 3)
-                if not isinstance(daily, list) or len(daily) < 2:
-                    continue
-                prev_day = daily[-2]
-                today = daily[-1]
-                if not isinstance(prev_day, dict) or not isinstance(today, dict):
-                    continue
-                pdh = float(prev_day.get("high") or 0.0)
-                pdl = float(prev_day.get("low") or 0.0)
-                pdc = float(prev_day.get("close") or 0.0)
-                today_h = float(today.get("high") or 0.0)
-                today_l = float(today.get("low") or 0.0)
-                today_c = float(today.get("close") or 0.0)
-
-                weekly = fetch_candles(symbol, "1w", 3)
-                weekly_block = ""
-                if isinstance(weekly, list) and weekly:
-                    weekly_high = max(float(c.get("high", 0) or 0) for c in weekly)
-                    weekly_low = min(float(c.get("low", 0) or 0) for c in weekly)
-                    weekly_close = float(weekly[-1].get("close", 0) or 0)
-                    weekly_block = (
-                        f"Тижневий графік:\n"
-                        f"Максимум тижня: {weekly_high}\n"
-                        f"Мінімум тижня: {weekly_low}\n"
-                        f"Закриття тижня: {weekly_close}\n\n"
-                    )
-
-                h4 = fetch_candles(symbol, "4h", 10)
-                session = fetch_session_levels(symbol)
-                fvg_data = fetch_fvg(symbol, "4h")
-                structure = fetch_market_structure(symbol, "4h")
-                pd_arr = fetch_pd_array(symbol, "1d")
-
-                context = (
-                    f"Символ: {symbol}\n"
-                    f"Час: вечірній аналіз (розклад OFFICE_BRIEFING_TZ, ціль 21:00 Київ).\n\n"
-                    f"{weekly_block}"
-                    f"Денна свічка (поточна доба на біржі):\n"
-                    f"максимум: {today_h}\nмінімум: {today_l}\nзакриття: {today_c}\n\n"
-                    f"Вчорашній максимум (PDH): {pdh}\nвчорашній мінімум (PDL): {pdl}\nвчора на закритті: {pdc}\n\n"
-                    f"Структура на 4 год: {structure}\n"
-                    f"Незаповнений розрив (FVG) на 4 год: {fvg_data}\n"
-                    f"Зони преміум/дисконт (день): {pd_arr}\n"
-                    f"Сесійні рівні: {session}\n"
-                    f"Кількість свічок 4 год: {len(h4) if isinstance(h4, list) else 0}\n"
-                )
-
-                response = clean_llm_note(
-                    ask_agent(
-                        "marichka",
-                        system_evening,
-                        context,
-                        max_tokens=600,
-                    )
-                )
-                if not response:
-                    continue
-                skip_phrases = [
-                    "нічого цікавого",
-                    "немає сетапу",
-                    "пропускаємо",
-                    "не цікаво",
-                    "мовчу",
-                ]
-                if any(p in response.lower() for p in skip_phrases):
-                    continue
-                header = f"🌙 МАРІЧКА | Вечірній аналіз {symbol}"
-                await send_office(f"{header}\n{response[:3800]}", stream="general")
+            for symbol in symbols[:20]:
                 try:
-                    briefing_save(db_path, symbol, "evening", response)
+                    atr = fetch_atr_context(symbol)
+                    atr_d = atr if isinstance(atr, dict) else {}
+                    day_used = float(atr_d.get("day_used_pct") or 100.0)
+                    if day_used > 80.0:
+                        continue
+
+                    structure = fetch_market_structure(symbol, "4h")
+                    struct_d = structure if isinstance(structure, dict) else {}
+                    pd_arr = fetch_pd_array(symbol, "1d")
+                    pd_d = pd_arr if isinstance(pd_arr, dict) else {}
+                    sweep = fetch_liquidity_sweep(symbol, "4h")
+                    sw_d = sweep if isinstance(sweep, dict) else {}
+
+                    ev = str(struct_d.get("event") or "").upper()
+                    has_structure = ev in (
+                        "BOS_BULLISH",
+                        "BOS_BEARISH",
+                        "CHOCH",
+                        "HH_HL",
+                        "LH_LL",
+                    )
+                    has_sweep = bool(sw_d.get("bsl_sweep") or sw_d.get("ssl_sweep"))
+                    z = str(pd_d.get("zone") or "").upper()
+                    has_discount_premium = z in ("PREMIUM", "DISCOUNT")
+
+                    if has_structure or has_sweep or has_discount_premium:
+                        candidates.append(
+                            {
+                                "symbol": symbol,
+                                "day_used": day_used,
+                                "structure": struct_d,
+                                "pd_arr": pd_d,
+                                "sweep": sw_d,
+                                "atr": atr_d,
+                            }
+                        )
+                except Exception:
+                    continue
+
+            if not candidates:
+                await send_office(
+                    "🌙 Марічка: Сьогодні немає чітких кандидатів на завтра. Ринок відпочиває.",
+                    stream="general",
+                )
+                return
+
+            candidates.sort(key=lambda x: float(x.get("day_used") or 100.0))
+            top5 = candidates[:5]
+
+            homework_results: List[Dict[str, Any]] = []
+
+            for cand in top5:
+                symbol = str(cand.get("symbol") or "")
+                if not symbol:
+                    continue
+                try:
+                    weekly = fetch_candles(symbol, "1w", 3)
+                    daily = fetch_candles(symbol, "1d", 5)
+                    session = fetch_session_levels(symbol)
+                    fvg_data = fetch_fvg(symbol, "4h")
+                    ob_data = fetch_order_blocks(symbol, "4h")
+                    dom = fetch_order_book_walls(symbol)
+                    ls = fetch_long_short_ratio(symbol)
+                    oi = fetch_open_interest(symbol)
+
+                    weekly_high = weekly_low = 0.0
+                    if isinstance(weekly, list) and weekly:
+                        weekly_high = max(
+                            float(c.get("high", 0) or 0) for c in weekly if isinstance(c, dict)
+                        )
+                        weekly_low = min(
+                            float(c.get("low", 0) or 0) for c in weekly if isinstance(c, dict)
+                        )
+
+                    current = 0.0
+                    if isinstance(daily, list) and daily and isinstance(daily[-1], dict):
+                        current = float(daily[-1].get("close") or 0.0)
+
+                    ls_d = ls if isinstance(ls, dict) else {}
+                    ls_ratio = float(ls_d.get("current_ratio") or 1.0)
+                    ls_hist = ls_d.get("history")
+                    ls_last = ls_hist[-1] if isinstance(ls_hist, list) and ls_hist else {}
+                    long_pct_v = ls_last.get("long_pct") if isinstance(ls_last, dict) else ""
+
+                    sess_d = session if isinstance(session, dict) else {}
+                    oi_d = oi if isinstance(oi, dict) else {}
+                    oi_usdt = oi_d.get("oi", "")
+
+                    pd_c = cand["pd_arr"] if isinstance(cand.get("pd_arr"), dict) else {}
+                    st_c = cand["structure"] if isinstance(cand.get("structure"), dict) else {}
+                    sw_c = cand["sweep"] if isinstance(cand.get("sweep"), dict) else {}
+                    fvg_d = fvg_data if isinstance(fvg_data, dict) else {}
+                    ob_d = ob_data if isinstance(ob_data, dict) else {}
+                    dom_d = dom if isinstance(dom, dict) else {}
+
+                    context = f"""
+Символ: {symbol}
+Поточна ціна: {current}
+
+ТИЖНЕВИЙ ТФ:
+Максимум тижня: {weekly_high}
+Мінімум тижня: {weekly_low}
+
+СТРУКТУРА 4H: {st_c.get("event", "")}
+PD ARRAY: {pd_c.get("zone", "")}
+  Рівноважна ціна: {pd_c.get("equilibrium", "")}
+
+SWEEP: {sw_c}
+FVG: {fvg_d.get("description", "")}
+ORDER BLOCK: {ob_d.get("description", "")}
+
+СТАКАН КИТІВ: {dom_d.get("description", "")}
+Long/Short: {ls_ratio} ({long_pct_v}% лонгів)
+OI: {oi_usdt}
+
+СЕСІЙНІ РІВНІ:
+Азія H/L: {sess_d.get("asia_high", "")} / {sess_d.get("asia_low", "")}
+Лондон H/L: {sess_d.get("london_high", "")} / {sess_d.get("london_low", "")}
+NY H/L: {sess_d.get("ny_high", "")} / {sess_d.get("ny_low", "")}
+PDH/PDL: {sess_d.get("pdh", "")} / {sess_d.get("pdl", "")}
+
+ATR використано: {float(cand.get("day_used") or 0):.0f}%
+"""
+
+                    system = """Ти Марічка.
+Готуєш домашнє завдання на завтра.
+Проста українська. Коротко.
+
+Аналізуй зверху вниз:
+1. Тижневий: куди глобально іде монета?
+2. Денний: де зараз ціна відносно вчорашніх максимуму/мінімуму?
+3. 4H: яка структура? де незаповнені розриви?
+4. Де великі гроші (стакан китів)?
+5. Напрямок на завтра: вгору/вниз/нейтрально
+6. Зона входу для снайперського входу
+7. На що чекати при відкритті сесії
+
+Пиши тільки якщо є конкретний план.
+Якщо нічого — одне речення і далі."""
+
+                    response = clean_llm_note(
+                        ask_agent(
+                            "marichka",
+                            system,
+                            context,
+                            max_tokens=500,
+                            db_path=db_path,
+                        )
+                    )
+                    if not response:
+                        continue
+                    skip_phrases = [
+                        "нічого цікавого",
+                        "немає сетапу",
+                        "пропускаємо",
+                        "не цікаво",
+                        "мовчу",
+                    ]
+                    if any(p in response.lower() for p in skip_phrases):
+                        continue
+                    homework_results.append(
+                        {
+                            "symbol": symbol,
+                            "analysis": response,
+                            "context": context,
+                        }
+                    )
+                    try:
+                        briefing_save(db_path, symbol, "evening", response)
+                    except Exception as save_exc:
+                        print(f"[homework] briefing_save {symbol}: {save_exc}")
+                    await send_office(f"🌙 {symbol}\n{response[:3800]}", stream="general")
+                    await asyncio.sleep(2.0)
+                except Exception as e:
+                    print(f"[homework] {symbol}: {e}")
+                    continue
+
+            if not homework_results:
+                await send_office(
+                    "🌙 Марічка: Нічого цікавого сьогодні. Ринок без чітких сетапів на завтра.",
+                    stream="general",
+                )
+                return
+
+            all_analyses = "\n\n".join(
+                f"{r['symbol']}:\n{r['analysis']}" for r in homework_results
+            )
+
+            lev_context = f"""
+Марічка проаналізувала {len(homework_results)} монет на завтра:
+
+{all_analyses}
+
+Дай фінальний план на завтра:
+- Які монети в пріоритеті?
+- В яку сесію входити?
+- Який напрямок?
+- Конкретні зони входу.
+"""
+
+            lev_system = """Ти Лев.
+Підсумовуєш домашнє завдання команди.
+Коротко і конкретно. Тільки українська.
+
+Дай план на завтра:
+1. Топ 2-3 монети з конкретними зонами
+2. В яку сесію входити (Азія/Лондон/NY)
+3. Напрямок і умова входу
+4. Що скасовує план
+
+Максимум 10 речень."""
+
+            lev_response = clean_llm_note(
+                ask_agent(
+                    "lev",
+                    lev_system,
+                    lev_context,
+                    max_tokens=600,
+                    db_path=db_path,
+                )
+            )
+
+            if lev_response:
+                await send_office(f"🦁 ПЛАН НА ЗАВТРА:\n\n{lev_response[:3800]}", stream="general")
+                try:
+                    briefing_save(db_path, "ALL", "evening_homework", lev_response)
                 except Exception as save_exc:
-                    print(f"[marichka-evening] briefing_save {symbol}: {save_exc}")
-                await asyncio.sleep(2.0)
-            except Exception as exc:
-                print(f"[marichka-evening] {symbol}: {exc}")
-                continue
+                    print(f"[homework] briefing_save ALL evening_homework: {save_exc}")
+        except Exception as e:
+            print(f"[evening-homework] error: {e}")
 
     async def marichka_evening_briefing() -> None:
-        """Щодня ~21:00 за OFFICE_BRIEFING_TZ (дефолт Europe/Kyiv) — вечірній брифінг Марічки."""
+        """Щодня ~21:00 за OFFICE_BRIEFING_TZ — командне вечірнє домашнє завдання (Марічка + Лев)."""
         nonlocal last_marichka_evening_date
         while True:
             try:
@@ -3598,9 +3739,9 @@ async def run() -> None:
                 today = now.strftime("%Y-%m-%d")
                 # Вікно 5 хв, щоб не пропустити хвилину при sleep(30).
                 if now.hour == 21 and now.minute < 5 and last_marichka_evening_date != today:
-                    await run_marichka_evening()
+                    await run_evening_homework()
                     last_marichka_evening_date = today
-                    print("[relay] marichka evening briefing sent")
+                    print("[relay] evening homework (team) sent")
                     await asyncio.sleep(3660)
                 else:
                     await asyncio.sleep(30)
