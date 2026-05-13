@@ -189,11 +189,11 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "get_edge_score",
         "description": (
-            "Edge Detector — визначає чи є статистична перевага для входу. "
-            "Score 0-100. Grade A+/B/C. "
-            "A+ (score>=60, 3+ факторів) = вхід. "
-            "B або C = чекаємо або пропускаємо. "
-            "7 факторів: ATR, sweep, BOS/CHOCH, OTE, OB, FVG, session confluence."
+            "Edge Detector — setup score 0–100, поріг 85 для снайперського входу. "
+            "has_edge=true лише при score>=85 і напрямку LONG/SHORT. "
+            "Компоненти: рівні ліквідності, sweep, BOS, режим BTC, стакан китів, "
+            "funding, ATR day_used, режим символу (не NEWS_CHAOS/PANIC). "
+            "Grade A+ (85+), B (70–84), C (<70)."
         ),
         "input_schema": {
             "type": "object",

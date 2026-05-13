@@ -131,7 +131,7 @@ LEV_RULE = """
 
 ПЕРЕД КОЖНИМ ВХОДОМ ОБОВ'ЯЗКОВО:
 0. get_probability_score — спочатку ймовірність напрямку. NO_TRADE або confidence LOW = ПРОПУСК.
-0.5. get_edge_score — Edge Detector. Grade C або score < 60 = ПРОПУСК. Тільки A+ сетапи заслуговують входу.
+0.5. get_edge_score — поріг 85 (снайпер); нижче — без входу
 1. get_market_regime — режим ринку
 2. get_session_levels — Asia/London/NY рівні
 3. get_liquidity_sweep — чи був sweep
@@ -4078,6 +4078,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             from office_market_data import (
                 fetch_atr_context,
                 fetch_candles,
+                fetch_edge_score,
                 fetch_funding_rate,
                 fetch_key_levels,
                 fetch_liquidations_proxy,
@@ -4196,6 +4197,37 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                     if atr_used > 85:
                         continue
 
+                    edge_data = fetch_edge_score(symbol)
+                    if not edge_data.get("has_edge"):
+                        try:
+                            fac = edge_data.get("factors") or []
+                            factors_txt = "; ".join(str(x) for x in fac)[:500]
+                            signal_upsert(
+                                db_path,
+                                signal_id=f"watch-edge-{symbol}",
+                                symbol=symbol,
+                                direction=str(edge_data.get("recommendation") or "NO_TRADE"),
+                                entry_low=None,
+                                entry_high=None,
+                                sl=None,
+                                tp1=None,
+                                tp2=None,
+                                rr=None,
+                                status="WATCHING",
+                                analysis_note=(
+                                    f"edge_score={edge_data.get('edge_score')} "
+                                    f"grade={edge_data.get('grade')} "
+                                    f"{edge_data.get('verdict', '')}. {factors_txt}"
+                                ),
+                            )
+                        except Exception as exc_w:
+                            print(f"[scanner] watch-edge {symbol}: {exc_w}")
+                        continue
+
+                    setup_direction = str(edge_data.get("recommendation") or "").upper().strip()
+                    if setup_direction not in ("LONG", "SHORT"):
+                        continue
+
                     ls = fetch_long_short_ratio(symbol)
                     funding = fetch_funding_rate(symbol)
                     ote = fetch_ote_levels(symbol, "1h")
@@ -4204,31 +4236,24 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                     funding_pct = float((funding or {}).get("funding_rate_pct", 0) or 0)
                     ls_ratio = float((ls or {}).get("current_ratio", 1) or 1)
 
-                    has_setup = False
-                    setup_direction = ""
-                    if funding_pct < -0.005 or ls_ratio < 0.8:
-                        has_setup = True
-                        setup_direction = "LONG"
-                    elif funding_pct > 0.01 or ls_ratio > 2.5:
-                        has_setup = True
-                        setup_direction = "SHORT"
-
-                    if has_setup:
-                        setups_found.append(
-                            {
-                                "symbol": symbol,
-                                "direction": setup_direction,
-                                "atr_used": atr.get("day_used_pct") if isinstance(atr, dict) else atr_used,
-                                "funding": funding_pct,
-                                "ls_ratio": ls_ratio,
-                                "ote": ote,
-                                "levels": levels,
-                                "atr": atr,
-                                "quote_volume": quote_volume,
-                                "change_pct": change_pct,
-                            }
-                        )
-                        _last_signal_time[symbol] = time.time()
+                    setups_found.append(
+                        {
+                            "symbol": symbol,
+                            "direction": setup_direction,
+                            "atr_used": edge_data.get("day_used_pct", atr_used),
+                            "funding": funding_pct,
+                            "ls_ratio": ls_ratio,
+                            "ote": ote,
+                            "levels": levels,
+                            "atr": atr,
+                            "quote_volume": quote_volume,
+                            "change_pct": change_pct,
+                            "edge_score": edge_data.get("edge_score"),
+                            "edge_grade": edge_data.get("grade"),
+                            "edge_verdict": edge_data.get("verdict"),
+                        }
+                    )
+                    _last_signal_time[symbol] = time.time()
                 except Exception:
                     continue
 
@@ -5011,13 +5036,13 @@ TradingView знайшов патерн на {tf}.
    get_pd_array — Premium чи Discount?
 
 4. Вхід:
-   get_edge_score — яка перевага?
+   get_edge_score — score >= 85 і has_edge, інакше відхилення
    get_order_book_walls — де стіни китів?
    get_key_levels — ключові рівні Герчика?
 
-Якщо 3+ факторів підтверджують {direction}
+Якщо score >= 85 і 3+ факторів підтверджують {direction}
 — дай Entry/SL/TP/RR.
-Якщо менше 3 — відхиляй з поясненням.
+Якщо менше — відхиляй з поясненням.
 
 Говориш тільки українською.
 Жодних англійських слів."""

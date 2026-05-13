@@ -19,6 +19,9 @@ _PROBABILITY_PHASE4_DEFAULT: Dict[str, Any] = {
     "fake_breakout_prob": 20,
 }
 
+# Поріг «снайперського» сетапу для fetch_edge_score() та проактивного сканера.
+SIGNAL_THRESHOLD = 85
+
 
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
     qs = urlencode(params)
@@ -1214,12 +1217,40 @@ def fetch_probability_score(symbol: str, db_path: Optional[str] = None) -> Dict[
         }
 
 
+def _near_session_or_pdh_pdl(price: float, session_d: Dict[str, Any], tol: float = 0.005) -> bool:
+    """Ціна близько до PDH/PDL або high/low сесій Asia/London/NY."""
+    if price <= 0 or not session_d:
+        return False
+    keys = (
+        "pdh",
+        "pdl",
+        "asia_high",
+        "asia_low",
+        "london_high",
+        "london_low",
+        "ny_high",
+        "ny_low",
+    )
+    for k in keys:
+        raw = session_d.get(k)
+        if raw is None:
+            continue
+        try:
+            lv = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if lv <= 0:
+            continue
+        if abs(price - lv) / lv < tol:
+            return True
+    return False
+
+
 def fetch_edge_score(symbol: str) -> Dict[str, Any]:
     """
-    Edge Detector — чи є confluence для статистичної переваги перед входом.
+    Edge Detector — setup score 0–100 (макс. після капу 100), поріг SIGNAL_THRESHOLD.
 
-    Накопичує score 0–100 і кількість «підтверджених» факторів.
-    A+: score >= 60 і confirmed >= 3 (has_edge=True); B / C — слабко або без edge.
+    has_edge=True лише якщо score >= SIGNAL_THRESHOLD і напрямок LONG/SHORT.
     """
     try:
         sym = str(symbol or "").upper().strip()
@@ -1233,17 +1264,27 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
                 "verdict": "Немає символу",
                 "factors": [],
                 "recommendation": "NO_TRADE",
+                "signal_threshold": SIGNAL_THRESHOLD,
+                "day_used_pct": None,
+                "funding_rate_pct": None,
+                "structure_event": "",
             }
         if not sym.endswith("USDT"):
             sym = f"{sym}USDT"
+
+        fr = 0.0
+        day_used = 100.0
+        struct_event = ""
 
         atr = fetch_atr_context(sym)
         sweep = fetch_liquidity_sweep(sym, "1h")
         structure = fetch_market_structure(sym, "1h")
         pd_arr = fetch_pd_array(sym, "4h")
-        ob = fetch_order_blocks(sym, "1h")
-        fvg = fetch_fvg(sym, "1h")
         session = fetch_session_levels(sym)
+        walls = fetch_order_book_walls(sym)
+        funding = fetch_funding_rate(sym)
+        regime_sym = fetch_market_regime(sym)
+        regime_btc = fetch_market_regime("BTCUSDT")
         _dbp = (os.getenv("OFFICE_DB_PATH") or os.getenv("DATABASE_URL") or "").strip() or None
         prob = fetch_probability_score(sym, _dbp)
 
@@ -1251,117 +1292,110 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
         sweep_d = sweep if isinstance(sweep, dict) else {}
         structure_d = structure if isinstance(structure, dict) else {}
         pd_d = pd_arr if isinstance(pd_arr, dict) else {}
-        ob_d = ob if isinstance(ob, dict) else {}
-        fvg_d = fvg if isinstance(fvg, dict) else {}
         session_d = session if isinstance(session, dict) else {}
+        walls_d = walls if isinstance(walls, dict) else {}
+        funding_d = funding if isinstance(funding, dict) else {}
+        regime_sym_d = regime_sym if isinstance(regime_sym, dict) else {}
+        regime_btc_d = regime_btc if isinstance(regime_btc, dict) else {}
         prob_d = prob if isinstance(prob, dict) else {}
+
+        direction = str(prob_d.get("recommendation") or "").strip().upper()
+        if direction not in ("LONG", "SHORT"):
+            direction = str(direction or "NO_TRADE").upper() or "NO_TRADE"
+
+        curr_f = float(pd_d.get("current_price") or 0.0)
+        if curr_f <= 0:
+            c1h = fetch_candles(sym, "1h", 1)
+            if isinstance(c1h, list) and c1h and isinstance(c1h[-1], dict):
+                try:
+                    curr_f = float(c1h[-1].get("close") or 0.0)
+                except (TypeError, ValueError):
+                    curr_f = 0.0
 
         edge_score = 0
         edge_factors: List[str] = []
         confirmed = 0
-        direction = str(prob_d.get("recommendation") or "")
 
-        day_used = float(atr_d.get("day_used_pct") or 100.0)
-        if day_used < 50:
+        # 1. Liquidity location (+15)
+        if curr_f > 0 and _near_session_or_pdh_pdl(curr_f, session_d):
             edge_score += 15
-            edge_factors.append(f"ATR залишок {100 - day_used:.0f}% — є куди йти")
+            edge_factors.append("Ціна біля рівня ліквідності (сесія / PDH / PDL)")
             confirmed += 1
-        elif day_used < 70:
-            edge_score += 8
-            edge_factors.append(f"ATR залишок {100 - day_used:.0f}% — помірний запас")
 
+        # 2. Sweep (+20)
         if sweep_d.get("bsl_sweep") or sweep_d.get("ssl_sweep"):
             edge_score += 20
             lvl = sweep_d.get("sweep_level")
-            edge_factors.append(f"Sweep підтверджено @ {lvl} — маніпуляція відпрацьована")
+            edge_factors.append(f"Sweep підтверджено @ {lvl}")
             confirmed += 1
 
+        # 3. Displacement BOS (+15)
         struct_event = str(structure_d.get("event") or "")
         if struct_event in ("BOS_BULLISH", "BOS_BEARISH"):
-            edge_score += 20
-            edge_factors.append(f"{struct_event} — структурне підтвердження")
+            edge_score += 15
+            edge_factors.append(f"{struct_event} — імпульс після структури")
             confirmed += 1
-        elif struct_event == "CHOCH":
+
+        # 4. BTC context (+10)
+        btc_reg = str(regime_btc_d.get("regime") or "").upper()
+        if btc_reg and btc_reg not in ("RANGE", "NEUTRAL", "NEWS_CHAOS", "LOW_LIQUIDITY", "UNKNOWN"):
             edge_score += 10
-            edge_factors.append("CHOCH — зміна характеру")
+            edge_factors.append(f"BTC режим сприяє: {btc_reg}")
+            confirmed += 1
 
-        ote_low = pd_d.get("ote_low")
-        ote_high = pd_d.get("ote_high")
-        current = float(pd_d.get("current_price") or 0.0)
+        # 5. Whales aligned (+10) — підтримка для LONG, опір для SHORT
+        biggest_bid = walls_d.get("biggest_support")
+        biggest_ask = walls_d.get("biggest_resistance")
+        if direction == "LONG" and biggest_bid:
+            edge_score += 10
+            edge_factors.append("Кит BID на стороні лонгу")
+            confirmed += 1
+        elif direction == "SHORT" and biggest_ask:
+            edge_score += 10
+            edge_factors.append("Кит ASK на стороні шорту")
+            confirmed += 1
 
-        if ote_low is not None and ote_high is not None and current > 0:
-            ol = float(ote_low)
-            oh = float(ote_high)
-            if ol <= current <= oh:
-                edge_score += 20
-                edge_factors.append(f"Ціна в OTE зоні {ol}–{oh} — снайперська точка")
-                confirmed += 1
+        # 6. Funding (+10)
+        try:
+            fr = abs(float(funding_d.get("funding_rate_pct", 0) or 0))
+        except (TypeError, ValueError):
+            fr = 0.0
+        if fr < 0.05:
+            edge_score += 10
+            edge_factors.append(f"Funding помірний ({fr:.4f}%)")
+            confirmed += 1
 
-        curr_f = current
+        # 7. ATR (+10 / +5)
+        day_used = float(atr_d.get("day_used_pct") or 100.0)
+        if day_used < 60:
+            edge_score += 10
+            edge_factors.append(f"ATR: запас ходу великий (day_used {day_used:.0f}%)")
+            confirmed += 1
+        elif day_used < 75:
+            edge_score += 5
+            edge_factors.append(f"ATR: помірний запас (day_used {day_used:.0f}%)")
+            confirmed += 1
 
-        if direction == "LONG" and ob_d.get("bullish_ob"):
-            bull_ob = ob_d["bullish_ob"]
-            if isinstance(bull_ob, dict):
-                ob_low = float(bull_ob.get("low") or 0.0)
-                ob_high = float(bull_ob.get("high") or 0.0)
-                if curr_f > 0 and ob_low <= curr_f <= ob_high:
-                    edge_score += 15
-                    edge_factors.append(f"Ціна в Bullish OB {ob_low}–{ob_high}")
-                    confirmed += 1
-        elif direction == "SHORT" and ob_d.get("bearish_ob"):
-            bear_ob = ob_d["bearish_ob"]
-            if isinstance(bear_ob, dict):
-                ob_low = float(bear_ob.get("low") or 0.0)
-                ob_high = float(bear_ob.get("high") or 0.0)
-                if curr_f > 0 and ob_low <= curr_f <= ob_high:
-                    edge_score += 15
-                    edge_factors.append(f"Ціна в Bearish OB {ob_low}–{ob_high}")
-                    confirmed += 1
-
-        if direction == "LONG" and fvg_d.get("bullish_fvg"):
-            bfvg = fvg_d["bullish_fvg"]
-            if isinstance(bfvg, dict):
-                fvg_l = float(bfvg.get("low") or 0.0)
-                fvg_h = float(bfvg.get("high") or 0.0)
-                if curr_f > 0 and fvg_l <= curr_f <= fvg_h:
-                    edge_score += 10
-                    edge_factors.append(f"Ціна в Bullish FVG {fvg_l}–{fvg_h}")
-                    confirmed += 1
-        elif direction == "SHORT" and fvg_d.get("bearish_fvg"):
-            bfv = fvg_d["bearish_fvg"]
-            if isinstance(bfv, dict):
-                fvg_l = float(bfv.get("low") or 0.0)
-                fvg_h = float(bfv.get("high") or 0.0)
-                if curr_f > 0 and fvg_l <= curr_f <= fvg_h:
-                    edge_score += 10
-                    edge_factors.append(f"Ціна в Bearish FVG {fvg_l}–{fvg_h}")
-                    confirmed += 1
-
-        ny_low = float(session_d.get("ny_low") or 0.0)
-        london_low = float(session_d.get("london_low") or 0.0)
-
-        if curr_f > 0 and ny_low > 0:
-            near_ny_low = abs(curr_f - ny_low) / ny_low < 0.005
-            near_london_low = london_low > 0 and abs(curr_f - london_low) / london_low < 0.005
-            if near_ny_low or near_london_low:
-                edge_score += 15
-                edge_factors.append("Ціна біля сесійного low — confluence зона")
-                confirmed += 1
+        # 8. News / режим символу (+10)
+        regime_val = str(regime_sym_d.get("regime") or "").upper()
+        if regime_val not in ("NEWS_CHAOS", "PANIC"):
+            edge_score += 10
+            edge_factors.append(f"Новинний/режимний фон ок ({regime_val or 'NEUTRAL'})")
+            confirmed += 1
 
         edge_score = min(edge_score, 100)
 
-        if edge_score >= 60 and confirmed >= 3:
+        if edge_score >= SIGNAL_THRESHOLD:
             grade = "A+"
-            has_edge = True
-            verdict = "EDGE є — вхід можливий"
-        elif edge_score >= 40 and confirmed >= 2:
+            verdict = "СНАЙПЕРСЬКИЙ ВХІД — дозволено"
+        elif edge_score >= 70:
             grade = "B"
-            has_edge = False
-            verdict = "Слабкий edge — чекаємо"
+            verdict = "Слабкий сетап — чекаємо"
         else:
             grade = "C"
-            has_edge = False
-            verdict = "Немає edge — ПРОПУСК"
+            verdict = "Немає переваги — мовчимо"
+
+        has_edge = bool(edge_score >= SIGNAL_THRESHOLD and direction in ("LONG", "SHORT"))
 
         return {
             "symbol": sym,
@@ -1371,7 +1405,11 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
             "confirmed_factors": confirmed,
             "verdict": verdict,
             "factors": edge_factors,
-            "recommendation": direction,
+            "recommendation": direction if direction in ("LONG", "SHORT") else "NO_TRADE",
+            "signal_threshold": SIGNAL_THRESHOLD,
+            "day_used_pct": day_used,
+            "funding_rate_pct": fr,
+            "structure_event": struct_event,
         }
     except Exception as e:
         print(f"[edge] error {symbol}: {e}")
@@ -1384,6 +1422,10 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
             "verdict": "Помилка розрахунку",
             "factors": [],
             "recommendation": "NO_TRADE",
+            "signal_threshold": SIGNAL_THRESHOLD,
+            "day_used_pct": None,
+            "funding_rate_pct": None,
+            "structure_event": "",
         }
 
 
