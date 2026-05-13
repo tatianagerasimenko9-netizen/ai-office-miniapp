@@ -275,9 +275,28 @@ def _kill_zone_session_name(utc_now: datetime) -> str:
     return "OFF_HOURS"
 
 
+AGENT_EMOJI: Dict[str, str] = {
+    "lev": "🦁",
+    "maks": "⚡",
+    "marichka": "🌙",
+    "news": "📰",
+    "daryna": "🛡️",
+    "marko": "🎯",
+    "olesya": "📊",
+    "memory": "🧠",
+    "psych": "💙",
+    "dev": "⚙️",
+}
+
+
 def fmt_agent_line(agent_key: str, text: str) -> str:
     # Hidden routing tag for relay multi-bot delivery; stripped before sending to Telegram.
-    return f"@@{agent_key}@@{text}"
+    key = str(agent_key or "").strip().lower()
+    prof = AGENTS.get(key)
+    agent_name = prof.name if prof else key
+    emoji = (AGENT_EMOJI.get(key) or "").strip()
+    body = f"{emoji} {agent_name}: {text}" if emoji else f"{agent_name}: {text}"
+    return f"@@{key}@@{body}"
 
 
 def _task_status_line(task_id: str, status: TaskStatus, assignee: str) -> str:

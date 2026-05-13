@@ -2054,35 +2054,33 @@ async def office_free_chat(
         "lev": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 42 роки. Ти Лев — керівник офісу. "
-            "Холодна голова. Відповідаєш Тетяні коротко і впевнено."
+            "Ти Лев — голова столу. Спокійний, впевнений; з Тетяною говориш як з партнером, не як з інструкцією."
         ),
         "maks": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 38 років. Ти Макс — ринковий аналітик. Бачиш ринок через цифри. Відповідаєш по суті."
+            "Ти Макс — твій стиль як у радара: помітив дивне в цифрах — сказав; якщо все рівно — не розводиш."
         ),
         "marichka": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 26 років. Ти Марічка — аналітик тренду. Говориш образно і просто."
+            "Ти Марічка — говориш просто, образами; як подруга, яка дивиться на графік разом з Тетяною."
         ),
         "daryna": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 34 роки. Ти Дарина — захищаєш капітал. Пряма і чесна. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
+            "Ти Дарина — скеля: тепло не втрачаєш, але про ризик говориш прямо. "
+            "Якщо питають про відкриті позиції чи PnL — чесно: зараз цього в чаті не видно, глянь Mini App."
         ),
         "marko": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 29 років. Ти Марко — технічний виконавець. Точний."
+            "Ти Марко — людина-дія: що робити зараз, куди дивитись, без зайвих абзаців."
         ),
         "news": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Тобі 31 рік. Ти Назар — стежиш за новинами. Обережний."
+            "Ти Назар — як у кого календар у голові: коротко «тихо» або «тут уважно», без лекцій."
         ),
         "olesya": (
             f"{OLESYA_RULE}\n"
@@ -2091,9 +2089,8 @@ async def office_free_chat(
         "memory": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Ти Софія — знаєш історію угод. Говориш тільки фактами з журналу. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
+            "Ти Софія — пам'ять офісу: нагадуєш історію людською мовою, без сухих таблиць. "
+            "Про відкриті позиції / точний PnL у чаті не вигадуй — відсилай до Mini App."
         ),
         "psych": (
             f"{VICTOR_RULE}\n"
@@ -2102,7 +2099,7 @@ async def office_free_chat(
         "dev": (
             f"{LEV_RULE}"
             f"{language_block}\n"
-            "Ти Артем — технічний девелопер. Відповідаєш про систему."
+            "Ти Артем — свій у техніці: якщо все ок, кажеш коротко; якщо ні — без паніки, по кроках."
         ),
     }
 
@@ -4099,21 +4096,40 @@ SYMBOL
         except Exception as e:
             print(f"[victor] error: {e}")
 
-    async def _olesya_live_signal_line(context: str, max_tokens: int = 80) -> None:
+    async def _agent_live_reaction(agent_key: str, context: str, max_tokens: int = 60) -> None:
         try:
-            msg = clean_llm_note(
+            from office_bridge import LEV_RULE as _br_lev, OLESYA_RULE as _br_olesya, VICTOR_RULE as _br_vic
+
+            key = str(agent_key or "").strip().lower()
+            rules = {
+                "lev": _br_lev,
+                "olesya": _br_olesya,
+                "psych": _br_vic,
+                "marko": _br_lev,
+                "maks": _br_lev,
+                "marichka": _br_lev,
+                "news": _br_lev,
+                "daryna": _br_lev,
+                "memory": _br_lev,
+                "dev": _br_lev,
+            }
+            system = rules.get(key) or _br_lev
+            response = clean_llm_note(
                 ask_agent(
-                    "olesya",
-                    OLESYA_RULE,
+                    key,
+                    system,
                     context,
                     max_tokens=max_tokens,
                     db_path=db_path,
                 )
             )
-            if msg:
-                await send_office(fmt_agent_line("olesya", msg), stream="general")
+            if response:
+                await send_office(fmt_agent_line(key, response), stream="general")
         except Exception as exc:
-            print(f"[olesya-live] {exc}")
+            print(f"[agent-live] {agent_key}: {exc}")
+
+    async def _olesya_live_signal_line(context: str, max_tokens: int = 80) -> None:
+        await _agent_live_reaction("olesya", context, max_tokens=max_tokens)
 
     async def monitor_active_signals() -> None:
         from office_market_data import (
@@ -4140,7 +4156,7 @@ SYMBOL
                 f"Що робити зараз: {action_now}\n"
                 f"SL після дії: {sl_after}"
             )
-        _olesya_win_burst_prev = 0
+        _win_streak_celebrated_at = 0
         while True:
             utc_now = datetime.now(timezone.utc)
             minute_of_day = utc_now.hour * 60 + utc_now.minute
@@ -4421,13 +4437,58 @@ SYMBOL
                                         "Команда добре відпрацювала.",
                                         80,
                                     )
+                                    await _agent_live_reaction(
+                                        "lev",
+                                        f"{symbol} досяг другого тейку. "
+                                        f"Команда відпрацювала план.",
+                                        max_tokens=60,
+                                    )
+                                    await asyncio.sleep(1.0)
+                                    await _agent_live_reaction(
+                                        "marko",
+                                        f"{symbol} TP2 досягнуто. "
+                                        f"Execution план виконано.",
+                                        max_tokens=60,
+                                    )
                                     streak_tp = office_signals_tp2_streak(db_path)
-                                    if streak_tp >= 3 and _olesya_win_burst_prev < 3:
+                                    if streak_tp < 3:
+                                        _win_streak_celebrated_at = 0
+                                    elif streak_tp >= 5 and _win_streak_celebrated_at < 5:
+                                        ctx5 = (
+                                            "П'ять других тейків підряд по всьому офісу. "
+                                            "Одне щире коротке речення від твоєї ролі — без списків і без сленгу."
+                                        )
+                                        for ak in (
+                                            "lev",
+                                            "maks",
+                                            "marichka",
+                                            "news",
+                                            "daryna",
+                                            "marko",
+                                            "olesya",
+                                            "memory",
+                                            "psych",
+                                            "dev",
+                                        ):
+                                            await _agent_live_reaction(ak, ctx5, max_tokens=50)
+                                            await asyncio.sleep(0.35)
+                                        _win_streak_celebrated_at = 5
+                                    elif streak_tp >= 3 and _win_streak_celebrated_at < 3:
                                         await _olesya_live_signal_line(
                                             "Три виграші підряд по команді.",
                                             80,
                                         )
-                                    _olesya_win_burst_prev = streak_tp
+                                        await _agent_live_reaction(
+                                            "lev",
+                                            "Три виграші підряд по команді. "
+                                            "Коротко — що це дає офісу зараз.",
+                                            max_tokens=60,
+                                        )
+                                        _win_streak_celebrated_at = 3
+                                    elif streak_tp >= 5:
+                                        _win_streak_celebrated_at = max(_win_streak_celebrated_at, 5)
+                                    elif streak_tp >= 3:
+                                        _win_streak_celebrated_at = max(_win_streak_celebrated_at, 3)
                                 except Exception as exc_st:
                                     print(f"[olesya-live-tp2] {exc_st}")
                                 continue
