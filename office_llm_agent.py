@@ -449,6 +449,12 @@ def ask_agent(
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return ""
+        try:
+            from office_bridge import _with_shared_comm_ua
+
+            system_prompt = _with_shared_comm_ua(system_prompt)
+        except Exception:
+            pass
         context_text = str(user_context or "")
         if agent_norm == "lev":
             recent_db_path = str(db_path or "").strip() or os.getenv("DATABASE_URL", "").strip() or os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip() or "office_bridge.db"
