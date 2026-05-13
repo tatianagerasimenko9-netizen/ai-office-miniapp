@@ -41,6 +41,7 @@ from office_bridge import (
     check_drawdown_alert,
     check_portfolio_correlation,
     clean_llm_note,
+    clean_self_naming,
     detect_setup_type,
     fmt_agent_line,
     get_agent_card_text,
@@ -714,10 +715,12 @@ def format_kyiv_time(dt: datetime) -> str:
     return f"{dt.hour} год {dt.minute:02d} хв"
 
 
-def get_session_status_kyiv() -> str:
+def get_session_status_kyiv(*, include_kill_zone: bool = True) -> str:
     """
     Повертає поточний статус сесій у зрозумілому форматі за Києвом
     (OFFICE_BRIEFING_TZ, зазвичай Europe/Kyiv).
+
+    include_kill_zone=False — без рядка KILL ZONE (щоб не дублювати session_announcer).
     """
     tz = _briefing_tzinfo()
     now = datetime.now(tz)
@@ -732,10 +735,11 @@ def get_session_status_kyiv() -> str:
     if h >= 16 or h < 1:
         sessions.append("🇺🇸 Нью-Йорк відкритий")
 
-    if 11 <= h < 14:
-        sessions.append("⚡ KILL ZONE Лондон (з 11 год до 14 год за Києвом)")
-    elif 16 <= h < 19:
-        sessions.append("⚡ KILL ZONE Нью-Йорк (з 16 год до 19 год за Києвом)")
+    if include_kill_zone:
+        if 11 <= h < 14:
+            sessions.append("⚡ KILL ZONE Лондон (з 11 год до 14 год за Києвом)")
+        elif 16 <= h < 19:
+            sessions.append("⚡ KILL ZONE Нью-Йорк (з 16 год до 19 год за Києвом)")
 
     if not sessions:
         sessions.append("😴 Між сесіями — тихо")
@@ -2619,7 +2623,8 @@ async def run() -> None:
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             await send_office(
-                "Офіс на зв'язку. Готові працювати.\n\n" + get_session_status_kyiv()
+                "Офіс на зв'язку. Готові працювати.\n\n"
+                + get_session_status_kyiv(include_kill_zone=False)
             )
             _RELAY_OFFICE_STARTUP_PING_SENT = True
             print("[relay] startup ping sent to OFFICE")
@@ -2649,6 +2654,7 @@ async def run() -> None:
                     )
                 )
                 if olesya_hi:
+                    olesya_hi = clean_self_naming(olesya_hi, "olesya")
                     await send_office(fmt_agent_line("olesya", olesya_hi), stream="general")
             except Exception as exc_ohi:
                 print(f"[relay][WARN] olesya startup greet failed: {exc_ohi}")
@@ -3236,7 +3242,7 @@ async def run() -> None:
 
     async def monitor_news() -> None:
         nonlocal last_news_level
-        http_timeout = aiohttp.ClientTimeout(total=10)
+        http_timeout = aiohttp.ClientTimeout(total=25)
         async with aiohttp.ClientSession(timeout=http_timeout) as session:
             while True:
                 try:
@@ -3898,7 +3904,8 @@ SYMBOL
                 if not text:
                     return
                 # Text is already shortened by _trim_lines.
-                msg = fmt_agent_line(agent_key, text)
+                body = clean_self_naming(str(text).strip(), agent_key)
+                msg = fmt_agent_line(agent_key, body)
                 await send_office(msg[:3800], stream="general")
 
             await _send_agent_turn("lev", f"Тетяно, бачу сетап 👀\n{direction} {symbol} — команда, аналіз.")
@@ -4142,6 +4149,7 @@ SYMBOL
                 )
             )
             if response:
+                response = clean_self_naming(response, key)
                 await send_office(fmt_agent_line(key, response), stream="general")
         except Exception as exc:
             print(f"[agent-live] {agent_key}: {exc}")
@@ -4883,7 +4891,7 @@ TradingView сигнал:
         """MASTER п.32–33: екстремальний funding BTC та «втома» ATR (24h range %) — з cooldown."""
         last_fund_mono = 0.0
         last_atr_mono = 0.0
-        http_timeout = aiohttp.ClientTimeout(total=12)
+        http_timeout = aiohttp.ClientTimeout(total=25)
         while True:
             try:
                 if os.getenv("OFFICE_MARKET_ALERTS_DISABLE", "").strip() == "1":
@@ -4920,7 +4928,7 @@ TradingView сигнал:
                     )
                     last_atr_mono = now_m
             except Exception as exc:
-                print(f"[relay][WARN] monitor_funding_atr_alerts failed: {exc}")
+                print(f"[relay][WARN] monitor_funding_atr_alerts failed: {exc!r}")
             await asyncio.sleep(int(os.getenv("OFFICE_MARKET_ALERT_POLL_SEC", "180") or "180"))
 
     asyncio.create_task(monitor_funding_atr_alerts())

@@ -2165,7 +2165,9 @@ def journal_learning_hints_from_tags(tags: Dict[str, int]) -> List[str]:
 async def agent_say(sender: AsyncSender, agent_key: str, text: str, delay_sec: float = 0.15) -> None:
     if delay_sec > 0:
         await asyncio.sleep(delay_sec)
-    await sender(fmt_agent_line(agent_key, polish_agent_message(text)))
+    polished = polish_agent_message(text)
+    body = clean_self_naming(polished, agent_key)
+    await sender(fmt_agent_line(agent_key, body))
 
 
 def _last_turn(conversation: List[ConversationTurn]) -> str:
@@ -2219,9 +2221,13 @@ def _fmt_level(v: Optional[float]) -> str:
 
 
 def clean_self_naming(text: str, agent_key: str) -> str:
-    """Прибирає самоназивання агента (підпис уже дає fmt_agent_line)."""
+    """Прибирає самоназивання агента (підпис уже дає fmt_agent_line).
+
+    Покриває варіанти на кшталт «📊 **Олеся:** …» після clean_llm_note (зірки зняті
+    частково) та «**🦁 Лев:**» на початку відповіді.
+    """
     if not text or not str(text).strip():
-        return text
+        return str(text or "")
     agent_names = {
         "lev": ["лев", "lev"],
         "maks": ["макс", "maks", "max"],
@@ -2236,14 +2242,20 @@ def clean_self_naming(text: str, agent_key: str) -> str:
     }
     key = str(agent_key or "").strip().lower()
     names = agent_names.get(key, [])
-    out = str(text)
+    out = str(text).strip()
+    # Усе до імені, що не є літерою/цифрою (emoji, *, пробіли, розділові знаки)
+    _lc = r"A-Za-zА-Яа-яЇїІіЄєҐґ"
     for name in names:
         if not name:
             continue
         escaped = re.escape(name)
-        # "Ім'я:" / "Ім'я," на початку рядка; дозволяємо зірки markdown навколо імені
-        pattern = rf"^\*{0,2}\s*{escaped}\s*\*{0,2}\s*[:,]\s*"
-        out = re.sub(pattern, "", out, flags=re.IGNORECASE)
+        pattern = (
+            rf"^[^{_lc}0-9]*(?:\*+\s*)*{escaped}"
+            rf"(?:\s*\*+)*\s*[:,]\s*(?:\*+\s*)*"
+        )
+        nxt = re.sub(pattern, "", out, count=1, flags=re.IGNORECASE)
+        if nxt != out:
+            out = nxt.strip()
     return out.strip()
 
 
