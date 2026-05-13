@@ -1872,7 +1872,10 @@ EV позитивне: {prob.get('ev_positive', '')}
 """
     except Exception:
         pass
-    response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
+    print(f"[debug] lev context tail: {context[-300:]}")
+    response = clean_llm_note(
+        ask_agent("lev", system, context, max_tokens=3000, db_path=db_path)
+    )
     if response:
         # Повна відповідь для парсингу рівнів (обрізка до N рядків лише для Telegram).
         response_for_parse = response
@@ -1882,11 +1885,13 @@ EV позитивне: {prob.get('ev_positive', '')}
             response_send = '\n'.join(lines[:16])
         else:
             response_send = response
-        parts = split_long_message(response_send)
-        for i, part in enumerate(parts):
-            await agent_say(sender, "lev", part if i == 0 else "..." + part)
-            if len(parts) > 1:
-                await asyncio.sleep(1.0)
+        _sent = False
+        if not _sent:
+            msg_out = response_send
+            if len(msg_out) > 3900:
+                msg_out = msg_out[:3897] + "..."
+            await agent_say(sender, "lev", msg_out)
+            _sent = True
 
         no_entry_phrases = [
             "не входжу",
