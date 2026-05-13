@@ -304,6 +304,10 @@ def save_relay_config(cfg: Dict[str, Any]) -> None:
             base_tokens = dict(merged.get("agent_bot_tokens") or {})
             base_tokens.update(v)
             merged[k] = base_tokens
+        elif k == "agent_bot_usernames" and isinstance(v, dict) and isinstance(merged.get("agent_bot_usernames"), dict):
+            base_u = dict(merged.get("agent_bot_usernames") or {})
+            base_u.update(v)
+            merged[k] = base_u
         else:
             merged[k] = v
 
@@ -415,6 +419,79 @@ def load_agent_bot_tokens() -> Dict[str, str]:
         pass
 
     return result
+
+
+def load_agent_bot_usernames() -> Dict[str, str]:
+    """
+    Usernames інших ботів для Bot API (Phase 14, direct bot-to-bot).
+    Env: AGENT_BOT_USERNAME_LEV, … або office_relay_config.json → agent_bot_usernames.
+    Значення без @; у sendMessage передається як @username.
+    """
+    keys = ("lev", "maks", "news", "daryna", "marko", "olesya", "memory", "psych", "dev", "marichka")
+    result: Dict[str, str] = {}
+    for k in keys:
+        raw = os.getenv(f"AGENT_BOT_USERNAME_{k.upper()}", "").strip().lstrip("@")
+        if raw:
+            result[k] = raw
+    try:
+        cfg = load_relay_config()
+        nested = cfg.get("agent_bot_usernames")
+        if isinstance(nested, dict):
+            for kk in keys:
+                if kk in result:
+                    continue
+                v2 = str(nested.get(kk, "") or "").strip().lstrip("@")
+                if v2:
+                    result[kk] = v2
+    except Exception:
+        pass
+    return result
+
+
+async def bot_to_bot_message(
+    from_agent: str,
+    to_agent: str,
+    text: str,
+    *,
+    session: Optional[aiohttp.ClientSession] = None,
+    agent_tokens: Optional[Dict[str, str]] = None,
+    agent_usernames: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Відправляє повідомлення від одного агента іншому через Telegram Bot API (sendMessage).
+
+    Потрібні токен відправника та username отримувача (див. load_agent_bot_usernames).
+    У Telegram 2026+ для ланцюга bot→bot обидва боти мають увімкнути bot-to-bot у налаштуваннях.
+    """
+    fk = str(from_agent or "").strip().lower()
+    tk = str(to_agent or "").strip().lower()
+    toks = agent_tokens if agent_tokens is not None else load_agent_bot_tokens()
+    users = agent_usernames if agent_usernames is not None else load_agent_bot_usernames()
+    from_token = toks.get(fk)
+    to_username = (users.get(tk) or "").strip().lstrip("@")
+    if not from_token or not to_username or not (text or "").strip():
+        return
+    url = f"https://api.telegram.org/bot{from_token}/sendMessage"
+    payload: Dict[str, Any] = {
+        "chat_id": f"@{to_username}",
+        "text": str(text)[:3900],
+        "disable_web_page_preview": True,
+    }
+    try:
+
+        async def _post(sess: aiohttp.ClientSession) -> None:
+            async with sess.post(url, json=payload) as resp:
+                body = await resp.json()
+                if resp.status != 200 or not bool((body or {}).get("ok")):
+                    print(f"[bot2bot] send failed {fk}->{tk}: http={resp.status} body={body!r}")
+
+        if session is not None:
+            await _post(session)
+        else:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25)) as sess:
+                await _post(sess)
+    except Exception as e:
+        print(f"[bot2bot] error: {e}")
 
 
 def detect_agent_key(message: str) -> Optional[str]:
@@ -2426,6 +2503,11 @@ async def run() -> None:
         agent_bot_tokens = load_agent_bot_tokens() or {}
     except Exception:
         agent_bot_tokens = {}
+    agent_bot_usernames: Dict[str, str] = {}
+    try:
+        agent_bot_usernames = load_agent_bot_usernames()
+    except Exception:
+        agent_bot_usernames = {}
     bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
     me = await client.get_me()
     owner_user_id: Optional[int] = None
@@ -2504,6 +2586,12 @@ async def run() -> None:
                 seen_ids[bot_id] = k
             lvl = "OK" if ok_chk else "WARN"
             print(f"[relay][{lvl}] bot-check {k}: {note_chk}")
+
+    if agent_bot_usernames:
+        print(
+            f"[relay] bot-to-bot usernames (AGENT_BOT_USERNAME_* / config): "
+            f"{', '.join(sorted(agent_bot_usernames.keys()))}"
+        )
 
     general_thread_id = int(os.getenv("OFFICE_GENERAL_THREAD_ID", "0") or "0") or None
     tasks_thread_id = int(os.getenv("OFFICE_TASKS_THREAD_ID", "0") or "0") or None
@@ -2751,11 +2839,12 @@ async def run() -> None:
 
     last_desk_qa_mono = 0.0
     last_main_fingerprint_by_msg: Dict[int, str] = {}
+    main_lev_automation_last = 0.0
 
     @client.on(events.NewMessage())
     async def on_message(event):  # type: ignore[no-redef]
         try:
-            nonlocal last_source_msg_id
+            nonlocal last_source_msg_id, main_lev_automation_last
             text = event.raw_text or ""
             if not text.strip():
                 return
@@ -2916,6 +3005,44 @@ async def run() -> None:
                 from_scanner = True
 
             if not from_scanner and not looks_like_signal(text):
+                if os.getenv("OFFICE_CHAT_AUTOMATION", "").strip() == "1":
+                    try:
+                        if sender_obj is not None and not bool(getattr(sender_obj, "bot", False)):
+                            sid = int(sender_id) if sender_id is not None else 0
+                            if owner_user_id is None or sid == int(owner_user_id):
+                                now_m = time.monotonic()
+                                if now_m - main_lev_automation_last >= 45.0:
+                                    lev_tok = (agent_bot_tokens or {}).get("lev")
+                                    if lev_tok:
+                                        auto_sys = (
+                                            f"{LEV_RULE}\n"
+                                            "Ти відповідаєш у головному торговому чаті (MAIN), не в офісі. "
+                                            "Коротко по-людськи, без сигналу й без таблиць, українською. "
+                                            "Якщо вітання — підтримай тоном. Якщо питання по ринку — одне чітке речення."
+                                        )
+                                        raw = ask_agent(
+                                            "lev",
+                                            auto_sys,
+                                            f"Повідомлення в MAIN:\n{text.strip()[:900]}",
+                                            max_tokens=200,
+                                            db_path=db_path,
+                                        )
+                                        reply = clean_self_naming(clean_llm_note(raw), "lev")
+                                        if reply.strip():
+                                            out = _strip_agent_tag(fmt_agent_line("lev", reply.strip()))
+                                            ok_auto, reason_auto, _ = await send_via_bot_api(
+                                                bot_http,
+                                                lev_tok,
+                                                int(main_chat_id),
+                                                out,
+                                                reply_to_message_id=msg_id if msg_id > 0 else None,
+                                            )
+                                            if ok_auto:
+                                                main_lev_automation_last = now_m
+                                            else:
+                                                print(f"[relay][WARN] MAIN automation (Lev) failed: {reason_auto}")
+                    except Exception as exc_auto:
+                        print(f"[relay][WARN] OFFICE_CHAT_AUTOMATION failed: {exc_auto}")
                 if os.getenv("RELAY_LOG_NONSIGNAL_MAIN", "").strip() == "1":
                     prev = " ".join((text or "").split())[:180]
                     print(f"[relay][DEBUG] MAIN message ignored (not signal) id={event.id}: {prev}")
