@@ -164,7 +164,10 @@ TP1: [ціна] (+[%])
 TP2: [ціна] (+[%])
 RR: [число]
 Режим: [режим]
-Sweep: [так/ні]
+Контролює: [хто]
+EV: [число]
+Sweep: [%]%
+Був sweep рівня: [так/ні]
 Структура: [BOS/CHOCH/HH-HL/LH-LL]
 Edge: [A+/B/C] ([score]/100)
 Зараз: [ВХОДЬ/ЧЕКАЙ/ПРОПУСКАЄМО]
@@ -1799,8 +1802,10 @@ async def full_auto_analysis(
             fetch_key_levels,
             fetch_liquidations_proxy,
             fetch_long_short_ratio,
+            fetch_market_regime,
             fetch_open_interest,
             fetch_ote_levels,
+            fetch_probability_score,
         )
     except Exception as exc:
         await agent_say(sender, "lev", f"Не можу підняти модулі аналізу для {symbol}: {exc}")
@@ -1854,6 +1859,19 @@ async def full_auto_analysis(
         f"{h4_snapshot}\n"
         f"current_price: {current_price}\n"
     )
+    try:
+        prob = fetch_probability_score(symbol, db_path)
+        regime = fetch_market_regime(symbol)
+        context += f"""
+Додаткові дані:
+Хто контролює: {regime.get('controller', '')}
+Очікувана цінність (EV): {prob.get('expected_value', '')}
+EV позитивне: {prob.get('ev_positive', '')}
+Ймовірність маніпуляції: {prob.get('sweep_probability', '')}%
+Ймовірність фейкового пробою: {prob.get('fake_breakout_prob', '')}%
+"""
+    except Exception:
+        pass
     response = clean_llm_note(ask_agent("lev", system, context, max_tokens=3000))
     if response:
         # Повна відповідь для парсингу рівнів (обрізка до N рядків лише для Telegram).
@@ -3778,8 +3796,10 @@ SYMBOL
                 fetch_key_levels,
                 fetch_liquidations_proxy,
                 fetch_long_short_ratio,
+                fetch_market_regime,
                 fetch_ote_levels,
                 fetch_open_interest,
+                fetch_probability_score,
                 fetch_top_movers,
             )
 
@@ -4124,6 +4144,19 @@ SYMBOL
                 active_signals_short.append(
                     f"{str(s.get('symbol') or '')}:{str(s.get('status') or '')}"
                 )
+            try:
+                prob = fetch_probability_score(symbol, db_path)
+                regime = fetch_market_regime(symbol)
+                lev_extra = f"""
+Додаткові дані:
+Хто контролює: {regime.get('controller', '')}
+Очікувана цінність (EV): {prob.get('expected_value', '')}
+EV позитивне: {prob.get('ev_positive', '')}
+Ймовірність маніпуляції: {prob.get('sweep_probability', '')}%
+Ймовірність фейкового пробою: {prob.get('fake_breakout_prob', '')}%
+"""
+            except Exception:
+                lev_extra = ""
             team_pack = (
                 f"Макс: {maks_msg}\n"
                 f"Марічка: {mar_msg}\n"
@@ -4133,6 +4166,7 @@ SYMBOL
                 f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}\n"
                 f"Активні сигнали (коротко): {active_signals_short}\n"
                 "Якщо по цьому символу вже є активний — дай UPDATE а не новий сигнал."
+                f"{lev_extra}"
             )
             lev_final_system = (
                 f"{LEV_RULE}"
