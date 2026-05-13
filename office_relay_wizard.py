@@ -67,6 +67,8 @@ from office_bridge import (
     signal_touch_updated,
     signal_update,
     signal_upsert,
+    tv_signal_fetch_unprocessed,
+    tv_signal_mark_processed,
     _extract_first_usdt_symbol,
     _now_kyiv_hm,
     _to_kyiv_time_from_utc,
@@ -4163,6 +4165,87 @@ SYMBOL
             await asyncio.sleep(120 if fast_poll else 900)
 
     asyncio.create_task(monitor_active_signals())
+
+    async def process_tv_signal(signal: Dict[str, Any]) -> None:
+        """
+        Обробляє сигнал від TradingView.
+        Лев додає ICT аналіз і дає рішення.
+        """
+        row_id = int(signal.get("id") or 0)
+        try:
+            symbol = str(signal.get("symbol", "")).strip()
+            pattern = str(signal.get("pattern", ""))
+            direction = str(signal.get("direction", "")).strip()
+            price_raw = signal.get("price", 0)
+            try:
+                price = float(price_raw) if price_raw is not None else 0.0
+            except Exception:
+                price = 0.0
+            tf = str(signal.get("timeframe", "1h") or "1h")
+            strength = str(signal.get("strength", ""))
+
+            if not symbol or direction not in ("LONG", "SHORT"):
+                if row_id:
+                    tv_signal_mark_processed(db_path, row_id)
+                return
+
+            system = f"""Ти Лев.
+TradingView надіслав сигнал.
+Твоя задача — підтвердити або відхилити
+через ICT аналіз.
+
+Перевір через інструменти:
+- get_market_regime
+- get_edge_score
+- get_liquidity_sweep
+- get_session_levels
+- get_order_book_walls
+
+Якщо ICT підтверджує TradingView —
+дай повний сетап з Entry/SL/TP/RR.
+Якщо ні — скажи чому відхиляєш."""
+
+            context = f"""
+TradingView сигнал (id={row_id}):
+Символ: {symbol}
+Патерн: {pattern}
+Напрямок: {direction}
+Ціна: {price}
+Таймфрейм: {tf}
+Сила: {strength}
+"""
+
+            response = clean_llm_note(
+                ask_agent("lev", system, context, max_tokens=600, db_path=db_path)
+            )
+
+            if response:
+                header = (
+                    f"📡 TradingView → {symbol}\n"
+                    f"Патерн: {pattern} | "
+                    f"{direction}\n"
+                    f"Лев перевірив:"
+                )
+                await send_office(
+                    f"{header}\n{response}",
+                    stream="general",
+                )
+            else:
+                print(f"[tv-webhook] empty lev response id={row_id}")
+            tv_signal_mark_processed(db_path, row_id)
+        except Exception as e:
+            print(f"[tv-webhook] error: {e}")
+
+    async def monitor_tradingview_signals() -> None:
+        while True:
+            try:
+                for sig in tv_signal_fetch_unprocessed(db_path, limit=6):
+                    await process_tv_signal(sig)
+            except Exception as exc:
+                print(f"[relay][WARN] monitor_tradingview_signals: {exc}")
+            await asyncio.sleep(15)
+
+    asyncio.create_task(monitor_tradingview_signals())
 
     async def morning_macro_brief() -> None:
         """

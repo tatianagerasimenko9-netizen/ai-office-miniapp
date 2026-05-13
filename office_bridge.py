@@ -450,6 +450,22 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS tv_signals (
+                        id SERIAL PRIMARY KEY,
+                        symbol TEXT NOT NULL,
+                        pattern TEXT,
+                        timeframe TEXT,
+                        price DOUBLE PRECISION,
+                        direction TEXT,
+                        strength TEXT,
+                        raw_message TEXT,
+                        processed BOOLEAN DEFAULT FALSE,
+                        ts_created TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -460,6 +476,10 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_office_briefings_symbol_type "
                     "ON office_briefings(symbol, type)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tv_signals_processed "
+                    "ON tv_signals(processed, id)"
                 )
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_text TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
@@ -576,6 +596,22 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tv_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                pattern TEXT,
+                timeframe TEXT,
+                price REAL,
+                direction TEXT,
+                strength TEXT,
+                raw_message TEXT,
+                processed INTEGER DEFAULT 0,
+                ts_created TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -586,6 +622,9 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_office_briefings_symbol_type "
             "ON office_briefings(symbol, type)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tv_signals_processed ON tv_signals(processed, id)"
         )
         cols = {
             str(r[1]).strip().lower()
@@ -625,6 +664,88 @@ def briefing_get_last(db_path: str, symbol: str, type_: str) -> Optional[str]:
     if not row or row[0] is None:
         return None
     return str(row[0])
+
+
+def tv_signal_insert(
+    db_path: str,
+    *,
+    symbol: str,
+    pattern: str,
+    timeframe: str,
+    price: Optional[float],
+    direction: str,
+    strength: str,
+    raw_message: str,
+) -> Optional[int]:
+    """Зберегти сигнал TradingView webhook; повертає id рядка."""
+    row = _fetchone(
+        db_path,
+        (
+            "INSERT INTO tv_signals (symbol, pattern, timeframe, price, direction, strength, raw_message, processed) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"
+        ),
+        (
+            symbol,
+            pattern or "",
+            timeframe or "",
+            price,
+            direction or "",
+            strength or "",
+            raw_message or "",
+            False if _is_pg(db_path) else 0,
+        ),
+    )
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except Exception:
+        return None
+
+
+def tv_signal_fetch_unprocessed(db_path: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """Рядки tv_signals для обробки relay."""
+    lim = max(1, min(int(limit or 8), 50))
+    if _is_pg(db_path):
+        rows = _fetchall(
+            db_path,
+            (
+                "SELECT id, symbol, pattern, timeframe, price, direction, strength, raw_message "
+                "FROM tv_signals WHERE COALESCE(processed, false) = false ORDER BY id ASC LIMIT ?"
+            ),
+            (lim,),
+        )
+    else:
+        rows = _fetchall(
+            db_path,
+            (
+                "SELECT id, symbol, pattern, timeframe, price, direction, strength, raw_message "
+                "FROM tv_signals WHERE IFNULL(processed, 0) = 0 ORDER BY id ASC LIMIT ?"
+            ),
+            (lim,),
+        )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "id": int(r[0]),
+                "symbol": str(r[1] or ""),
+                "pattern": str(r[2] or ""),
+                "timeframe": str(r[3] or ""),
+                "price": r[4],
+                "direction": str(r[5] or ""),
+                "strength": str(r[6] or ""),
+                "raw_message": str(r[7] or ""),
+            }
+        )
+    return out
+
+
+def tv_signal_mark_processed(db_path: str, row_id: int) -> None:
+    if _is_pg(db_path):
+        _execute(db_path, "UPDATE tv_signals SET processed = TRUE WHERE id = ?", (int(row_id),))
+    else:
+        _execute(db_path, "UPDATE tv_signals SET processed = 1 WHERE id = ?", (int(row_id),))
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:

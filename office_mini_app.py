@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from office_bridge import office_db_identity
+from office_bridge import init_office_db, log_event, office_db_identity, tv_signal_insert
 
 try:
     import psycopg
@@ -75,6 +75,40 @@ def _parse_ts_close(s: object) -> datetime | None:
         return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def _tv_webhook_secret_ok(handler: BaseHTTPRequestHandler, u) -> bool:
+    """Якщо TRADINGVIEW_WEBHOOK_SECRET задано — перевір query (?secret= / ?token=) або X-TradingView-Secret."""
+    want = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "").strip()
+    if not want:
+        return True
+    qs = parse_qs(u.query)
+    qtok = (qs.get("secret") or qs.get("token") or [""])[0].strip()
+    hdr = (handler.headers.get("X-TradingView-Secret") or "").strip()
+    if not hdr:
+        auth = (handler.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            hdr = auth[7:].strip()
+    return qtok == want or hdr == want
+
+
+def _parse_json_body(raw: bytes) -> dict:
+    if not raw:
+        return {}
+    s = raw.decode("utf-8", errors="replace").strip()
+    if not s:
+        return {}
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    try:
+        flat = {k: (v[0] if v else "") for k, v in parse_qs(s, keep_blank_values=True).items()}
+        return flat
+    except Exception:
+        return {"message": s}
 
 
 def _f_or_none(x: object) -> float | None:
@@ -904,12 +938,87 @@ setInterval(loadOffice, 9000);
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         u = urlparse(self.path)
-        if u.path in ("/", "/api/summary", "/api/review_draft"):
+        if u.path in ("/", "/api/summary", "/api/review_draft", "/api/webhook/tradingview"):
             self.send_response(200)
             self.end_headers()
             return
         self.send_response(404)
         self.end_headers()
+
+    def do_POST(self) -> None:
+        u = urlparse(self.path)
+        if u.path != "/api/webhook/tradingview":
+            self.send_response(404)
+            self.end_headers()
+            return
+        if not _tv_webhook_secret_ok(self, u):
+            b = b'{"ok":false,"error":"unauthorized"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        raw = self.rfile.read(length) if length > 0 else b""
+        payload = _parse_json_body(raw)
+        sym = str(payload.get("symbol") or payload.get("ticker") or "").strip().upper()
+        direction = str(payload.get("direction") or "").strip().upper()
+        if not sym or direction not in ("LONG", "SHORT"):
+            b = json.dumps(
+                {"ok": False, "error": "symbol and direction (LONG|SHORT) required"},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        pattern = str(payload.get("pattern") or "").strip()
+        tf = str(payload.get("timeframe") or payload.get("interval") or "1h").strip()
+        strength = str(payload.get("strength") or "").strip()
+        msg = str(payload.get("message") or "").strip()
+        price_v = _f_or_none(payload.get("price"))
+        raw_msg = json.dumps(payload, ensure_ascii=False)
+        db = _db_target_for_identity()
+        try:
+            rid = tv_signal_insert(
+                db,
+                symbol=sym,
+                pattern=pattern,
+                timeframe=tf,
+                price=price_v,
+                direction=direction,
+                strength=strength,
+                raw_message=raw_msg if raw_msg else msg,
+            )
+        except Exception as exc:
+            b = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        try:
+            log_event(
+                db,
+                "tradingview_webhook",
+                {"id": rid, "symbol": sym, "pattern": pattern, "direction": direction},
+                signal_id=str(rid or ""),
+            )
+        except Exception:
+            pass
+        body = json.dumps({"ok": True, "id": rid}, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self) -> None:
         u = urlparse(self.path)
@@ -958,6 +1067,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    try:
+        init_office_db(_db_target_for_identity())
+    except Exception as exc:
+        print(f"[warn] init_office_db: {exc}")
     if (not _is_pg()) and (not os.path.exists(DB_PATH)):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
