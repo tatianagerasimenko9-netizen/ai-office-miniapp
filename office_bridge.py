@@ -116,8 +116,8 @@ AGENTS: Dict[str, AgentProfile] = {
         nickname="Звіт",
         emoji="📊",
         role="Performance Analyst",
-        character="аналітична, позитивна, data-first, on-duty по позиціях",
-        responsibility="звітність, ретроспектива, A/B learning + супровід відкритих угод (partial/move SL/exit)",
+        character="тепла, уважна; радіє успіхам команди, підтримує після збитку без жалості; коротко по-людськи",
+        responsibility="журнал, статистика, живі реакції на результат команди",
         photo_hint="Analytics terminal, KPI boards, reporting desk",
     ),
     "memory": AgentProfile(
@@ -146,8 +146,8 @@ AGENTS: Dict[str, AgentProfile] = {
         nickname="Dev",
         emoji="🛠️",
         role="Technical Developer",
-        character="технічний, короткий, без зайвої термінології",
-        responsibility="стан API/бота/Mini App, технічні попередження і стабільність",
+        character="спокійний інженер: коротко по техніці, без води; попереджає про збої вчасно",
+        responsibility="API, бот, Mini App, стабільність; людський тон без зайвого формалізму",
         photo_hint="Dev console, status monitors, incident board",
     ),
     "marichka": AgentProfile(
@@ -937,6 +937,28 @@ def victor_recent_sl_streak(db_path: str, limit: int = 5) -> int:
     streak = 0
     for r in rows:
         if str(r[0] or "") == "HIT_SL":
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def office_signals_tp2_streak(db_path: str, limit: int = 12) -> int:
+    """Скільки підряд HIT_TP2 у найсвіжіших подіях office_signals (між TP2/SL/EXPIRED)."""
+    lim = max(3, min(int(limit or 12), 40))
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT status FROM office_signals
+        WHERE status IN ('HIT_TP2', 'HIT_SL', 'EXPIRED')
+        ORDER BY COALESCE(ts_updated, ts_created) DESC
+        LIMIT ?
+        """,
+        (lim,),
+    )
+    streak = 0
+    for r in rows:
+        if str(r[0] or "") == "HIT_TP2":
             streak += 1
         else:
             break
@@ -2183,6 +2205,27 @@ VICTOR_RULE = """
 
 Говориш тільки українською.
 Втручаєшся рідко — але влучно.
+"""
+
+
+OLESYA_RULE = """
+Тобі 28 років. Ти Олеся.
+Ведеш журнал і статистику офісу.
+Тепла, уважна, радієш успіхам команди.
+Після виграшу — щиро радієш як людина.
+Після збитку — підтримуєш без жалості.
+Говориш коротко і по-людськи.
+Тільки українська.
+"""
+
+
+ARTEM_RULE = """
+Тобі 32 роки. Ти Артем.
+Тримаєш під контролем бота, API й Mini App.
+Говориш коротко й по суті, без зайвого жаргону.
+Якщо все стабільно — не розписуєш зайвого.
+Якщо є ризик або збій — одразу й чітко.
+Тільки українська.
 """
 
 
@@ -3459,12 +3502,9 @@ def _olesya_reply(signal: OfficeSignal, verdict: OfficeVerdict, db_path: str = "
     closed = journal_closed_trade_count(db_path)
     recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
     system = (
-        f"{LEV_RULE}"
+        f"{OLESYA_RULE}\n"
         "МОВА: Ти пишеш ТІЛЬКИ українською.\n"
-        "Тобі 27 років.\n"
-        "Ти Олеся — аналітик результатів і журналу угод у трейдинг-офісі.\n"
-        "Тон: коротко, по-діловому, data-first. Не вигадуєш чисел.\n"
-        "Даєш 1-2 речення: що зафіксовано і який learning-фокус далі."
+        "Даєш 1-2 речення: що зафіксовано і який learning-фокус далі. Не вигадуєш чисел."
     )
     context = (
         f"Сигнал: {signal.symbol} {signal.direction}\n"
@@ -3485,10 +3525,10 @@ def _olesya_reply(signal: OfficeSignal, verdict: OfficeVerdict, db_path: str = "
 def _dev_reply(question: str) -> str:
     q = (question or "").lower()
     if any(k in q for k in ("mini app", "miniapp", "рендер", "render", "кнопк", "open office")):
-        return "Mini App і кнопка Open Office під контролем. Якщо є збій, даю фікс по кроках."
+        return "Mini App і кнопка Open Office на контролі. Якщо щось падає — розпишу кроки без води."
     if any(k in q for k in ("api", "бот", "relay", "помилка", "error")):
-        return "Технічний стан нормальний. API/relay перевіряємо перед входом."
-    return "Технічна частина стабільна. Інфраструктура готова до роботи."
+        return "По API й боту зараз тихо. Якщо зʼявиться аномалія — скажу одразу, коротко."
+    return "Інфраструктура в нормі. Тримаю руку на пульсі: бот, API, Mini App."
 
 
 SCENARIO_TEMPLATES: Dict[str, List[tuple[str, str]]] = {

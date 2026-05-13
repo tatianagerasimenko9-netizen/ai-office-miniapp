@@ -62,6 +62,8 @@ from office_bridge import (
     office_run_scenario,
     office_trade_closed,
     live_risk_snapshot,
+    office_signals_tp2_streak,
+    OLESYA_RULE,
     signal_get_active,
     signal_get_by_symbol,
     signal_should_skip_proactive_scan,
@@ -2083,11 +2085,8 @@ async def office_free_chat(
             "Тобі 31 рік. Ти Назар — стежиш за новинами. Обережний."
         ),
         "olesya": (
-            f"{LEV_RULE}"
+            f"{OLESYA_RULE}\n"
             f"{language_block}\n"
-            "Ти Олеся — ведеш журнал. Тепла і точна. "
-            "Якщо питають про відкриті позиції, PnL або статистику — скажи чесно: "
-            "'Зараз немає доступу до даних в цьому режимі. Перевір в Mini App.'"
         ),
         "memory": (
             f"{LEV_RULE}"
@@ -2609,6 +2608,35 @@ async def run() -> None:
             )
             _RELAY_OFFICE_STARTUP_PING_SENT = True
             print("[relay] startup ping sent to OFFICE")
+            try:
+                tz = _briefing_tzinfo()
+                now_k = datetime.now(tz)
+                h = now_k.hour
+                if 5 <= h < 12:
+                    slot = "ранок"
+                elif 12 <= h < 18:
+                    slot = "день"
+                elif 18 <= h < 23:
+                    slot = "вечір"
+                else:
+                    slot = "ніч"
+                ctx_hi = (
+                    f"Зараз за Києвом: {slot}, {now_k.strftime('%H:%M')}. "
+                    "Офіс щойно увімкнувся — один короткий привіт Тетяні й команді в чаті, по-людськи."
+                )
+                olesya_hi = clean_llm_note(
+                    ask_agent(
+                        "olesya",
+                        OLESYA_RULE,
+                        ctx_hi,
+                        max_tokens=60,
+                        db_path=db_path,
+                    )
+                )
+                if olesya_hi:
+                    await send_office(fmt_agent_line("olesya", olesya_hi), stream="general")
+            except Exception as exc_ohi:
+                print(f"[relay][WARN] olesya startup greet failed: {exc_ohi}")
 
         # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
         tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "0").strip() == "0"
@@ -4071,6 +4099,22 @@ SYMBOL
         except Exception as e:
             print(f"[victor] error: {e}")
 
+    async def _olesya_live_signal_line(context: str, max_tokens: int = 80) -> None:
+        try:
+            msg = clean_llm_note(
+                ask_agent(
+                    "olesya",
+                    OLESYA_RULE,
+                    context,
+                    max_tokens=max_tokens,
+                    db_path=db_path,
+                )
+            )
+            if msg:
+                await send_office(fmt_agent_line("olesya", msg), stream="general")
+        except Exception as exc:
+            print(f"[olesya-live] {exc}")
+
     async def monitor_active_signals() -> None:
         from office_market_data import (
             fetch_liquidations_proxy,
@@ -4096,6 +4140,7 @@ SYMBOL
                 f"Що робити зараз: {action_now}\n"
                 f"SL після дії: {sl_after}"
             )
+        _olesya_win_burst_prev = 0
         while True:
             utc_now = datetime.now(timezone.utc)
             minute_of_day = utc_now.hour * 60 + utc_now.minute
@@ -4349,6 +4394,14 @@ SYMBOL
                                         for part in split_long_message(analysis_note):
                                             await send_office(part, stream="general")
                                 await check_victor_trigger()
+                                try:
+                                    await _olesya_live_signal_line(
+                                        f"{symbol} вибило по стопу.\n"
+                                        "Капітал захищено стопом.",
+                                        80,
+                                    )
+                                except Exception:
+                                    pass
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:
@@ -4362,6 +4415,21 @@ SYMBOL
                                         f"{symbol} досяг TP2 {tp2_v} 🎯\nВідмінний результат! Фіксуємо і шукаємо наступний сетап.",
                                         stream="general",
                                     )
+                                try:
+                                    await _olesya_live_signal_line(
+                                        f"{symbol} досяг другого тейку.\n"
+                                        "Команда добре відпрацювала.",
+                                        80,
+                                    )
+                                    streak_tp = office_signals_tp2_streak(db_path)
+                                    if streak_tp >= 3 and _olesya_win_burst_prev < 3:
+                                        await _olesya_live_signal_line(
+                                            "Три виграші підряд по команді.",
+                                            80,
+                                        )
+                                    _olesya_win_burst_prev = streak_tp
+                                except Exception as exc_st:
+                                    print(f"[olesya-live-tp2] {exc_st}")
                                 continue
                     except Exception as exc_row:
                         print(f"[signals] row monitor failed: {exc_row}")
