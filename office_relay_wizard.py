@@ -94,6 +94,7 @@ _chat_history_ts: float = 0.0
 _last_signal_time: Dict[str, float] = {}
 _last_notified: Dict[str, float] = {}
 _risk_committee_last_sent: float = 0.0
+_lev_last_response: Dict[str, float] = {}
 
 OFFICE_RULES_BRIEF_UA = (
     "Правила офісу (коротко):\n"
@@ -121,6 +122,9 @@ LEV_RULE = """
 Виживання важливіше прибутку.
 Тиша — це теж стратегія.
 80% часу — спостереження.
+
+Якщо Тетяна просто вітається або пише не про ринок — відповідай як людина. Коротко і тепло.
+Не кидайся одразу в аналіз.
 
 ПЕРЕД КОЖНИМ ВХОДОМ ОБОВ'ЯЗКОВО:
 0. get_probability_score — спочатку ймовірність напрямку. NO_TRADE або confidence LOW = ПРОПУСК.
@@ -2166,6 +2170,10 @@ async def office_free_chat(
                     + context
                 )
     chosen_agent = detect_agent_from_text(text)
+    if chosen_agent == "lev":
+        if time.time() - _lev_last_response.get("lev", 0) < 30:
+            return
+        _lev_last_response["lev"] = time.time()
     answer_system = (
         f"{personalities.get(chosen_agent, personalities['lev'])}\n\n"
         "Ти в Telegram груповому чаті офісу. Без таблиць, без ## заголовків.\n"
