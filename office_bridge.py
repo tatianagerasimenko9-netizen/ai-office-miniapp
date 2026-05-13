@@ -1169,7 +1169,7 @@ def signal_get_latest_by_symbol(db_path: str, symbol: str) -> Optional[Dict[str,
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
         WHERE UPPER(symbol) = ?
-        ORDER BY ts_created DESC
+        ORDER BY COALESCE(NULLIF(ts_updated, ''), ts_created) DESC
         LIMIT 1
         """,
         (sym,),
@@ -1203,7 +1203,7 @@ def signal_should_skip_proactive_scan(
 ) -> Tuple[bool, str]:
     """
     Не запускати проактивний деск по символу, якщо вже є активний сигнал
-    або нещодавно був будь-який запис (антиспам після редеплою, коли скидається RAM).
+    або нещодавно був будь-який запис (включно з EXPIRED — за останню активність у записі).
     """
     latest = signal_get_latest_by_symbol(db_path, symbol)
     if not latest:
@@ -1211,22 +1211,36 @@ def signal_should_skip_proactive_scan(
     st = str(latest.get("status") or "").strip().upper()
     if st in ("WATCHING", "ACTIVE", "HIT_ENTRY", "HIT_TP1"):
         return True, f"active_status={st}"
-    ts_raw = latest.get("ts_created")
-    if ts_raw is None:
+
+    def _parse_ts(val: Any) -> Optional[datetime]:
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            dt = val
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+
+    created = _parse_ts(latest.get("ts_created"))
+    updated = _parse_ts(latest.get("ts_updated"))
+    ref_candidates = [d for d in (created, updated) if d is not None]
+    if not ref_candidates:
         return False, ""
+    ref = max(ref_candidates)
     try:
-        if isinstance(ts_raw, datetime):
-            created = ts_raw
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-        else:
-            ts_s = str(ts_raw).strip().replace("Z", "+00:00")
-            created = datetime.fromisoformat(ts_s)
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-        age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+        age_h = (datetime.now(timezone.utc) - ref).total_seconds() / 3600.0
         if age_h < float(cooldown_hours):
-            return True, f"cooldown_{age_h:.2f}h_lt_{cooldown_hours}h"
+            return True, f"cooldown_{age_h:.2f}h_lt_{cooldown_hours}h_status={st}"
     except Exception:
         return False, ""
     return False, ""

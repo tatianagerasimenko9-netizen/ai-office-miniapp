@@ -3577,9 +3577,15 @@ SYMBOL
                     acc_low = float(acc.get("low") or 0.0)
                     acc_high = float(acc.get("high") or 0.0)
                     acc_days = int(acc.get("days") or 7)
+                    skip_acc, skip_acc_reason = signal_should_skip_proactive_scan(
+                        db_path, acc_symbol, cooldown_hours=24.0
+                    )
+                    if skip_acc:
+                        print(f"[scanner] wyckoff skip {acc_symbol}: {skip_acc_reason}")
+                        continue
                     acc_key = f"ACC::{acc_symbol}"
                     last_acc_ts = float(_last_signal_time.get(acc_key, 0.0) or 0.0)
-                    if (time.time() - last_acc_ts) < 6 * 3600:
+                    if (time.time() - last_acc_ts) < 24 * 3600:
                         continue
                     _last_signal_time[acc_key] = time.time()
                     await send_office(
