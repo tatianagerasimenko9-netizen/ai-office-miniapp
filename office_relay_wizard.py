@@ -647,6 +647,36 @@ def _briefing_tzinfo():
         return timezone.utc
 
 
+def get_session_status_kyiv() -> str:
+    """
+    Повертає поточний статус сесій у зрозумілому форматі за Києвом
+    (OFFICE_BRIEFING_TZ, зазвичай Europe/Kyiv).
+    """
+    tz = _briefing_tzinfo()
+    now = datetime.now(tz)
+    h = now.hour
+    m = now.minute
+    time_str = f"{h:02d}:{m:02d}"
+
+    sessions: List[str] = []
+    if 3 <= h < 11:
+        sessions.append("🌏 Азія відкрита")
+    if 11 <= h < 19:
+        sessions.append("🇬🇧 Лондон відкритий")
+    if h >= 16 or h < 1:
+        sessions.append("🇺🇸 Нью-Йорк відкритий")
+
+    if 11 <= h < 14:
+        sessions.append("⚡ KILL ZONE Лондон (11:00–14:00 за Києвом)")
+    elif 16 <= h < 19:
+        sessions.append("⚡ KILL ZONE Нью-Йорк (16:00–19:00 за Києвом)")
+
+    if not sessions:
+        sessions.append("😴 Між сесіями — тихо")
+
+    return f"🕐 Зараз {time_str} за Києвом\n" + "\n".join(sessions)
+
+
 def _session_label_from_hour(h: int) -> str:
     if 0 <= h < 9:
         return "ASIA"
@@ -2359,7 +2389,9 @@ async def run() -> None:
         return first_id
 
     try:
-        await send_office("Офіс на зв'язку. Готові працювати.")
+        await send_office(
+            "Офіс на зв'язку. Готові працювати.\n\n" + get_session_status_kyiv()
+        )
         print("[relay] startup ping sent to OFFICE")
 
         # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
@@ -3257,12 +3289,77 @@ SYMBOL
 
     asyncio.create_task(marichka_morning_briefing())
 
+    async def session_announcer() -> None:
+        """Повідомляє про початок/кінець ключових вікон за Києвом."""
+        announced: set[str] = set()
+        while True:
+            try:
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                key = f"{now.date()}_{now.hour}"
+                if key not in announced:
+                    msg: Optional[str] = None
+                    if now.hour == 3:
+                        msg = (
+                            "🌏 Азіатська сесія відкрилась\n"
+                            f"🕐 {now.strftime('%H:%M')} за Києвом"
+                        )
+                    elif now.hour == 11:
+                        msg = (
+                            "🇬🇧 Лондон відкрився\n"
+                            "⚡ Kill Zone почалась (11:00–14:00 за Києвом)\n"
+                            "Шукаємо сетапи..."
+                        )
+                    elif now.hour == 14:
+                        msg = (
+                            "🇬🇧 Лондон Kill Zone закрилась\n"
+                            "Між сесіями до 16:00"
+                        )
+                    elif now.hour == 16:
+                        msg = (
+                            "🇺🇸 Нью-Йорк відкрився\n"
+                            "⚡ Kill Zone почалась (16:00–19:00 за Києвом)\n"
+                            "Шукаємо сетапи..."
+                        )
+                    elif now.hour == 19:
+                        msg = (
+                            "🇺🇸 NY Kill Zone закрилась\n"
+                            "Торговий день завершено."
+                        )
+                    if msg:
+                        announced.add(key)
+                        await send_office(msg, stream="general")
+                if len(announced) > 400:
+                    announced.clear()
+                await asyncio.sleep(55)
+            except Exception as e:
+                print(f"[session-announcer] {e}")
+                await asyncio.sleep(60)
+
+    asyncio.create_task(session_announcer())
+
+    _proactive_kz_session_banner_key: Optional[str] = None
+
     async def proactive_market_scan() -> None:
         """
         Кожні 15 хвилин агенти самі сканують ринок і якщо знаходять сетап —
         пишуть Тетяні першими.
         """
+        nonlocal _proactive_kz_session_banner_key
         try:
+            tz_k = _briefing_tzinfo()
+            now_k = datetime.now(tz_k)
+            kh = now_k.hour
+            in_ldn_kz_kyiv = 11 <= kh < 14
+            in_ny_kz_kyiv = 16 <= kh < 19
+            if in_ldn_kz_kyiv or in_ny_kz_kyiv:
+                day_k = now_k.strftime("%Y-%m-%d")
+                seg_k = "LDN_KZ" if in_ldn_kz_kyiv else "NY_KZ"
+                banner_key = f"{day_k}:{seg_k}"
+                if _proactive_kz_session_banner_key != banner_key:
+                    _proactive_kz_session_banner_key = banner_key
+                    await send_office(get_session_status_kyiv(), stream="general")
+
             utc_now = datetime.now(timezone.utc)
             h = utc_now.hour
             m = utc_now.minute
@@ -3566,7 +3663,7 @@ SYMBOL
                 if news_mins >= 999
                 else (
                     f"Увага! {news_event_name} через {news_mins} хв "
-                    f"о {news_kyiv_time or 'за Києвом'} за Києвом."
+                    f"о {news_kyiv_time or '??:??'} за Києвом."
                 )
             )
             news_msg = _trim_lines(news_msg, 3)
@@ -3818,9 +3915,11 @@ SYMBOL
                                 continue
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
                             if _allow_notify(symbol, "HIT_ENTRY"):
+                                _kyiv_hm = _now_kyiv_hm()
                                 await send_office(
                                     f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
-                                    f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}",
+                                    f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}\n"
+                                    f"🕐 Зараз за Києвом: {_kyiv_hm}",
                                     stream="general",
                                 )
                             continue
@@ -3905,22 +4004,21 @@ SYMBOL
                                         "1) Чи були новини в цей момент?\n"
                                         "2) Чи була маніпуляція (sweep)?\n"
                                         "3) Чи правильна була точка входу?\n"
-                                        "4) Яка сесія була активна?\n"
+                                        "4) Яка сесія була активна (час за Києвом)?\n"
                                         "5) Що можна покращити наступного разу?\n"
                                         "Говориш українською. Конкретно."
                                     )
-                                    hour = now_utc.hour
-                                    sess = "LONDON" if 8 <= hour < 11 else ("NEW_YORK" if 13 <= hour < 16 else "OFF_HOURS")
+                                    kyiv_ts = datetime.now(_briefing_tzinfo()).strftime("%Y-%m-%d %H:%M")
+                                    sess_kyiv = get_session_status_kyiv()
                                     context = (
                                         f"Сигнал: {direction} {symbol}\n"
                                         f"Entry: {e_low}-{e_high}\n"
                                         f"SL: {sl_v}\n"
                                         f"Час сигналу: {ts_created}\n"
-                                        f"Час вибивання (UTC): {now_utc.isoformat()}\n"
-                                        f"Час вибивання за Києвом: {_now_kyiv_hm()}\n"
+                                        f"Час вибивання за Києвом: {kyiv_ts}\n"
+                                        f"{sess_kyiv}\n"
                                         f"Поточна ціна: {current_price}\n"
                                         f"Новинний ризик зараз: {n_risk}\n"
-                                        f"Сесія Kill Zone (UTC): {sess}"
                                     )
                                     analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=200))
                                     analysis_note = _trim_lines(analysis_note, max_lines=6)
