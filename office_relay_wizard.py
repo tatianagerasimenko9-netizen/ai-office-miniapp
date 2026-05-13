@@ -9,7 +9,7 @@ import random
 import re
 import sqlite3
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 try:
@@ -3146,8 +3146,7 @@ async def run() -> None:
 
     async def marichka_morning_briefing() -> None:
         """Щодня ~08:00 за OFFICE_BRIEFING_TZ — ранкове підтвердження Марічки."""
-        last_marichka_morning_date: Optional[date] = None
-
+        last_date = None
         while True:
             try:
                 if os.getenv("OFFICE_MARICHKA_MORNING_DISABLE", "").strip() == "1":
@@ -3156,15 +3155,18 @@ async def run() -> None:
                 tz = _briefing_tzinfo()
                 now = datetime.now(tz)
                 today = now.date()
-                if now.hour == 8 and now.minute < 5 and last_marichka_morning_date != today:
+                if (
+                    now.hour == 8
+                    and now.minute < 5
+                    and last_date != today
+                ):
+                    last_date = today
                     await run_marichka_morning()
-                    last_marichka_morning_date = today
-                    print("[relay] marichka morning briefing sent")
                     await asyncio.sleep(3660)
                 else:
                     await asyncio.sleep(30)
-            except Exception as exc:
-                print(f"[marichka-morning] scheduler: {exc}")
+            except Exception as e:
+                print(f"[marichka-morning] {e}")
                 await asyncio.sleep(60)
 
     asyncio.create_task(marichka_morning_briefing())
