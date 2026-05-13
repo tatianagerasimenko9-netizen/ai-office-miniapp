@@ -3774,6 +3774,53 @@ SYMBOL
                 )
             )
             lev_final = _trim_lines(lev_final, 7)
+            lev_low = (lev_final or "").lower()
+            skip_words = [
+                "пропуск",
+                "пропускаємо",
+                "не входжу",
+                "не входимо",
+                "чекаю",
+                "немає входу",
+            ]
+            is_skip = any(w in lev_low for w in skip_words)
+            if is_skip:
+                levels_skip = _parse_signal_levels_from_text(lev_final or "")
+                el = levels_skip.get("entry_low")
+                if el is not None:
+                    try:
+                        signal_upsert(
+                            db_path,
+                            signal_id=f"proactive-watch-{symbol}-{int(time.time())}",
+                            symbol=symbol,
+                            direction=direction,
+                            entry_low=levels_skip.get("entry_low"),
+                            entry_high=levels_skip.get("entry_high"),
+                            sl=levels_skip.get("sl"),
+                            tp1=levels_skip.get("tp1"),
+                            tp2=levels_skip.get("tp2"),
+                            rr=levels_skip.get("rr"),
+                            status="WATCHING",
+                            analysis_note=(lev_final or "")[:2000],
+                        )
+                        eh = levels_skip.get("entry_high")
+                        print(
+                            f"[scanner] {symbol} → WATCHING тихо "
+                            f"{el}-{eh if eh is not None else el}"
+                        )
+                    except Exception as exc_w:
+                        print(f"[scanner] silent WATCHING upsert failed {symbol}: {exc_w}")
+                return
+
+            has_entry = any(
+                w in lev_low
+                for w in ("entry:", "вхід:", "входь")
+            )
+            has_sl = "sl:" in lev_low
+            if not (has_entry and has_sl):
+                print(f"[scanner] {symbol} → немає чіткого сетапу, мовчимо")
+                return
+
             await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
