@@ -212,6 +212,9 @@ Session            сесія
 Ти снайпер. Один постріл — одна ціль.
 """
 
+# Один стартовий ping у OFFICE за процес (уникнення дубля при повторному вході в run()).
+_RELAY_OFFICE_STARTUP_PING_SENT: bool = False
+
 
 @dataclass
 class DialogItem:
@@ -698,8 +701,7 @@ def get_session_status_kyiv() -> str:
     tz = _briefing_tzinfo()
     now = datetime.now(tz)
     h = now.hour
-    m = now.minute
-    time_str = f"{h:02d}:{m:02d}"
+    time_str = now.strftime("%H:%M")
 
     sessions: List[str] = []
     if 3 <= h < 11:
@@ -2124,6 +2126,7 @@ async def pick_chats(client: TelegramClient) -> Tuple[int, int]:
 
 
 async def run() -> None:
+    global _RELAY_OFFICE_STARTUP_PING_SENT
     print("=== AI Office Wizard ===")
     cfg_path = relay_config_path()
     cfg = load_relay_config()
@@ -2432,10 +2435,12 @@ async def run() -> None:
         return first_id
 
     try:
-        await send_office(
-            "Офіс на зв'язку. Готові працювати.\n\n" + get_session_status_kyiv()
-        )
-        print("[relay] startup ping sent to OFFICE")
+        if not _RELAY_OFFICE_STARTUP_PING_SENT:
+            await send_office(
+                "Офіс на зв'язку. Готові працювати.\n\n" + get_session_status_kyiv()
+            )
+            _RELAY_OFFICE_STARTUP_PING_SENT = True
+            print("[relay] startup ping sent to OFFICE")
 
         # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
         tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "0").strip() == "0"
