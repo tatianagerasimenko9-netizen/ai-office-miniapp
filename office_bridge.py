@@ -512,6 +512,28 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS trade_journal_knowledge (
+                        id SERIAL PRIMARY KEY,
+                        symbol TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        entry_price DOUBLE PRECISION,
+                        exit_price DOUBLE PRECISION,
+                        sl DOUBLE PRECISION,
+                        tp DOUBLE PRECISION,
+                        result TEXT,
+                        pnl_pct DOUBLE PRECISION,
+                        setup_type TEXT,
+                        mistake TEXT,
+                        lesson TEXT,
+                        session TEXT,
+                        source_text TEXT,
+                        ts_opened TIMESTAMPTZ DEFAULT NOW(),
+                        ts_closed TIMESTAMPTZ
+                    )
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -526,6 +548,14 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_tv_signals_processed "
                     "ON tv_signals(processed, id)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_trade_journal_kb_sym_dir "
+                    "ON trade_journal_knowledge(symbol, direction)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_trade_journal_kb_ts_open "
+                    "ON trade_journal_knowledge(ts_opened DESC)"
                 )
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_text TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
@@ -658,6 +688,28 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trade_journal_knowledge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                entry_price REAL,
+                exit_price REAL,
+                sl REAL,
+                tp REAL,
+                result TEXT,
+                pnl_pct REAL,
+                setup_type TEXT,
+                mistake TEXT,
+                lesson TEXT,
+                session TEXT,
+                source_text TEXT,
+                ts_opened TEXT DEFAULT (datetime('now')),
+                ts_closed TEXT
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
@@ -671,6 +723,13 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tv_signals_processed ON tv_signals(processed, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trade_journal_kb_sym_dir "
+            "ON trade_journal_knowledge(symbol, direction)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trade_journal_kb_ts_open ON trade_journal_knowledge(ts_opened DESC)"
         )
         cols = {
             str(r[1]).strip().lower()
@@ -882,6 +941,232 @@ def victor_recent_sl_streak(db_path: str, limit: int = 5) -> int:
         else:
             break
     return streak
+
+
+_TRADE_JOURNAL_KB_TABLE = "trade_journal_knowledge"
+
+
+def _trade_journal_kb_row_to_dict(row: tuple) -> Dict[str, Any]:
+    if not row:
+        return {}
+    return {
+        "id": int(row[0]) if row[0] is not None else 0,
+        "symbol": str(row[1] or ""),
+        "direction": str(row[2] or ""),
+        "entry_price": row[3],
+        "exit_price": row[4],
+        "sl": row[5],
+        "tp": row[6],
+        "result": str(row[7] or "") if row[7] is not None else None,
+        "pnl_pct": row[8],
+        "setup_type": str(row[9] or ""),
+        "mistake": str(row[10] or ""),
+        "lesson": str(row[11] or ""),
+        "session": str(row[12] or ""),
+        "source_text": str(row[13] or ""),
+        "ts_opened": str(row[14] or "") if row[14] is not None else None,
+        "ts_closed": str(row[15] or "") if row[15] is not None else None,
+    }
+
+
+def _trade_journal_kb_finalize(db_path: str, **kw: Any) -> Optional[int]:
+    """Закрити останній відкритий рядок бібліотеки (result/ts_closed)."""
+    res = str(kw.get("result") or "").strip().upper()
+    if res == "BE":
+        res = "BREAKEVEN"
+    if res not in ("WIN", "LOSS", "BREAKEVEN"):
+        return None
+    sym = str(kw.get("symbol") or "").strip().upper()
+    exit_p = kw.get("exit_price")
+    pnl = kw.get("pnl_pct")
+    lesson_v = kw.get("lesson")
+    if lesson_v is not None:
+        lesson_v = str(lesson_v).strip() or None
+    mistake_v = kw.get("mistake")
+    if mistake_v is not None:
+        mistake_v = str(mistake_v).strip() or None
+    ts_close = _now_iso()
+
+    sel = (
+        f"SELECT id FROM {_TRADE_JOURNAL_KB_TABLE} WHERE result IS NULL "
+        f"AND ts_closed IS NULL "
+    )
+    params_sel: Tuple[Any, ...]
+    if sym:
+        sel += "AND UPPER(symbol) = ? "
+        params_sel = (sym,)
+    else:
+        params_sel = ()
+    sel += "ORDER BY ts_opened DESC LIMIT 1"
+    row = _fetchone(db_path, sel, params_sel)
+    if not row or row[0] is None:
+        return None
+    rid = int(row[0])
+    _execute(
+        db_path,
+        f"""
+        UPDATE {_TRADE_JOURNAL_KB_TABLE} SET
+            result = ?,
+            exit_price = ?,
+            pnl_pct = ?,
+            lesson = COALESCE(?, lesson),
+            mistake = COALESCE(?, mistake),
+            ts_closed = ?
+        WHERE id = ?
+        """,
+        (
+            res,
+            exit_p,
+            pnl,
+            lesson_v,
+            mistake_v,
+            ts_close,
+            rid,
+        ),
+    )
+    return rid
+
+
+def trade_journal_add(db_path: str, **kwargs: Any) -> Optional[int]:
+    """
+    Додати запис у бібліотеку угод (trade_journal_knowledge) або закрити останній відкритий
+    (finalize_last=True + result WIN/LOSS/BREAKEVEN).
+    """
+    kw = dict(kwargs)
+    if bool(kw.pop("finalize_last", False)):
+        return _trade_journal_kb_finalize(db_path, **kw)
+
+    symbol = str(kw.get("symbol") or "").strip().upper()
+    direction = str(kw.get("direction") or "").strip().upper()
+    if not symbol or direction not in ("LONG", "SHORT"):
+        return None
+
+    entry_price = kw.get("entry_price")
+    exit_price = kw.get("exit_price")
+    sl = kw.get("sl")
+    tp = kw.get("tp")
+    result = kw.get("result")
+    if result is not None:
+        result = str(result).strip().upper()
+        if result == "BE":
+            result = "BREAKEVEN"
+    pnl_pct = kw.get("pnl_pct")
+    setup_type = str(kw.get("setup_type") or "")
+    mistake = str(kw.get("mistake") or "")
+    lesson = str(kw.get("lesson") or "")
+    session = str(kw.get("session") or "")
+    source_text = str(kw.get("source_text") or "")[:4000]
+    ts_opened = str(kw.get("ts_opened") or "").strip() or _now_iso()
+    ts_closed = kw.get("ts_closed")
+    ts_closed_s = str(ts_closed).strip() if ts_closed not in (None, "") else None
+
+    row = _fetchone(
+        db_path,
+        f"""
+        INSERT INTO {_TRADE_JOURNAL_KB_TABLE}(
+            symbol, direction, entry_price, exit_price, sl, tp,
+            result, pnl_pct, setup_type, mistake, lesson, session,
+            source_text, ts_opened, ts_closed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+        """,
+        (
+            symbol,
+            direction,
+            entry_price,
+            exit_price,
+            sl,
+            tp,
+            result,
+            pnl_pct,
+            setup_type,
+            mistake,
+            lesson,
+            session,
+            source_text,
+            ts_opened,
+            ts_closed_s,
+        ),
+    )
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except Exception:
+        return None
+
+
+def trade_journal_get_recent(db_path: str, limit: int = 10) -> List[Dict[str, Any]]:
+    lim = max(1, min(int(limit or 10), 100))
+    rows = _fetchall(
+        db_path,
+        f"""
+        SELECT id, symbol, direction, entry_price, exit_price, sl, tp,
+               result, pnl_pct, setup_type, mistake, lesson, session,
+               source_text, ts_opened, ts_closed
+        FROM {_TRADE_JOURNAL_KB_TABLE}
+        ORDER BY COALESCE(ts_closed, ts_opened) DESC
+        LIMIT ?
+        """,
+        (lim,),
+    )
+    return [_trade_journal_kb_row_to_dict(r) for r in rows]
+
+
+def trade_journal_get_stats(db_path: str) -> Dict[str, Any]:
+    row = _fetchone(
+        db_path,
+        f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN result = 'WIN' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN result = 'BREAKEVEN' THEN 1 ELSE 0 END) AS breakevens,
+            SUM(CASE WHEN result IS NULL AND ts_closed IS NULL THEN 1 ELSE 0 END) AS open_rows,
+            AVG(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct END) AS avg_pnl_pct
+        FROM {_TRADE_JOURNAL_KB_TABLE}
+        """,
+        (),
+    )
+    if not row:
+        return {
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "breakevens": 0,
+            "open": 0,
+            "avg_pnl_pct": None,
+        }
+    return {
+        "total": int(row[0] or 0),
+        "wins": int(row[1] or 0),
+        "losses": int(row[2] or 0),
+        "breakevens": int(row[3] or 0),
+        "open": int(row[4] or 0),
+        "avg_pnl_pct": float(row[5]) if row[5] is not None else None,
+    }
+
+
+def trade_journal_search_similar(db_path: str, symbol: str, direction: str, limit: int = 15) -> List[Dict[str, Any]]:
+    sym = str(symbol or "").strip().upper()
+    direc = str(direction or "").strip().upper()
+    if not sym or direc not in ("LONG", "SHORT"):
+        return []
+    lim = max(1, min(int(limit or 15), 50))
+    rows = _fetchall(
+        db_path,
+        f"""
+        SELECT id, symbol, direction, entry_price, exit_price, sl, tp,
+               result, pnl_pct, setup_type, mistake, lesson, session,
+               source_text, ts_opened, ts_closed
+        FROM {_TRADE_JOURNAL_KB_TABLE}
+        WHERE UPPER(symbol) = ? AND direction = ?
+        ORDER BY COALESCE(ts_closed, ts_opened) DESC
+        LIMIT ?
+        """,
+        (sym, direc, lim),
+    )
+    return [_trade_journal_kb_row_to_dict(r) for r in rows]
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:

@@ -68,6 +68,9 @@ from office_bridge import (
     signal_touch_updated,
     signal_update,
     signal_upsert,
+    trade_journal_add,
+    trade_journal_get_recent,
+    trade_journal_search_similar,
     tv_signal_fetch_unprocessed,
     tv_signal_mark_processed,
     victor_recent_sl_streak,
@@ -1381,6 +1384,71 @@ def is_trade_feedback(text: str) -> bool:
     return has_symbol and has_result
 
 
+def _kb_session_label() -> str:
+    try:
+        tz = _briefing_tzinfo()
+        h = datetime.now(tz).hour
+        if 0 <= h < 9:
+            return "ASIA"
+        if 9 <= h < 17:
+            return "LONDON"
+        return "NY"
+    except Exception:
+        return ""
+
+
+def parse_tetiana_journal_kb_voice(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Розпізнавання коротких голосових формул Тетяни для бібліотеки угод
+    (окремо від trade_journal / journal_add_feedback).
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    low = raw.lower()
+    if ("закрила" in low or "закрив" in low) and any(
+        x in low for x in ("прибут", "профит", "профіт", "плюс")
+    ):
+        return {"kind": "close", "result": "WIN"}
+    if "вибило" in low and ("стоп" in low or "стопу" in low):
+        return {"kind": "close", "result": "LOSS"}
+    if not any(
+        k in low
+        for k in (
+            "зайшла",
+            "зашла",
+            "зайшов",
+            "зашов",
+            "заходжу",
+            "заходим",
+            "взяла",
+            "взяв",
+            "зайшли",
+        )
+    ):
+        return None
+    syms = extract_symbols_list(raw) or extract_symbols(raw)
+    sym = (syms[0] if syms else "").strip().upper()
+    if sym and not sym.endswith("USDT"):
+        sym = normalize_symbol(sym)
+    if not sym:
+        return None
+    if "лонг" in low or "long" in low:
+        direction = "LONG"
+    elif "шорт" in low or "short" in low:
+        direction = "SHORT"
+    else:
+        return None
+    m = re.search(r"(?:від|от)\s*([\d\s.,]+)", low)
+    entry: Optional[float] = None
+    if m:
+        try:
+            entry = float(str(m.group(1)).replace(" ", "").replace(",", "."))
+        except Exception:
+            entry = None
+    return {"kind": "open", "symbol": sym, "direction": direction, "entry_price": entry}
+
+
 def _feedback_result(text: str) -> str:
     low = str(text or "").lower()
     win_keys = ("відпрацював", "взяли", "тейк", "tp", "профіт", "в плюс", "відмінно")
@@ -1833,6 +1901,107 @@ async def office_free_chat(
     if is_symbol_only(text):
         symbol = normalize_symbol(text)
         await full_auto_analysis(symbol, sender, db_path)
+        return
+
+    kb_voice = parse_tetiana_journal_kb_voice(text)
+    if kb_voice:
+        try:
+            if kb_voice.get("kind") == "open":
+                sym = str(kb_voice.get("symbol") or "").strip().upper()
+                direc = str(kb_voice.get("direction") or "").strip().upper()
+                entry_p = kb_voice.get("entry_price")
+                rid = trade_journal_add(
+                    db_path,
+                    symbol=sym,
+                    direction=direc,
+                    entry_price=entry_p,
+                    session=_kb_session_label(),
+                    source_text=text[:500],
+                )
+                await agent_say(
+                    sender,
+                    "olesya",
+                    f"Занесла {sym} {direc} у бібліотеку угод (запис #{rid or '—'}).",
+                    0.06,
+                )
+                if rid and sym and direc:
+                    sim = [
+                        s
+                        for s in trade_journal_search_similar(db_path, sym, direc, limit=10)
+                        if int(s.get("id") or 0) != int(rid)
+                    ][:6]
+                    if sim:
+                        sim_txt = "\n".join(
+                            f"· {s.get('symbol')} {s.get('direction')} → {s.get('result') or 'відкрито'} "
+                            f"(вхід {s.get('entry_price')}, закриття {s.get('ts_closed') or '—'})"
+                            for s in sim
+                        )
+                        ctx_mem = f"Останній запис Тетяни: {sym} {direc}, вхід {entry_p}.\nСхожі з бібліотеки:\n{sim_txt}"
+                        sof = clean_llm_note(
+                            ask_agent(
+                                "memory",
+                                "Ти Софія. Дві короткі фрази українською: що повторюється в історії і на що звернути увагу.",
+                                ctx_mem,
+                                max_tokens=220,
+                                db_path=db_path,
+                            )
+                        )
+                        if sof:
+                            await agent_say(sender, "memory", sof, 0.08)
+            elif kb_voice.get("kind") == "close":
+                res = str(kb_voice.get("result") or "LOSS").upper()
+                auto_lesson = (
+                    "Закриття з прибутком — закріплюємо дисципліну входу."
+                    if res == "WIN"
+                    else "Стоп — пауза, без відіграшу і без форсу наступного входу."
+                )
+                rid = trade_journal_add(
+                    db_path,
+                    finalize_last=True,
+                    result=res,
+                    lesson=auto_lesson,
+                    source_text=text[:500],
+                )
+                if rid:
+                    await agent_say(sender, "olesya", "Оновила запис у бібліотеці: результат зафіксовано.", 0.06)
+                    recent0 = trade_journal_get_recent(db_path, 1)
+                    row = recent0[0] if recent0 else {}
+                    sym = str(row.get("symbol") or "").strip().upper()
+                    direc = str(row.get("direction") or "").strip().upper()
+                    if sym and direc:
+                        sim = [
+                            s
+                            for s in trade_journal_search_similar(db_path, sym, direc, limit=10)
+                            if s.get("result")
+                        ][:6]
+                        if sim:
+                            sim_txt = "\n".join(
+                                f"· {s.get('symbol')} {s.get('direction')} → {s.get('result')} "
+                                f"(pnl% {s.get('pnl_pct')}, урок: {(s.get('lesson') or '')[:80]})"
+                                for s in sim
+                            )
+                            ctx_mem = f"Щойно закрито: {sym} {direc} як {res}.\nСхожі закриті угоди:\n{sim_txt}"
+                            sof = clean_llm_note(
+                                ask_agent(
+                                    "memory",
+                                    "Ти Софія. Дві короткі фрази українською: що вже було в схожих кейсах.",
+                                    ctx_mem,
+                                    max_tokens=220,
+                                    db_path=db_path,
+                                )
+                            )
+                            if sof:
+                                await agent_say(sender, "memory", sof, 0.08)
+                else:
+                    await agent_say(
+                        sender,
+                        "olesya",
+                        "Не знайшла відкритого запису в бібліотеці — спочатку напиши вхід (зайшла … LONG/SHORT …).",
+                        0.08,
+                    )
+        except Exception as exc_kb:
+            print(f"[journal-kb] {exc_kb}")
+            await agent_say(sender, "olesya", "Не вдалося записати в бібліотеку — перевір формат повідомлення.", 0.08)
         return
 
     if is_trade_feedback(text):
