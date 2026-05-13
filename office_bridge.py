@@ -1723,18 +1723,26 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
 
 def check_portfolio_correlation(db_path: str) -> Dict[str, Any]:
     """
-    Спрощений «кореляційний» фільтр: частка LONG/SHORT серед активних сигналів.
+    Спрощений «кореляційний» фільтр: частка LONG/SHORT серед відкритих позицій.
+    WATCHING не враховується — це зони очікування, не позиції.
     """
     try:
-        active = signal_get_active(db_path)
+        active = _fetchall(
+            db_path,
+            """SELECT direction FROM office_signals
+               WHERE status IN (
+                   'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+            """,
+            (),
+        )
         if not active:
             return {
                 "safe": True,
-                "message": "Немає позицій",
+                "message": "Немає відкритих позицій",
             }
 
-        longs = [s for s in active if str(s.get("direction") or "").upper() == "LONG"]
-        shorts = [s for s in active if str(s.get("direction") or "").upper() == "SHORT"]
+        longs = [r for r in active if str(r[0]).upper() == "LONG"]
+        shorts = [r for r in active if str(r[0]).upper() == "SHORT"]
 
         total = len(active)
         long_pct = len(longs) / total * 100.0
