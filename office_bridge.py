@@ -299,12 +299,16 @@ AGENT_EMOJI: Dict[str, str] = {
 
 
 def fmt_agent_line(agent_key: str, text: str) -> str:
-    # Hidden routing tag for relay multi-bot delivery; stripped before sending to Telegram.
+    """Тіло повідомлення: лише емодзі + текст (ім'я вже в профілі бота в Telegram).
+
+    Префікс @@agent_key@@ лишається для relay multi-bot; знімається перед відправкою.
+    """
     key = str(agent_key or "").strip().lower()
-    prof = AGENTS.get(key)
-    agent_name = prof.name if prof else key
     emoji = (AGENT_EMOJI.get(key) or "").strip()
-    body = f"{emoji} {agent_name}: {text}" if emoji else f"{agent_name}: {text}"
+    if emoji:
+        body = f"{emoji} {text}"
+    else:
+        body = text
     return f"@@{key}@@{body}"
 
 
@@ -2221,7 +2225,7 @@ def _fmt_level(v: Optional[float]) -> str:
 
 
 def clean_self_naming(text: str, agent_key: str) -> str:
-    """Прибирає самоназивання агента (підпис уже дає fmt_agent_line).
+    """Прибирає самоназивання агента (у чаті вже є емодзі-аватар через fmt_agent_line).
 
     Покриває варіанти на кшталт «📊 **Олеся:** …» після clean_llm_note (зірки зняті
     частково) та «**🦁 Лев:**» на початку відповіді.
