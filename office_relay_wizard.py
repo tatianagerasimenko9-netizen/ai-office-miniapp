@@ -2969,92 +2969,57 @@ async def run() -> None:
 
     asyncio.create_task(monitor_news())
 
-    def _marichka_smart_symbols() -> List[str]:
-        """Активні сигнали + топ за обсягом; ATR < 85% і quoteVolume > 5M для альтів; max 10."""
-        from office_market_data import fetch_atr_context
-        from urllib.request import Request, urlopen
-
-        active = signal_get_active(db_path)
-        active_syms: set[str] = set()
-        symbols: List[str] = []
-        for s in active:
-            if not isinstance(s, dict):
-                continue
-            sym = str(s.get("symbol") or "").strip().upper()
-            if sym:
-                active_syms.add(sym)
-                if sym not in symbols:
-                    symbols.append(sym)
-
-        vol_map: Dict[str, float] = {}
-        tickers: List[Any] = []
+    async def _marichka_dynamic_symbols() -> List[str]:
+        """USDT perpetuals: обсяг і добовий рух; плюс активні сигнали; max 20."""
+        _skip = ("USDC", "BUSD", "TUSD", "USDP", "DAI", "FDUSD")
         try:
-            req = Request(
-                "https://fapi.binance.com/fapi/v1/ticker/24hr",
-                headers={"User-Agent": "Mozilla/5.0 (compatible; OfficeRelay/1.0)"},
-            )
-            with urlopen(req, timeout=10) as resp:
-                tickers = json.loads(resp.read().decode("utf-8", errors="replace"))
-            if not isinstance(tickers, list):
-                tickers = []
-            else:
-                tickers.sort(
-                    key=lambda x: float(
-                        (x.get("quoteVolume", 0) if isinstance(x, dict) else 0) or 0
-                    ),
-                    reverse=True,
-                )
-                for t in tickers:
-                    if isinstance(t, dict):
-                        s0 = str(t.get("symbol") or "")
-                        if s0.endswith("USDT"):
-                            vol_map[s0] = float(t.get("quoteVolume") or 0)
-                for t in tickers[:30]:
-                    if not isinstance(t, dict):
-                        continue
-                    sym = str(t.get("symbol", "")).strip().upper()
-                    if (
-                        sym.endswith("USDT")
-                        and sym not in symbols
-                        and sym not in ("BTCUSDT", "ETHUSDT")
-                    ):
-                        symbols.append(sym)
-                    if len(symbols) >= 15:
-                        break
-        except Exception:
-            pass
-
-        for base in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
-            if base not in symbols:
-                symbols.insert(0, base)
-
-        majors = frozenset({"BTCUSDT", "ETHUSDT", "SOLUSDT"})
-        min_qv = 5_000_000.0
-        filtered: List[str] = []
-        for sym in symbols[:20]:
-            try:
-                if sym in active_syms or sym in majors:
-                    filtered.append(sym)
+            to = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=to) as _s:
+                async with _s.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as _r:
+                    _tickers = await _r.json()
+            if not isinstance(_tickers, list):
+                raise ValueError("ticker 24hr not a list")
+            _candidates: List[Dict[str, Any]] = []
+            for _t in _tickers:
+                if not isinstance(_t, dict):
                     continue
-                atr = fetch_atr_context(sym)
-                atr_d = atr if isinstance(atr, dict) else {}
-                day_used = float(atr_d.get("day_used_pct", 100) or 100)
-                qv = float(vol_map.get(sym, 0.0) or 0.0)
-                if day_used < 85 and qv > min_qv:
-                    filtered.append(sym)
-            except Exception:
-                continue
+                _sym = str(_t.get("symbol") or "")
+                if not _sym.endswith("USDT"):
+                    continue
+                if any(_sk in _sym for _sk in _skip):
+                    continue
+                try:
+                    _vol = float(_t.get("quoteVolume") or 0)
+                    _chg = abs(float(_t.get("priceChangePercent") or 0))
+                except (TypeError, ValueError):
+                    continue
+                if _vol < 5_000_000:
+                    continue
+                if not (2.0 <= _chg <= 20.0):
+                    continue
+                _candidates.append({"symbol": _sym, "volume": _vol})
+            _candidates.sort(key=lambda x: float(x["volume"]), reverse=True)
 
-        out: List[str] = []
-        for s in filtered:
-            if s not in out:
-                out.append(s)
-        return out[:10]
+            symbols: List[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+            _active = signal_get_active(db_path)
+            for _a in _active:
+                if not isinstance(_a, dict):
+                    continue
+                _sym_a = str(_a.get("symbol") or "").strip().upper()
+                if _sym_a and _sym_a not in symbols:
+                    symbols.append(_sym_a)
+            for _c in _candidates[:30]:
+                _sym_c = str(_c.get("symbol") or "").strip().upper()
+                if _sym_c and _sym_c not in symbols:
+                    symbols.append(_sym_c)
+            return symbols[:20]
+        except Exception:
+            return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
     last_marichka_evening_date = ""
 
     async def run_marichka_evening() -> None:
-        """Вечірній top-down: розумний список пар (активні + ліквідні альти)."""
+        """Вечірній огляд: динамічний список USDT + активні сигнали (до 20 пар)."""
         from office_market_data import (
             fetch_candles,
             fetch_fvg,
@@ -3063,7 +3028,34 @@ async def run() -> None:
             fetch_session_levels,
         )
 
-        symbols = _marichka_smart_symbols()
+        symbols = await _marichka_dynamic_symbols()
+        system_evening = """Ти Марічка. 26 років.
+Говориш як подруга — просто і зрозуміло.
+Жодних англійських слів.
+
+bias → напрямок
+bullish → вгору
+bearish → вниз
+OTE → зона входу
+FVG → незаповнений розрив
+BOS → зламала структуру
+PDH/PDL → вчорашній максимум/мінімум
+liquidity → ліквідність
+sweep → маніпуляція
+
+ПИШИ ТІЛЬКИ ПРО ЦІКАВІ МОНЕТИ:
+Якщо монета нецікава — мовчи.
+Якщо є сетап — пиши коротко:
+
+SYMBOL
+Що сталось: (1 речення)
+Вчорашній максимум/мінімум: X / Y
+Напрямок: вгору/вниз/нейтрально
+Зона входу: X–Y
+Чекаємо: (1 речення)
+
+Максимум 3-4 монети за вечір.
+Краще мало але якісно."""
         for symbol in symbols:
             try:
                 daily = fetch_candles(symbol, "1d", 3)
@@ -3089,46 +3081,42 @@ async def run() -> None:
                 context = (
                     f"Символ: {symbol}\n"
                     f"Час: вечірній аналіз (розклад OFFICE_BRIEFING_TZ, ціль 21:00 Київ).\n\n"
-                    f"ДЕННА СВІЧКА (поточна доба на біржі):\n"
-                    f"High: {today_h}\nLow: {today_l}\nClose: {today_c}\n\n"
-                    f"PDH (вчора High): {pdh}\nPDL (вчора Low): {pdl}\nPDC (вчора Close): {pdc}\n\n"
-                    f"Структура 4H: {structure}\n"
-                    f"FVG 4H: {fvg_data}\n"
-                    f"PD Array (1d): {pd_arr}\n"
+                    f"Денна свічка (поточна доба на біржі):\n"
+                    f"максимум: {today_h}\nмінімум: {today_l}\nзакриття: {today_c}\n\n"
+                    f"Вчорашній максимум (PDH): {pdh}\nвчорашній мінімум (PDL): {pdl}\nвчора на закритті: {pdc}\n\n"
+                    f"Структура на 4 год: {structure}\n"
+                    f"Незаповнений розрив (FVG) на 4 год: {fvg_data}\n"
+                    f"Зони преміум/дисконт (день): {pd_arr}\n"
                     f"Сесійні рівні: {session}\n"
-                    f"H4 останні свічки (к-ть): {len(h4) if isinstance(h4, list) else 0}\n"
-                )
-
-                system = (
-                    "Ти Марічка.\n"
-                    "Вечірній top-down аналіз.\n"
-                    "Коротко і по суті:\n\n"
-                    f"1. Що зробила денна свічка (бичача/ведмежа/невизначена)\n"
-                    f"2. PDH {pdh:.4f} і PDL {pdl:.4f} — ключові рівні на завтра\n"
-                    "3. FVG на H4 — незаповнені зони (якщо релевантно)\n"
-                    "4. Bias на завтра: LONG/SHORT/НЕЙТРАЛЬНО\n"
-                    "5. Plan A: якщо ціна йде вгору\n"
-                    "6. Plan B: якщо ціна йде вниз\n"
-                    "7. На що чекати вранці (Asian Range)\n\n"
-                    "Максимум 10 речень. Без води. Українською."
+                    f"Кількість свічок 4 год: {len(h4) if isinstance(h4, list) else 0}\n"
                 )
 
                 response = clean_llm_note(
                     ask_agent(
                         "marichka",
-                        system,
+                        system_evening,
                         context,
                         max_tokens=600,
                     )
                 )
-                if response:
-                    header = f"🌙 МАРІЧКА | Вечірній аналіз {symbol}"
-                    await send_office(f"{header}\n{response[:3800]}", stream="general")
-                    try:
-                        briefing_save(db_path, symbol, "evening", response)
-                    except Exception as save_exc:
-                        print(f"[marichka-evening] briefing_save {symbol}: {save_exc}")
-                    await asyncio.sleep(2.0)
+                if not response:
+                    continue
+                skip_phrases = [
+                    "нічого цікавого",
+                    "немає сетапу",
+                    "пропускаємо",
+                    "не цікаво",
+                    "мовчу",
+                ]
+                if any(p in response.lower() for p in skip_phrases):
+                    continue
+                header = f"🌙 МАРІЧКА | Вечірній аналіз {symbol}"
+                await send_office(f"{header}\n{response[:3800]}", stream="general")
+                try:
+                    briefing_save(db_path, symbol, "evening", response)
+                except Exception as save_exc:
+                    print(f"[marichka-evening] briefing_save {symbol}: {save_exc}")
+                await asyncio.sleep(2.0)
             except Exception as exc:
                 print(f"[marichka-evening] {symbol}: {exc}")
                 continue
@@ -3159,7 +3147,7 @@ async def run() -> None:
     asyncio.create_task(marichka_evening_briefing())
 
     async def run_marichka_morning() -> None:
-        """Ранкове підтвердження: розумний список пар (активні + ліквідні альти)."""
+        """Ранок: той самий динамічний список пар + вечірній план з БД."""
         from office_market_data import (
             fetch_atr_context,
             fetch_candles,
@@ -3167,7 +3155,34 @@ async def run() -> None:
             fetch_session_levels,
         )
 
-        symbols = _marichka_smart_symbols()
+        symbols = await _marichka_dynamic_symbols()
+        system_morning = """Ти Марічка. 26 років.
+Говориш як подруга — просто і зрозуміло.
+Жодних англійських слів.
+
+bias → напрямок
+bullish → вгору
+bearish → вниз
+OTE → зона входу
+FVG → незаповнений розрив
+BOS → зламала структуру
+PDH/PDL → вчорашній максимум/мінімум
+liquidity → ліквідність
+sweep → маніпуляція
+
+ПИШИ ТІЛЬКИ ПРО ЦІКАВІ МОНЕТИ:
+Якщо монета нецікава — мовчи.
+Якщо є сетап — пиши коротко:
+
+SYMBOL
+Що сталось: (1 речення)
+Вчорашній максимум/мінімум: X / Y
+Напрямок: вгору/вниз/нейтрально
+Зона входу: X–Y
+Чекаємо: (1 речення)
+
+Максимум 3-4 монети за ранок.
+Краще мало але якісно."""
         for symbol in symbols:
             try:
                 candles_1h = fetch_candles(symbol, "1h", 8)
@@ -3190,30 +3205,19 @@ async def run() -> None:
                 tail = candles_1h[-3:] if len(candles_1h) >= 3 else candles_1h
                 context = (
                     f"Символ: {symbol}\n"
-                    f"Час: ранкове підтвердження (OFFICE_BRIEFING_TZ, ціль 08:00 Київ).\n\n"
-                    f"Вечірній план (вчора 21:00):\n{evening_plan or 'немає даних'}\n\n"
-                    f"Asian Range:\nHigh: {asia_high}\nLow: {asia_low}\n\n"
-                    f"Поточна ціна (close останньої 1h): {current}\n"
-                    f"Структура 1H: {structure}\n"
-                    f"ATR (контекст доби): {atr}\n"
-                    f"Останні свічки 1H (до 3): {tail}\n"
-                )
-
-                system = (
-                    "Ти Марічка.\n"
-                    "Ранкове підтвердження плану.\n"
-                    "Коротко:\n\n"
-                    f"1. Asian Range: {asia_high}–{asia_low}. Де ціна відкрилась відносно Asian Range?\n"
-                    "2. Вечірній план підтверджується чи скасовується?\n"
-                    "3. На що звернути увагу в London сесію (08:00–11:00 UTC)\n"
-                    "4. Bias на день підтверджено чи змінився?\n\n"
-                    "Максимум 6 речень. Конкретні ціни. Українською."
+                    f"Час: ранкове підтвердження (розклад OFFICE_BRIEFING_TZ, ціль 08:00 Київ).\n\n"
+                    f"Вечірній план (вчора о 21:00):\n{evening_plan or 'немає даних'}\n\n"
+                    f"Нічний коридор (азійська сесія):\nверх: {asia_high}\nниз: {asia_low}\n\n"
+                    f"Поточна ціна (остання годинна свічка): {current}\n"
+                    f"Структура на 1 год: {structure}\n"
+                    f"Рух за день відносно норми (ATR): {atr}\n"
+                    f"Останні до трьох свічок по годині: {tail}\n"
                 )
 
                 response = clean_llm_note(
                     ask_agent(
                         "marichka",
-                        system,
+                        system_morning,
                         context,
                         max_tokens=400,
                     )
