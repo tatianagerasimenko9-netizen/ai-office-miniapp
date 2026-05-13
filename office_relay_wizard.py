@@ -3117,32 +3117,35 @@ async def run() -> None:
 
         symbols = await _marichka_dynamic_symbols()
         system_evening = """Ти Марічка. 26 років.
-Говориш як подруга — просто і зрозуміло.
-Жодних англійських слів.
+Говориш просто як подруга.
 
-bias → напрямок
-bullish → вгору
-bearish → вниз
-OTE → зона входу
-FVG → незаповнений розрив
-BOS → зламала структуру
-PDH/PDL → вчорашній максимум/мінімум
-liquidity → ліквідність
-sweep → маніпуляція
+ВЕЧІРНІЙ АНАЛІЗ — top-down по кожній монеті:
 
-ПИШИ ТІЛЬКИ ПРО ЦІКАВІ МОНЕТИ:
-Якщо монета нецікава — мовчи.
-Якщо є сетап — пиши коротко:
+1. ТИЖНЕВИЙ ГРАФІК:
+   Куди іде монета глобально?
+   Вгору / вниз / боковик?
 
-SYMBOL
-Що сталось: (1 речення)
-Вчорашній максимум/мінімум: X / Y
-Напрямок: вгору/вниз/нейтрально
-Зона входу: X–Y
-Чекаємо: (1 речення)
+2. ДЕННИЙ ГРАФІК:
+   Що зробила сьогоднішня свічка?
+   Закрилась вище/нижче вчорашнього
+   максимуму/мінімуму?
 
+3. 4-ГОДИННИЙ:
+   Яка структура?
+   Де незаповнені розриви?
+
+4. ГОДИННИЙ:
+   Де зона входу на завтра?
+
+5. ВИСНОВОК:
+   Напрямок на завтра: вгору/вниз/нейтрально
+   Зона входу: X–Y (якщо є)
+   Чекаємо: (що має статись для входу)
+
+ПИШИ ТІЛЬКИ якщо є конкретний сетап.
+Якщо нічого цікавого — мовчи.
 Максимум 3-4 монети за вечір.
-Краще мало але якісно."""
+Жодних англійських слів."""
         for symbol in symbols:
             try:
                 daily = fetch_candles(symbol, "1d", 3)
@@ -3159,6 +3162,19 @@ SYMBOL
                 today_l = float(today.get("low") or 0.0)
                 today_c = float(today.get("close") or 0.0)
 
+                weekly = fetch_candles(symbol, "1w", 3)
+                weekly_block = ""
+                if isinstance(weekly, list) and weekly:
+                    weekly_high = max(float(c.get("high", 0) or 0) for c in weekly)
+                    weekly_low = min(float(c.get("low", 0) or 0) for c in weekly)
+                    weekly_close = float(weekly[-1].get("close", 0) or 0)
+                    weekly_block = (
+                        f"Тижневий графік:\n"
+                        f"Максимум тижня: {weekly_high}\n"
+                        f"Мінімум тижня: {weekly_low}\n"
+                        f"Закриття тижня: {weekly_close}\n\n"
+                    )
+
                 h4 = fetch_candles(symbol, "4h", 10)
                 session = fetch_session_levels(symbol)
                 fvg_data = fetch_fvg(symbol, "4h")
@@ -3168,6 +3184,7 @@ SYMBOL
                 context = (
                     f"Символ: {symbol}\n"
                     f"Час: вечірній аналіз (розклад OFFICE_BRIEFING_TZ, ціль 21:00 Київ).\n\n"
+                    f"{weekly_block}"
                     f"Денна свічка (поточна доба на біржі):\n"
                     f"максимум: {today_h}\nмінімум: {today_l}\nзакриття: {today_c}\n\n"
                     f"Вчорашній максимум (PDH): {pdh}\nвчорашній мінімум (PDL): {pdl}\nвчора на закритті: {pdc}\n\n"
