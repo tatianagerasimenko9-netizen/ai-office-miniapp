@@ -4189,83 +4189,43 @@ SYMBOL
                     tv_signal_mark_processed(db_path, row_id)
                 return
 
-            from office_market_data import (
-                fetch_key_levels,
-                fetch_market_structure,
-                fetch_order_book_walls,
-            )
-
-            def _snap(obj: object, cap: int = 4000) -> str:
-                try:
-                    s = json.dumps(obj, ensure_ascii=False)
-                except Exception:
-                    s = str(obj)
-                if len(s) > cap:
-                    return s[: cap - 20] + "\n…(обрізано)"
-                return s
-
-            snap_1d = ""
-            snap_levels = ""
-            snap_walls = ""
-            try:
-                snap_1d = _snap(fetch_market_structure(symbol, "1d"))
-            except Exception as exc:
-                snap_1d = f"недоступно: {exc}"
-            try:
-                snap_levels = _snap(fetch_key_levels(symbol))
-            except Exception as exc:
-                snap_levels = f"недоступно: {exc}"
-            try:
-                snap_walls = _snap(fetch_order_book_walls(symbol, 500_000.0))
-            except Exception as exc:
-                snap_walls = f"недоступно: {exc}"
-
-            price_txt = f"{price:g}"
-
             system = f"""Ти Лев.
-TradingView надіслав сигнал.
-Твоя задача — підтвердити або відхилити
-через ICT аналіз.
-
-Аналізуй зверху вниз:
-1. Тижневий/денний тренд (get_market_structure 1d)
-2. H4 структура і режим (get_market_regime)
-3. H1 підтвердження (get_liquidity_sweep)
-4. Вхід на M15 (get_edge_score)
-
 TradingView знайшов патерн на {tf}.
-Підтверди чи відхили через ICT top-down.
+Перевір через top-down аналіз:
 
-У контексті вже є зріз структури 1d, рівні Герчика та стакан китів — використай; не дублюй зайвих запитів до тих самих даних.
+1. Денний/тижневий тренд:
+   get_market_structure — який тренд?
 
-Якщо ICT підтверджує TradingView —
-дай повний сетап з Entry/SL/TP/RR.
-Якщо ні — скажи чому відхиляєш.
+2. H4 структура і режим:
+   get_market_regime — який режим ринку?
+
+3. H1 підтвердження:
+   get_liquidity_sweep — чи був sweep?
+   get_pd_array — Premium чи Discount?
+
+4. Вхід:
+   get_edge_score — яка перевага?
+   get_order_book_walls — де стіни китів?
+   get_key_levels — ключові рівні Герчика?
+
+Якщо 3+ факторів підтверджують {direction}
+— дай Entry/SL/TP/RR.
+Якщо менше 3 — відхиляй з поясненням.
 
 Говориш тільки українською.
-Жодних англійських слів.
-Edge Score → перевага
-Grade C → слабка
-BSL sweep → маніпуляція вгорі
-PDH → вчорашній максимум"""
+Жодних англійських слів."""
 
             context = f"""
-TradingView сигнал (id={row_id}):
+TradingView сигнал:
 Символ: {symbol}
 Патерн: {pattern}
+Таймфрейм патерну: {tf}
 Напрямок: {direction}
-Ціна: {price}
-Таймфрейм: {tf}
-Сила: {strength}
+Ціна виявлення: {price}
+Сила сигналу: {strength}
 
-Структура ринку (1d, top-down база):
-{snap_1d}
-
-Рівні Герчика (get_key_levels):
-{snap_levels}
-
-Стакан китів (get_order_book_walls):
-{snap_walls}
+Завдання: підтвердити або відхилити
+через ICT top-down аналіз.
 """
 
             response = clean_llm_note(
@@ -4276,8 +4236,8 @@ TradingView сигнал (id={row_id}):
                 header = (
                     f"📡 TradingView → {symbol}\n"
                     f"Патерн: {pattern} на {tf}\n"
-                    f"Напрямок: {direction}\n"
-                    f"Ціна: {price_txt}\n"
+                    f"Напрямок: {direction} | "
+                    f"Ціна: {price}\n"
                     f"Лев перевірив:"
                 )
                 await send_office(
