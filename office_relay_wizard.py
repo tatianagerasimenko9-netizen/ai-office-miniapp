@@ -42,6 +42,7 @@ from office_bridge import (
     detect_setup_type,
     fmt_agent_line,
     get_agent_card_text,
+    get_meta_intelligence_report,
     init_office_db,
     journal_close_trade,
     journal_consecutive_loss_streak,
@@ -4398,6 +4399,99 @@ TradingView сигнал:
             await asyncio.sleep(45)
 
     asyncio.create_task(monitor_weekly_review())
+
+    async def run_meta_intelligence() -> None:
+        """Запускає Meta Intelligence аналіз."""
+        try:
+            report = get_meta_intelligence_report(db_path)
+            if report.get("error"):
+                print(f"[meta] report error: {report.get('error')}")
+                return
+            if int(report.get("total_signals") or 0) == 0:
+                await send_office(
+                    "📊 Тижневий звіт: "
+                    "немає угод за тиждень.",
+                    stream="general",
+                )
+                return
+
+            context = f"""
+Статистика офісу за 7 днів:
+
+Всього сигналів: {report['total_signals']}
+Досягли першого тейку: {report['hit_tp1']}
+Досягли другого тейку: {report['hit_tp2']}
+Вибило по стопу: {report['hit_sl']}
+Не відпрацювали: {report['expired']}
+В очікуванні: {report['watching']}
+
+Результативність: {report['win_rate']}%
+Лонгів: {report['longs']}
+Шортів: {report['shorts']}
+
+Топ монети: {report['top_symbols']}
+"""
+
+            system = """Ти Лев.
+Аналізуй тижневу статистику офісу.
+Говориш українською просто і чесно.
+
+Дай відповідь на питання:
+1. Які результати за тиждень?
+2. Що працює добре?
+3. Де є слабкі місця?
+4. Що змінити на наступний тиждень?
+5. Загальна оцінка роботи офісу.
+
+Максимум 10 речень. Конкретно."""
+
+            response = clean_llm_note(
+                ask_agent(
+                    "lev",
+                    system,
+                    context,
+                    max_tokens=600,
+                    db_path=db_path,
+                )
+            )
+
+            if response:
+                await send_office(
+                    f"📊 МЕТ АНАЛІЗ ТИЖНЯ\n\n"
+                    f"{response}",
+                    stream="general",
+                )
+
+        except Exception as e:
+            print(f"[meta] error: {e}")
+
+    async def meta_intelligence_weekly() -> None:
+        """Щотижневий Meta Intelligence звіт."""
+        last_date: Optional[Any] = None
+        while True:
+            try:
+                if os.getenv("OFFICE_META_INTELLIGENCE_DISABLE", "").strip() == "1":
+                    await asyncio.sleep(600)
+                    continue
+                tz = _briefing_tzinfo()
+                now = datetime.now(tz)
+                today = now.date()
+                if (
+                    now.weekday() == 6
+                    and now.hour == 20
+                    and now.minute < 5
+                    and last_date != today
+                ):
+                    last_date = today
+                    await run_meta_intelligence()
+                    await asyncio.sleep(3660)
+                else:
+                    await asyncio.sleep(60)
+            except Exception as e:
+                print(f"[meta-weekly] {e}")
+                await asyncio.sleep(60)
+
+    asyncio.create_task(meta_intelligence_weekly())
 
     async def monitor_risk_committee() -> None:
         """MASTER п.30: один нагадувальний пост на день при серії SL або багатьох денних лоссах."""

@@ -12,6 +12,7 @@ This module is intentionally standalone and does not mutate trading logic.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import hashlib
 import json
 import os
@@ -746,6 +747,74 @@ def tv_signal_mark_processed(db_path: str, row_id: int) -> None:
         _execute(db_path, "UPDATE tv_signals SET processed = TRUE WHERE id = ?", (int(row_id),))
     else:
         _execute(db_path, "UPDATE tv_signals SET processed = 1 WHERE id = ?", (int(row_id),))
+
+
+def get_meta_intelligence_report(db_path: str) -> Dict[str, Any]:
+    """
+    Щотижневий звіт по ефективності офісу.
+    Аналізує реальні угоди і знаходить
+    слабкі місця.
+    """
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT
+                symbol,
+                direction,
+                status,
+                outcome,
+                entry_low,
+                sl,
+                tp1,
+                ts_created
+            FROM office_signals
+            WHERE ts_created > ?
+            ORDER BY ts_created DESC
+            """,
+            (cutoff,),
+        )
+
+        total = len(rows)
+        if total == 0:
+            return {
+                "period": "7 днів",
+                "total_signals": 0,
+                "message": "Немає даних",
+            }
+
+        hit_tp1 = sum(1 for r in rows if str(r[2] or "") in ("HIT_TP1", "HIT_TP2"))
+        hit_tp2 = sum(1 for r in rows if str(r[2] or "") == "HIT_TP2")
+        hit_sl = sum(1 for r in rows if str(r[2] or "") == "HIT_SL")
+        expired = sum(1 for r in rows if str(r[2] or "") == "EXPIRED")
+        watching = sum(1 for r in rows if str(r[2] or "") == "WATCHING")
+
+        denom = hit_tp1 + hit_sl
+        win_rate = (hit_tp1 / denom * 100.0) if denom > 0 else 0.0
+
+        symbols = Counter(str(r[0] or "").upper() for r in rows if str(r[0] or "").strip())
+        top_symbols = symbols.most_common(5)
+
+        longs = sum(1 for r in rows if str(r[1] or "").upper() == "LONG")
+        shorts = sum(1 for r in rows if str(r[1] or "").upper() == "SHORT")
+
+        return {
+            "period": "7 днів",
+            "total_signals": total,
+            "hit_tp1": hit_tp1,
+            "hit_tp2": hit_tp2,
+            "hit_sl": hit_sl,
+            "expired": expired,
+            "watching": watching,
+            "win_rate": round(win_rate, 1),
+            "longs": longs,
+            "shorts": shorts,
+            "top_symbols": top_symbols,
+        }
+    except Exception as e:
+        print(f"[meta] error: {e}")
+        return {"error": str(e)}
 
 
 def _db_write(db_path: str, sql: str, params: tuple) -> None:
