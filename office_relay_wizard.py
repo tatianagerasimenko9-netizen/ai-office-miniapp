@@ -2969,10 +2969,92 @@ async def run() -> None:
 
     asyncio.create_task(monitor_news())
 
+    def _marichka_smart_symbols() -> List[str]:
+        """Активні сигнали + топ за обсягом; ATR < 85% і quoteVolume > 5M для альтів; max 10."""
+        from office_market_data import fetch_atr_context
+        from urllib.request import Request, urlopen
+
+        active = signal_get_active(db_path)
+        active_syms: set[str] = set()
+        symbols: List[str] = []
+        for s in active:
+            if not isinstance(s, dict):
+                continue
+            sym = str(s.get("symbol") or "").strip().upper()
+            if sym:
+                active_syms.add(sym)
+                if sym not in symbols:
+                    symbols.append(sym)
+
+        vol_map: Dict[str, float] = {}
+        tickers: List[Any] = []
+        try:
+            req = Request(
+                "https://fapi.binance.com/fapi/v1/ticker/24hr",
+                headers={"User-Agent": "Mozilla/5.0 (compatible; OfficeRelay/1.0)"},
+            )
+            with urlopen(req, timeout=10) as resp:
+                tickers = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if not isinstance(tickers, list):
+                tickers = []
+            else:
+                tickers.sort(
+                    key=lambda x: float(
+                        (x.get("quoteVolume", 0) if isinstance(x, dict) else 0) or 0
+                    ),
+                    reverse=True,
+                )
+                for t in tickers:
+                    if isinstance(t, dict):
+                        s0 = str(t.get("symbol") or "")
+                        if s0.endswith("USDT"):
+                            vol_map[s0] = float(t.get("quoteVolume") or 0)
+                for t in tickers[:30]:
+                    if not isinstance(t, dict):
+                        continue
+                    sym = str(t.get("symbol", "")).strip().upper()
+                    if (
+                        sym.endswith("USDT")
+                        and sym not in symbols
+                        and sym not in ("BTCUSDT", "ETHUSDT")
+                    ):
+                        symbols.append(sym)
+                    if len(symbols) >= 15:
+                        break
+        except Exception:
+            pass
+
+        for base in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
+            if base not in symbols:
+                symbols.insert(0, base)
+
+        majors = frozenset({"BTCUSDT", "ETHUSDT", "SOLUSDT"})
+        min_qv = 5_000_000.0
+        filtered: List[str] = []
+        for sym in symbols[:20]:
+            try:
+                if sym in active_syms or sym in majors:
+                    filtered.append(sym)
+                    continue
+                atr = fetch_atr_context(sym)
+                atr_d = atr if isinstance(atr, dict) else {}
+                day_used = float(atr_d.get("day_used_pct", 100) or 100)
+                qv = float(vol_map.get(sym, 0.0) or 0.0)
+                if day_used < 85 and qv > min_qv:
+                    filtered.append(sym)
+            except Exception:
+                continue
+
+        out: List[str] = []
+        for s in filtered:
+            if s not in out:
+                out.append(s)
+        return out[:10]
+
     last_marichka_evening_date = ""
 
     async def run_marichka_evening() -> None:
-        """Вечірній top-down по BTC/ETH/SOL для OFFICE."""
+        """Вечірній top-down: розумний список пар (активні + ліквідні альти)."""
         from office_market_data import (
             fetch_candles,
             fetch_fvg,
@@ -2981,7 +3063,7 @@ async def run() -> None:
             fetch_session_levels,
         )
 
-        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        symbols = _marichka_smart_symbols()
         for symbol in symbols:
             try:
                 daily = fetch_candles(symbol, "1d", 3)
@@ -3077,7 +3159,7 @@ async def run() -> None:
     asyncio.create_task(marichka_evening_briefing())
 
     async def run_marichka_morning() -> None:
-        """Ранкове підтвердження плану (Asian vs ціна, структура, ATR) — BTC/ETH/SOL."""
+        """Ранкове підтвердження: розумний список пар (активні + ліквідні альти)."""
         from office_market_data import (
             fetch_atr_context,
             fetch_candles,
@@ -3085,7 +3167,7 @@ async def run() -> None:
             fetch_session_levels,
         )
 
-        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        symbols = _marichka_smart_symbols()
         for symbol in symbols:
             try:
                 candles_1h = fetch_candles(symbol, "1h", 8)
