@@ -3862,6 +3862,140 @@ SYMBOL
 
     asyncio.create_task(marichka_morning_briefing())
 
+    async def run_session_playbook(session: str) -> None:
+        """
+        На початку кожної ключової сесії (Київ) Лев звіряє вечірній план з реальністю
+        і дає конкретний playbook.
+
+        session: 'asia' | 'london' | 'ny'
+        """
+        try:
+            if os.getenv("OFFICE_SESSION_PLAYBOOK_DISABLE", "").strip() == "1":
+                return
+            from office_market_data import (
+                fetch_atr_context,
+                fetch_liquidity_sweep,
+                fetch_long_short_ratio,
+                fetch_order_book_walls,
+                fetch_session_levels,
+            )
+
+            evening_plan = briefing_get_last(db_path, "ALL", "evening_homework")
+
+            session_names = {
+                "asia": "Азія (03:00–11:00 Київ)",
+                "london": "Лондон (11:00–14:00 Київ)",
+                "ny": "Нью-Йорк (16:00–19:00 Київ)",
+            }
+
+            session_mode = {
+                "asia": "Агресивний режим. Шукаємо маніпуляції Asian Range.",
+                "london": "Моментум або маніпуляція. Лондон sweep → вхід.",
+                "ny": "Захисний режим. Тільки мажори з підтвердженням.",
+            }
+
+            symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+            market_snapshot: List[str] = []
+
+            for symbol in symbols:
+                try:
+                    session_lvl = fetch_session_levels(symbol)
+                    sweep = fetch_liquidity_sweep(symbol, "1h")
+                    dom = fetch_order_book_walls(symbol)
+                    atr = fetch_atr_context(symbol)
+                    ls = fetch_long_short_ratio(symbol)
+
+                    sl = session_lvl if isinstance(session_lvl, dict) else {}
+                    sw = sweep if isinstance(sweep, dict) else {}
+                    dm = dom if isinstance(dom, dict) else {}
+                    at = atr if isinstance(atr, dict) else {}
+                    ls_d = ls if isinstance(ls, dict) else {}
+                    ls_hist = ls_d.get("history")
+                    ls_last = ls_hist[-1] if isinstance(ls_hist, list) and ls_hist else {}
+                    long_pct_v = ls_last.get("long_pct") if isinstance(ls_last, dict) else ""
+
+                    snapshot = f"""
+{symbol}:
+Asian Range: {sl.get("asia_high", "")} / {sl.get("asia_low", "")}
+PDH/PDL: {sl.get("pdh", "")} / {sl.get("pdl", "")}
+Sweep: {sw.get("description", "")}
+Кити: {dm.get("description", "")}
+ATR використано: {at.get("day_used_pct", "")}%
+L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
+"""
+                    market_snapshot.append(snapshot)
+                except Exception:
+                    continue
+
+            context = f"""
+Сесія: {session_names.get(session, session)}
+Режим: {session_mode.get(session, "")}
+
+Вечірній план команди:
+{evening_plan or "Немає плану — аналізуй поточний ринок"}
+
+Поточний стан ринку:
+{"".join(market_snapshot)}
+"""
+
+            system = f"""Ти Лев.
+Відкривається {session_names.get(session, session)}.
+Режим: {session_mode.get(session, "")}
+
+Звір вечірній план з реальністю.
+Дай конкретний playbook на цю сесію:
+
+1. Чи реалізується вечірній сценарій?
+2. Де зараз ліквідність (Asian low/high)?
+3. Чи є sweep маніпуляція?
+4. Куди йдуть кити (стакан)?
+5. Конкретний план: символ, напрямок, зона входу
+
+Якщо немає сетапу — одне речення і мовчиш.
+Якщо є — Entry/SL/TP/RR чітко.
+Тільки українська. Максимум 8 речень."""
+
+            response = clean_llm_note(
+                ask_agent(
+                    "lev",
+                    system,
+                    context,
+                    max_tokens=500,
+                    db_path=db_path,
+                )
+            )
+
+            if not response:
+                return
+
+            skip_phrases = [
+                "немає сетапу",
+                "пропускаємо",
+                "нічого цікавого",
+            ]
+
+            session_emoji = {
+                "asia": "🌏",
+                "london": "🇬🇧",
+                "ny": "🇺🇸",
+            }
+
+            emoji = session_emoji.get(session, "📊")
+            sn = session_names.get(session, session)
+
+            if not any(p in response.lower() for p in skip_phrases):
+                await send_office(
+                    f"{emoji} {sn.upper()}\n\n{response[:3800]}",
+                    stream="general",
+                )
+            else:
+                await send_office(
+                    f"{emoji} {sn}: немає сетапу. Чекаємо.",
+                    stream="general",
+                )
+        except Exception as e:
+            print(f"[session-playbook] {e}")
+
     async def session_announcer() -> None:
         """Повідомляє про початок/кінець ключових вікон за Києвом."""
         announced: set[str] = set()
@@ -3900,6 +4034,12 @@ SYMBOL
                     if msg:
                         announced.add(key)
                         await send_office(msg, stream="general")
+                        if now.hour == 3:
+                            asyncio.create_task(run_session_playbook("asia"))
+                        elif now.hour == 11:
+                            asyncio.create_task(run_session_playbook("london"))
+                        elif now.hour == 16:
+                            asyncio.create_task(run_session_playbook("ny"))
                 if len(announced) > 400:
                     announced.clear()
                 await asyncio.sleep(55)
