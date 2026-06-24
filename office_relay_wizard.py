@@ -4887,6 +4887,34 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         )
                                         await send_office(rev_note, stream="general")
 
+                        # ФІКС 3: попередження про наближення до SL / TP1 (до фактичного спрацювання).
+                        if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1"):
+                            near_pct = 0.5
+                            if sl_v is not None and sl_v > 0:
+                                if direction == "LONG":
+                                    near_sl = current_price > sl_v and (current_price - sl_v) / sl_v * 100.0 < near_pct
+                                else:
+                                    near_sl = current_price < sl_v and (sl_v - current_price) / sl_v * 100.0 < near_pct
+                                if near_sl and _allow_notify(symbol, "SL_NEAR"):
+                                    await send_office(
+                                        f"⚠️ Тетяно, {symbol}: ціна близько до стопу.\n"
+                                        f"Зараз {current_price}, стоп {sl_v}.\n"
+                                        "Перевір позицію — без добору проти руху.",
+                                        stream="general",
+                                    )
+                            if tp1_v is not None and tp1_v > 0 and status in ("ACTIVE", "HIT_ENTRY"):
+                                if direction == "LONG":
+                                    near_tp1 = current_price < tp1_v and (tp1_v - current_price) / tp1_v * 100.0 < near_pct
+                                else:
+                                    near_tp1 = current_price > tp1_v and (current_price - tp1_v) / tp1_v * 100.0 < near_pct
+                                if near_tp1 and _allow_notify(symbol, "TP1_NEAR"):
+                                    await send_office(
+                                        f"🎯 Тетяно, {symbol}: ціна близько до першої цілі.\n"
+                                        f"Зараз {current_price}, TP1 {tp1_v}.\n"
+                                        "Розглянь часткову фіксацію і перенос стопу в беззбиток.",
+                                        stream="general",
+                                    )
+
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
                             hit_sl = (direction == "LONG" and current_price <= sl_v) or (
                                 direction == "SHORT" and current_price >= sl_v
