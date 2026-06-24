@@ -5413,7 +5413,9 @@ TradingView сигнал:
         nonlocal last_daily_report_date
         while True:
             try:
-                now_local = datetime.now()
+                # Київський час (OFFICE_BRIEFING_TZ), а не UTC сервера Render —
+                # інакше денний звіт «з'їжджає» на кілька годин.
+                now_local = datetime.now(_briefing_tzinfo())
                 today = now_local.strftime("%Y-%m-%d")
                 if now_local.hour >= 22 and last_daily_report_date != today:
                     report = build_daily_journal_report(db_path)
