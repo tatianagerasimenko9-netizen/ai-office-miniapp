@@ -4588,6 +4588,25 @@ EV позитивне: {prob.get('ev_positive', '')}
                 status="ACTIVE",
                 analysis_note=lev_final or "",
             )
+            # ФІКС 4: Олеся автоматично заносить сигнал у бібліотеку угод.
+            try:
+                rid = trade_journal_add(
+                    db_path,
+                    symbol=symbol,
+                    direction=direction,
+                    entry_price=parsed.get("entry_low"),
+                    sl=parsed.get("sl"),
+                    tp=parsed.get("tp1"),
+                    setup_type="proactive_scan",
+                    session=_kb_session_label(),
+                    source_text=(lev_final or "")[:500],
+                )
+                await _send_agent_turn(
+                    "olesya",
+                    f"Записала {symbol} {direction} в журнал (#{rid or '—'}).",
+                )
+            except Exception as exc_j:
+                print(f"[olesya-journal] {exc_j}")
         except Exception as e:
             print(f"[scanner] error: {e}")
 
