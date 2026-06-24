@@ -69,6 +69,7 @@ from office_bridge import (
     OLESYA_RULE,
     signal_get_active,
     signal_get_by_symbol,
+    signal_get_latest_by_symbol,
     signal_should_skip_proactive_scan,
     signal_touch_updated,
     signal_update,
@@ -2271,6 +2272,32 @@ async def office_free_chat(
                 f"TP1: {active_by_symbol.get('tp1')}\n"
                 + context
             )
+        else:
+            # Пам'ять про вже закритий/неактивний сигнал по символу: щоб Лев не казав
+            # "сетапу немає", коли позиція щойно закрита по стопу або згоріла.
+            last_sig = signal_get_latest_by_symbol(db_path, symbols_in_text[0])
+            if last_sig:
+                status_ua = {
+                    "ACTIVE": "позиція активна",
+                    "HIT_ENTRY": "вхід відбувся, позиція активна",
+                    "HIT_TP1": "перша ціль взята",
+                    "HIT_TP2": "позиція закрита в плюс (друга ціль)",
+                    "HIT_SL": "позиція закрита по стопу",
+                    "EXPIRED": "сигнал згорів без входу",
+                }.get(
+                    str(last_sig.get("status") or "").upper(),
+                    str(last_sig.get("status") or "невідомо"),
+                )
+                context = (
+                    f"Раніше по {last_sig.get('symbol')} був сигнал {last_sig.get('direction')}: "
+                    f"Entry {last_sig.get('entry_low')}-{last_sig.get('entry_high')}, "
+                    f"SL {last_sig.get('sl')}, TP1 {last_sig.get('tp1')}, TP2 {last_sig.get('tp2')}. "
+                    f"Статус: {status_ua} "
+                    f"(час {last_sig.get('ts_updated') or last_sig.get('ts_created')}). "
+                    "Тетяна питає саме про цю угоду — відповідай у її контексті, "
+                    "не кажи що сетапу немає.\n"
+                    + context
+                )
     if not symbols_in_text:
         active = signal_get_active(db_path)
         if active:
