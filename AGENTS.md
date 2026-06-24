@@ -20,8 +20,13 @@ Only `python3` is on PATH in this environment. Docs/RUNBOOK use `python` — sub
 
 ### What can / cannot run end-to-end here
 - The **Mini App and Dashboard run fully locally** with no secrets. A complete "take action" smoke test: `POST /api/webhook/tradingview` to insert a signal, then see it in `office_events` (Dashboard) / the SQLite `tv_signals` table.
-- The **relay (`office_multibot_bootstrap.py`) cannot run end-to-end without Telegram credentials**: `TG_API_ID`, `TG_API_HASH`, `TG_BOT_TOKEN`, plus `MAIN_CHAT_ID` and `OFFICE_CHAT_ID`. First-time config is interactive (`RELAY_INTERACTIVE=1`/`RELAY_FORCE_SETUP=1`); it writes `office_relay_config.json` (gitignored) and a Telethon `*.session` file.
+- The **relay (`office_multibot_bootstrap.py`) needs Telegram credentials** to run end-to-end: `TG_API_ID`, `TG_API_HASH`, `TG_BOT_TOKEN`, plus `MAIN_CHAT_ID` and `OFFICE_CHAT_ID` (add these as Cursor secrets). With `TG_BOT_TOKEN` present it runs in non-interactive "cloud mode", reads the two chat IDs from env, and on each launch **sends a startup ping ("Офіс на зв'язку…") to the OFFICE Telegram chat** — expect a real message in that chat. It writes `office_relay_config.json` (gitignored) and a Telethon `office_relay_wizard.session` file.
 - **External APIs are network-restricted in this VM and degrade gracefully:** Binance market data (`office_market_data.py`) returns empty dicts (no key needed in prod), and Anthropic LLM (`ANTHROPIC_API_KEY`, optional) falls back to heuristic agent replies. These are not blockers for local dev.
+
+### Relay run gotchas (non-obvious)
+- **Secrets are NOT inherited by fresh `tmux` login shells.** Cursor injects `TG_*`/`MAIN_CHAT_ID`/`OFFICE_CHAT_ID` into the agent's shell environment, but a new `tmux ... new-session ... bash -l` resets the env and the relay will fall back to interactive `input()` prompts. Run the relay directly from the agent shell (or explicitly export the vars into the tmux pane).
+- **The relay calls blocking `input()` for the optional `NEWS_API_KEY` after startup** (and for `AGENT_BOT_TOKEN_*` if `MULTIBOT_INTERACTIVE=1`). In a non-TTY/background process this raises `EOFError` and kills the relay *after* it already connected. Avoid it by either setting `NEWS_API_KEY` (any value; news API is optional and degrades) or feeding empty stdin, e.g. `yes "" | python3 -u office_multibot_bootstrap.py`.
+- `office_multibot_bootstrap.py` prints `missing bot tokens: …` when per-agent `AGENT_BOT_TOKEN_*` are unset — this is fine; all agents fall back to the single `TG_BOT_TOKEN` (logged as `multi-bot mode disabled`).
 
 ### Tests / lint
 - No formal test runner. The "tests" are manual scripts: `python3 scripts/test_parse_signal_levels.py` (offline, returns exit 1 on failure) and `python3 scripts/test_llm_daryna.py` (offline heuristic). `python3 scripts/test_market_data.py` needs Binance access (empty output here).
