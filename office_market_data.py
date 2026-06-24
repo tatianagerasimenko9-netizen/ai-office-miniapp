@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 import math
 from typing import Any, Dict, List, Optional, Union
@@ -763,12 +764,20 @@ def _parse_econ_dt(value: str) -> Optional[datetime]:
     return None
 
 
+_NEWS_API_DISABLED_UNTIL = 0.0
+
+
 def _news_chaos_sync() -> tuple[bool, str]:
     """
     NEWS CHAOS: важлива макро-подія за FMP — за <30 хв або щойно (до 15 хв тому).
     """
+    global _NEWS_API_DISABLED_UNTIL
     key = os.getenv("NEWS_API_KEY", "").strip()
     if not key:
+        return False, ""
+    # Пауза після помилок доступу/оплати (402/401/403/429) — щоб не спамити лог
+    # і не смикати платний/недоступний endpoint щохвилини.
+    if time.time() < _NEWS_API_DISABLED_UNTIL:
         return False, ""
     keys_hi = ("fomc", "fed", "rate", "cpi", "nfp", "powell", "inflation", "ecb", "boj")
     try:
@@ -799,7 +808,15 @@ def _news_chaos_sync() -> tuple[bool, str]:
             if -15 <= mins < 0:
                 return True, title[:120]
     except Exception as exc:
-        print(f"[regime-news] {exc}")
+        code = getattr(exc, "code", None)
+        if code in (401, 402, 403, 429):
+            _NEWS_API_DISABLED_UNTIL = time.time() + 6 * 3600
+            print(
+                f"[regime-news] календар недоступний (HTTP {code}); "
+                "паузу на 6 год, працюємо без NEWS_CHAOS"
+            )
+        else:
+            print(f"[regime-news] {exc}")
     return False, ""
 
 
