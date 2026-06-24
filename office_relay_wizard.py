@@ -3693,7 +3693,11 @@ ATR використано: {float(cand.get("day_used") or 0):.0f}%
                         briefing_save(db_path, symbol, "evening", response)
                     except Exception as save_exc:
                         print(f"[homework] briefing_save {symbol}: {save_exc}")
-                    await send_office(f"🌙 {symbol}\n{response[:3800]}", stream="general")
+                    # ФІКС 1: Марічка публікує аналіз від СВОГО бота (а не через головний).
+                    await send_office(
+                        fmt_agent_line("marichka", f"{symbol}\n{response[:3800]}"),
+                        stream="general",
+                    )
                     await asyncio.sleep(2.0)
                 except Exception as e:
                     print(f"[homework] {symbol}: {e}")
@@ -3745,7 +3749,11 @@ ATR використано: {float(cand.get("day_used") or 0):.0f}%
             )
 
             if lev_response:
-                await send_office(f"🦁 ПЛАН НА ЗАВТРА:\n\n{lev_response[:3800]}", stream="general")
+                # ФІКС 1: фінальний план — від бота Лева (а не через головний бот).
+                await send_office(
+                    fmt_agent_line("lev", f"ПЛАН НА ЗАВТРА:\n\n{lev_response[:3800]}"),
+                    stream="general",
+                )
                 try:
                     briefing_save(db_path, "ALL", "evening_homework", lev_response)
                 except Exception as save_exc:
@@ -3858,7 +3866,11 @@ SYMBOL
                 )
                 if response:
                     header = f"🌅 МАРІЧКА | Ранок {symbol}"
-                    await send_office(f"{header}\n{response[:3800]}", stream="general")
+                    # ФІКС 1: ранковий аналіз — від бота Марічки.
+                    await send_office(
+                        fmt_agent_line("marichka", f"{header}\n{response[:3800]}"),
+                        stream="general",
+                    )
                     await asyncio.sleep(2.0)
             except Exception as exc:
                 print(f"[marichka-morning] {symbol}: {exc}")
