@@ -2965,15 +2965,32 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
     )
 
 
-def _strategist_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
+def _strategist_reply(
+    signal: OfficeSignal,
+    conversation: List[ConversationTurn],
+    prior_decisions: Optional[List[AgentDecision]] = None,
+) -> AgentDecision:
     lv = _level_pack(signal)
     entry = _fmt_level(lv["entry"])
     sl = _fmt_level(lv["sl"])
     tp = _fmt_level(lv["tp"])
     against_bias = bool(signal.meta.get("against_bias", False))
     bias_tail = " Торгуємо проти тренду — підвищена обережність." if against_bias else ""
+    # Текстовий розбір реплік (як було) — лишаємо для сумісності зі старою поведінкою.
     has_reject = any("Вето" in t.text or "пропуск" in t.text.lower() or "HIGH RISK" in t.text for t in conversation if t.agent_key in ("maks", "daryna", "news"))
     has_wait = any("Чекаємо" in t.text or "переносимо" in t.text for t in conversation if t.agent_key in ("maks", "daryna"))
+    # Надійніший фінал: поважаємо СТРУКТУРНІ рішення ключових ролей (Макс/Назар/Дарина),
+    # навіть якщо LLM сформулював текст без тригерних слів. Це може лише посилити
+    # обережність (ENTER -> WAIT/SKIP) і ніколи не робить вхід агресивнішим.
+    gate_keys = ("maks", "news", "daryna")
+    if prior_decisions:
+        for d in prior_decisions:
+            if d.agent_key not in gate_keys:
+                continue
+            if d.decision == "REJECTED":
+                has_reject = True
+            elif d.decision == "WAIT":
+                has_wait = True
     final_action: Literal["ENTER", "SKIP", "WAIT"] = "ENTER"
     if signal.regime.upper() == "CHOP" or has_reject:
         final_action = "SKIP"
@@ -3147,7 +3164,7 @@ def _decide_chain(signal: OfficeSignal, db_path: str = "office_bridge.db") -> Of
     decisions.append(risk)
     conversation.append(ConversationTurn(risk.agent_key, risk.note))
 
-    strategist = _strategist_reply(signal, conversation)
+    strategist = _strategist_reply(signal, conversation, decisions)
     decisions.append(strategist)
     conversation.append(ConversationTurn(strategist.agent_key, strategist.note))
 
@@ -3930,7 +3947,7 @@ async def office_desk_user_question(
         conversation.append(ConversationTurn("dev", dev_note))
         prev_agent = "dev"
 
-    strategist = _strategist_reply(sig, conversation)
+    strategist = _strategist_reply(sig, conversation, [analyst, news, risk])
     su = _simple_ua(strategist.agent_key, strategist.note)
     await agent_say(
         sender,
