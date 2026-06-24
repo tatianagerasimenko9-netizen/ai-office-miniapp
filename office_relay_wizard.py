@@ -3737,8 +3737,10 @@ ATR використано: {float(cand.get("day_used") or 0):.0f}%
                 tz = _briefing_tzinfo()
                 now = datetime.now(tz)
                 today = now.strftime("%Y-%m-%d")
+                # Зсув від desk-брифінгу (за замовчуванням 21:10), щоб не дублювати о 21:00.
+                eve_h, eve_m = _parse_hh_mm(os.getenv("OFFICE_MARICHKA_EVENING_TIME", "21:10"), 21, 10)
                 # Вікно 5 хв, щоб не пропустити хвилину при sleep(30).
-                if now.hour == 21 and now.minute < 5 and last_marichka_evening_date != today:
+                if now.hour == eve_h and eve_m <= now.minute < eve_m + 5 and last_marichka_evening_date != today:
                     await run_evening_homework()
                     last_marichka_evening_date = today
                     print("[relay] evening homework (team) sent")
@@ -3846,9 +3848,11 @@ SYMBOL
                 tz = _briefing_tzinfo()
                 now = datetime.now(tz)
                 today = now.date()
+                # Зсув від desk-брифінгу (за замовчуванням 08:10), щоб не дублювати о 08:00.
+                mor_h, mor_m = _parse_hh_mm(os.getenv("OFFICE_MARICHKA_MORNING_TIME", "08:10"), 8, 10)
                 if (
-                    now.hour == 8
-                    and now.minute < 5
+                    now.hour == mor_h
+                    and mor_m <= now.minute < mor_m + 5
                     and last_date != today
                 ):
                     last_date = today
