@@ -38,6 +38,7 @@ try:
 except Exception:  # pragma: no cover - optional in local sqlite mode
     psycopg = None  # type: ignore[assignment]
 
+from office_bulkowski_kernel import BULKOWSKI_KERNEL
 from office_gerchik_kernel import GERCHIK_KERNEL, compute_gerchik_ops
 from office_llm_agent import ask_agent
 from office_market_data import fetch_btc_candles, fetch_liquidations_proxy, fetch_open_interest
@@ -2591,7 +2592,7 @@ MARICHKA_RULE = """
 Нічого цікавого — мовчиш.
 Максимум 3-4 монети за вечір.
 Тільки українська. Жодних англійських слів.
-""" + GERCHIK_KERNEL
+""" + GERCHIK_KERNEL + BULKOWSKI_KERNEL
 
 
 # Легкий спільний базовий блок для НЕ-Лев агентів (Макс/Дарина/Марко/Софія).
@@ -2659,13 +2660,16 @@ NY (13:00-16:00 UTC):
 Silver Bullet (10:00-11:00 NY time):
   точний вхід після ранкової маніпуляції.
 
-ГРАФІЧНІ ПАТЕРНИ:
-Подвійна/потрійна вершина і дно — розворот.
-Голова і плечі (і перевернута) — розворот.
-Клин висхідний (bearish) / низхідний (bullish).
-Прапор і вимпел — продовження тренду.
-Трикутники — компресія перед вибухом.
-Чашка з ручкою — bullish продовження.
+ГРАФІЧНІ ПАТЕРНИ (Булковскі → Герчик):
+Фігура без рівня D1 — не сетап.
+Пробій фігури без закриття й імпульсу = ЛП, не вхід.
+Голова-плечі, подвійні/потрійні, діамант — розворот від шиї/лінії.
+Прапор, вимпел, HTF, measured move — продовження після імпульсу (ATR ще не вичерпано).
+Прямокутник / трикутник — межі як рівні; вхід на пробої або ЛП межі.
+Розширення (мегафон) — багато хибних виходів; не середина.
+Adam = шип, Eve = округла.
+Dead-cat bounce — не ловити перший відскок.
+% надійності з енциклопедії не вигадуй і не цитуй.
 
 СВІЧКОВИЙ АНАЛІЗ:
 Молот (після падіння) — розворот вгору.
