@@ -14,6 +14,8 @@
 - `books/gerchik_kurs_aktyvnoho_treydera/system/93_systema_na_odnii_storintsi.md` — система на одній сторінці.
 - `books/gerchik_kurs_aktyvnoho_treydera/system/21_vkhid_v_uhodu.md` + `11_atr.md` + `06_khybnyi_probiy.md`.
 
+- `books/bulkowski_encyclopedia_chart_patterns/ARCHIVE_INDEX_UA.md` — фігури; без вигаданих %.
+
 **Не робити:** не підставляти вигадані ціни/winrate; шар Б (бали, JSON) — не цитата книги.
 
 ## За потреби

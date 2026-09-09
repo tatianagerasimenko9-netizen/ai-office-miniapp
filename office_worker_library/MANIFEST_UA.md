@@ -32,3 +32,4 @@
 | `books/gerchik_kurs_aktyvnoho_treydera/KONSPEKT_UA.md` | Наративний конспект «Курс активного трейдера» |
 | `books/gerchik_kurs_aktyvnoho_treydera/system/` | Практична система: 25 тем + додатки (правила, чек-листи, AI-алгоритм) |
 | `books/bulkowski_encyclopedia_chart_patterns/KONSPEKT_UA.md` | Конспект Encyclopedia of Chart Patterns |
+| `books/bulkowski_encyclopedia_chart_patterns/ARCHIVE_INDEX_UA.md` | Індекс 52 карток з архіву Patterns (без статистики) |
