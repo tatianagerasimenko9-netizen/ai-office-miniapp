@@ -38,6 +38,7 @@ try:
 except Exception:  # pragma: no cover - optional in local sqlite mode
     psycopg = None  # type: ignore[assignment]
 
+from office_gerchik_kernel import GERCHIK_KERNEL, compute_gerchik_ops
 from office_llm_agent import ask_agent
 from office_market_data import fetch_btc_candles, fetch_liquidations_proxy, fetch_open_interest
 from office_style_qa import polish_agent_message
@@ -2536,6 +2537,10 @@ RR: [число]
 Чекаю зону: [low]–[high]
 Умова входу: (що має статись)
 
+У ФІНАЛІ обов'язково назви:
+Модель Герчика: [відбій/пробій/ЛП/немає]
+Герчик_бал: [n]/10 (або «немає даних»)
+
 ЗАБОРОНЕНО:
 - Входити без підтвердження ретестом
 - Рухати стоп проти позиції
@@ -2544,11 +2549,12 @@ RR: [число]
 - Довгі пояснення замість конкретних цифр
 - Два сигнали по одному символу
 - Дублювати те що вже сказала команда
+- Називати сетапом Герчика угоду з RR < 3 або без рівня
 
 Говориш тільки українською.
 Жодних англійських слів.
 Ти снайпер. Один постріл — одна ціль.
-"""
+""" + GERCHIK_KERNEL
 
 
 MARICHKA_RULE = """
@@ -2579,12 +2585,13 @@ MARICHKA_RULE = """
 - База (проторговка) біля рівня = сильний сигнал
 - Хибний пробій = торгуємо зворотний бік
 - Тижневий рівень важливіший за денний
+- Назви модель: відбій / пробій / ЛП; без рівня D1 — мовчиш
 
 Пиши тільки якщо є конкретний план.
 Нічого цікавого — мовчиш.
 Максимум 3-4 монети за вечір.
 Тільки українська. Жодних англійських слів.
-"""
+""" + GERCHIK_KERNEL
 
 
 # Легкий спільний базовий блок для НЕ-Лев агентів (Макс/Дарина/Марко/Софія).
@@ -2605,9 +2612,10 @@ DESK_BASE_RULE = """
 - Запас ходу (ATR): якщо пройдено ~75-80% денного ATR — не по тренду (пропуск або контртренд);
   технічний ATR (відстань між рівнями) має вміщати щонайменше 5 стопів.
 - Ризик: стоп ЗА СТРУКТУРУ рівня з невеликим буфером під шум/проскальзування; стоп проти позиції не рухаємо; RR ≥ 1:2 (ідеал 1:3).
+  Сетап за Герчиком — лише якщо RR ≥ 3:1; інакше не називати його герчиківським.
 - Підготовка: думати як великий гравець (набір позиції, збір стопів довгими хвостами);
   тримати сценарії План А / План Б з умовою інвалідації тези.
-"""
+""" + GERCHIK_KERNEL
 
 
 TRADING_KNOWLEDGE = """
@@ -2930,7 +2938,9 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         f"Проти тренду: {bool(signal.meta.get('against_bias', False))}\n"
         f"Денний bias: {signal.meta.get('daily_bias', 'NEUTRAL')}\n"
         f"Новинний ризик: {signal.meta.get('news_risk', 'SAFE')}\n"
-        f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%"
+        f"Drawdown сьогодні: {_f(signal.meta.get('daily_drawdown', 0.0)):.1f}%\n"
+        f"Герчик_бал: {signal.meta.get('gerchik_ops_score', 'немає даних')}\n"
+        f"Герчик ATR veto: {bool(signal.meta.get('gerchik_atr_trend_veto'))}"
     )
     system = (
         f"{DESK_BASE_RULE}"
@@ -2953,8 +2963,26 @@ def _risk_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         "Звертайся до Тетяни по імені коли доречно. "
         "Звертайся до колег по іменах — Макс, Марічка, Назар, Дарина, Лев, Марко.\n"
         "Ніколи не вигадуєш стан портфеля."
+        " Якщо Герчик_бал ≤4 — вето. Якщо ATR day_used ≥80% по тренду — вето, окрім явного sweep/ЛП."
     )
     llm_note = clean_llm_note(ask_agent("daryna", system, context, max_tokens=800))
+    gscore = signal.meta.get("gerchik_ops_score")
+    try:
+        gscore_i = int(gscore) if gscore is not None else None
+    except (TypeError, ValueError):
+        gscore_i = None
+    if gscore_i is not None and gscore_i <= 4:
+        note = llm_note or _enforce_data_grounding(
+            f"Вето Герчика: бал {gscore_i}/10 (0–4 = не торгувати).",
+            signal,
+        )
+        return AgentDecision("daryna", "REJECTED", note, {"veto": True, "gerchik_ops": gscore_i})
+    if bool(signal.meta.get("gerchik_atr_trend_veto")) and not bool(signal.meta.get("gerchik_sweep")):
+        note = llm_note or _enforce_data_grounding(
+            "Вето ATR: денний запас ходу вичерпано (≥80%), по тренду не входимо.",
+            signal,
+        )
+        return AgentDecision("daryna", "REJECTED", note, {"veto": True, "gerchik_atr": True})
     if bool(signal.meta.get("loss_cooldown_active", False)):
         note = llm_note or _enforce_data_grounding(f"Активний cooldown. Вхід переносимо. {risk_levels}", signal)
         return AgentDecision(
@@ -3442,6 +3470,19 @@ async def office_handle_signal(
 
     await sender(f"Новий кейс: {signal.symbol} {signal.direction}. Команда на розборі.")
     await sender(f"#{str(signal.symbol).upper()}_{str(signal.direction).upper()}")
+
+    try:
+        gops = compute_gerchik_ops(signal.symbol)
+        if isinstance(gops, dict):
+            signal.meta["gerchik_ops_score"] = gops.get("gerchik_ops_score")
+            signal.meta["gerchik_ops_band"] = gops.get("gerchik_ops_band")
+            signal.meta["gerchik_atr_trend_veto"] = bool(gops.get("gerchik_atr_trend_veto"))
+            signal.meta["gerchik_ops_reasons"] = gops.get("gerchik_ops_reasons")
+            # sweep-прапорець для винятку ATR: бал ЛП/sweep уже в reasons
+            reasons = gops.get("gerchik_ops_reasons") or []
+            signal.meta["gerchik_sweep"] = any("ЛП" in str(x) or "sweep" in str(x).lower() for x in reasons)
+    except Exception:
+        pass
 
     try:
         disc_every = int(os.getenv("OFFICE_DISCIPLINE_REVIEW_EVERY", "0") or "0")
