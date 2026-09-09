@@ -9,6 +9,8 @@
 |-------|--------|
 | `shared/` | Повні копії найважливіших файлів (імена латинкою `*_SNAPSHOT.*`, щоб уникнути проблем у Git на різних ОС). |
 | `by_role/<ключ>/` | `BIBLIOTEKA_ROLI_UA.md` — **що читати першим** для цієї ролі і як це застосовувати в офісі. |
+| `books/gerchik_kurs_aktyvnoho_treydera/` | Конспект Герчика + практична система `system/` (25 тем, IF/THEN, крипта/XAUUSD). |
+| `books/bulkowski_encyclopedia_chart_patterns/` | Конспект Encyclopedia of Chart Patterns (геометрія фігур). |
 
 Ключі ролей збігаються з кодом: `lev`, `maks`, `news`, `daryna`, `marko`, `olesya`, `memory`, `psych`, `dev`.
 
