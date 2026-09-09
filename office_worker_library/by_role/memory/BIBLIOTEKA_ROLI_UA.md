@@ -13,4 +13,6 @@
 - **`shared/STRATEGIA_PREPUMP_PREDUMP_SNAPSHOT.md`**, **`shared/STRATEGIA_TSIL_DNJA_SNAPSHOT.md`** — шаблони сценаріїв.
 - **`shared/BOT_MEMORY_README_SNAPSHOT.md`** — де лежать файли пам’яті в оригінальному боті.
 
+- **`books/gerchik_kurs_aktyvnoho_treydera/system/`** — зіставляти сетапи з темами; winrate лише з журналу.
+
 **Не робити:** не видавати заучені відповіді замість перевірки актуального журналу офісу та даних радара.

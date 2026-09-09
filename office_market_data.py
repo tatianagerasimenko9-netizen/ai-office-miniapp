@@ -1064,7 +1064,7 @@ def fetch_probability_score(symbol: str, db_path: Optional[str] = None) -> Dict[
         factors_short: List[str] = []
 
         day_used = float(atr_d.get("day_used_pct") or 100.0)
-        if day_used > 85.0:
+        if day_used > 80.0:
             return {
                 "symbol": sym,
                 "long_prob": 0,

@@ -13,4 +13,6 @@
 - **`shared/STATISTYKA_SNAPSHOT.txt`** — лише як **історичний** знімок; для live-рішень покладатися на журнал офісу та дані радара.
 - **`shared/PROBLEMY_TA_RISHENNYA_SNAPSHOT.md`** — кейси, коли логіка ламалась і як її чинили.
 
+- **`books/gerchik_kurs_aktyvnoho_treydera/system/13_ryzyk_menedzhment.md`**, `14_mani_menedzhment.md`, `15_rr.md`, `11_atr.md` — RR 3:1, денний ліміт, ATR ≥ 5 стопів, вето.
+
 **Не робити:** не погоджуватися на «гарну історію» без перевірки розміру позиції та умов входу.

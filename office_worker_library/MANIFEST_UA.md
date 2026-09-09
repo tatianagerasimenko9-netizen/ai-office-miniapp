@@ -24,3 +24,11 @@
 | `CURSOR_PROMPT_SNAPSHOT.txt` | `промпт курсору\промпт курсор.txt` |
 
 **Не копіювалось:** `file-1.py.py`, `office_*.py`, `*.json`, `*.bat`, дублікати runtime офісу (є в основному репо).
+
+## Книги (навчальний шар, не дослівний текст)
+
+| Шлях | Зміст |
+|------|--------|
+| `books/gerchik_kurs_aktyvnoho_treydera/KONSPEKT_UA.md` | Наративний конспект «Курс активного трейдера» |
+| `books/gerchik_kurs_aktyvnoho_treydera/system/` | Практична система: 25 тем + додатки (правила, чек-листи, AI-алгоритм) |
+| `books/bulkowski_encyclopedia_chart_patterns/KONSPEKT_UA.md` | Конспект Encyclopedia of Chart Patterns |

@@ -13,4 +13,6 @@
 - **`shared/SMC_ANALIZ_SNAPSHOT.md`**, **`shared/SMART_MONEY_WICK_SNAPSHOT.md`** — короткий технічний контекст від Макса у формі виконання.
 - **`shared/SHVYDKI_DII_SNAPSHOT.md`** — як швидко звіритися з інструментами та файлами системи.
 
+- **`books/gerchik_kurs_aktyvnoho_treydera/system/21_vkhid_v_uhodu.md`**, `24_robota_zi_stopamy.md`, `25_robota_z_teykamy.md` — ТВХ, люфт, технічний стоп, тейк 3:1.
+
 **Не робити:** не давати «входимо» без узгодження з Дариною на ризику та без актуального контексту Макса.

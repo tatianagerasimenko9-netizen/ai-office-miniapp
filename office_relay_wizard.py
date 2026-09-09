@@ -84,6 +84,10 @@ from office_bridge import (
     _extract_first_usdt_symbol,
     _now_kyiv_hm,
     _to_kyiv_time_from_utc,
+    LEV_RULE,
+    DESK_BASE_RULE,
+    MARICHKA_RULE,
+    ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
 
@@ -114,124 +118,7 @@ _CHAT_USDT_PAIR_ALIASES: Dict[str, str] = {
     "BUSDT": "BUSDT",
 }
 
-LEV_RULE = """
-Ти — Лев. 42 роки. Інституційний трейдер.
-Школа: Герчик (рівні + ризик), Пол Тюдор Джонс
-(адаптивність + макро), Рей Даліо (системність).
-20 років дисципліни. Без revenge, без FOMO.
-
-ІДЕНТИЧНІСТЬ:
-Ти не прогнозуєш — ти керуєш ризиком.
-Ти не шукаєш угоди — ти чекаєш A+ сетапи.
-Виживання важливіше прибутку.
-Тиша — це теж стратегія.
-80% часу — спостереження.
-
-Якщо Тетяна просто вітається або пише не про ринок — відповідай як людина. Коротко і тепло.
-Не кидайся одразу в аналіз.
-
-ПЕРЕД КОЖНИМ ВХОДОМ ОБОВ'ЯЗКОВО:
-0. get_probability_score — спочатку ймовірність напрямку. NO_TRADE або confidence LOW = ПРОПУСК.
-0.5. get_edge_score — поріг 85 (снайпер); нижче — без входу
-1. get_market_regime — режим ринку
-2. get_session_levels — Asia/London/NY рівні
-3. get_liquidity_sweep — чи був sweep
-4. get_market_structure — BOS/CHOCH
-5. get_pd_array — Premium чи Discount
-6. get_order_blocks — Order Block зони
-7. get_fvg — Fair Value Gap
-8. get_atr_context — запас ходу >30%
-9. get_order_book_walls — стакан китів.
-   Whale BID = підтримка.
-   Whale ASK = опір.
-   SL завжди ЗА стіною кита.
-
-ПРАВИЛА (неготіабельно):
-- LOW_LIQUIDITY або ATR >90% = ПРОПУСК
-- Без SL = не входимо ніколи
-- RR мінімум 1:2, ідеал 1:3+
-- Стоп за структурою (swing/OB/sweep рівень)
-- Максимум 2-3 угоди на день
-- Вхід від рівня, не від поточної ціни
-- Перший ретест важливіший за перший імпульс
-- Немає рівня = немає угоди
-
-ФОРМАТ ВІДПОВІДІ:
-[LONG/SHORT/ПРОПУСК] SYMBOL
-
-Entry: [зона]
-SL: [ціна] (за [причина])
-TP1: [ціна] (+[%])
-TP2: [ціна] (+[%])
-RR: [число]
-Режим: [режим]
-Контролює: [хто]
-EV: [число]
-Sweep: [%]%
-Був sweep рівня: [так/ні]
-Структура: [BOS/CHOCH/HH-HL/LH-LL]
-Edge: [A+/B/C] ([score]/100)
-Зараз: [ВХОДЬ/ЧЕКАЙ/ПРОПУСКАЄМО]
-
-Одне речення чому. Більше нічого.
-
-ЯКЩО ПРОПУСК — формат відповіді (підписи тільки українською):
-ПРОПУСК SYMBOL
-
-Ймовірність: [не торгуємо / вгору / вниз / невизначено]
-Впевненість: [низька / середня / висока]
-Перевага: [слабка / середня / сильна] ([score]/100)
-Режим: [боковик / тренд вгору / тренд вниз]
-Структура: [коротко українською]
-Зараз: [входь / чекаємо / пропускаємо]
-
-[одне речення чому простою українською]
-
-Чекаю зону: [low]–[high]
-
-Формат відповіді ПРОПУСК (приклад):
-ПРОПУСК XAUUSDT
-
-Ймовірність: не торгуємо
-Впевненість: низька
-Перевага: слабка (28/100)
-Режим: боковик
-Структура: немає підтвердження
-Зараз: чекаємо
-
-Ринок в боковику без чіткого напрямку.
-
-Чекаю зону: 4632–4713
-
-ЗАБОРОНЕНО:
-- Довгі абзаци
-- OHLCV таблиці
-- Два сигнали по одному символу
-- Входити без підтвердження структури
-- Вигадувати точність де її немає
-- Мотиваційна вода
-
-Говориш тільки українською.
-Жодних англійських слів і абревіатур.
-
-Замість:           Пиши:
-Probability        ймовірність
-Confidence         впевненість
-Edge               перевага
-NO_TRADE           не торгуємо
-RANGE              боковик
-BOS/CHOCH          структура
-LOW/MEDIUM/HIGH    низька/середня/висока
-ATR                денний запас ходу
-OTE                зона входу
-FVG                незаповнений розрив
-Sweep              маніпуляція
-PDH/PDL            вчорашній максимум/мінімум
-Kill Zone          активна зона торгівлі
-Session            сесія
-
-Ти снайпер. Один постріл — одна ціль.
-"""
+# LEV_RULE / DESK_BASE_RULE — єдине джерело в office_bridge (+ GERCHIK_KERNEL).
 
 # Один стартовий ping у OFFICE за процес (уникнення дубля при повторному вході в run()).
 _RELAY_OFFICE_STARTUP_PING_SENT: bool = False
@@ -2176,28 +2063,28 @@ async def office_free_chat(
             "Ти Лев — голова столу. Спокійний, впевнений; з Тетяною говориш як з партнером, не як з інструкцією."
         ),
         "maks": (
-            f"{LEV_RULE}"
+            f"{DESK_BASE_RULE}"
             f"{language_block}\n"
             "Ти Макс — твій стиль як у радара: помітив дивне в цифрах — сказав; якщо все рівно — не розводиш."
         ),
         "marichka": (
-            f"{LEV_RULE}"
+            f"{MARICHKA_RULE}"
             f"{language_block}\n"
             "Ти Марічка — говориш просто, образами; як подруга, яка дивиться на графік разом з Тетяною."
         ),
         "daryna": (
-            f"{LEV_RULE}"
+            f"{DESK_BASE_RULE}"
             f"{language_block}\n"
             "Ти Дарина — скеля: тепло не втрачаєш, але про ризик говориш прямо. "
             "Якщо питають про відкриті позиції чи PnL — чесно: зараз цього в чаті не видно, глянь Mini App."
         ),
         "marko": (
-            f"{LEV_RULE}"
+            f"{DESK_BASE_RULE}"
             f"{language_block}\n"
             "Ти Марко — людина-дія: що робити зараз, куди дивитись, без зайвих абзаців."
         ),
         "news": (
-            f"{LEV_RULE}"
+            f"{DESK_BASE_RULE}"
             f"{language_block}\n"
             "Ти Назар — як у кого календар у голові: коротко «тихо» або «тут уважно», без лекцій."
         ),
@@ -2206,7 +2093,7 @@ async def office_free_chat(
             f"{language_block}\n"
         ),
         "memory": (
-            f"{LEV_RULE}"
+            f"{DESK_BASE_RULE}"
             f"{language_block}\n"
             "Ти Софія — пам'ять офісу: нагадуєш історію людською мовою, без сухих таблиць. "
             "Про відкриті позиції / точний PnL у чаті не вигадуй — відсилай до Mini App."
@@ -2216,7 +2103,7 @@ async def office_free_chat(
             f"{language_block}\n"
         ),
         "dev": (
-            f"{LEV_RULE}"
+            f"{ARTEM_RULE}"
             f"{language_block}\n"
             "Ти Артем — свій у техніці: якщо все ок, кажеш коротко; якщо ні — без паніки, по кроках."
         ),
@@ -4132,6 +4019,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                 fetch_probability_score,
                 fetch_top_movers,
             )
+            from office_gerchik_kernel import compute_gerchik_ops
 
             EXCLUDED_FROM_SCANNER = {"BTCUSDT", "ETHUSDT"}
             ticker24_map: Dict[str, Dict[str, float]] = {}
@@ -4237,7 +4125,23 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         continue
                     atr = fetch_atr_context(symbol)
                     atr_used = float((atr or {}).get("day_used_pct", 100) or 100)
-                    if atr_used > 85:
+                    if atr_used >= 80:
+                        continue
+                    try:
+                        btc_reg = str((fetch_market_regime("BTCUSDT") or {}).get("regime") or "").upper()
+                    except Exception:
+                        btc_reg = ""
+                    if symbol != "BTCUSDT" and btc_reg in ("NEWS_CHAOS", "PANIC", "LOW_LIQUIDITY"):
+                        continue
+
+                    gops = compute_gerchik_ops(symbol)
+                    gscore = gops.get("gerchik_ops_score") if isinstance(gops, dict) else None
+                    if gscore is not None and int(gscore) <= 4:
+                        continue
+                    if isinstance(gops, dict) and gops.get("gerchik_atr_trend_veto") and not (
+                        str(gops.get("gerchik_ops_reasons") or "").find("ЛП") >= 0
+                        or any("sweep" in str(x).lower() or "ЛП" in str(x) for x in (gops.get("gerchik_ops_reasons") or []))
+                    ):
                         continue
 
                     edge_data = fetch_edge_score(symbol)
@@ -4294,6 +4198,8 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                             "edge_score": edge_data.get("edge_score"),
                             "edge_grade": edge_data.get("grade"),
                             "edge_verdict": edge_data.get("verdict"),
+                            "gerchik_ops": gops,
+                            "gerchik_ops_score": gscore,
                         }
                     )
                     _last_signal_time[symbol] = time.time()
@@ -4415,12 +4321,15 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             maks_ctx = (
                 f"Символ: {symbol}\nНапрямок: {direction}\nПоточна ціна: {current_price}\n"
                 f"OI: {oi_now}\nFunding: {best.get('funding')}%\nL/S: {best.get('ls_ratio')}\n"
-                f"Ліквідації: {liq_now}"
+                f"Ліквідації: {liq_now}\n"
+                f"Герчик_бал: {best.get('gerchik_ops_score')}\n"
+                f"Герчик_причини: {best.get('gerchik_ops')}"
             )
             maks_msg = clean_llm_note(
                 ask_agent(
                     "maks",
-                    "Ти Макс. Дай коротко ринкові дані: OI/funding/liquidations і висновок по імпульсу. Українською.",
+                    f"{DESK_BASE_RULE}\nТи Макс. Дай коротко ринкові дані: OI/funding/liquidations, "
+                    "модель Герчика (відбій/пробій/ЛП) і висновок по імпульсу. Українською.",
                     maks_ctx,
                     max_tokens=900,
                 )
@@ -4439,7 +4348,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             mar_msg = clean_llm_note(
                 ask_agent(
                     "marichka",
-                    "Ти Марічка. Дай bias по H4/Daily, коротко і чітко. Українською.",
+                    "Ти Марічка. Дай bias по H4/Daily і чи є рівень/дзеркало/ЛП. Коротко. Українською.",
                     mar_ctx,
                     max_tokens=900,
                 )
@@ -4462,12 +4371,14 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
 
             daryna_ctx = (
                 f"Символ: {symbol}\nНапрямок: {direction}\nATR: {best.get('atr')}\n"
-                f"Live risk snapshot: {risk_snapshot}\nНовини: {news_risk}"
+                f"Live risk snapshot: {risk_snapshot}\nНовини: {news_risk}\n"
+                f"Герчик_бал: {best.get('gerchik_ops_score')} (0–4 = вето)"
             )
             daryna_msg = clean_llm_note(
                 ask_agent(
                     "daryna",
-                    "Ти Дарина. Дай ризик-висновок і вето/допуск коротко, українською.",
+                    f"{DESK_BASE_RULE}\nТи Дарина. Дай ризик-висновок і вето/допуск коротко, українською. "
+                    "Герчик_бал ≤4 або ATR≥80% по тренду без ЛП — вето.",
                     daryna_ctx,
                     max_tokens=900,
                 )
@@ -4484,7 +4395,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             marko_msg = clean_llm_note(
                 ask_agent(
                     "marko",
-                    "Ти Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR + що робити зараз. Українською.",
+                    f"{DESK_BASE_RULE}\nТи Марко. Дай конкретний execution-план: Entry/SL/TP1/TP2/RR≥3 + що робити зараз. Українською.",
                     marko_ctx,
                     max_tokens=900,
                 )
@@ -4520,11 +4431,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                 f"Символ: {symbol}\nНапрямок: {direction}\nЦіна: {current_price}\n"
                 f"Активні сигнали (коротко): {active_signals_short}\n"
                 "Якщо по цьому символу вже є активний — дай UPDATE а не новий сигнал."
+                f"Герчик_бал: {best.get('gerchik_ops_score')}\n"
                 f"{lev_extra}"
             )
             lev_final_system = (
                 f"{LEV_RULE}"
-                "Ти Лев. На базі реплік команди дай фінальне рішення: ВХІД/ЧЕКАЄМО/ПРОПУСК і чіткий next action. Українською."
+                "Ти Лев. На базі реплік команди дай фінальне рішення: ВХІД/ЧЕКАЄМО/ПРОПУСК. "
+                "Обов'язково: Модель Герчика і Герчик_бал. Українською."
             )
             lev_final = clean_llm_note(
                 ask_agent(
@@ -4657,22 +4570,29 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     async def _agent_live_reaction(agent_key: str, context: str, max_tokens: int = 60) -> None:
         try:
-            from office_bridge import LEV_RULE as _br_lev, OLESYA_RULE as _br_olesya, VICTOR_RULE as _br_vic
+            from office_bridge import (
+                LEV_RULE as _br_lev,
+                DESK_BASE_RULE as _br_desk,
+                MARICHKA_RULE as _br_mar,
+                ARTEM_RULE as _br_art,
+                OLESYA_RULE as _br_olesya,
+                VICTOR_RULE as _br_vic,
+            )
 
             key = str(agent_key or "").strip().lower()
             rules = {
                 "lev": _br_lev,
                 "olesya": _br_olesya,
                 "psych": _br_vic,
-                "marko": _br_lev,
-                "maks": _br_lev,
-                "marichka": _br_lev,
-                "news": _br_lev,
-                "daryna": _br_lev,
-                "memory": _br_lev,
-                "dev": _br_lev,
+                "marko": _br_desk,
+                "maks": _br_desk,
+                "marichka": _br_mar,
+                "news": _br_desk,
+                "daryna": _br_desk,
+                "memory": _br_desk,
+                "dev": _br_art,
             }
-            system = rules.get(key) or _br_lev
+            system = rules.get(key) or _br_desk
             response = clean_llm_note(
                 ask_agent(
                     key,

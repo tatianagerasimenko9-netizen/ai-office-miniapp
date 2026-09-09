@@ -13,4 +13,6 @@
 - **`shared/TRADING_STATE_SNAPSHOT.md`** — які правила/режими зараз зафіксовані в журналі продукту.
 - **`shared/STRATEGIA_PREPUMP_PREDUMP_SNAPSHOT.md`** — зв’язок стратегії з різними фазами руху.
 
+- **`books/gerchik_kurs_aktyvnoho_treydera/system/01_rivni_pidtrymky_oporu.md`**, `06_khybnyi_probiy.md`, `11_atr.md` — рівні, ЛП, запас ходу. Шар Б (бали) не видавати як live-winrate.
+
 **Не робити:** не вигадувати OHLC чи відсотки; якщо даних немає — чітко казати «немає в поточному контексті».
