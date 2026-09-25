@@ -49,7 +49,9 @@
 | 20 | `20_ROOT_CAUSES.md` |
 | 21 | `21_CURRENT_VS_REQUIRED.md` |
 | 22 | `22_OFFICE_2_ARCHITECTURE.md` |
-| 23 | `23_OFFICE_VS_SCANNER.md` |
+| 24 | `24_KEEP_CHANGE_REMOVE_PLAN.md` |
+| 25 | `25_MINIAPP_GGSHOT.md` |
+| — | `PROMPT_NEXT_CLOUD.md` |
 | — | `telegram_audit_stats.json` |
 
 Корінь репо: `AI_OFFICE_MASTER.md` — єдиний збірник висновків і вимог 2.0.

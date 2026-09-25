@@ -1,82 +1,55 @@
 # AI Office — MASTER
 
-Єдиний збірник **підтвердженого** аудиту, дірок і вимог 2.0. Деталі — у `AI_OFFICE_AUDIT/`.  
-Код не змінювати, поки немає команди **МОЖНА ВНОСИТИ ЗМІНИ**.  
-Оновлено: 2026-09-25 (промпт з ChatGPT share `6ab681cf-86b8-83ed-95c6-eb7455f920fc`).
+Єдиний збірник. Деталі: `AI_OFFICE_AUDIT/`.  
+Код **не змінювати** без `МОЖНА ВНОСИТИ ЗМІНИ`.  
+Оновлено: 2026-09-25 (уточнення Тетяни + GGShot guide + план keep/change/remove).
 
-## Мета 2.0 (замовниця)
+## Одна фраза
 
-Автономно знаходити й **вести** сетапи scalp / intraday / swing.  
-Повідомляти: наближення до зони → sweep → підтвердження.  
-Короткі сигнали: Entry / SL / TP / RR, українською, без лекцій.  
-Супровід **моєї** позиції окремо від оцінки **чужого** сигналу.  
-Достовірна статистика.  
-Один узгоджений стан офісу і торгового бота.  
-Мінімум повідомлень і токенів.  
-Контекст ринку, не одна свічка. GEX — характер руху, **не** напрямок.
+Офіс навчився казати NO TRADE, але не навчився **сам** сказати 👀 зона → 🚨 sweep → 🟢 сигнал. Паралельно сканер може торгувати **всупереч** цьому NO TRADE.
 
-## Що доведено (CODE + Telegram JSON групи AI Office)
+## Мета 2.0
 
-1. Офіс = Telethon relay + LLM-персонажі + REST, не event FSM.  
-2. `full_auto_analysis` на тікер користувача — основний потік (514× «Аналізую»).  
-3. Проактивний скан альтів: 1 година, London/NY UTC, **без BTC/ETH**.  
-4. Sweep у коді = 3 свічки 1h у момент виклику.  
-5. WATCHING = poll зони; після SKIP часто новий watch.  
-6. ATR_DEAD = expire WATCHING якщо day_used_pct > 90 (ATR 1d). Не стопить ручний спам `Ake`.  
-7. Edge 85: без sweep / на RANGE часто математично < порога. Бектесту 85 немає.  
-8. AKE 19–20.09 — **USER_REQUEST**, не автономний цикл.  
-9. BTC 23.09 87247 — немає timely SWEEP; confirm після питання.  
-10. Немає `/review` vs `/position`. Лев може вигадати «твою позицію».  
-11. GEX / true heatmap / on-chain whales / MFE-MAE — ABSENT.  
-12. `file-1` / scanner_bot **поза репо**. Офіс форвардить SOURCE→MAIN і рев’ює; SKIP офісу **не** глушить сканер.  
-13. Telegram ≥4096 обрізка в експорті не знайдена (max 2234). Обриви — ймовірно `max_tokens`.  
-14. Binance з audit-VM: HTTP 451 — історичні свічки після SKIP **не перевірені**.
+Радар: scalp / intraday / swing. Короткі події й картки Entry/SL/TP/RR.  
+`/review` ≠ `/position`. Один стан OFFICE ↔ BOT. Статистика SIGNAL→RESULT.  
+Апка: Home, Scanner, Signals, My Positions, Statistics, пуші.  
+GEX — характер ринку, не напрямок. Мінімум токенів. Українською, просто.
 
-## Що не встановлено
+## Доведено
 
-- Чи 39 рядків `office_signals` за тиждень до 20.09 правдиві (немає прод-БД).  
-- Чи 87247 о 07:35 був на біржі (немає klines).  
-- Чи SKIP потім давав +2R.  
-- Чи 804 згадки LONG/SHORT — хибна метрика (у нас 472 токен-хіти, 4 картки).  
-- Live GEX API.  
-- Особисті DM з ботами поза групою.
+Коментатор, не радар. Скан без BTC/ETH, 1h. Sweep = 3 свічки 1h.  
+AKE = ручний. BTC 23.09 07:35 — немає timely alert.  
+804 ≠ сигнали (472 токени, ~4 картки).  
+Scanner `file-1` автономний; офісний SKIP його не глушить (`23`).  
+Назар: **22/45** «Новинний фон чистий. Входити можна.»  
+Debrief ~**128** — лишити, з’єднати з RESULT.  
+Binance з audit-VM: HTTP 451.  
+Mini App зараз — таблиці журналу, не GGShot.
 
-## Вимоги Mini App (майбутнє, не будувати зараз)
+## Не встановлено
 
-| Екран | Зміст |
-|-------|--------|
-| Home | BTC, ціна, режим, важливі рівні (вкл. GEX walls як контекст), активні події, поточні setup |
-| Scanner | Активи з умовами (не 200 альтів без BTC) |
-| Signals | COIN, TF, LONG/SHORT, Entry, SL, TP, RR, setup, status |
-| My Positions | Лише intent=MY_POSITION: Entry, SL, TP, P/L, status |
-| Statistics | Setup, WR, avg R, expectancy, MFE, MAE |
-| Сповіщення | PRE-ALERT / SWEEP / CONFIRM / SIGNAL — короткі |
+Прод «39 рядків», біржовий факт 87247, +2R після SKIP, GEX API, DM ботів.
 
-Чат = стрічка подій, не енциклопедія.
+## Keep / change / remove
 
-## Архітектура 2.0 (стисло)
-
-Незалежні модулі → Setup Engine (збіг шарів) → Confirm → Signal → Risk.  
-GEX: коридор, стіна, магніт, IV/RV, щільність після експірації. Не LONG/SHORT.  
-Деталі: `11_GEX_OPTIONS.md`, `22_OFFICE_2_ARCHITECTURE.md`, `23_OFFICE_VS_SCANNER.md`.
+Покроково: `AI_OFFICE_AUDIT/24_KEEP_CHANGE_REMOVE_PLAN.md`.  
+Апка vs GGShot: `25_MINIAPP_GGSHOT.md`.  
+Промпт далі: `PROMPT_NEXT_CLOUD.md`.
 
 ## P0–P4
 
-- **P0** intent, anti-spam WATCHING, не вигадувати позицію.  
-- **P1** watchlist рівнів, BTC session events, короткі картки, GEX-state (навіть ручний знімок).  
-- **P2** статистика / пороги по даних.  
-- **P3** Mini App.  
-- **P4** авто-виконання угод — не зараз.
+0. **Спільний MarketState + BLOCK сканера при OFFICE NO.** Intent. Назар fail-closed. Антиспам WATCHING.  
+1. Радар BTC (APPROACH/SWEEP/CONFIRM/SIGNAL). GEX-картка зі знімка.  
+2. Статистика етапів + debrief→RESULT.  
+3. Mini App екрани.  
+4. ENTER як у GGShot (пресет, тап, біржа) — **не зараз**.
 
-## Три наступні дії (коли дозволять код)
+Не робити більше сигналів і не різати Лева як KPI.
 
-1. P0: `/review` vs `/position` + не створювати WATCHING після SKIP.  
-2. P1: named-level watch на BTC (підхід / touch / sweep) без 6 LLM.  
-3. Зафіксувати джерело GEX (ручний JSON або провайдер) — не вигадувати endpoint.
+## Промпт у Cloud
 
-## Що потрібно від Тетяни
+Скопіюй текст з `AI_OFFICE_AUDIT/PROMPT_NEXT_CLOUD.md`.
 
-- Команда **МОЖНА ВНОСИТИ ЗМІНИ** і номер P0/P1.  
-- За бажанням: dump `office_signals` з Render (перевірка «39»).  
-- GEX-знімки — якщо буде ручний імпорт до API.  
-- Повторний JSON **тієї ж** групи не потрібен. DM ботів — лише якщо спілкування було поза групою.
+## Від Тетяни
+
+`МОЖНА ВНОСИТИ ЗМІНИ` + який P0 шматок першим. Опційно: dump Render `office_signals`. ChatGPT-проєкт «AI Office» — у **її** акаунті ChatGPT (я не можу натиснути «перенести чат» там). Тут у git уже лежить увесь аудит.
