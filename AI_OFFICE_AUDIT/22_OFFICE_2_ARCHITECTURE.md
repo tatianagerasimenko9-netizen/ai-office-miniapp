@@ -21,7 +21,8 @@ Telegram-офіс: LLM-персонажі + REST Binance + таблиця сиг
 - BTC як головний watch.  
 - REVIEW vs POSITION.  
 - Статистика реальних угод.  
-- Книги → detector.
+- Книги → detector.  
+- Ринковий контекст поза свічкою (GEX, справжня liq map, IV/RV) — **відсутній**.
 
 ## 4. Головна причина
 
@@ -37,23 +38,37 @@ Telegram-офіс: LLM-персонажі + REST Binance + таблиця сиг
 
 ## 7. Критично не вистачає
 
-Watchlist рівнів; детектор sweep на 5m/15m; intent flags; короткий SIGNAL; журнал з MFE; BTC в проактивному моніторі (не обов’язково в «сканері 200 альтів»).
+Watchlist рівнів; детектор sweep на 5m/15m; intent flags; короткий SIGNAL; журнал з MFE; BTC в проактивному моніторі; **GEX як шар характеру ринку** (не напрямок).
 
 ## 8. Цільовий пайплайн
 
 ```
 MARKET DATA (REST+опційно WS)
-  → CONTEXT MODULES (price, liq, OI, funding, session, optional GEX/whale)
-  → EVENT ENGINE (level touch, sweep, displacement)   # без LLM
-  → WATCH ENGINE (підписки користувача і системи)
-  → SETUP ENGINE (scalp | intraday | swing окремо)
-  → CONFIRMATION (мікро BOS / reject — правила + опційний LLM)
-  → STATISTICS (чи цей клас сетапа має expectancy)
-  → RISK (size, buffer з ATR, не позиція на /review)
-  → ORCHESTRATOR (1 коротка українська картка)
+  → CONTEXT MODULES (кожен зі своєю роллю, не всі в чат):
+        PRICE / STRUCTURE
+        LIQUIDITY (BSL/SSL)
+        LIQUIDATION HEATMAP
+        GEX / OPTIONS     # коридор, стіни, магніт, IV/RV, щільність після експірації
+        OI / FUNDING
+        WHALES
+        NEWS
+        SESSION
+        PATTERNS
+        HISTORICAL STATISTICS
+  → EVENT ENGINE (level touch, sweep, displacement, GEX_WALL)   # без LLM
+  → WATCH ENGINE
+  → SETUP ENGINE     # збіг шарів = один сетап; один шар ≠ сигнал
+  → CONFIRMATION
+  → STATISTICS
+  → RISK ENGINE      # Entry / SL / TP / запас
+  → ORCHESTRATOR     # коротка українська картка
   → TRADE MANAGER лише якщо intent=MY_POSITION
-  → RESULT → LEARNING (спочатку логи, потім пороги)
+  → RESULT → LEARNING
 ```
+
+**GEX не визначає напрямок.** Приклад стику: SHORT 89 800 + gamma wall 90 000 → зона реакції. Після великої експірації вага GEX-рівнів знижується, поки карта не ущільниться. Повна спека: `11_GEX_OPTIONS.md`.
+
+Не копіювати зовнішні пости в чат. Знімати з них **поля** (B / стіна / підтримка / IV / RV / експірація) і віддавати 8–12 рядків.
 
 LLM **не** думає про ринок кожні 30 с. Його будять події або slash.
 
@@ -74,7 +89,8 @@ LLM **не** думає про ринок кожні 30 с. Його будят�
 - BTC/ETH завжди в session monitor (Азія теж), сканер альтів — другий контур.  
 - Три режими `/scalp` `/intraday` `/swing`.  
 - Картка сигналу як у п.45 ТЗ.  
-- Один бот-оркестратор (імена можна як підпис).
+- Один бот-оркестратор (імена можна як підпис).  
+- GEX state + коротка картка для BTC (спочатку навіть з ручного/імпортованого знімка; без вигаданого API). Стик wall/support як named levels у Setup.
 
 ### P2 — статистика
 

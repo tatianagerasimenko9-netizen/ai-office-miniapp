@@ -19,3 +19,30 @@
 Пріоритетів «не всі модулі щоразу» **немає**: `full_auto_analysis` тягне пачку REST **завжди**; LLM може ще до 5 tools.
 
 У cloud VM Binance часто порожній — у чаті є «ціна None» (AKE 22:18 19.09). Це **окремий failure mode**, не методологія.
+
+## Ролі шарів (концепція 2.0, зафіксовано 2026-09-25)
+
+Досвідчений практик не дивиться одну свічку. Офіс збирає **незалежний** контекст, потім просте рішення. Не 50 індикаторів у чат.
+
+```
+PRICE + STRUCTURE
++ LIQUIDITY / BSL-SSL
++ LIQUIDATION HEATMAP
++ GEX / OPTIONS     ← характер, не напрямок
++ OI + FUNDING
++ WHALES
++ NEWS
++ SESSION
++ PATTERNS
++ HISTORICAL STATISTICS
+        ↓
+   SETUP ENGINE      ← чи складається ситуація
+        ↓
+   CONFIRMATION
+        ↓
+     SIGNAL
+        ↓
+   RISK ENGINE       ← Entry / SL / TP / запас
+```
+
+GEX-спека і еталон картки: `11_GEX_OPTIONS.md`.

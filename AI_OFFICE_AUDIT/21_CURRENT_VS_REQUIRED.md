@@ -14,7 +14,7 @@
 | Марічка | Структура | Довгі домашки | LLM | Вода |
 | Віктор | Психолог | Короткі репліки | LLM | Слабкий вплив на edge |
 | Mini App | Dashboard | Summary/heatmap журналу | HTTP | Не live levels/events |
-| GEX | — | Ні | — | Дірка |
+| GEX / options | Характер, не напрямок; коротка картка | Ні | — | Дірка; спека в `11_GEX_OPTIONS.md` |
 | Whales on-chain | — | Ні | стакан | Дірка |
 | Liq heatmap | «зони» | Proxy 24h | ticker | Дірка |
 | Patterns | Книги | Промпт | — | Не detector |
