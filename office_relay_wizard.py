@@ -114,6 +114,7 @@ from office_watching_dedup import (
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 from office_session_radar import evaluate_session_radar
 from office_external_signal import (
+    gather_external_market,
     ingest_external_signal,
     persist_external_original,
     review_external_signal,
@@ -2879,42 +2880,33 @@ async def run() -> None:
                     received_at=getattr(event, "date", None),
                 )
                 persist_external_original(db_path, _ext_orig)
-                try:
-                    _ext_ms = market_state_get(db_path, _ext_orig.get("symbol") or "") or {}
-                except Exception:
-                    _ext_ms = {}
-                _ext_rev = review_external_signal(
-                    _ext_orig,
-                    market={"bot_action": _ext_ms.get("bot_action")},
-                )
-                _ext_candles: list = []
-                _ext_mkt = {"bot_action": _ext_ms.get("bot_action")}
-                try:
-                    from office_market_data import fetch_atr_context, fetch_candles as _fetch_c
-
-                    _sym = str(_ext_orig.get("symbol") or "")
-                    if _sym:
-                        _h1 = _fetch_c(_sym, "1h", 30)
-                        if isinstance(_h1, list):
-                            _ext_candles = _h1
-                        _atr = fetch_atr_context(_sym) or {}
-                        if _atr.get("day_used_pct") is not None:
-                            _ext_mkt["day_used_pct"] = _atr.get("day_used_pct")
-                        if _ext_candles:
-                            _ext_mkt["price"] = float((_ext_candles[-1] or {}).get("close") or 0) or None
-                except Exception:
-                    _ext_candles = []
-                _trader = compose_trader_plan(
-                    _ext_orig,
-                    _ext_rev,
-                    market=_ext_mkt,
-                    t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
-                    candles=_ext_candles or None,
-                    asof=str(_ext_orig.get("received_at") or ""),
-                )
-                await send_office(format_trader_plan(_trader))
-                if _trader.skip is not None:
-                    persist_skip_case(db_path, _trader.skip, now_ts=time.time())
+                if _ext_orig.get("symbol") and str(_ext_orig.get("direction") or "").upper() in ("LONG", "SHORT"):
+                    try:
+                        _ext_ms = market_state_get(db_path, _ext_orig.get("symbol") or "") or {}
+                    except Exception:
+                        _ext_ms = {}
+                    _ext_mkt = gather_external_market(
+                        str(_ext_orig.get("symbol") or ""),
+                        bot_action=_ext_ms.get("bot_action"),
+                    )
+                    _ext_rev = review_external_signal(_ext_orig, market=_ext_mkt)
+                    _ext_candles = list(_ext_mkt.get("candles") or [])
+                    _trader = compose_trader_plan(
+                        _ext_orig,
+                        _ext_rev,
+                        market=_ext_mkt,
+                        t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
+                        candles=_ext_candles or None,
+                        asof=str(_ext_mkt.get("quote_asof") or _ext_orig.get("received_at") or ""),
+                    )
+                    await send_office(format_trader_plan(_trader))
+                    if _trader.skip is not None:
+                        persist_skip_case(db_path, _trader.skip, now_ts=time.time())
+                    print(
+                        f"[relay] external review {_ext_orig.get('symbol')} "
+                        f"verdict={_ext_rev.verdict} skip_llm_chain=1"
+                    )
+                    return
             except Exception as exc_ext:
                 print(f"[relay][WARN] external signal review failed: {type(exc_ext).__name__}: {exc_ext}")
             # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.

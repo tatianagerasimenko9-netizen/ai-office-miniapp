@@ -20,6 +20,8 @@ from office_radar import MIN_RR, card_levels, detect_sweep_from_candles, m15_con
 from office_session_radar import independent_flip_ok, session_at_utc
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT
 from office_level_scalp import infer_trade_mode, parse_bot_card_overlay, rr_after_costs
+from office_market_scout import DATA_UNAVAILABLE, DATA_OK
+from office_telegram_filter import newest_quote_asof, quote_is_stale
 
 # Вердикти — дані для Лева, не шаблон його репліки.
 VERDICT_CONFIRMED = "ПІДТВЕРДЖЕНО"
@@ -30,6 +32,9 @@ VERDICT_REJECTED = "ВІДХИЛЕНО"
 KIND_EXTERNAL = "external_review"
 LEVEL_DRIFT_PCT = 0.0018
 CHASE_PCT = 0.02
+# Скальп 5m: 3 свічки. Повторна пересилка через 44 хв — не свіжий вхід.
+SCALP_SIGNAL_STALE_SEC = 15 * 60
+INTRADAY_SIGNAL_STALE_SEC = 45 * 60
 
 
 def _f(v: Any) -> Optional[float]:
@@ -128,9 +133,61 @@ def ingest_external_signal(
         "timeframe": overlay.get("timeframe") or "",
         "style": overlay.get("style") or "",
         "mode": overlay.get("mode") or infer_trade_mode(overlay.get("timeframe"), overlay.get("style")),
+        "source_at": overlay.get("source_at") or "",
         "kind": KIND_EXTERNAL,
         "opens_position": False,
     }
+
+
+def signal_stale_limit_sec(timeframe: Any, mode: Any = "") -> int:
+    md = infer_trade_mode(timeframe, mode)
+    return SCALP_SIGNAL_STALE_SEC if md == "scalp" else INTRADAY_SIGNAL_STALE_SEC
+
+
+def gather_external_market(symbol: str, *, bot_action: Any = None) -> Dict[str, Any]:
+    """Ціна/ATR/Edge/свічки для review. Порожній біржовий знімок = DATA_UNAVAILABLE."""
+    mkt: Dict[str, Any] = {
+        "bot_action": bot_action,
+        "data_status": DATA_UNAVAILABLE,
+        "candles": [],
+        "review_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sym = str(symbol or "").upper()
+    if not sym:
+        return mkt
+    try:
+        from office_market_data import fetch_atr_context, fetch_candles, fetch_edge_score
+
+        h1 = fetch_candles(sym, "1h", 30)
+        m15 = fetch_candles(sym, "15m", 12)
+        m5 = fetch_candles(sym, "5m", 20)
+        candles = h1 if isinstance(h1, list) else []
+        mkt["candles"] = candles
+        mkt["h1_candles"] = candles
+        mkt["m15_candles"] = m15 if isinstance(m15, list) else []
+        mkt["m5_candles"] = m5 if isinstance(m5, list) else []
+        asof = newest_quote_asof(m5, m15, h1)
+        mkt["quote_asof"] = asof
+        has_intra = bool((isinstance(m5, list) and m5) or (isinstance(m15, list) and m15))
+        mkt["quote_stale"] = quote_is_stale(asof, has_intraday=has_intra) if asof else True
+        if candles:
+            try:
+                mkt["price"] = float((candles[-1] or {}).get("close") or 0) or None
+            except (TypeError, ValueError):
+                mkt["price"] = None
+        atr = fetch_atr_context(sym) or {}
+        if atr.get("day_used_pct") is not None:
+            mkt["day_used_pct"] = atr.get("day_used_pct")
+        edge = fetch_edge_score(sym) or {}
+        if edge.get("edge_score") is not None:
+            mkt["edge_score"] = edge.get("edge_score")
+        if candles or asof:
+            mkt["data_status"] = DATA_OK
+        else:
+            mkt["data_status"] = DATA_UNAVAILABLE
+    except Exception:
+        mkt["data_status"] = DATA_UNAVAILABLE
+    return mkt
 
 
 def persist_external_original(db_path: str, original: Dict[str, Any]) -> None:
@@ -225,6 +282,35 @@ def review_external_signal(
         edge_f = None
     atr = classify_atr_day_used(mkt.get("day_used_pct"))
     extras["atr"] = atr
+    extras["data_status"] = mkt.get("data_status")
+    extras["quote_asof"] = mkt.get("quote_asof") or ""
+    extras["review_at"] = mkt.get("review_at") or datetime.now(timezone.utc).isoformat()
+    extras["source_at"] = orig.get("source_at") or orig.get("received_at") or ""
+    extras["no_trade_is_rule"] = True
+    extras["no_trade_is_price_forecast"] = False
+
+    src_dt = _now(orig.get("source_at") or None) if orig.get("source_at") else None
+    rev_dt = _now(mkt.get("review_at") or extras["review_at"])
+    if src_dt is not None:
+        age = (rev_dt - src_dt).total_seconds()
+        extras["signal_age_sec"] = age
+        if age > float(signal_stale_limit_sec(orig.get("timeframe"), orig.get("mode"))):
+            extras["signal_stale"] = True
+            reasons.append(
+                "первинний сигнал застарів відносно часу картки бота — "
+                "це повторний розбір, не перевірка свіжого входу"
+            )
+
+    if str(mkt.get("data_status") or "") == DATA_UNAVAILABLE and mkt.get("price") is None:
+        reasons.append("немає актуальних свічок — DATA_UNAVAILABLE, план не вигадуємо")
+        return ExternalReview(
+            verdict=VERDICT_CONDITIONAL,
+            original=orig,
+            reasons=reasons,
+            watching_condition="немає підтверджених даних; ЗАРАЗ УГОДИ НЕМАЄ",
+            lifecycle_hint="WATCHING",
+            extras=extras,
+        )
     sweep = mkt.get("sweep") if isinstance(mkt.get("sweep"), dict) else detect_sweep_from_candles(
         mkt.get("sweep_candles") or []
     )
@@ -349,18 +435,33 @@ def review_external_signal(
 
     if atr.get("t0_entry_blocked") or atr.get("gerchik_entry_blocked"):
         reasons.append(str(atr.get("label") or "ATR блок конкретного входу"))
+        reasons.append(
+            "NO_TRADE 100% у Probability Engine — спрацювало правило ATR, "
+            "не ймовірність невдалої угоди і не «ринок зупинився»"
+        )
+        if edge_f is not None and edge_f < SIGNAL_THRESHOLD:
+            reasons.append(
+                f"Edge {edge_f:.0f} < {SIGNAL_THRESHOLD} — вхід заблоковано правилом порогу, "
+                "не 100% прогноз збитку"
+            )
         return ExternalReview(
             verdict=VERDICT_CONDITIONAL,
             original=orig,
             reasons=reasons,
             office_plan=office_plan,
-            watching_condition="ATR запас ходу; пошук сценарію триває, вхід бота не копіюємо",
+            watching_condition=(
+                "вхід бота не копіюємо; нова D1 не є сигналом; "
+                "підтвердженої альтернативи немає — ЗАРАЗ УГОДИ НЕМАЄ"
+            ),
             lifecycle_hint="WATCHING",
             extras=extras,
         )
 
     if edge_f is not None and edge_f < SIGNAL_THRESHOLD:
-        reasons.append(f"Edge {edge_f:.0f} < {SIGNAL_THRESHOLD} — не підганяємо висновок бота")
+        reasons.append(
+            f"Edge {edge_f:.0f} < {SIGNAL_THRESHOLD} — вхід заблоковано правилом порогу, "
+            "не 100% прогноз збитку"
+        )
         return ExternalReview(
             verdict=VERDICT_CONDITIONAL,
             original=orig,

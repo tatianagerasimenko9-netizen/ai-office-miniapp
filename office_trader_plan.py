@@ -13,7 +13,8 @@ from office_external_signal import ExternalReview, VERDICT_CONFIRMED
 from office_level_scalp import nearest_target, rr_after_costs
 from office_radar import MIN_RR, detect_sweep_from_candles
 from office_range_radar import classify_range_event, detect_range_bounds
-from office_skip_plan import SkipPlan, build_skip_plan, case_key, format_skip_plan
+from office_skip_plan import SkipPlan, build_skip_plan, case_key
+from office_telegram_filter import format_px
 
 KIND_TRADER = "trader_plan"
 WICK_SWEEP_RETURN = "SWEEP_RETURN"
@@ -159,6 +160,7 @@ def compose_trader_plan(
         price=mkt.get("price") or orig.get("entry"),
         levels=mkt.get("levels"),
     )
+    extras_stale = bool((review.extras or {}).get("signal_stale"))
     sp = skip
     if sp is None and review.verdict != VERDICT_CONFIRMED:
         sp = build_skip_plan(
@@ -168,54 +170,48 @@ def compose_trader_plan(
             t7_snap=t7_snap,
             candles=candles,
         )
-    if entry_view["late"] or review.verdict != VERDICT_CONFIRMED:
+    if entry_view["late"] or review.verdict != VERDICT_CONFIRMED or extras_stale:
+        stale_bit = "Первинний сигнал застарів. " if extras_stale else ""
         bot_v = (
-            f"Сигнал бота: {orig.get('direction')} entry={orig.get('entry')} — "
-            f"початковий вхід пропускаємо. {entry_view['reason']}. "
-            f"Вердикт фільтрів: {review.verdict}."
+            f"{stale_bit}Сигнал бота: {orig.get('direction')} entry={format_px(orig.get('entry'))} "
+            f"(картка {orig.get('source_at') or orig.get('received_at') or 'н/д'}). "
+            f"Початковий вхід не копіюємо. {entry_view['reason']}. "
+            f"Вердикт: {review.verdict}."
         )
     else:
         bot_v = (
             f"Сигнал бота {orig.get('direction')} збігається з правилами як картка розбору, "
             "не як ордер."
         )
-    if sp:
-        a = sp.alt_a
-        if a.get("zone_low") is not None:
-            own = (
-                f"Власний план: спостерігаю LONG-відкат у {a.get('zone_low')}–{a.get('zone_high')}. "
-                "Підтвердження: свіп мінімуму, повернення над рівень, структура M5. "
-                "Після цього перерахую entry/SL/TP. Сам дотик зони — не вхід."
-            )
-        else:
-            own = (
-                "Власний план: перевіреної зони попиту на свічках немає — рівні не вигадую. "
-                f"{a.get('note')}. {'; '.join(a.get('wait_for') or [])}."
-            )
-        b = sp.alt_b
-        if wick.get("class") == WICK_BREAK_HOLD and str((confirmed_card or {}).get("direction") or "") == "SHORT":
-            opp = "SHORT підтверджено карткою після структури, не через RSI чи виніс."
-        elif b.get("zone_low") is not None:
-            opp = (
-                f"Протилежний сценарій: виніс до {b.get('zone_high')} сам по собі не сигнал. "
-                "SHORT лише після повернення під опір і BOS. Ймовірніший SHORT без цих даних не оголошую."
-            )
-        else:
-            opp = (
-                "Протилежний сценарій: SHORT не називаю ймовірнішим без BOS і свіпу зверху. "
-                f"{b.get('note')}."
-            )
-        action = (
-            "Обидва сценарії у WATCHING. Повідомлю після підтвердження або інвалідації. "
-            "Початковий сигнал бота не дублюю. Угода лише через /position."
+    confirmed_ok = (
+        review.verdict == VERDICT_CONFIRMED
+        and not extras_stale
+        and not entry_view["late"]
+    )
+    if confirmed_ok:
+        p = dict(confirmed_card or review.office_plan or {})
+        e, s, t1 = format_px(p.get("entry")), format_px(p.get("sl")), format_px(p.get("tp1") or p.get("tp"))
+        own = (
+            "Підтверджений план офісу (не ордер): "
+            f"вхід {e or 'н/д'} · SL {s or 'н/д'} · TP1 {t1 or 'н/д'}."
+            if (e and s and t1)
+            else "Власний план: поточна картка офісу після підтвердження (не копія бота)."
         )
-    else:
-        own = "Власний план: поточна картка офісу після підтвердження (не копія бота)."
         opp = "Протилежний сценарій лишається гіпотезою, доки немає зворотного BOS."
-        action = "Картка надіслана після підтвердження. Не чекаємо повторного запиту по монеті."
-    if confirmed_card and not (sp and review.verdict != VERDICT_CONFIRMED):
+        action = "Картка після підтвердження. Угода лише через /position."
+    else:
+        own = (
+            "Зараз: УГОДИ НЕМАЄ. Підтвердженого альтернативного плану на свічках немає. "
+            "Добір/азійський рендж бота не підставляємо як зону офісу. "
+            "Нова денна свічка не є входом."
+        )
+        opp = (
+            "LONG після відкату і SHORT після BOS лишаються внутрішніми гіпотезами, "
+            "поки немає реакції на рівні зі свічок. Не оголошую SHORT через RSI і не вигадую wait-зону."
+        )
         action = (
-            "Підтверджений сценарій уже в картці. Інший напрямок — WATCHING до інвалідації. "
+            "Офіс спостерігає всередині, без голої картки WATCHING у Telegram. "
+            "Повторна пересилка дає нову версію розбору того самого кейса, не другу угоду. "
             "Угода лише через /position."
         )
     return TraderPlan(
@@ -227,28 +223,60 @@ def compose_trader_plan(
         wick=wick,
         skip=sp,
         confirmed_card=deepcopy(confirmed_card) if confirmed_card else None,
-        asof=str(asof or orig.get("received_at") or ""),
-        extras={"entry_view": entry_view, "review": review.verdict},
+        asof=str(asof or mkt.get("quote_asof") or orig.get("received_at") or ""),
+        extras={
+            "entry_view": entry_view,
+            "review": review.verdict,
+            "reasons": list(review.reasons or []),
+            "signal_stale": extras_stale,
+            "quote_asof": mkt.get("quote_asof") or asof,
+            "review_at": (review.extras or {}).get("review_at") or mkt.get("review_at") or "",
+            "source_at": orig.get("source_at") or "",
+            "version": int(getattr(sp, "version", 1) or 1),
+            "liq_state": (getattr(sp, "liquidations", None) or {}).get("state") if sp else None,
+        },
     )
 
 
 def format_trader_plan(plan: TraderPlan) -> str:
-    """Одне повідомлення в Telegram: 4 блоки фактів, не репліка-шаблон."""
+    """Короткий /review: статус первинного, причина, що змінилось, висновок. Не ордер."""
+    o = (plan.skip.original if plan.skip else {}) or {}
+    sym = str(o.get("symbol") or "")
     lines = [
-        "1) Вердикт щодо сигналу бота",
+        f"🦁 {sym or 'розбір'} · зовнішній сигнал",
+        "1) Статус первинного сигналу",
         plan.bot_verdict,
-        "2) Власний торговий план",
-        plan.own_plan,
-        "3) Протилежний сценарій",
-        plan.opposite,
-        "4) Дія офісу",
-        plan.office_action,
+        "2) Чому так",
     ]
-    if plan.asof:
-        lines.append(f"Дані asof: {plan.asof}")
-    lines.append(f"Виніс: {plan.wick.get('class')} — {plan.wick.get('reason')}")
+    reasons = list((plan.extras or {}).get("reasons") or [])
+    if reasons:
+        for r in reasons[:6]:
+            lines.append(f"— {r}")
+    else:
+        lines.append("— див. вердикт вище")
+    ver = (plan.extras or {}).get("version") or 1
+    lines.append("3) Що змінилось")
+    lines.append(
+        f"Версія розбору {ver}. Повторна пересилка не копіює попередню відповідь "
+        "і не відкриває другу угоду."
+    )
+    lines.append("4) Зараз")
+    lines.append(plan.own_plan)
+    lines.append(plan.opposite)
+    lines.append(plan.office_action)
+    asof = plan.asof or (plan.extras or {}).get("quote_asof") or ""
+    if asof:
+        lines.append(f"Котирування: {asof}")
+    src = (plan.extras or {}).get("source_at") or ""
+    if src:
+        lines.append(f"Час картки бота: {src}")
+    liq = (plan.extras or {}).get("liq_state")
+    if liq and liq != "connected":
+        lines.append(
+            f"Ліквідації T7: стан {liq} — не використовуємо як підтвердження входу "
+            "(forceOrder ≠ heatmap)."
+        )
     lines.append("Намір маркет-мейкера не стверджую.")
     lines.append("Це аналітика, не ордер.")
-    if plan.skip:
-        lines.append(format_skip_plan(plan.skip))
-    return "\n".join(lines)
+    blob = "\n".join(lines)
+    return blob
