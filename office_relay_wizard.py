@@ -114,9 +114,6 @@ from office_watching_dedup import (
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 from office_session_radar import evaluate_session_radar
 from office_external_signal import (
-    VERDICT_CONDITIONAL,
-    VERDICT_CONFIRMED,
-    format_external_review,
     ingest_external_signal,
     persist_external_original,
     review_external_signal,
@@ -132,7 +129,8 @@ from office_market_scout import (
     screen_futures_market,
 )
 from office_level_scalp import evaluate_level_book, format_level_book
-from office_skip_plan import build_skip_plan, format_skip_plan, persist_skip_case
+from office_skip_plan import persist_skip_case
+from office_trader_plan import compose_trader_plan, format_trader_plan
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -2884,16 +2882,34 @@ async def run() -> None:
                     _ext_orig,
                     market={"bot_action": _ext_ms.get("bot_action")},
                 )
-                await send_office(format_external_review(_ext_rev))
-                if _ext_rev.verdict != VERDICT_CONFIRMED:
-                    _skip = build_skip_plan(
-                        _ext_orig,
-                        _ext_rev,
-                        market={"bot_action": _ext_ms.get("bot_action")},
-                        t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
-                    )
-                    await send_office(format_skip_plan(_skip))
-                    persist_skip_case(db_path, _skip, now_ts=time.time())
+                _ext_candles: list = []
+                _ext_mkt = {"bot_action": _ext_ms.get("bot_action")}
+                try:
+                    from office_market_data import fetch_atr_context, fetch_candles as _fetch_c
+
+                    _sym = str(_ext_orig.get("symbol") or "")
+                    if _sym:
+                        _h1 = _fetch_c(_sym, "1h", 30)
+                        if isinstance(_h1, list):
+                            _ext_candles = _h1
+                        _atr = fetch_atr_context(_sym) or {}
+                        if _atr.get("day_used_pct") is not None:
+                            _ext_mkt["day_used_pct"] = _atr.get("day_used_pct")
+                        if _ext_candles:
+                            _ext_mkt["price"] = float((_ext_candles[-1] or {}).get("close") or 0) or None
+                except Exception:
+                    _ext_candles = []
+                _trader = compose_trader_plan(
+                    _ext_orig,
+                    _ext_rev,
+                    market=_ext_mkt,
+                    t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
+                    candles=_ext_candles or None,
+                    asof=str(_ext_orig.get("received_at") or ""),
+                )
+                await send_office(format_trader_plan(_trader))
+                if _trader.skip is not None:
+                    persist_skip_case(db_path, _trader.skip, now_ts=time.time())
             except Exception as exc_ext:
                 print(f"[relay][WARN] external signal review failed: {type(exc_ext).__name__}: {exc_ext}")
             # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.

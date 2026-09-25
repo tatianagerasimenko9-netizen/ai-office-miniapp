@@ -113,7 +113,7 @@ def classify_range_event(
             "status": "PIERCE_WATCHING",
             "hypotheses": [fake_short, long_hyp],
             "active_hint": "SHORT",
-            "reason": "прокол верху з поверненням у діапазон — маніпуляція, не пробій",
+            "reason": "прокол верху з поверненням у діапазон — свіп стопів, не підтверджений пробій",
         }
     if lo < rl and cl > rl:
         return {
@@ -122,7 +122,7 @@ def classify_range_event(
             "status": "PIERCE_WATCHING",
             "hypotheses": [fake_long, short_hyp],
             "active_hint": "LONG",
-            "reason": "прокол низу з поверненням у діапазон — маніпуляція, не пробій",
+            "reason": "прокол низу з поверненням у діапазон — свіп стопів, не підтверджений пробій",
         }
 
     close_above = cl > rh
