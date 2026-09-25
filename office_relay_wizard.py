@@ -91,6 +91,13 @@ from office_bridge import (
 )
 from office_llm_agent import ask_agent
 from office_market_state import market_state_get, scanner_blocked_notice, scanner_signal_blocked
+from office_review_position import (
+    handle_position_command,
+    handle_review_command,
+    parse_t1_command,
+    scanner_enter_opens_position,
+    scanner_review_notice,
+)
 from office_zone_alert import (
     T0_PROBE_PREFIX,
     ZONE_REACHED_COOLDOWN_SEC,
@@ -2814,6 +2821,17 @@ async def run() -> None:
                         return
                     await send_office("📘 OFFICE MASTER PROMPT (скорочено):\n" + full, stream="tasks")
                     return
+                t1 = parse_t1_command(text)
+                if t1 is not None:
+                    kind, _body = t1
+                    if kind == "review":
+                        card = handle_review_command(text, db_path)
+                        await send_office(str(card.get("message") or ""))
+                    else:
+                        card = handle_position_command(text, db_path)
+                        await send_office(str(card.get("message") or ""))
+                    print(f"[relay] T1 {kind} office opens_position={card.get('opens_position')}")
+                    return
                 if low.startswith("/chart") or low.startswith("!chart") or low.startswith("графік"):
                     sym = _extract_first_usdt_symbol(text) or "BTCUSDT"
                     mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
@@ -2931,6 +2949,16 @@ async def run() -> None:
                 return
             if msg_id > 0:
                 last_main_fingerprint_by_msg[msg_id] = fp
+            t1_main = parse_t1_command(text)
+            if t1_main is not None:
+                kind, _body = t1_main
+                if kind == "review":
+                    card = handle_review_command(text, db_path)
+                else:
+                    card = handle_position_command(text, db_path)
+                await send_office(str(card.get("message") or ""))
+                print(f"[relay] T1 {kind} main opens_position={card.get('opens_position')}")
+                return
             sender_id = getattr(event, "sender_id", None)
             sender_username = ""
             try:
@@ -3040,68 +3068,73 @@ async def run() -> None:
 
             verdict = await office_handle_signal(sender=sender, signal=sig, db_path=db_path)
             if verdict.action == "ENTER":
-                recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
-                if recurring:
-                    hints = journal_learning_hints_from_tags(recurring)[:3]
-                    await send_office(
-                        "Нагадування перед входом (з минулих помилок):\n"
-                        + "\n".join(f"- {h}" for h in hints),
-                        stream="tasks",
+                # T1: ENTER по картці сканера — розбір, не позиція Тетяни.
+                if not scanner_enter_opens_position(verdict.action):
+                    await send_office(scanner_review_notice(sig.symbol, verdict.action))
+                    print(f"[relay] T1 scanner ENTER kept as review symbol={sig.symbol}")
+                else:
+                    recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
+                    if recurring:
+                        hints = journal_learning_hints_from_tags(recurring)[:3]
+                        await send_office(
+                            "Нагадування перед входом (з минулих помилок):\n"
+                            + "\n".join(f"- {h}" for h in hints),
+                            stream="tasks",
+                        )
+                    active_positions[sig.signal_id] = ActivePosition(
+                        signal_id=sig.signal_id,
+                        symbol=sig.symbol,
+                        direction=sig.direction,
+                        opened_ts=time.time(),
+                        stage=0,
+                        initial_volatility_pct=float(sig.meta.get("volatility_pct", 0.0)),
+                        initial_news_risk=str(sig.meta.get("news_risk", "SAFE")),
                     )
-                active_positions[sig.signal_id] = ActivePosition(
-                    signal_id=sig.signal_id,
-                    symbol=sig.symbol,
-                    direction=sig.direction,
-                    opened_ts=time.time(),
-                    stage=0,
-                    initial_volatility_pct=float(sig.meta.get("volatility_pct", 0.0)),
-                    initial_news_risk=str(sig.meta.get("news_risk", "SAFE")),
-                )
-                setup_tag = detect_setup_type(sig)
-                journal_open_trade(
-                    db_path,
-                    trade_id=sig.signal_id,
-                    symbol=sig.symbol,
-                    direction=sig.direction,
-                    entry_price=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                    stop_loss=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
-                    take_profit=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
-                    setup_name=setup_tag,
-                    timeframe="auto",
-                    entry_reason="Desk ENTER after agent chain",
-                    context={
-                        "setup_type": setup_tag,
-                        "session": sig.session,
-                        "regime": sig.regime,
-                        "score": sig.score,
-                    },
-                )
-                signal_upsert(
-                    db_path,
-                    signal_id=sig.signal_id,
-                    symbol=sig.symbol,
-                    direction=sig.direction,
-                    entry_low=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                    entry_high=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                    sl=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
-                    tp1=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
-                    tp2=None,
-                    rr=(float(sig.meta.get("rr")) if sig.meta.get("rr") else None),
-                    status="ACTIVE",
-                    analysis_note=str(verdict.summary or ""),
-                )
-                await agent_say(
-                    sender,
-                    "olesya",
-                    f"Сигнал {sig.symbol} {sig.direction} зафіксовано. Стежу 24/7.",
-                )
-                await office_position_event(
-                    sender=sender,
-                    symbol=sig.symbol,
-                    event_type="PRICE_UPDATE",
-                    details="Позицію відкрито. Моніторинг активовано (24/7).",
-                    db_path=db_path,
-                )
+                    setup_tag = detect_setup_type(sig)
+                    journal_open_trade(
+                        db_path,
+                        trade_id=sig.signal_id,
+                        symbol=sig.symbol,
+                        direction=sig.direction,
+                        entry_price=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
+                        stop_loss=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
+                        take_profit=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
+                        setup_name=setup_tag,
+                        timeframe="auto",
+                        entry_reason="Desk ENTER after agent chain",
+                        context={
+                            "setup_type": setup_tag,
+                            "session": sig.session,
+                            "regime": sig.regime,
+                            "score": sig.score,
+                        },
+                    )
+                    signal_upsert(
+                        db_path,
+                        signal_id=sig.signal_id,
+                        symbol=sig.symbol,
+                        direction=sig.direction,
+                        entry_low=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
+                        entry_high=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
+                        sl=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
+                        tp1=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
+                        tp2=None,
+                        rr=(float(sig.meta.get("rr")) if sig.meta.get("rr") else None),
+                        status="ACTIVE",
+                        analysis_note=str(verdict.summary or ""),
+                    )
+                    await agent_say(
+                        sender,
+                        "olesya",
+                        f"Сигнал {sig.symbol} {sig.direction} зафіксовано. Стежу 24/7.",
+                    )
+                    await office_position_event(
+                        sender=sender,
+                        symbol=sig.symbol,
+                        event_type="PRICE_UPDATE",
+                        details="Позицію відкрито. Моніторинг активовано (24/7).",
+                        db_path=db_path,
+                    )
             print("[relay] office_handle_signal done")
         except Exception as exc:
             print(f"[relay][ERROR] handler failed: {exc}")
