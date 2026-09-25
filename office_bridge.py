@@ -42,6 +42,7 @@ from office_bulkowski_kernel import BULKOWSKI_KERNEL
 from office_gerchik_kernel import GERCHIK_KERNEL, compute_gerchik_ops
 from office_llm_agent import ask_agent
 from office_market_data import fetch_btc_candles, fetch_liquidations_proxy, fetch_open_interest
+from office_news_agent import DATA_UNAVAILABLE, format_nazar_update
 from office_style_qa import polish_agent_message
 
 
@@ -3073,16 +3074,30 @@ def _bias_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
 def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> AgentDecision:
     risk = str(signal.meta.get("news_risk", "SAFE")).upper()
     mins = int(signal.meta.get("minutes_to_event", 999))
-    event_name = str(signal.meta.get("news_event_name") or signal.meta.get("news_headline") or "невідомо")
+    event_name = str(signal.meta.get("news_event_name") or signal.meta.get("news_headline") or "")
     event_time_utc = str(signal.meta.get("news_event_time_utc") or "")
-    currency = str(signal.meta.get("news_currency") or "USD")
-    importance = str(signal.meta.get("news_importance") or "low").lower()
-    kyiv_time = _to_kyiv_time_from_utc(event_time_utc, mins)
-    news_note = (
-        "Новинний фон чистий. Входити можна."
-        if mins >= 999
-        else f"Увага! {event_name} через {mins} хв о {kyiv_time} за Києвом."
+    status = str(signal.meta.get("news_data_status") or "")
+    if not status:
+        if str(signal.meta.get("news_api_ok") or "").lower() in ("0", "false", "no"):
+            status = DATA_UNAVAILABLE
+        elif mins >= 999 and not event_name:
+            status = "DATA_EMPTY"
+        else:
+            status = "DATA_OK"
+    kyiv_time = _to_kyiv_time_from_utc(event_time_utc, mins) if event_time_utc or mins < 999 else ""
+    news_note = format_nazar_update(
+        data_status=status,
+        minutes_to_event=mins,
+        event_name=event_name,
+        event_time_ua=kyiv_time,
     )
+    if news_note is None:
+        return AgentDecision(
+            "news",
+            "WAIT",
+            "",
+            {"news": "UNAVAILABLE", "silent": True},
+        )
     if risk == "HIGH":
         return AgentDecision(
             "news",
@@ -3099,7 +3114,7 @@ def _news_reply(signal: OfficeSignal, conversation: List[ConversationTurn]) -> A
         )
     return AgentDecision(
         "news",
-        "APPROVED",
+        "WAIT" if "нейтральн" in news_note.lower() else "APPROVED",
         _enforce_data_grounding(news_note, signal),
         {"news": "SAFE"},
     )
@@ -3748,7 +3763,8 @@ async def office_handle_signal(
     for idx, d in enumerate(verdict.decisions, start=1):
         pre = _cross_reply_prefix(prev_agent, d.agent_key)
         out = f"{pre}{d.note}" if pre else d.note
-        await agent_say(sender, d.agent_key, out)
+        if str(d.note or "").strip():
+            await agent_say(sender, d.agent_key, out)
         log_message(db_path, signal.signal_id, idx, d.agent_key, out)
         prev_agent = d.agent_key
         next_status: TaskStatus = "IN_PROGRESS"
@@ -3822,18 +3838,27 @@ async def office_news_trigger(
     headline: str,
     minutes_to_event: int,
     db_path: str = "office_bridge.db",
+    event_name: str = "",
+    event_time_utc: str = "",
+    data_status: str = "DATA_OK",
 ) -> None:
-    risk_ua = {"SAFE": "СПОКІЙНО", "RISK": "УВАГА", "HIGH RISK": "ВИСОКИЙ РИЗИК"}.get(risk_level, risk_level)
-    short_headline = "Важлива макроподія в календарі."
-    if str(headline or "").strip():
-        short_headline = "Подія в календарі потребує обережності."
-    t_ky = _to_kyiv_time(max(0, int(minutes_to_event)))
-    await agent_say(
-        sender,
-        "news",
-        f"{risk_ua}: подія через {minutes_to_event} хв (~о {t_ky} за Києвом). {short_headline}",
-        0.02,
+    kyiv = _to_kyiv_time_from_utc(event_time_utc, minutes_to_event) if event_time_utc else _to_kyiv_time(max(0, int(minutes_to_event)))
+    msg = format_nazar_update(
+        data_status=data_status,
+        minutes_to_event=minutes_to_event,
+        event_name=event_name or headline,
+        event_time_ua=kyiv,
     )
+    if not msg:
+        log_event(
+            db_path,
+            "NEWS_SILENCE",
+            {"reason": "api_unavailable", "risk_level": risk_level, "headline": headline},
+        )
+        return
+    await agent_say(sender, "news", msg, 0.02)
+    if data_status == DATA_UNAVAILABLE:
+        return
     if risk_level == "HIGH RISK":
         await agent_say(sender, "daryna", "Вето по новинах. Нові входи тимчасово блокуємо.", 0.02)
         await agent_say(sender, "marko", "Рішення: пауза, діє новинне блокування.", 0.02)
@@ -4178,9 +4203,10 @@ async def office_desk_user_question(
 
     news = _news_reply(sig, conversation)
     nu = _simple_ua(news.agent_key, news.note)
-    await agent_say(sender, news.agent_key, f"{_cross_reply_prefix(prev_agent, news.agent_key)}{nu}", 0.12)
-    conversation.append(ConversationTurn(news.agent_key, news.note))
-    prev_agent = news.agent_key
+    if str(news.note or "").strip():
+        await agent_say(sender, news.agent_key, f"{_cross_reply_prefix(prev_agent, news.agent_key)}{nu}", 0.12)
+        conversation.append(ConversationTurn(news.agent_key, news.note))
+        prev_agent = news.agent_key
 
     risk = _risk_reply(sig, conversation)
     ru = _simple_ua(risk.agent_key, risk.note)

@@ -458,9 +458,9 @@ def format_level_book(book: LevelBook) -> str:
             f"Підтвердження: {sc.confirmation}."
         )
         if sc.status == "CONFIRMED" and sc.entry is not None:
+            rr_s = f" | RR: 1:{float(sc.rr_net):.1f}" if sc.rr_net is not None else ""
             lines.append(
-                f"  Entry {sc.entry} | SL {sc.sl} | TP1 {sc.tp1} | TP2 {sc.tp2} | "
-                f"RR брутто {sc.rr_gross} / після витрат {sc.rr_net}"
+                f"  Entry {sc.entry} | SL {sc.sl} | TP1 {sc.tp1} | TP2 {sc.tp2}{rr_s}"
             )
             lines.append(f"  Скасування: {sc.cancel}")
         elif sc.status == "WATCHING":

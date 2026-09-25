@@ -8,7 +8,7 @@ import socket
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from office_btc_liquidations import FORCE_ORDER_WS_URL, WS_FRESH_SEC
+from office_btc_liquidations import FORCE_ORDER_WS_URL, WS_FRESH_SEC, last_event_ago_min
 
 
 def classify_book_state(snap: Dict[str, Any]) -> str:
@@ -54,6 +54,27 @@ def diagnose_force_order_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
         "creates_enter": False,
         "needs_force_order_to_prove_ws": False,
         "idle_cold_means_no_liquidations": False,
+        "connecting_means_no_liquidations": False,
+    }
+
+
+def t7_health_payload(snap: Dict[str, Any], *, now_mono: Optional[float] = None) -> Dict[str, Any]:
+    """Публічний статус для Mini App. connecting ≠ немає ліквідацій на ринку."""
+    state = classify_book_state(snap)
+    if state == "connected":
+        status = "connected"
+    elif state == "connecting":
+        status = "connecting"
+    else:
+        status = "disconnected"
+    ago = last_event_ago_min(snap, now_mono=now_mono)
+    return {
+        "t7_status": status,
+        "last_event_ago_min": ago,
+        "book_state": state,
+        "idle_cold_means_no_liquidations": False,
+        "connecting_means_no_liquidations": False,
+        "creates_enter": False,
     }
 
 

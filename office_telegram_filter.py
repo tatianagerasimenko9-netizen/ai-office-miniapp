@@ -266,10 +266,9 @@ def format_opportunity_alert(
         lines.append("Діапазон сесії: Asian High/Low DATA_UNAVAILABLE")
     lines.append(f"Вхід: {e}")
     lines.append(f"SL: {s}")
-    mv = ""
+    lines.append(f"TP1: {t1}")
     if move_pct is not None:
-        mv = f"  (+{float(move_pct):.1f}% від входу)"
-    lines.append(f"TP1: {t1}{mv}")
+        lines.append(f"Потенціал до TP1: {float(move_pct):.1f}%")
     if t2 and move_pct is not None and entry:
         try:
             m2 = abs(float(tp2) - float(entry)) / float(entry) * 100.0
