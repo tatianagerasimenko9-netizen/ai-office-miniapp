@@ -104,6 +104,11 @@ from office_zone_alert import (
     after_zone_reached_action,
     plan_watching_zone_hit,
 )
+from office_watching_dedup import (
+    apply_skip_watching_gate,
+    record_skip_scenario,
+    should_keep_watching_on_skip,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -1813,22 +1818,34 @@ EV позитивне: {prob.get('ev_positive', '')}
             print(f"[signal] {symbol} no levels in response")
         low_resp = response_for_parse.lower()
         if any(p in low_resp for p in no_entry_phrases):
-            if watching_signal_id:
-                signal_update(
-                    db_path,
-                    signal_id=watching_signal_id,
-                    status="EXPIRED",
-                    outcome="SKIP_WATCH",
-                    analysis_note="Lev SKIP при WATCHING — зупинка циклу повторного аналізу",
-                )
+            if watching_signal_id and should_keep_watching_on_skip():
+                if parsed.get("entry_low") is not None:
+                    gate_keep = apply_skip_watching_gate(
+                        db_path,
+                        symbol=symbol,
+                        direction="SHORT"
+                        if ("SHORT" in response_for_parse.upper() or "ШОРТ" in response_for_parse.upper())
+                        else "LONG",
+                        entry_low=parsed.get("entry_low"),
+                        entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
+                        timeframe="1h",
+                        now_ts=time.time(),
+                    )
+                    record_skip_scenario(
+                        db_path,
+                        str(gate_keep.get("key") or ""),
+                        symbol=symbol,
+                        timeframe="1h",
+                        setup=str(gate_keep.get("setup") or ""),
+                        expiry=str(gate_keep.get("expiry") or ""),
+                    )
                 await agent_say(
                     sender,
                     "olesya",
-                    f"{symbol}: Лев дав ПРОПУСК — WATCHING закрито (EXPIRED), без повторного аналізу в зоні.",
+                    f"{symbol}: Лев дав ПРОПУСК по входу — WATCHING лишається, ZONE_REACHED не глушу.",
                 )
                 return True
-            # no-entry не означає "нічого не робити":
-            # якщо є зона, зберігаємо WATCHING замість ACTIVE (ручний / офіс без прив'язки до рядка WATCHING).
+            # T3: новий WATCHING після SKIP лише якщо сценарій ще не скіпали і зони немає.
             if parsed.get("entry_low") is not None:
                 correlation = check_portfolio_correlation(db_path)
                 if not correlation.get("safe"):
@@ -1840,26 +1857,47 @@ EV позитивне: {prob.get('ev_positive', '')}
                     direction_watch = "SHORT"
                 elif "LONG" in up_watch or "ЛОНГ" in up_watch:
                     direction_watch = "LONG"
-                signal_id = f"watch-{symbol}-{int(time.time())}"
-                signal_upsert(
+                now_ts = time.time()
+                gate = apply_skip_watching_gate(
                     db_path,
-                    signal_id=signal_id,
                     symbol=symbol,
                     direction=direction_watch,
                     entry_low=parsed.get("entry_low"),
                     entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
-                    sl=parsed.get("sl"),
-                    tp1=parsed.get("tp1"),
-                    tp2=parsed.get("tp2"),
-                    rr=parsed.get("rr"),
-                    status="WATCHING",
-                    analysis_note=response_for_parse,
+                    timeframe="1h",
+                    now_ts=now_ts,
                 )
-                await agent_say(
-                    sender,
-                    "olesya",
-                    f"Зона {symbol} {parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} в WATCHING. "
-                    "Повідомлю як ціна дійде.",
+                if gate.get("create"):
+                    signal_id = f"watch-{symbol}-{int(now_ts)}"
+                    signal_upsert(
+                        db_path,
+                        signal_id=signal_id,
+                        symbol=symbol,
+                        direction=direction_watch,
+                        entry_low=parsed.get("entry_low"),
+                        entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
+                        sl=parsed.get("sl"),
+                        tp1=parsed.get("tp1"),
+                        tp2=parsed.get("tp2"),
+                        rr=parsed.get("rr"),
+                        status="WATCHING",
+                        analysis_note=response_for_parse,
+                    )
+                    await agent_say(
+                        sender,
+                        "olesya",
+                        f"Зона {symbol} {parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} в WATCHING. "
+                        "Повідомлю як ціна дійде.",
+                    )
+                else:
+                    print(f"[relay] T3 skip duplicate WATCHING {symbol} key={gate.get('key')}")
+                record_skip_scenario(
+                    db_path,
+                    str(gate.get("key") or ""),
+                    symbol=symbol,
+                    timeframe="1h",
+                    setup=str(gate.get("setup") or ""),
+                    expiry=str(gate.get("expiry") or ""),
                 )
             return False
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
@@ -4513,24 +4551,47 @@ EV позитивне: {prob.get('ev_positive', '')}
                 el = levels_skip.get("entry_low")
                 if el is not None:
                     try:
-                        signal_upsert(
+                        gate = apply_skip_watching_gate(
                             db_path,
-                            signal_id=f"proactive-watch-{symbol}-{int(time.time())}",
                             symbol=symbol,
                             direction=direction,
                             entry_low=levels_skip.get("entry_low"),
                             entry_high=levels_skip.get("entry_high"),
-                            sl=levels_skip.get("sl"),
-                            tp1=levels_skip.get("tp1"),
-                            tp2=levels_skip.get("tp2"),
-                            rr=levels_skip.get("rr"),
-                            status="WATCHING",
-                            analysis_note=(lev_final or "")[:2000],
+                            timeframe="1h",
+                            now_ts=time.time(),
                         )
-                        eh = levels_skip.get("entry_high")
-                        print(
-                            f"[scanner] {symbol} → WATCHING тихо "
-                            f"{el}-{eh if eh is not None else el}"
+                        if gate.get("create"):
+                            signal_upsert(
+                                db_path,
+                                signal_id=f"proactive-watch-{symbol}-{int(time.time())}",
+                                symbol=symbol,
+                                direction=direction,
+                                entry_low=levels_skip.get("entry_low"),
+                                entry_high=levels_skip.get("entry_high"),
+                                sl=levels_skip.get("sl"),
+                                tp1=levels_skip.get("tp1"),
+                                tp2=levels_skip.get("tp2"),
+                                rr=levels_skip.get("rr"),
+                                status="WATCHING",
+                                analysis_note=(lev_final or "")[:2000],
+                            )
+                            eh = levels_skip.get("entry_high")
+                            print(
+                                f"[scanner] {symbol} → WATCHING тихо "
+                                f"{el}-{eh if eh is not None else el}"
+                            )
+                        else:
+                            print(
+                                f"[scanner] T3 skip duplicate WATCHING {symbol} "
+                                f"key={gate.get('key')}"
+                            )
+                        record_skip_scenario(
+                            db_path,
+                            str(gate.get("key") or ""),
+                            symbol=symbol,
+                            timeframe="1h",
+                            setup=str(gate.get("setup") or ""),
+                            expiry=str(gate.get("expiry") or ""),
                         )
                     except Exception as exc_w:
                         print(f"[scanner] silent WATCHING upsert failed {symbol}: {exc_w}")
