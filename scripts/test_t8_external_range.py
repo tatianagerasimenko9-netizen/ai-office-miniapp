@@ -31,6 +31,7 @@ from office_range_radar import (  # noqa: E402
     format_range_card,
     scan_universe,
 )
+from office_market_scout import CONTEXT_SEEDS, top_move_is_setup  # noqa: E402
 from office_review_position import scanner_enter_opens_position  # noqa: E402
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
 
@@ -63,8 +64,10 @@ def main() -> int:
         return _fail("Edge 85")
     if RADAR_SYMBOLS != ("BTCUSDT",):
         return _fail("T6 RADAR_SYMBOLS must stay BTC-only")
-    if "XAUUSDT" not in T8_SCAN_UNIVERSE or "ETHUSDT" not in T8_SCAN_UNIVERSE:
+    if T8_SCAN_UNIVERSE != CONTEXT_SEEDS:
         return _fail("universe")
+    if top_move_is_setup(25.0):
+        return _fail("gainer is not entry")
     if scanner_enter_opens_position("ПІДТВЕРДЖЕНО") is not False:
         return _fail("auto order")
 

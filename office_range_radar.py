@@ -14,15 +14,8 @@ from office_market_data import SIGNAL_THRESHOLD
 from office_radar import MIN_RR, card_levels, detect_sweep_from_candles
 from office_session_radar import detect_breakout_retest, m15_confirmation
 
-# Окремо від T6 RADAR_SYMBOLS (лишається BTCUSDT).
-T8_SCAN_UNIVERSE: Tuple[str, ...] = (
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "BNBUSDT",
-    "XRPUSDT",
-    "XAUUSDT",
-)
+# Контекстні якорі. Повний ринок формує office_market_scout, не цей кортеж.
+T8_SCAN_UNIVERSE: Tuple[str, ...] = ("BTCUSDT", "XAUUSDT")
 KIND_RANGE = "range_radar"
 MAX_RANGE_WIDTH_PCT = 3.5
 CONTEXT_ASSETS = frozenset({"BTCUSDT", "XAUUSDT"})
@@ -385,11 +378,16 @@ def format_range_card(res: RangeRadarResult) -> str:
     return "\n".join(lines)
 
 
-def radar_symbols_for_monitor(t6_symbols: Sequence[str]) -> List[str]:
-    """T6 лишає BTC; T8 додає всесвіт без дублікатів."""
+def radar_symbols_for_monitor(
+    t6_symbols: Sequence[str],
+    *,
+    deep_symbols: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """T6 лишає BTC. Глибина T8 — динамічний скаут, не фіксована п'ятірка."""
     seen = set()
     out: List[str] = []
-    for s in list(t6_symbols) + list(T8_SCAN_UNIVERSE):
+    tail = list(deep_symbols) if deep_symbols is not None else list(T8_SCAN_UNIVERSE)
+    for s in list(t6_symbols) + tail:
         u = str(s or "").upper()
         if not u or u in seen:
             continue

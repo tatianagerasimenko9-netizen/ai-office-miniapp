@@ -121,9 +121,14 @@ from office_external_signal import (
     review_external_signal,
 )
 from office_range_radar import (
-    T8_SCAN_UNIVERSE,
     evaluate_range_radar,
     format_range_card,
+)
+from office_market_scout import (
+    already_ran_without_entry,
+    btc_context_only,
+    promote_for_deep_scan,
+    screen_futures_market,
 )
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
@@ -5080,7 +5085,39 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
-                for rsym in T8_SCAN_UNIVERSE:
+                tickers_24: Any = None
+                try:
+                    timeout_sc = aiohttp.ClientTimeout(total=12)
+                    async with aiohttp.ClientSession(timeout=timeout_sc) as s_sc:
+                        async with s_sc.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as r_sc:
+                            tickers_24 = await r_sc.json()
+                except Exception as exc_sc:
+                    print(f"[scout] ticker 24hr unavailable: {type(exc_sc).__name__}: {exc_sc}")
+                    tickers_24 = None
+                screen = screen_futures_market(tickers_24 if isinstance(tickers_24, list) else None)
+                extra_req = [
+                    x.strip().upper()
+                    for x in str(os.getenv("OFFICE_SCOUT_EXTRA_SYMBOLS") or "").split(",")
+                    if x.strip()
+                ]
+                watching_now: List[str] = []
+                try:
+                    for _aw in signal_get_active(db_path) or []:
+                        if isinstance(_aw, dict) and _aw.get("symbol"):
+                            watching_now.append(str(_aw.get("symbol")))
+                except Exception:
+                    watching_now = []
+                deep_syms = promote_for_deep_scan(
+                    screen,
+                    extra_user_symbols=extra_req,
+                    active_watching=watching_now,
+                )
+                btc_ctx = btc_context_only(screen)
+                print(
+                    f"[scout] screened={screen.screened} status={screen.data_status} "
+                    f"deep={len(deep_syms)} gold={((screen.gold or {}).get('source'))}"
+                )
+                for rsym in deep_syms:
                     try:
                         rh1 = fetch_candles(rsym, "1h", 30)
                         rm15 = fetch_candles(rsym, "15m", 12)
@@ -5104,12 +5141,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                             confirm_candles=rm15 if isinstance(rm15, list) else rh1,
                             price=rprice,
                             day_used_pct=r_used,
+                            btc_context=btc_ctx,
                             prev_fingerprint=_range_fp.get(rsym, ""),
                         )
                         _fp = str((rres.extras or {}).get("fingerprint") or "")
                         if _fp:
                             _range_fp[rsym] = _fp
                         if rres.opens_position:
+                            continue
+                        if rres.card and already_ran_without_entry(
+                            direction=rres.direction,
+                            entry=(rres.card or {}).get("entry"),
+                            price=rprice,
+                            sl=(rres.card or {}).get("sl"),
+                        ):
+                            print(f"[scout] skip chase {rsym}")
                             continue
                         if rres.should_notify and rres.status != "NONE":
                             card_txt = format_range_card(rres)

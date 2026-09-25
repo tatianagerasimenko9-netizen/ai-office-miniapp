@@ -26,6 +26,7 @@ from office_t8_backtest import DATA_CONTROL, DATA_UNAVAILABLE, run_t8_backtest  
 from office_watching_dedup import apply_skip_watching_gate, record_skip_if_valid  # noqa: E402
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
 from office_radar import RADAR_SYMBOLS  # noqa: E402
+from office_market_scout import CONTEXT_SEEDS, top_move_is_setup  # noqa: E402
 from office_range_radar import T8_SCAN_UNIVERSE  # noqa: E402
 from office_external_signal import VERDICT_CONFIRMED  # noqa: E402
 
@@ -44,8 +45,10 @@ def main() -> int:
         return _fail("Edge 85 frozen")
     if RADAR_SYMBOLS != ("BTCUSDT",):
         return _fail("T6 symbols frozen")
-    if "ETHUSDT" not in T8_SCAN_UNIVERSE:
-        return _fail("T8 universe")
+    if T8_SCAN_UNIVERSE != CONTEXT_SEEDS:
+        return _fail("T8 universe is scout seeds")
+    if top_move_is_setup(30.0):
+        return _fail("top move is not setup")
     if VERDICT_CONFIRMED == "ENTER":
         return _fail("verdict is not enter")
     if CREATES_ENTER:
