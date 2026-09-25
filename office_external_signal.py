@@ -19,6 +19,7 @@ from office_market_state import scanner_signal_blocked
 from office_radar import MIN_RR, card_levels, detect_sweep_from_candles, m15_confirmation
 from office_session_radar import independent_flip_ok, session_at_utc
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT
+from office_level_scalp import infer_trade_mode, parse_bot_card_overlay, rr_after_costs
 
 # Вердикти — дані для Лева, не шаблон його репліки.
 VERDICT_CONFIRMED = "ПІДТВЕРДЖЕНО"
@@ -87,20 +88,23 @@ def ingest_external_signal(
     """Знімок оригіналу. Подальший аналіз цей dict не мутує."""
     src = str(text or "")
     levels = parse_signal_levels_from_text(src)
+    overlay = parse_bot_card_overlay(src)
     up = src.upper()
-    symbol = ""
+    symbol = str(overlay.get("symbol") or "")
     m = re.search(r"\b[A-Z0-9]{2,15}USDT\b", up)
     if m:
         symbol = m.group(0)
     elif re.search(r"\bXAU(?:USD)?\b|\bGOLD\b", up):
         symbol = "XAUUSDT"
-    direction = ""
+    direction = str(overlay.get("direction") or "")
     if any(t in up for t in ("SHORT", "SELL", "ШОРТ", "ПРОДАЖ", "🔴")):
         direction = "SHORT"
     elif any(t in up for t in ("LONG", "BUY", "ЛОНГ", "КУПІВЛ", "🟢")):
         direction = "LONG"
-    entry = _f(levels.get("entry_low"))
-    entry_high = _f(levels.get("entry_high"))
+    if not direction:
+        direction = str(overlay.get("direction") or "")
+    entry = _f(levels.get("entry_low")) or _f(overlay.get("entry"))
+    entry_high = _f(levels.get("entry_high")) or _f(overlay.get("entry"))
     if entry is not None and entry_high is not None:
         entry_mid = (entry + entry_high) / 2.0
     else:
@@ -114,11 +118,16 @@ def ingest_external_signal(
         "symbol": _norm_symbol(symbol),
         "direction": direction,
         "entry": entry_mid,
-        "entry_low": _f(levels.get("entry_low")),
-        "entry_high": _f(levels.get("entry_high")),
-        "sl": _f(levels.get("sl")),
-        "tp1": _f(levels.get("tp1")),
-        "tp2": _f(levels.get("tp2")),
+        "entry_low": _f(levels.get("entry_low")) or entry_mid,
+        "entry_high": _f(levels.get("entry_high")) or entry_mid,
+        "sl": _f(levels.get("sl")) or _f(overlay.get("sl")),
+        "tp1": _f(levels.get("tp1")) or _f(overlay.get("tp1")),
+        "tp2": _f(levels.get("tp2")) or _f(overlay.get("tp2")),
+        "tp3": _f(overlay.get("tp3")),
+        "add_on": _f(overlay.get("add_on")),
+        "timeframe": overlay.get("timeframe") or "",
+        "style": overlay.get("style") or "",
+        "mode": overlay.get("mode") or infer_trade_mode(overlay.get("timeframe"), overlay.get("style")),
         "kind": KIND_EXTERNAL,
         "opens_position": False,
     }
@@ -320,6 +329,23 @@ def review_external_signal(
                 lifecycle_hint="INVALIDATED",
                 extras=extras,
             )
+        if str(orig.get("mode") or "") == "scalp":
+            net = rr_after_costs(
+                entry=office_plan.get("entry"),
+                sl=office_plan.get("sl"),
+                tp=office_plan.get("tp1") or office_plan.get("tp"),
+            )
+            office_plan["rr_net"] = net
+            if net is not None and net < MIN_RR:
+                return ExternalReview(
+                    verdict=VERDICT_CONDITIONAL,
+                    original=orig,
+                    reasons=["скальп: після комісій і прослизання RR нижче порогу — не копіюємо цілі бота"],
+                    office_plan=office_plan,
+                    watching_condition="чекаємо ширший внутрішньоденний рівень або кращий RR нетто",
+                    lifecycle_hint="WATCHING",
+                    extras=extras,
+                )
 
     if atr.get("t0_entry_blocked") or atr.get("gerchik_entry_blocked"):
         reasons.append(str(atr.get("label") or "ATR блок конкретного входу"))

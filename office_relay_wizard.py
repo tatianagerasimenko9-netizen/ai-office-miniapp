@@ -130,6 +130,7 @@ from office_market_scout import (
     promote_for_deep_scan,
     screen_futures_market,
 )
+from office_level_scalp import evaluate_level_book, format_level_book
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -4976,6 +4977,7 @@ EV позитивне: {prob.get('ev_positive', '')}
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
 
         _range_fp: Dict[str, str] = {}
+        _level_fp: Dict[str, str] = {}
         while True:
             try:
                 for symbol in RADAR_SYMBOLS:
@@ -5121,6 +5123,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     try:
                         rh1 = fetch_candles(rsym, "1h", 30)
                         rm15 = fetch_candles(rsym, "15m", 12)
+                        rm5 = fetch_candles(rsym, "5m", 20)
                         if not isinstance(rh1, list) or len(rh1) < 8:
                             continue
                         rprice = 0.0
@@ -5162,6 +5165,29 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if card_txt:
                                 await send_office(fmt_agent_line("lev", card_txt))
                                 print(f"[range] {rsym} {rres.status} {rres.event} notify")
+                        for _mode, _candles, _confirm in (
+                            ("intraday", rh1, rm15 if isinstance(rm15, list) else rh1),
+                            ("scalp", rm5 if isinstance(rm5, list) and rm5 else rh1, rm5 if isinstance(rm5, list) and rm5 else rm15),
+                        ):
+                            book = evaluate_level_book(
+                                symbol=rsym,
+                                candles=_candles if isinstance(_candles, list) else rh1,
+                                confirm_candles=_confirm if isinstance(_confirm, list) else rh1,
+                                price=rprice,
+                                day_used_pct=r_used,
+                                mode=_mode,
+                                prev_fingerprint=_level_fp.get(f"{rsym}:{_mode}", ""),
+                            )
+                            _lfp = str((book.extras or {}).get("fingerprint") or "")
+                            if _lfp:
+                                _level_fp[f"{rsym}:{_mode}"] = _lfp
+                            if book.opens_position:
+                                continue
+                            if book.should_notify:
+                                ltxt = format_level_book(book)
+                                if ltxt:
+                                    await send_office(fmt_agent_line("lev", ltxt))
+                                    print(f"[levels] {rsym} {_mode} notify")
                     except Exception as exc_range:
                         print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
