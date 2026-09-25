@@ -78,6 +78,29 @@ def classify_atr_day_used(day_used_pct: Any) -> Dict[str, Any]:
     }
 
 
+def explain_atr_day_used(day_used_pct: Any) -> Dict[str, Any]:
+    """120.7% = денний хід на 20.7% більший за ATR, не «більш ніж удвічі»."""
+    cls = classify_atr_day_used(day_used_pct)
+    used = cls.get("day_used_pct")
+    excess = None
+    if used is not None:
+        excess = round(float(used) - 100.0, 1)
+    return {
+        **cls,
+        "excess_pct_over_atr": excess,
+        "more_than_double_atr": bool(used is not None and float(used) >= 200.0),
+        "new_d1_is_entry": False,
+        "plain": (
+            None
+            if used is None
+            else (
+                f"ATR day_used {used:.1f}% — денний хід перевищив ATR на {excess:.1f}%, "
+                "не «більш ніж удвічі». Нова D1 лише перераховує day_used, це не вхід."
+            )
+        ),
+    }
+
+
 def probability_no_trade_payload(day_used_pct: float) -> Dict[str, Any]:
     """Поля Probability Engine при ATR>80: правило, не forecast ціни."""
     cls = classify_atr_day_used(day_used_pct)

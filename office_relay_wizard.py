@@ -113,6 +113,24 @@ from office_watching_dedup import (
 )
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 from office_session_radar import evaluate_session_radar
+from office_external_signal import (
+    ingest_external_signal,
+    persist_external_original,
+    review_external_signal,
+)
+from office_range_radar import (
+    evaluate_range_radar,
+    format_range_card,
+)
+from office_market_scout import (
+    already_ran_without_entry,
+    btc_context_only,
+    promote_for_deep_scan,
+    screen_futures_market,
+)
+from office_level_scalp import evaluate_level_book, format_level_book
+from office_skip_plan import persist_skip_case
+from office_trader_plan import compose_trader_plan, format_trader_plan
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -2848,6 +2866,52 @@ async def run() -> None:
             )
             _history_reset()
             sig = parse_signal(text, event.id)
+            # T8: зовнішній бот — незалежний розбір, оригінал без змін, не ордер.
+            try:
+                _ext_orig = ingest_external_signal(
+                    text=text,
+                    msg_id=event.id,
+                    received_at=getattr(event, "date", None),
+                )
+                persist_external_original(db_path, _ext_orig)
+                try:
+                    _ext_ms = market_state_get(db_path, _ext_orig.get("symbol") or "") or {}
+                except Exception:
+                    _ext_ms = {}
+                _ext_rev = review_external_signal(
+                    _ext_orig,
+                    market={"bot_action": _ext_ms.get("bot_action")},
+                )
+                _ext_candles: list = []
+                _ext_mkt = {"bot_action": _ext_ms.get("bot_action")}
+                try:
+                    from office_market_data import fetch_atr_context, fetch_candles as _fetch_c
+
+                    _sym = str(_ext_orig.get("symbol") or "")
+                    if _sym:
+                        _h1 = _fetch_c(_sym, "1h", 30)
+                        if isinstance(_h1, list):
+                            _ext_candles = _h1
+                        _atr = fetch_atr_context(_sym) or {}
+                        if _atr.get("day_used_pct") is not None:
+                            _ext_mkt["day_used_pct"] = _atr.get("day_used_pct")
+                        if _ext_candles:
+                            _ext_mkt["price"] = float((_ext_candles[-1] or {}).get("close") or 0) or None
+                except Exception:
+                    _ext_candles = []
+                _trader = compose_trader_plan(
+                    _ext_orig,
+                    _ext_rev,
+                    market=_ext_mkt,
+                    t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
+                    candles=_ext_candles or None,
+                    asof=str(_ext_orig.get("received_at") or ""),
+                )
+                await send_office(format_trader_plan(_trader))
+                if _trader.skip is not None:
+                    persist_skip_case(db_path, _trader.skip, now_ts=time.time())
+            except Exception as exc_ext:
+                print(f"[relay][WARN] external signal review failed: {type(exc_ext).__name__}: {exc_ext}")
             # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.
             try:
                 _ms = market_state_get(db_path, getattr(sig, "symbol", "") or "")
@@ -4920,9 +4984,11 @@ EV позитивне: {prob.get('ev_positive', '')}
     asyncio.create_task(monitor_active_signals())
 
     async def monitor_trade_radar() -> None:
-        """T6: радар BTC — рівні, наближення, sweep+M15. SIGNAL без журналу позиції."""
+        """T6: радар BTC. T8: боковик + всесвіт альтів/золота без копіювання BTC."""
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
 
+        _range_fp: Dict[str, str] = {}
+        _level_fp: Dict[str, str] = {}
         while True:
             try:
                 for symbol in RADAR_SYMBOLS:
@@ -5032,6 +5098,109 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
+                tickers_24: Any = None
+                try:
+                    timeout_sc = aiohttp.ClientTimeout(total=12)
+                    async with aiohttp.ClientSession(timeout=timeout_sc) as s_sc:
+                        async with s_sc.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as r_sc:
+                            tickers_24 = await r_sc.json()
+                except Exception as exc_sc:
+                    print(f"[scout] ticker 24hr unavailable: {type(exc_sc).__name__}: {exc_sc}")
+                    tickers_24 = None
+                screen = screen_futures_market(tickers_24 if isinstance(tickers_24, list) else None)
+                extra_req = [
+                    x.strip().upper()
+                    for x in str(os.getenv("OFFICE_SCOUT_EXTRA_SYMBOLS") or "").split(",")
+                    if x.strip()
+                ]
+                watching_now: List[str] = []
+                try:
+                    for _aw in signal_get_active(db_path) or []:
+                        if isinstance(_aw, dict) and _aw.get("symbol"):
+                            watching_now.append(str(_aw.get("symbol")))
+                except Exception:
+                    watching_now = []
+                deep_syms = promote_for_deep_scan(
+                    screen,
+                    extra_user_symbols=extra_req,
+                    active_watching=watching_now,
+                )
+                btc_ctx = btc_context_only(screen)
+                print(
+                    f"[scout] screened={screen.screened} status={screen.data_status} "
+                    f"deep={len(deep_syms)} gold={((screen.gold or {}).get('source'))}"
+                )
+                for rsym in deep_syms:
+                    try:
+                        rh1 = fetch_candles(rsym, "1h", 30)
+                        rm15 = fetch_candles(rsym, "15m", 12)
+                        rm5 = fetch_candles(rsym, "5m", 20)
+                        if not isinstance(rh1, list) or len(rh1) < 8:
+                            continue
+                        rprice = 0.0
+                        try:
+                            rprice = float((rh1[-1] or {}).get("close") or 0.0)
+                        except Exception:
+                            rprice = 0.0
+                        r_used = None
+                        try:
+                            r_atr = fetch_atr_context(rsym) or {}
+                            if r_atr.get("day_used_pct") is not None:
+                                r_used = float(r_atr.get("day_used_pct"))
+                        except Exception:
+                            r_used = None
+                        rres = evaluate_range_radar(
+                            symbol=rsym,
+                            candles=rh1,
+                            confirm_candles=rm15 if isinstance(rm15, list) else rh1,
+                            price=rprice,
+                            day_used_pct=r_used,
+                            btc_context=btc_ctx,
+                            prev_fingerprint=_range_fp.get(rsym, ""),
+                        )
+                        _fp = str((rres.extras or {}).get("fingerprint") or "")
+                        if _fp:
+                            _range_fp[rsym] = _fp
+                        if rres.opens_position:
+                            continue
+                        if rres.card and already_ran_without_entry(
+                            direction=rres.direction,
+                            entry=(rres.card or {}).get("entry"),
+                            price=rprice,
+                            sl=(rres.card or {}).get("sl"),
+                        ):
+                            print(f"[scout] skip chase {rsym}")
+                            continue
+                        if rres.should_notify and rres.status != "NONE":
+                            card_txt = format_range_card(rres)
+                            if card_txt:
+                                await send_office(fmt_agent_line("lev", card_txt))
+                                print(f"[range] {rsym} {rres.status} {rres.event} notify")
+                        for _mode, _candles, _confirm in (
+                            ("intraday", rh1, rm15 if isinstance(rm15, list) else rh1),
+                            ("scalp", rm5 if isinstance(rm5, list) and rm5 else rh1, rm5 if isinstance(rm5, list) and rm5 else rm15),
+                        ):
+                            book = evaluate_level_book(
+                                symbol=rsym,
+                                candles=_candles if isinstance(_candles, list) else rh1,
+                                confirm_candles=_confirm if isinstance(_confirm, list) else rh1,
+                                price=rprice,
+                                day_used_pct=r_used,
+                                mode=_mode,
+                                prev_fingerprint=_level_fp.get(f"{rsym}:{_mode}", ""),
+                            )
+                            _lfp = str((book.extras or {}).get("fingerprint") or "")
+                            if _lfp:
+                                _level_fp[f"{rsym}:{_mode}"] = _lfp
+                            if book.opens_position:
+                                continue
+                            if book.should_notify:
+                                ltxt = format_level_book(book)
+                                if ltxt:
+                                    await send_office(fmt_agent_line("lev", ltxt))
+                                    print(f"[levels] {rsym} {_mode} notify")
+                    except Exception as exc_range:
+                        print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
                     log_event(db_path, "BTC_FORCE_ORDERS", BTC_FORCE_ORDER_BOOK.snapshot())
                     print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
