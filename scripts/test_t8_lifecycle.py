@@ -25,6 +25,9 @@ from office_t7_health import classify_book_state, diagnose_force_order_snapshot 
 from office_t8_backtest import DATA_CONTROL, DATA_UNAVAILABLE, run_t8_backtest  # noqa: E402
 from office_watching_dedup import apply_skip_watching_gate, record_skip_if_valid  # noqa: E402
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
+from office_radar import RADAR_SYMBOLS  # noqa: E402
+from office_range_radar import T8_SCAN_UNIVERSE  # noqa: E402
+from office_external_signal import VERDICT_CONFIRMED  # noqa: E402
 
 
 def _fail(msg: str) -> int:
@@ -39,6 +42,12 @@ def main() -> int:
         return _fail("80 frozen")
     if SIGNAL_THRESHOLD != 85:
         return _fail("Edge 85 frozen")
+    if RADAR_SYMBOLS != ("BTCUSDT",):
+        return _fail("T6 symbols frozen")
+    if "ETHUSDT" not in T8_SCAN_UNIVERSE:
+        return _fail("T8 universe")
+    if VERDICT_CONFIRMED == "ENTER":
+        return _fail("verdict is not enter")
     if CREATES_ENTER:
         return _fail("T7 enter")
     if scanner_enter_opens_position("ENTER") is not False:

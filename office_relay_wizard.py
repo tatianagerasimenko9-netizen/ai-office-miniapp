@@ -113,6 +113,18 @@ from office_watching_dedup import (
 )
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 from office_session_radar import evaluate_session_radar
+from office_external_signal import (
+    VERDICT_CONDITIONAL,
+    format_external_review,
+    ingest_external_signal,
+    persist_external_original,
+    review_external_signal,
+)
+from office_range_radar import (
+    T8_SCAN_UNIVERSE,
+    evaluate_range_radar,
+    format_range_card,
+)
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -2848,6 +2860,41 @@ async def run() -> None:
             )
             _history_reset()
             sig = parse_signal(text, event.id)
+            # T8: зовнішній бот — незалежний розбір, оригінал без змін, не ордер.
+            try:
+                _ext_orig = ingest_external_signal(
+                    text=text,
+                    msg_id=event.id,
+                    received_at=getattr(event, "date", None),
+                )
+                persist_external_original(db_path, _ext_orig)
+                try:
+                    _ext_ms = market_state_get(db_path, _ext_orig.get("symbol") or "") or {}
+                except Exception:
+                    _ext_ms = {}
+                _ext_rev = review_external_signal(
+                    _ext_orig,
+                    market={"bot_action": _ext_ms.get("bot_action")},
+                )
+                await send_office(format_external_review(_ext_rev))
+                if _ext_rev.verdict == VERDICT_CONDITIONAL and _ext_orig.get("symbol"):
+                    _plan = _ext_rev.office_plan or {}
+                    signal_upsert(
+                        db_path,
+                        signal_id=str(_ext_orig.get("signal_id") or f"ext-{event.id}"),
+                        symbol=str(_ext_orig.get("symbol")),
+                        direction=str(_ext_orig.get("direction") or "LONG"),
+                        entry_low=_ext_orig.get("entry_low") or _ext_orig.get("entry"),
+                        entry_high=_ext_orig.get("entry_high") or _ext_orig.get("entry"),
+                        sl=_ext_orig.get("sl"),
+                        tp1=_ext_orig.get("tp1"),
+                        tp2=_ext_orig.get("tp2"),
+                        rr=_plan.get("rr"),
+                        status="WATCHING",
+                        analysis_note=(format_external_review(_ext_rev))[:2000],
+                    )
+            except Exception as exc_ext:
+                print(f"[relay][WARN] external signal review failed: {type(exc_ext).__name__}: {exc_ext}")
             # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.
             try:
                 _ms = market_state_get(db_path, getattr(sig, "symbol", "") or "")
@@ -4920,9 +4967,10 @@ EV позитивне: {prob.get('ev_positive', '')}
     asyncio.create_task(monitor_active_signals())
 
     async def monitor_trade_radar() -> None:
-        """T6: радар BTC — рівні, наближення, sweep+M15. SIGNAL без журналу позиції."""
+        """T6: радар BTC. T8: боковик + всесвіт альтів/золота без копіювання BTC."""
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
 
+        _range_fp: Dict[str, str] = {}
         while True:
             try:
                 for symbol in RADAR_SYMBOLS:
@@ -5032,6 +5080,44 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
+                for rsym in T8_SCAN_UNIVERSE:
+                    try:
+                        rh1 = fetch_candles(rsym, "1h", 30)
+                        rm15 = fetch_candles(rsym, "15m", 12)
+                        if not isinstance(rh1, list) or len(rh1) < 8:
+                            continue
+                        rprice = 0.0
+                        try:
+                            rprice = float((rh1[-1] or {}).get("close") or 0.0)
+                        except Exception:
+                            rprice = 0.0
+                        r_used = None
+                        try:
+                            r_atr = fetch_atr_context(rsym) or {}
+                            if r_atr.get("day_used_pct") is not None:
+                                r_used = float(r_atr.get("day_used_pct"))
+                        except Exception:
+                            r_used = None
+                        rres = evaluate_range_radar(
+                            symbol=rsym,
+                            candles=rh1,
+                            confirm_candles=rm15 if isinstance(rm15, list) else rh1,
+                            price=rprice,
+                            day_used_pct=r_used,
+                            prev_fingerprint=_range_fp.get(rsym, ""),
+                        )
+                        _fp = str((rres.extras or {}).get("fingerprint") or "")
+                        if _fp:
+                            _range_fp[rsym] = _fp
+                        if rres.opens_position:
+                            continue
+                        if rres.should_notify and rres.status != "NONE":
+                            card_txt = format_range_card(rres)
+                            if card_txt:
+                                await send_office(fmt_agent_line("lev", card_txt))
+                                print(f"[range] {rsym} {rres.status} {rres.event} notify")
+                    except Exception as exc_range:
+                        print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
                     log_event(db_path, "BTC_FORCE_ORDERS", BTC_FORCE_ORDER_BOOK.snapshot())
                     print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
