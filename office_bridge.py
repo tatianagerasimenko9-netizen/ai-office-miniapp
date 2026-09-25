@@ -1572,6 +1572,157 @@ def journal_total_closed(db_path: str = "office_bridge.db") -> int:
     return journal_closed_trade_count(db_path)
 
 
+POSITION_CONFIRM_REASON = "explicit /position by owner"
+DESK_ENTER_REASON = "desk enter after agent chain"
+
+
+def _parse_journal_ts(raw: Any) -> Optional[datetime]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def kyiv_calendar_date(now: Optional[datetime] = None) -> str:
+    """Календарна дата брифінгу за Києвом, не UTC сервера."""
+    stamp = now if now is not None else datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(_office_kyiv_tzinfo()).strftime("%Y-%m-%d")
+
+
+def _journal_row_kyiv_date(raw: Any) -> str:
+    dt = _parse_journal_ts(raw)
+    if dt is None:
+        return ""
+    return dt.astimezone(_office_kyiv_tzinfo()).strftime("%Y-%m-%d")
+
+
+def is_confirmed_position_row(entry_reason: Any = "", setup_name: Any = "", trade_id: Any = "") -> bool:
+    """Підтверджена угода Тетяни — лише явний /position, не Desk ENTER."""
+    reason = str(entry_reason or "").strip().lower()
+    setup = str(setup_name or "").strip().upper()
+    tid = str(trade_id or "").strip().lower()
+    if POSITION_CONFIRM_REASON in reason:
+        return True
+    if setup == "T1_MY_POSITION":
+        return True
+    if tid.startswith("pos-"):
+        return True
+    return False
+
+
+def _fmt_closed_stats(rows: List[tuple]) -> str:
+    """WR/PnL/Avg R лише якщо є закриті угоди; інакше «немає даних»."""
+    if not rows:
+        return "WR / PnL / Avg R: немає даних"
+    wins = losses = be = 0
+    pnl_sum = 0.0
+    r_vals: List[float] = []
+    for outcome, pnl_pct, r_multiple in rows:
+        o = str(outcome or "").upper()
+        if o == "WIN":
+            wins += 1
+        elif o == "LOSS":
+            losses += 1
+        elif o == "BE":
+            be += 1
+        try:
+            pnl_sum += float(pnl_pct or 0.0)
+        except Exception:
+            pass
+        try:
+            if r_multiple is not None and str(r_multiple) != "":
+                r_vals.append(float(r_multiple))
+        except Exception:
+            pass
+    decided = wins + losses
+    wr_txt = f"{(wins / decided * 100.0):.1f}%" if decided > 0 else "немає даних"
+    avg_r_txt = f"{(sum(r_vals) / len(r_vals)):+.2f}" if r_vals else "немає даних"
+    return (
+        f"W {wins} · L {losses} · BE {be} | WR {wr_txt}\n"
+        f"PnL сумарно: {pnl_sum:+.2f}% | Avg R: {avg_r_txt}"
+    )
+
+
+def build_evening_journal_summary(db_path: str, *, now: Optional[datetime] = None) -> str:
+    """Зведення журналу для debrief. Рядки БД не змінює."""
+    today = kyiv_calendar_date(now)
+    try:
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT trade_id, status, outcome, pnl_pct, r_multiple,
+                   ts_close_utc, entry_reason, setup_name
+            FROM trade_journal
+            """,
+            (),
+        )
+    except Exception:
+        rows = []
+
+    total = len(rows)
+    hist_open = 0
+    hist_closed = 0
+    confirmed_open = 0
+    confirmed_closed_today: List[tuple] = []
+    closed_today_all = 0
+    closed_today_confirmed = 0
+    closed_today_hist = 0
+
+    for trade_id, status, outcome, pnl_pct, r_multiple, ts_close, entry_reason, setup_name in rows:
+        st = str(status or "").upper()
+        confirmed = is_confirmed_position_row(entry_reason, setup_name, trade_id)
+        close_d = _journal_row_kyiv_date(ts_close)
+        if confirmed:
+            if st == "OPEN":
+                confirmed_open += 1
+            if st == "CLOSED" and close_d == today:
+                closed_today_all += 1
+                closed_today_confirmed += 1
+                confirmed_closed_today.append((outcome, pnl_pct, r_multiple))
+            continue
+        if st == "OPEN":
+            hist_open += 1
+        elif st == "CLOSED":
+            hist_closed += 1
+            if close_d == today:
+                closed_today_all += 1
+                closed_today_hist += 1
+
+    hist_n = hist_open + hist_closed
+    if closed_today_all:
+        closed_today_line = (
+            f"усього {closed_today_all} "
+            f"(підтверджені {closed_today_confirmed}, історичні {closed_today_hist})"
+        )
+    else:
+        closed_today_line = "немає · WR / PnL / Avg R: немає даних"
+    return "\n".join(
+        [
+            f"Дата звіту (Київ): {today}",
+            "Підтверджені угоди (/position):",
+            f"відкриті зараз: {confirmed_open} · закриті сьогодні: {closed_today_confirmed}",
+            _fmt_closed_stats(confirmed_closed_today),
+            "Закриті сьогодні (календар Київ):",
+            closed_today_line,
+            "Історичний журнал (не поточні позиції):",
+            (
+                f"{total} записів усього, з них історичних {hist_n} "
+                f"(OPEN {hist_open} від старої логіки Desk ENTER — "
+                "не вважаємо реальними позиціями без /position; "
+                f"CLOSED історичні {hist_closed})."
+            ),
+        ]
+    )
+
+
 def journal_add_feedback(
     db_path: str,
     *,
@@ -3362,18 +3513,15 @@ async def office_evening_debrief(
     journal_summary: str,
 ) -> None:
     """
-    Вечірній debrief після сесії (MASTER п.28). Короткий підсумок + репліки команди.
+    Вечірній debrief після сесії (MASTER п.28). Один звіт Лева, без шаблонного хору.
     """
-    js = (journal_summary or "").strip()[:650]
-    await sender(
-        f"🌆 *#Загальний · Вечірній debrief*\n"
+    js = (journal_summary or "").strip()[:1800]
+    body = (
+        f"🌆 Вечірній debrief\n"
         f"Час за Києвом: `{_now_kyiv_hm()}` · BTC 24г `{btc_change_pct:+.2f}%`\n"
         f"{js}"
     )
-    await agent_say(sender, "olesya", "День на столі зафіксовано. Завтра продовжимо з тим самим фокусом на дисципліні.", 0.07)
-    await agent_say(sender, "lev", "Гарна робота. Завтра знову тільки чисті сетапи, без форсу.", 0.07)
-    await agent_say(sender, "psych", "Відпочинь від екранів — завтра заходимо без зайвого емоційного багажу.", 0.07)
-    await agent_say(sender, "daryna", "Капітал під контролем — це найкращий результат. Завтра знову жорсткий ризик-периметр.", 0.07)
+    await sender(fmt_agent_line("lev", body[:3900]))
 
 
 async def office_emergency_alert(
