@@ -16,6 +16,7 @@ from office_watching_dedup import (  # noqa: E402
     SKIP_SCENARIO_EXPIRY_SEC,
     apply_skip_watching_gate,
     expiry_label,
+    record_skip_if_valid,
     record_skip_scenario,
     scenario_key,
     should_create_watching_after_skip,
@@ -148,6 +149,33 @@ def main() -> int:
         return _fail("zone reached emit")
     if setup_a == setup_b:
         return _fail("setups must differ")
+
+    # Сміття 82–963 не створює WATCHING і не блокує справжню зону через T3.
+    g_bad = apply_skip_watching_gate(
+        db,
+        symbol="BTCUSDT",
+        direction="LONG",
+        entry_low=82.0,
+        entry_high=963.0,
+        timeframe="1h",
+        now_ts=now,
+        current_price=83100.0,
+    )
+    if g_bad.get("create") or not g_bad.get("invalid_zone"):
+        return _fail("invalid zone must not create")
+    record_skip_if_valid(db, g_bad, symbol="BTCUSDT", timeframe="1h")
+    g_good = apply_skip_watching_gate(
+        db,
+        symbol="BTCUSDT",
+        direction="LONG",
+        entry_low=82963.0,
+        entry_high=83434.0,
+        timeframe="1h",
+        now_ts=now,
+        current_price=83100.0,
+    )
+    if not g_good.get("create") or g_good.get("invalid_zone"):
+        return _fail("real zone must still create after garbage skip")
 
     print("OK: test_watching_dedup")
     return 0

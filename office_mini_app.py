@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from office_bridge import init_office_db, log_event, office_db_identity, tv_signal_insert
+from office_desk_state import build_desk_state
 
 try:
     import psycopg
@@ -407,7 +408,7 @@ def get_data(
     )
     rows_journal_raw = q(
         """
-        SELECT trade_id, ts_open_utc, ts_close_utc, symbol, direction, status, outcome, pnl_pct, r_multiple, mistake_tags_json, review_note
+        SELECT trade_id, ts_open_utc, ts_close_utc, symbol, direction, status, outcome, pnl_pct, r_multiple, mistake_tags_json, review_note, entry_reason, setup_name
         FROM trade_journal
         ORDER BY ts_open_utc DESC
         LIMIT 100
@@ -421,6 +422,18 @@ def get_data(
         LIMIT 40
         """
     )
+    try:
+        rows_watch = q(
+            """
+            SELECT signal_id, symbol, direction, entry_low, entry_high, analysis_note
+            FROM office_signals
+            WHERE status = 'WATCHING'
+            ORDER BY ts_updated DESC
+            LIMIT 40
+            """
+        )
+    except Exception:
+        rows_watch = []
     rows_culture = q(
         """
         SELECT ts_close_utc, symbol, outcome, pnl_pct
@@ -591,6 +604,36 @@ def get_data(
             {"tag": k, "count": v}
             for k, v in sorted(mistakes.items(), key=lambda x: (-x[1], x[0]))[:8]
         ],
+        "desk_state": build_desk_state(
+            _db_target_for_identity(),
+            watching_rows=[
+                {
+                    "signal_id": w[0],
+                    "symbol": w[1],
+                    "direction": w[2],
+                    "entry_low": w[3],
+                    "entry_high": w[4],
+                    "analysis_note": w[5],
+                }
+                for w in rows_watch
+            ],
+            journal_rows=[
+                {
+                    "trade_id": str(r[0] or ""),
+                    "symbol": r[3],
+                    "direction": r[4],
+                    "status": r[5],
+                    "entry_reason": r[11] if len(r) > 11 else "",
+                    "setup_name": r[12] if len(r) > 12 else "",
+                }
+                for r in rows_journal_raw
+            ],
+            force_order_events=[
+                {"ts_utc": r[0], "payload_json": r[3]}
+                for r in rows_events
+                if str(r[1] or "") == "BTC_FORCE_ORDERS"
+            ],
+        ),
     }
 
 
@@ -678,6 +721,11 @@ def html() -> str:
       <div><b>Культура (7д / 14д)</b></div>
       <div id="culture" class="muted">…</div>
     </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px;">
+    <b>Desk state</b> <span class="muted">watching / signal / live / paper / T7 — шари не змішуються</span>
+    <div id="deskState" class="muted">…</div>
   </div>
 
   <div class="panel" style="margin-top:12px;">
@@ -841,6 +889,14 @@ async function loadOffice() {
     'PnL sum: <b>' + (d.kpi.pnl_sum_pct >= 0 ? '+' : '') + d.kpi.pnl_sum_pct.toFixed(2) + '%</b><br>' +
     'Avg R: <b>' + (d.kpi.avg_r >= 0 ? '+' : '') + d.kpi.avg_r.toFixed(2) + '</b>'
   );
+  const ds = d.desk_state || {};
+  const c = ds.counts || {};
+  const atr = (ds.atr_policy || {}).doc || '';
+  t('deskState',
+    'WATCHING: <b>' + (c.watching || 0) + '</b> · SIGNAL: <b>' + (c.signals || 0) +
+    '</b> · Live /position: <b>' + (c.live_positions || 0) + '</b> · Paper: <b>' + (c.paper || 0) +
+    '</b> · T7: <b>' + (c.t7 || 0) + '</b><br><span class="muted">' + atr + '</span>'
+  );
 
   t('mistakes',
     '<tr><th>Тег</th><th>К-сть</th></tr>' +
@@ -938,7 +994,7 @@ setInterval(loadOffice, 9000);
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         u = urlparse(self.path)
-        if u.path in ("/", "/api/summary", "/api/review_draft", "/api/webhook/tradingview"):
+        if u.path in ("/", "/api/summary", "/api/office_state", "/api/review_draft", "/api/webhook/tradingview"):
             self.send_response(200)
             self.end_headers()
             return
@@ -1032,22 +1088,26 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if u.path == "/api/summary":
+        if u.path in ("/api/summary", "/api/office_state"):
             qs = parse_qs(u.query)
 
             def _first(name: str) -> str:
                 v = qs.get(name)
                 return (v[0] if v else "").strip()
 
-            body = json.dumps(
-                get_data(
-                    symbol_filter=_first("symbol"),
-                    action_filter=_first("action"),
-                    agent_filter=_first("agent"),
-                    chart_symbol=_first("chart"),
-                ),
-                ensure_ascii=False,
-            ).encode("utf-8")
+            data = get_data(
+                symbol_filter=_first("symbol"),
+                action_filter=_first("action"),
+                agent_filter=_first("agent"),
+                chart_symbol=_first("chart"),
+            )
+            if u.path == "/api/office_state":
+                data = {
+                    "now_utc": data.get("now_utc"),
+                    "desk_state": data.get("desk_state"),
+                    "db_identity": data.get("db_identity"),
+                }
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

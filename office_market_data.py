@@ -1065,16 +1065,12 @@ def fetch_probability_score(symbol: str, db_path: Optional[str] = None) -> Dict[
 
         day_used = float(atr_d.get("day_used_pct") or 100.0)
         if day_used > 80.0:
+            from office_atr_policy import probability_no_trade_payload
+
+            payload = probability_no_trade_payload(day_used)
             return {
                 "symbol": sym,
-                "long_prob": 0,
-                "short_prob": 0,
-                "no_trade_prob": 100,
-                "confidence": "LOW",
-                "recommendation": "NO_TRADE",
-                "reason": f"ATR {day_used:.0f}% — немає запасу ходу",
-                "factors_long": [],
-                "factors_short": [],
+                **payload,
                 **phase4,
             }
 

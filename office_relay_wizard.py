@@ -105,12 +105,15 @@ from office_zone_alert import (
     after_zone_reached_action,
     plan_watching_zone_hit,
 )
+from office_level_parse import apply_zone_sanity, parse_signal_levels_from_text
 from office_watching_dedup import (
     apply_skip_watching_gate,
-    record_skip_scenario,
+    record_skip_if_valid,
     should_keep_watching_on_skip,
 )
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
+from office_session_radar import evaluate_session_radar
+from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
     format_radar_liq_summary,
@@ -1440,161 +1443,8 @@ def extract_symbols_list(text: str) -> List[str]:
 
 
 def _parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
-    out: Dict[str, Optional[float]] = {
-        "entry_low": None,
-        "entry_high": None,
-        "sl": None,
-        "tp1": None,
-        "tp2": None,
-        "rr": None,
-    }
-    src = str(text or "")
-    # Прибрати backticks (Markdown) — щоб зона парсилась стабільно.
-    src = src.replace("`", "")
-
-    def _to_float(raw: str) -> Optional[float]:
-        try:
-            s = str(raw or "").replace(" ", "")
-            if "," in s and "." in s:
-                # If both separators exist, assume commas are thousand separators.
-                s = s.replace(",", "")
-            elif "," in s:
-                # US-style thousands: 80,328 / 1,234,567 — завжди прибираємо коми.
-                if re.fullmatch(r"\d{1,3}(?:,\d{3})+", s):
-                    s = s.replace(",", "")
-                else:
-                    # Heuristic requested:
-                    # - big values (e.g. 80,000) => remove comma
-                    # - small values (e.g. 0,1453) => decimal comma
-                    test = s.replace(",", ".")
-                    v_test = float(test)
-                    if abs(v_test) >= 1000:
-                        s = s.replace(",", "")
-                    elif abs(v_test) < 100:
-                        s = s.replace(",", ".")
-                    else:
-                        s = s.replace(",", "")
-            return float(s)
-        except Exception:
-            return None
-
-    def _extract_line_value(label: str, line_text: str, hint: Optional[float] = None) -> Optional[float]:
-        patterns = [
-            rf"{label}\s*:\s*([^\n\r]+)",
-            rf"{label}\s*[—–\-]\s*([^\n\r]+)",
-            rf"{label}\s+([0-9][\d,]*(?:\.\d+)?[^\n\r]*)",
-        ]
-        chunk = ""
-        for pat in patterns:
-            m = re.search(pat, line_text, flags=re.IGNORECASE)
-            if m:
-                chunk = str(m.group(1) or "")
-                break
-        if not chunk:
-            return None
-        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", chunk)
-        values: List[float] = []
-        for n in nums:
-            v = _to_float(n)
-            if v is not None:
-                values.append(v)
-        if not values:
-            return None
-        # Ignore percentage-like tail values if a realistic price exists.
-        if hint is not None:
-            near = [v for v in values if 0.5 * hint <= v <= 1.5 * hint]
-            if near:
-                return near[0]
-        big = [v for v in values if v >= 10]
-        return big[0] if big else values[0]
-    nums = re.findall(r"\d+(?:\.\d+)?", src)
-    if nums:
-        pass
-
-    # «Entry твій:», «Entry у тебе:» тощо — між Entry і двокрапкою може бути короткий текст.
-    m_entry = re.search(
-        r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
-        src,
-        flags=re.IGNORECASE,
-    )
-    if not m_entry:
-        m_entry = re.search(
-            r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
-            src,
-            flags=re.IGNORECASE,
-        )
-    if m_entry:
-        a = _to_float(m_entry.group(1))
-        b = _to_float(m_entry.group(2))
-        if a is not None and b is not None:
-            out["entry_low"] = min(a, b)
-            out["entry_high"] = max(a, b)
-    else:
-        m_entry_one = re.search(
-            r"Entry[^:\n]{0,24}:\s*([0-9]+(?:[.,][0-9]+)?)",
-            src,
-            flags=re.IGNORECASE,
-        )
-        if not m_entry_one:
-            m_entry_one = re.search(r"Entry:\s*([0-9]+(?:[.,][0-9]+)?)", src, flags=re.IGNORECASE)
-        if m_entry_one:
-            v = _to_float(m_entry_one.group(1))
-            if v is not None:
-                out["entry_low"] = v
-                out["entry_high"] = v
-        else:
-            m_entry_no_colon = re.search(
-                r"Entry\s+([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212]\s*([0-9]+(?:[.,][0-9]+)?)",
-                src,
-                flags=re.IGNORECASE,
-            )
-            if m_entry_no_colon:
-                a = _to_float(m_entry_no_colon.group(1))
-                b = _to_float(m_entry_no_colon.group(2))
-                if a is not None and b is not None:
-                    out["entry_low"] = min(a, b)
-                    out["entry_high"] = max(a, b)
-            else:
-                m_entry_one_no_colon = re.search(
-                    r"Entry\s+([0-9]+(?:[.,][0-9]+)?)",
-                    src,
-                    flags=re.IGNORECASE,
-                )
-                if m_entry_one_no_colon:
-                    v = _to_float(m_entry_one_no_colon.group(1))
-                    if v is not None:
-                        out["entry_low"] = v
-                        out["entry_high"] = v
-    # Шукаємо зону очікування: OTE зона, «чекаю зону:», повернення в зону тощо.
-    # Після двокрапки можуть бути лапки; тире інколи з пробілами: «2270 – 2273».
-    zone_pattern = re.search(
-        r"(?:зона|зони|зон[уі]|повернення\s+(?:в|до)|жд[уеи]\s+повернення\s+(?:в|до)"
-        r"|жд[уеи]\s+повернення\s+в\s+зон[уі]|"
-        r"OTE\s+(?:SHORT|LONG|Шорт|Лонг)?\s*зона|чекаю\s+зону:)\s*"
-        r"([0-9]+(?:[.,][0-9]+)?)\s*[-–—\u2212\s]+\s*([0-9]+(?:[.,][0-9]+)?)",
-        src,
-        flags=re.IGNORECASE,
-    )
-    if zone_pattern and out["entry_low"] is None:
-        a = _to_float(zone_pattern.group(1))
-        b = _to_float(zone_pattern.group(2))
-        if a is not None and b is not None:
-            out["entry_low"] = min(a, b)
-            out["entry_high"] = max(a, b)
-    entry_hint = out["entry_low"] or out["entry_high"]
-    sl_v = _extract_line_value("SL", src, hint=entry_hint)
-    if sl_v is not None:
-        out["sl"] = sl_v
-    tp1_v = _extract_line_value("TP1", src, hint=entry_hint)
-    if tp1_v is not None:
-        out["tp1"] = tp1_v
-    tp2_v = _extract_line_value("TP2", src, hint=entry_hint)
-    if tp2_v is not None:
-        out["tp2"] = tp2_v
-    m_rr = re.search(r"RR:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
-    if m_rr:
-        out["rr"] = float(m_rr.group(1))
-    return out
+    """Обгортка: канонічний парсер у office_level_parse."""
+    return parse_signal_levels_from_text(text)
 
 
 def _history_reset() -> None:
@@ -1744,7 +1594,10 @@ EV позитивне: {prob.get('ev_positive', '')}
             "no entry",
         ]
 
-        levels = _parse_signal_levels_from_text(response_for_parse)
+        levels = apply_zone_sanity(
+            _parse_signal_levels_from_text(response_for_parse),
+            current_price,
+        )
         parsed = levels
         if levels.get("entry_low"):
             print(f"[signal] {symbol} levels OK: {levels}")
@@ -1764,14 +1617,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                         entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
                         timeframe="1h",
                         now_ts=time.time(),
+                        current_price=current_price,
                     )
-                    record_skip_scenario(
+                    record_skip_if_valid(
                         db_path,
-                        str(gate_keep.get("key") or ""),
+                        gate_keep,
                         symbol=symbol,
                         timeframe="1h",
-                        setup=str(gate_keep.get("setup") or ""),
-                        expiry=str(gate_keep.get("expiry") or ""),
                     )
                 await agent_say(
                     sender,
@@ -1800,6 +1652,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
                     timeframe="1h",
                     now_ts=now_ts,
+                    current_price=current_price,
                 )
                 if gate.get("create"):
                     signal_id = f"watch-{symbol}-{int(now_ts)}"
@@ -1825,13 +1678,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                     )
                 else:
                     print(f"[relay] T3 skip duplicate WATCHING {symbol} key={gate.get('key')}")
-                record_skip_scenario(
+                record_skip_if_valid(
                     db_path,
-                    str(gate.get("key") or ""),
+                    gate,
                     symbol=symbol,
                     timeframe="1h",
-                    setup=str(gate.get("setup") or ""),
-                    expiry=str(gate.get("expiry") or ""),
                 )
             return False
         if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
@@ -3434,8 +3285,7 @@ async def run() -> None:
                     atr = fetch_atr_context(symbol)
                     atr_d = atr if isinstance(atr, dict) else {}
                     day_used = float(atr_d.get("day_used_pct") or 100.0)
-                    if day_used > 80.0:
-                        continue
+                    # ATR>80 не викидає монету зі скану — лише позначає блок входу.
 
                     structure = fetch_market_structure(symbol, "4h")
                     struct_d = structure if isinstance(structure, dict) else {}
@@ -3465,6 +3315,7 @@ async def run() -> None:
                                 "pd_arr": pd_d,
                                 "sweep": sw_d,
                                 "atr": atr_d,
+                                "entry_blocked_atr80": bool(day_used > 80.0),
                             }
                         )
                 except Exception:
@@ -4129,8 +3980,8 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         continue
                     atr = fetch_atr_context(symbol)
                     atr_used = float((atr or {}).get("day_used_pct", 100) or 100)
-                    if atr_used >= 80:
-                        continue
+                    atr_cls = classify_atr_day_used(atr_used)
+                    skip_enter = bool(atr_cls.get("gerchik_entry_blocked") or atr_cls.get("t0_entry_blocked"))
                     try:
                         btc_reg = str((fetch_market_regime("BTCUSDT") or {}).get("regime") or "").upper()
                     except Exception:
@@ -4146,10 +3997,10 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         str(gops.get("gerchik_ops_reasons") or "").find("ЛП") >= 0
                         or any("sweep" in str(x).lower() or "ЛП" in str(x) for x in (gops.get("gerchik_ops_reasons") or []))
                     ):
-                        continue
+                        skip_enter = True
 
                     edge_data = fetch_edge_score(symbol)
-                    if not edge_data.get("has_edge"):
+                    if skip_enter or not edge_data.get("has_edge"):
                         try:
                             fac = edge_data.get("factors") or []
                             factors_txt = "; ".join(str(x) for x in fac)[:500]
@@ -4463,7 +4314,10 @@ EV позитивне: {prob.get('ev_positive', '')}
             ]
             is_skip = any(w in lev_low for w in skip_words)
             if is_skip:
-                levels_skip = _parse_signal_levels_from_text(lev_final or "")
+                levels_skip = apply_zone_sanity(
+                    _parse_signal_levels_from_text(lev_final or ""),
+                    current_price,
+                )
                 el = levels_skip.get("entry_low")
                 if el is not None:
                     try:
@@ -4475,6 +4329,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             entry_high=levels_skip.get("entry_high"),
                             timeframe="1h",
                             now_ts=time.time(),
+                            current_price=current_price,
                         )
                         if gate.get("create"):
                             signal_upsert(
@@ -4501,13 +4356,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 f"[scanner] T3 skip duplicate WATCHING {symbol} "
                                 f"key={gate.get('key')}"
                             )
-                        record_skip_scenario(
+                        record_skip_if_valid(
                             db_path,
-                            str(gate.get("key") or ""),
+                            gate,
                             symbol=symbol,
                             timeframe="1h",
-                            setup=str(gate.get("setup") or ""),
-                            expiry=str(gate.get("expiry") or ""),
                         )
                     except Exception as exc_w:
                         print(f"[scanner] silent WATCHING upsert failed {symbol}: {exc_w}")
@@ -5081,6 +4934,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                         daily = fetch_candles(symbol, "1d", 30)
                         h1 = fetch_candles(symbol, "1h", 10)
                         m15 = fetch_candles(symbol, "15m", 8)
+                        m5 = fetch_candles(symbol, "5m", 12)
+                        m1 = fetch_candles(symbol, "1m", 20)
                         if not isinstance(daily, list) or not isinstance(h1, list) or not daily or not h1:
                             print(f"[radar] no candles {symbol}")
                             continue
@@ -5112,6 +4967,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                             day_used_pct=day_used,
                             bot_action=ms.get("bot_action"),
                         )
+                        sres = evaluate_session_radar(
+                            symbol=symbol,
+                            price=price,
+                            level_price=res.level_price,
+                            sweep_candles=h1,
+                            m15_candles=m15 if isinstance(m15, list) else [],
+                            m5_candles=m5 if isinstance(m5, list) else [],
+                            m1_candles=m1 if isinstance(m1, list) else [],
+                            day_used_pct=day_used,
+                        )
+                        if res.status == "NONE" and sres.status != "NONE":
+                            res.status = sres.status
+                            res.direction = sres.direction or res.direction
+                            res.level_price = sres.level_price or res.level_price
+                            res.reason = sres.reason
+                            if sres.card:
+                                res.card = sres.card
                         if res.status == "NONE":
                             continue
                         if res.status == "WATCHING" and res.level_price is not None:
@@ -5123,6 +4995,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 entry_high=float(res.level_price),
                                 timeframe="1h",
                                 now_ts=time.time(),
+                                current_price=price,
                             )
                             if gate.get("create"):
                                 signal_upsert(
