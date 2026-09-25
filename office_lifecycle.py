@@ -59,7 +59,7 @@ class LifecycleTrace:
 def db_status_for(state: str) -> str:
     """WAITING_SWEEP у таблиці office_signals = WATCHING, не окремий SIGNAL."""
     st = str(state or "WATCHING").upper()
-    if st in (ENTRY_WAITING_SWEEP, "WAITING_SWEEP"):
+    if st in (ENTRY_WAITING_SWEEP, "WAITING_SWEEP", "NEAR_SWEEP"):
         return "WATCHING"
     return st
 
