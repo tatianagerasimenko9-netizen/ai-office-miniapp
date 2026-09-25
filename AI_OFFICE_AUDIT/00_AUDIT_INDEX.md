@@ -52,7 +52,9 @@
 | 23 | `23_OFFICE_VS_SCANNER.md` |
 | 24 | `24_KEEP_CHANGE_REMOVE_PLAN.md` |
 | 25 | `25_MINIAPP_GGSHOT.md` |
-| — | `PROMPT_NEXT_CLOUD.md` |
+| — | `CURRENT_SYSTEM.md` `AUDIT_EVIDENCE.md` `KEEP_CHANGE_REMOVE.md` |
+| — | `OFFICE_2_ARCHITECTURE.md` `TRADING_RADAR_SPEC.md` `MINI_APP_SPEC.md` |
+| — | `IMPLEMENTATION_ROADMAP.md` `CURSOR_TASKS.md` `OPEN_QUESTIONS.md` |
 | — | `telegram_audit_stats.json` |
 
 Корінь репо: `AI_OFFICE_MASTER.md` — єдиний збірник висновків і вимог 2.0.

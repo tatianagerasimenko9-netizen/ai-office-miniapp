@@ -1,0 +1,46 @@
+# CURSOR_TASKS.md
+
+Виконувати **лише після** `МОЖНА ВНОСИТИ ЗМІНИ`. Одна задача = один PR. Не чіпати `file-1`, книги, CONFIG торгівлі без ТЗ.
+
+## T1 — Intent review ≠ position
+Файли: `office_relay_wizard.py` (хендлер тексту), `office_bridge.py` (journal insert).  
+Поведінка: `/review` або «сигнал бота» → оцінка, **не** ACTIVE position. `/position` → журнал MY_POSITION.  
+Заборона: не міняти сканер, не міняти edge 85.  
+Тест: фікстура тексту картки сканера → 0 рядків ENTRY.
+
+## T2 — Назар fail-closed
+Файли: news fetch + шаблон Назара (wizard/bridge).  
+Поведінка: HTTP 401/402/403/429/порожньо → `NEWS DATA UNAVAILABLE`, ніколи «фон чистий».  
+Тест: мок 402.
+
+## T3 — Дедуп WATCHING після SKIP
+Файли: `full_auto_analysis`.  
+Поведінка: явний ПРОПУСК не створює новий `watch-*` або створює без «повідомлю» + cooldown символу.  
+Тест: два `Ake` за 10 хв → один аналіз.
+
+## T4 — Таблиця market_state
+Файли: `office_bridge.py` schema.  
+Поведінка: upsert по symbol полів з `OFFICE_2_ARCHITECTURE.md`. Поки read/write без зміни чату.  
+Тест: insert/get.
+
+## T5 — MAIN handler шанує bot_action
+Файли: wizard ~2907–3088.  
+Поведінка: якщо state.bot_action=BLOCKED — не kickoff ENTER. Повідомити «сканер BLOCKED офісом».  
+Заборона: не глушити Telethon SOURCE форвард без flag (може знадобитись сировина).  
+Тест: підставити BLOCKED.
+
+## T6 — Radar stub BTC
+Новий файл + loop. Watchlist hardcoded BTC BSL з `/watch` або state.  
+Поведінка: ціна в 0.3% від зони → одне 👀.  
+Заборона: не 6 LLM.  
+Тест: replay цін.
+
+## T7 — Mini App Home читає state
+Файли: `office_mini_app.py`.  
+Поведінка: блок BTC regime/watch/event або «немає стану». Без фейкового wr.
+
+## T8 — Класифікатор історії (офлайн скрипт)
+`scripts/classify_office_messages.py` по JSON експорту → counts MENTION/SETUP/WATCH/SIGNAL. Не міняти прод.  
+Критерій: не називати 804 SIGNAL.
+
+Не починати T6–T8 до T1–T5, якщо немає явного «можна радар першим».
