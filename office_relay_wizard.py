@@ -110,6 +110,11 @@ from office_watching_dedup import (
     should_keep_watching_on_skip,
 )
 from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
+from office_btc_liquidations import (
+    BTC_FORCE_ORDER_BOOK,
+    format_radar_liq_summary,
+    run_btc_force_order_loop,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -5222,7 +5227,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     tp2=None,
                                     rr=None,
                                     status="WATCHING",
-                                    analysis_note=(res.reason or "T6 radar watching")[:2000],
+                                            analysis_note=(
+                                        f"{res.reason or 'T6 radar watching'}\n"
+                                        f"{format_radar_liq_summary(BTC_FORCE_ORDER_BOOK)}"
+                                    )[:2000],
                                 )
                                 print(f"[radar] WATCHING {symbol} {res.level_price}")
                         if res.status == "SIGNAL":
@@ -5231,10 +5239,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                             last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
                             if (now_ts - last_ts) >= 1800:
                                 _last_notified[nkey] = now_ts
-                                await send_office(fmt_agent_line("lev", format_radar_card(res)))
+                                await send_office(
+                                    fmt_agent_line(
+                                        "lev",
+                                        f"{format_radar_card(res)}\n"
+                                        f"{format_radar_liq_summary(BTC_FORCE_ORDER_BOOK)}",
+                                    )
+                                )
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
+                try:
+                    log_event(db_path, "BTC_FORCE_ORDERS", BTC_FORCE_ORDER_BOOK.snapshot())
+                    print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
+                except Exception as exc_liq:
+                    print(f"[liq] snapshot failed: {exc_liq}")
             except Exception as exc:
                 print(f"[radar] monitor failed: {exc}")
             utc_now = datetime.now(timezone.utc)
@@ -5243,6 +5262,7 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(180 if fast else 600)
 
     asyncio.create_task(monitor_trade_radar())
+    asyncio.create_task(run_btc_force_order_loop(BTC_FORCE_ORDER_BOOK))
 
     async def process_tv_signal(signal: Dict[str, Any]) -> None:
         """
