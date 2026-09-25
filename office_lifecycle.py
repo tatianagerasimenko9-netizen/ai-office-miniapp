@@ -135,6 +135,71 @@ def flip_invalidates(
     )
 
 
+def remaining_pct(*, price: Any, target: Any) -> Optional[float]:
+    try:
+        p, t = float(price), float(target)
+    except (TypeError, ValueError):
+        return None
+    if p <= 0:
+        return None
+    return abs(t - p) / p * 100.0
+
+
+def format_manage_update(
+    *,
+    symbol: str,
+    direction: str,
+    price: Any,
+    tp1: Any,
+    sl: Any,
+    remaining_to_tp1: Any = None,
+) -> str:
+    """Оновлення до TP1. Не відкриває угоду."""
+    from office_telegram_filter import format_px
+
+    side = str(direction or "").upper()
+    left = remaining_to_tp1
+    if left is None:
+        left = remaining_pct(price=price, target=tp1)
+    left_s = f"{float(left):.1f}%" if left is not None else "н/д"
+    return "\n".join(
+        [
+            f"📍 UPDATE · {symbol} {side}",
+            f"Ціна зараз: {format_px(price)}",
+            f"TP1 близько ({format_px(tp1)} — залишилось {left_s})",
+            "→ Готуйся закрити 50–70% на TP1",
+            f"→ SL тримай на {format_px(sl)} поки не закрито TP1",
+        ]
+    )
+
+
+def format_tp1_hit(
+    *,
+    symbol: str,
+    direction: str,
+    entry: Any,
+    tp1: Any,
+    tp2: Any = None,
+    move_pct: Any = None,
+) -> str:
+    """TP1 взято: конкретні дії. Не ордер у біржі."""
+    from office_telegram_filter import format_px, move_pct_to_tp
+
+    side = str(direction or "").upper()
+    mv = move_pct
+    if mv is None:
+        mv = move_pct_to_tp(entry=entry, tp=tp1)
+    mv_s = f"+{float(mv):.1f}%" if mv is not None else ""
+    lines = [
+        f"✅ TP1 · {symbol} {side}" + (f" · {mv_s}" if mv_s else ""),
+        "Закрий 50–70% позиції зараз",
+        f"Перестав SL в беззбиток: {format_px(entry)}",
+    ]
+    if format_px(tp2):
+        lines.append(f"Тримай решту до TP2 ({format_px(tp2)})")
+    return "\n".join(lines)
+
+
 def record_next_opportunity(
     trace: LifecycleTrace,
     *,

@@ -22,6 +22,7 @@ from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT
 from office_level_scalp import infer_trade_mode, parse_bot_card_overlay, rr_after_costs
 from office_market_scout import DATA_UNAVAILABLE, DATA_OK
 from office_telegram_filter import newest_quote_asof, quote_is_stale
+from office_topdown import build_topdown, calc_sl_with_buffer, clock_pair_ua
 
 # Вердикти — дані для Лева, не шаблон його репліки.
 VERDICT_CONFIRMED = "ПІДТВЕРДЖЕНО"
@@ -158,11 +159,15 @@ def gather_external_market(symbol: str, *, bot_action: Any = None) -> Dict[str, 
     try:
         from office_market_data import fetch_atr_context, fetch_candles, fetch_edge_score
 
+        d1 = fetch_candles(sym, "1d", 30)
+        h4 = fetch_candles(sym, "4h", 30)
         h1 = fetch_candles(sym, "1h", 30)
-        m15 = fetch_candles(sym, "15m", 12)
+        m15 = fetch_candles(sym, "15m", 96)
         m5 = fetch_candles(sym, "5m", 20)
         candles = h1 if isinstance(h1, list) else []
         mkt["candles"] = candles
+        mkt["d1_candles"] = d1 if isinstance(d1, list) else []
+        mkt["h4_candles"] = h4 if isinstance(h4, list) else []
         mkt["h1_candles"] = candles
         mkt["m15_candles"] = m15 if isinstance(m15, list) else []
         mkt["m5_candles"] = m5 if isinstance(m5, list) else []
@@ -288,6 +293,15 @@ def review_external_signal(
     extras["source_at"] = orig.get("source_at") or orig.get("received_at") or ""
     extras["no_trade_is_rule"] = True
     extras["no_trade_is_price_forecast"] = False
+    extras["topdown"] = build_topdown(
+        symbol=symbol,
+        d1=mkt.get("d1_candles"),
+        h4=mkt.get("h4_candles"),
+        h1=mkt.get("h1_candles") or mkt.get("candles"),
+        m15=mkt.get("m15_candles"),
+        m5=mkt.get("m5_candles"),
+        direction=direction,
+    )
 
     src_dt = _now(orig.get("source_at") or None) if orig.get("source_at") else None
     rev_dt = _now(mkt.get("review_at") or extras["review_at"])
@@ -296,6 +310,11 @@ def review_external_signal(
         extras["signal_age_sec"] = age
         if age > float(signal_stale_limit_sec(orig.get("timeframe"), orig.get("mode"))):
             extras["signal_stale"] = True
+            scalp = infer_trade_mode(orig.get("timeframe"), orig.get("mode")) == "scalp"
+            extras["clock_line"] = clock_pair_ua(
+                extras["source_at"], extras["review_at"], scalp=scalp
+            )
+            reasons.append(extras["clock_line"])
             reasons.append(
                 "первинний сигнал застарів відносно часу картки бота — "
                 "це повторний розбір, не перевірка свіжого входу"
@@ -392,13 +411,17 @@ def review_external_signal(
 
     office_plan = None
     entry_px = px or bot_entry
-    if entry_px and structure_sl:
+    if extras.get("signal_stale"):
+        office_plan = None
+    elif entry_px and structure_sl:
         office_plan = card_levels(
             direction=direction,
             entry=float(entry_px),
             structure_sl=float(structure_sl),
             rr=max(MIN_RR, 2.0),
         )
+        packed = calc_sl_with_buffer(structure_sl, direction, price=entry_px)
+        office_plan["sl_explain"] = packed.get("explain") or ""
         if bot_tp and office_plan.get("entry") and office_plan.get("sl"):
             # Другий тейк — 1.5× до TP1 офісу, не копія бота.
             e = float(office_plan["entry"])
@@ -509,17 +532,21 @@ def review_external_signal(
         )
 
     reasons.append("напрямок, структура, RR, ATR і Edge збігаються з правилами офісу")
+    if not office_plan:
+        reasons.append("власних рівнів зі свічок немає — не копіюємо картку бота як аналіз")
+        return ExternalReview(
+            verdict=VERDICT_CONDITIONAL,
+            original=orig,
+            reasons=reasons,
+            watching_condition="чекаємо структуру зі свічок; ЗАРАЗ УГОДИ НЕМАЄ",
+            lifecycle_hint="WATCHING",
+            extras=extras,
+        )
     return ExternalReview(
         verdict=VERDICT_CONFIRMED,
         original=orig,
         reasons=reasons,
-        office_plan=office_plan or {
-            "entry": bot_entry,
-            "sl": bot_sl,
-            "tp": bot_tp,
-            "tp1": bot_tp,
-            "rr": bot_rr,
-        },
+        office_plan=office_plan,
         lifecycle_hint="CONFIRMED",
         extras=extras,
     )

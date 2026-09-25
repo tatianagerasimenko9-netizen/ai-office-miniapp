@@ -20,6 +20,26 @@ ALERT_COOLDOWN_SEC = 4 * 3600
 QUOTE_STALE_SEC_INTRADAY = 20 * 60
 QUOTE_STALE_SEC_HOURLY = 70 * 60
 
+# Тип угоди → ТФ входу і ТФ скасування. Не пороги ATR/Edge.
+TRADE_STYLE = {
+    "scalp": {"type_ua": "СКАЛЬП", "entry_tf": "M5", "cancel_tf": "M5"},
+    "intraday": {"type_ua": "ІНТРАДЕЙ", "entry_tf": "M15", "cancel_tf": "H1"},
+    "swing": {"type_ua": "СВІНГ", "entry_tf": "H4", "cancel_tf": "H4"},
+}
+
+
+def resolve_trade_style(mode: Any = "", timeframe: Any = "") -> dict:
+    """СКАЛЬП/ІНТРАДЕЙ/СВІНГ для картки. Не змінює статус сценарію."""
+    md = str(mode or "").strip().lower()
+    if md in TRADE_STYLE:
+        return dict(TRADE_STYLE[md])
+    tf = str(timeframe or "").strip().lower()
+    if tf in ("m1", "1m", "m5", "5m"):
+        return dict(TRADE_STYLE["scalp"])
+    if tf in ("h4", "4h", "d1", "1d"):
+        return dict(TRADE_STYLE["swing"])
+    return dict(TRADE_STYLE["intraday"])
+
 
 def format_px(value: Any) -> str:
     """Читабельна ціна без float-сміття і без 'None'."""
@@ -190,8 +210,8 @@ def format_opportunity_alert(
     symbol: str,
     direction: str,
     timeframe: str,
-    setup: str,
-    why: str,
+    setup: str = "",
+    why: str = "",
     entry: Any,
     sl: Any,
     tp1: Any,
@@ -200,36 +220,86 @@ def format_opportunity_alert(
     cancel: str = "",
     quote_asof: str = "",
     move_pct: Any = None,
+    structure_line: str = "",
+    sweep_line: str = "",
+    asia_high: Any = None,
+    asia_low: Any = None,
+    sl_explain: str = "",
+    entry_note: str = "",
+    mode: str = "",
+    live_price: Any = None,
 ) -> str:
-    """Одне повідомлення — одна угода для графіка. Без списку всіх рівнів."""
+    """Картка практика: тип/ТФ, цифри SL/TP, скасування цифрою. Без шаблонного статусу."""
     e, s, t1 = format_px(entry), format_px(sl), format_px(tp1)
     t2 = format_px(tp2)
     tf = str(timeframe or "").strip() or "H1"
-    setup_ua = {
-        "bounce": "відскок від рівня",
-        "sweep_reclaim": "свіп і повернення",
-        "break_retest": "пробій і ретест",
-    }.get(str(setup or ""), str(setup or "сетап"))
+    style = resolve_trade_style(mode, tf)
+    side = str(direction or "").upper()
+    mark = "🟢" if side == "LONG" else "🔴"
     lines = [
-        f"🦁 {direction} · {symbol} · {tf} · {setup_ua}",
-        f"Чому звернув увагу: {why}",
-        f"План: вхід {e} · SL {s} · TP1 {t1}" + (f" · TP2 {t2}" if t2 else ""),
+        f"{mark} {side} · {symbol} · {tf}",
+        f"Тип: {style['type_ua']} · Вхід на {style['entry_tf']}",
     ]
-    if move_pct is not None:
-        lines.append(
-            f"Потенціал до TP1: приблизно {float(move_pct):.1f}% до витрат "
-            "(не чистий прибуток). "
-            + (f"RR після витрат {float(rr_net):.1f}." if rr_net is not None else "")
-        )
-    if cancel:
-        lines.append(f"Скасування: {cancel}")
-    if quote_asof:
-        lines.append(f"Котирування: {quote_asof}")
-    lines.append(
-        "Статус: умови підтверджені всередині офісу; "
-        "перевірити актуальність ціни перед рішенням. Не ордер. Угода лише через /position."
+    live = format_px(live_price) or e
+    if live:
+        lines.append(f"Ціна зараз: {live}")
+    struct = str(structure_line or "").strip()
+    why_s = str(why or "").strip()
+    template_why = any(
+        x in why_s.lower()
+        for x in ("реакція +", "закриття нижче рівня", "закриття вище рівня", "умови підтверджен")
     )
-    return "\n".join(lines)
+    if struct:
+        lines.append(f"Структура: {struct}")
+    elif why_s and not template_why:
+        lines.append(f"Структура: {why_s}")
+    else:
+        lines.append("Структура: DATA_UNAVAILABLE (немає свічок)")
+    if sweep_line:
+        lines.append(f"Свіп: {sweep_line}")
+    else:
+        lines.append("Свіп: DATA_UNAVAILABLE (немає підтверджених свічок)")
+    ah, al = format_px(asia_high), format_px(asia_low)
+    if ah and al:
+        lines.append(f"Діапазон сесії: Asian High {ah} · Low {al}")
+    else:
+        lines.append("Діапазон сесії: Asian High/Low DATA_UNAVAILABLE")
+    lines.append(f"Вхід: {e}")
+    lines.append(f"SL: {s}")
+    mv = ""
+    if move_pct is not None:
+        mv = f"  (+{float(move_pct):.1f}% від входу)"
+    lines.append(f"TP1: {t1}{mv}")
+    if t2 and move_pct is not None and entry:
+        try:
+            m2 = abs(float(tp2) - float(entry)) / float(entry) * 100.0
+            lines.append(f"TP2: {t2}  (+{m2:.1f}%)")
+        except (TypeError, ValueError):
+            lines.append(f"TP2: {t2}")
+    elif t2:
+        lines.append(f"TP2: {t2}")
+    if rr_net is not None:
+        lines.append(f"RR: 1:{float(rr_net):.1f}")
+    if t2:
+        lines.append(
+            "Ведення: при TP1 — закрий 50–70%, перестав SL у беззбиток на рівень входу, "
+            "тримай решту до TP2"
+        )
+    else:
+        lines.append("Ведення: при TP1 — закрий 50–70% і перестав SL у беззбиток на рівень входу")
+    if s:
+        above = "вище" if side == "SHORT" else "нижче"
+        lines.append(
+            f"Скасування: {style['cancel_tf']} свічка закривається {above} {s}"
+        )
+    elif cancel and format_px(cancel):
+        above = "вище" if side == "SHORT" else "нижче"
+        lines.append(
+            f"Скасування: {style['cancel_tf']} свічка закривається {above} {format_px(cancel)}"
+        )
+    lines.append("Позиція: немає")
+    blob = "\n".join(lines)
+    return blob
 
 
 def format_watch_nudge(
@@ -284,14 +354,24 @@ def level_book_to_alert(
     if picked is None:
         return None
     mode = str(getattr(book, "mode", "") or "")
-    tf = "M5" if mode == "scalp" else "H1"
-    why = str(getattr(picked, "confirmation", "") or "реакція на ключовому рівні")
+    if mode == "scalp":
+        tf = "M5"
+    elif mode == "swing":
+        tf = "H4"
+    else:
+        tf = "H1"
+    extras = getattr(book, "extras", None) or {}
+    td = extras.get("topdown") if isinstance(extras, dict) else None
+    td = td if isinstance(td, dict) else {}
+    asia = td.get("asia") if isinstance(td.get("asia"), dict) else {}
+    sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
+    extras_px = extras.get("price") if isinstance(extras, dict) else None
     return format_opportunity_alert(
         symbol=str(getattr(book, "symbol", "")),
         direction=str(picked.direction),
         timeframe=tf,
         setup=str(picked.setup or ""),
-        why=why,
+        why=str(td.get("structure_line") or ""),
         entry=picked.entry,
         sl=picked.sl,
         tp1=picked.tp1,
@@ -300,6 +380,14 @@ def level_book_to_alert(
         cancel=str(picked.cancel or ""),
         quote_asof=quote_asof,
         move_pct=picked_dec.get("move_pct"),
+        structure_line=str(td.get("structure_line") or ""),
+        sweep_line=str(sweep.get("line") or ""),
+        asia_high=asia.get("high"),
+        asia_low=asia.get("low"),
+        sl_explain="",
+        entry_note="",
+        mode=mode,
+        live_price=extras_px if extras_px is not None else picked.entry,
     )
 
 
@@ -325,18 +413,31 @@ def range_result_to_alert(
     )
     if not dec.get("send"):
         return None
+    extras = getattr(res, "extras", None) or {}
+    td = extras.get("topdown") if isinstance(extras, dict) else {}
+    td = td if isinstance(td, dict) else {}
+    asia = td.get("asia") if isinstance(td.get("asia"), dict) else {}
+    sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
     return format_opportunity_alert(
         symbol=str(getattr(res, "symbol", "")),
         direction=str(getattr(res, "direction", "")),
         timeframe="H1",
         setup=str(getattr(res, "event", "") or "breakout"),
-        why=str(getattr(res, "reason", "") or "підтверджений вихід з боковика"),
+        why=str(td.get("structure_line") or getattr(res, "reason", "") or ""),
         entry=c.get("entry"),
         sl=c.get("sl"),
         tp1=c.get("tp1") or c.get("tp"),
         tp2=c.get("tp2"),
         rr_net=c.get("rr"),
-        cancel="повернення всередину боковика без закріплення",
+        cancel="",
         quote_asof=quote_asof,
         move_pct=dec.get("move_pct"),
+        structure_line=str(td.get("structure_line") or ""),
+        sweep_line=str(sweep.get("line") or ""),
+        asia_high=asia.get("high"),
+        asia_low=asia.get("low"),
+        sl_explain="",
+        entry_note="",
+        mode="intraday",
+        live_price=c.get("entry"),
     )
