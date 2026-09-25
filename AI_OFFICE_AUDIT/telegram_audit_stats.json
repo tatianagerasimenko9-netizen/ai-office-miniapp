@@ -1,0 +1,89 @@
+{
+  "chat_name": "AI Office",
+  "chat_type": "private_supergroup",
+  "chat_id": 3945513365,
+  "export_first": "2026-05-05T21:41:09",
+  "export_last": "2026-09-25T16:01:03",
+  "raw_messages": 6458,
+  "service": 20,
+  "text_messages": 6438,
+  "by_from": {
+    "Лев": 3849,
+    "Tatiana Duziak": 801,
+    "Олеся": 580,
+    "Марічка": 419,
+    "Дарина": 302,
+    "Макс": 159,
+    "Марко": 154,
+    "Віктор": 129,
+    "Назар": 45
+  },
+  "avg_chars": {
+    "Лев": 176,
+    "Tatiana Duziak": 90,
+    "Олеся": 74,
+    "Марічка": 663,
+    "Дарина": 85,
+    "Макс": 92,
+    "Марко": 87,
+    "Віктор": 77,
+    "Назар": 64
+  },
+  "labels_keyword": {
+    "USER_REQUEST": 801,
+    "SKIP": 508,
+    "WATCHING": 488,
+    "NO_TRADE": 157,
+    "AUTONOMOUS_ALERT_or_homework_or_session": 680,
+    "SYSTEM_STATUS": 120,
+    "SETUP_бачу_сетап": 24,
+    "EVENT_sweep_or_atr_dead_token": 24,
+    "TP_keyword": 13,
+    "SL_keyword": 2,
+    "USER_SIGNAL_REVIEW": 10,
+    "POSITION_keyword": 7,
+    "SIGNAL_card_like": 4,
+    "UNKNOWN_agent_chat": 3829
+  },
+  "full_auto_analyzing_total": 514,
+  "full_auto_top_symbols": [
+    [
+      "XAUUSDT",
+      73
+    ],
+    [
+      "BTCUSDT",
+      64
+    ],
+    [
+      "QQQUSDT",
+      41
+    ],
+    [
+      "AIAUSDT",
+      34
+    ],
+    [
+      "GOOGLUSDT",
+      32
+    ],
+    [
+      "CLUSDT",
+      21
+    ],
+    [
+      "AKEUSDT",
+      11
+    ]
+  ],
+  "user_ticker_like": 287,
+  "pasted_scanner_cards": 3,
+  "meta_week_reports_in_chat": [
+    "2026-06-28 24 signals 0 TP",
+    "2026-09-13 5 signals 0 TP",
+    "2026-09-20 39 signals 0 TP 3/10"
+  ],
+  "max_message_chars": 2234,
+  "over_4096": 0,
+  "notes": "Labels are keyword heuristics, not DB ground truth. UNKNOWN is mostly Lev/desk Q&A without SKIP/WATCH tokens."
+}
