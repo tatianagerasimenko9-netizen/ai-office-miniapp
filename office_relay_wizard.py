@@ -10,7 +10,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -138,6 +138,14 @@ from office_telegram_filter import (
     newest_quote_asof,
     quote_is_stale,
     range_result_to_alert,
+)
+from office_telegram_policy import (
+    KIND_SIGNAL,
+    KIND_SWEEP_NEAR,
+    KIND_WATCHING,
+    allow_proactive_telegram,
+    mark_cycle_sent,
+    preferred_scan_mode,
 )
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
@@ -5028,6 +5036,26 @@ EV позитивне: {prob.get('ev_positive', '')}
         _range_fp: Dict[str, str] = {}
         _level_fp: Dict[str, str] = {}
         while True:
+            sent_this_cycle: Set[str] = set()
+
+            async def _try_signal_feed(sym: str, text: str, tag: str) -> bool:
+                now_ts = time.time()
+                last_feed = float(_last_notified.get("__FEED_COOLDOWN__", 0.0) or 0.0)
+                gate = allow_proactive_telegram(
+                    kind=KIND_SIGNAL,
+                    symbol=sym,
+                    sent_symbols=sent_this_cycle,
+                    last_feed_ts=last_feed,
+                    now_ts=now_ts,
+                )
+                if not gate.get("send"):
+                    print(f"[{tag}] {sym} hold: {gate.get('reason')}")
+                    return False
+                _last_notified["__FEED_COOLDOWN__"] = now_ts
+                mark_cycle_sent(sent_this_cycle, sym)
+                await send_office(fmt_agent_line("lev", text))
+                return True
+
             try:
                 for symbol in RADAR_SYMBOLS:
                     try:
@@ -5124,8 +5152,18 @@ EV позитивне: {prob.get('ev_positive', '')}
                             nkey = f"{symbol}::RADAR_SIGNAL"
                             now_ts = time.time()
                             last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
-                            if (now_ts - last_ts) >= 1800:
+                            last_feed = float(_last_notified.get("__FEED_COOLDOWN__", 0.0) or 0.0)
+                            gate = allow_proactive_telegram(
+                                kind=KIND_SIGNAL,
+                                symbol=symbol,
+                                sent_symbols=sent_this_cycle,
+                                last_feed_ts=last_feed,
+                                now_ts=now_ts,
+                            )
+                            if gate.get("send") and (now_ts - last_ts) >= 1800:
                                 _last_notified[nkey] = now_ts
+                                _last_notified["__FEED_COOLDOWN__"] = now_ts
+                                mark_cycle_sent(sent_this_cycle, symbol)
                                 await send_office(
                                     fmt_agent_line(
                                         "lev",
@@ -5134,6 +5172,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     )
                                 )
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
+                            elif not gate.get("send"):
+                                print(f"[radar] SIGNAL hold {symbol}: {gate.get('reason')}")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
                 tickers_24: Any = None
@@ -5228,10 +5268,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                             quote_stale=r_stale,
                         )
                         if rng_txt:
-                            await send_office(fmt_agent_line("lev", rng_txt))
-                            print(f"[range] {rsym} ALERT {rres.status}")
+                            if await _try_signal_feed(rsym, rng_txt, "range"):
+                                print(f"[range] {rsym} ALERT {rres.status}")
                         elif rres.should_notify:
                             print(f"[range] {rsym} hold {rres.status} {rres.event} (not telegram)")
+                        level_hits: Dict[str, str] = {}
                         for _mode, _candles, _confirm in (
                             ("intraday", rh1, rm15 if isinstance(rm15, list) else rh1),
                             ("scalp", rm5 if isinstance(rm5, list) and rm5 else rh1, rm5 if isinstance(rm5, list) and rm5 else rm15),
@@ -5271,49 +5312,63 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 quote_stale=r_stale,
                             )
                             if ltxt:
-                                await send_office(fmt_agent_line("lev", ltxt))
-                                print(f"[levels] {rsym} {_mode} ALERT")
-                            else:
-                                wtxt = level_book_to_watching(book)
-                                if wtxt:
-                                    try:
-                                        sw = ((book.extras or {}).get("topdown") or {}).get("sweep") or {}
-                                        lv = sw.get("level")
-                                        side = next((s.direction for s in book.scenarios if s.direction), "LONG")
-                                        signal_upsert(
-                                            db_path,
-                                            signal_id=f"watch-sweep-{rsym}-{_mode}",
-                                            symbol=rsym,
-                                            direction=str(side),
-                                            entry_low=float(lv) if lv is not None else None,
-                                            entry_high=float(lv) if lv is not None else None,
-                                            sl=None,
-                                            tp1=None,
-                                            tp2=None,
-                                            rr=None,
-                                            status=db_status_for("WAITING_SWEEP"),
-                                            analysis_note=wtxt[:2000],
-                                        )
-                                    except Exception as exc_ws:
-                                        print(f"[levels] {rsym} watching upsert: {exc_ws}")
-                                    nkey = f"{rsym}::WAITING_SWEEP::{_mode}"
-                                    now_ts = time.time()
-                                    last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
-                                    if (now_ts - last_ts) >= 14400:
-                                        _last_notified[nkey] = now_ts
-                                        await send_office(fmt_agent_line("lev", wtxt))
-                                        print(f"[levels] {rsym} {_mode} WATCHING sweep")
-                                atxt = level_book_to_sweep_approach(book, price=rprice)
-                                if atxt:
-                                    nkey_a = f"{rsym}::SWEEP_NEAR::{_mode}"
-                                    now_ts = time.time()
-                                    last_ts = float(_last_notified.get(nkey_a, 0.0) or 0.0)
-                                    if (now_ts - last_ts) >= 1800:
-                                        _last_notified[nkey_a] = now_ts
-                                        await send_office(fmt_agent_line("lev", atxt))
-                                        print(f"[levels] {rsym} {_mode} SWEEP NEAR")
-                                elif book.should_notify:
-                                    print(f"[levels] {rsym} {_mode} hold (not telegram)")
+                                level_hits[_mode] = ltxt
+                                print(f"[levels] {rsym} {_mode} candidate")
+                            wtxt = level_book_to_watching(book)
+                            if wtxt:
+                                try:
+                                    sw = ((book.extras or {}).get("topdown") or {}).get("sweep") or {}
+                                    lv = sw.get("level")
+                                    side = next((s.direction for s in book.scenarios if s.direction), "LONG")
+                                    signal_upsert(
+                                        db_path,
+                                        signal_id=f"watch-sweep-{rsym}-{_mode}",
+                                        symbol=rsym,
+                                        direction=str(side),
+                                        entry_low=float(lv) if lv is not None else None,
+                                        entry_high=float(lv) if lv is not None else None,
+                                        sl=None,
+                                        tp1=None,
+                                        tp2=None,
+                                        rr=None,
+                                        status=db_status_for("WAITING_SWEEP"),
+                                        analysis_note=wtxt[:2000],
+                                    )
+                                except Exception as exc_ws:
+                                    print(f"[levels] {rsym} watching upsert: {exc_ws}")
+                                hold_w = allow_proactive_telegram(kind=KIND_WATCHING, symbol=rsym)
+                                print(f"[levels] {rsym} {_mode} WATCHING db-only ({hold_w.get('reason')})")
+                            atxt = level_book_to_sweep_approach(book, price=rprice)
+                            if atxt:
+                                try:
+                                    sw = ((book.extras or {}).get("topdown") or {}).get("sweep") or {}
+                                    lv = sw.get("level")
+                                    side = next((s.direction for s in book.scenarios if s.direction), "LONG")
+                                    signal_upsert(
+                                        db_path,
+                                        signal_id=f"watch-near-{rsym}-{_mode}",
+                                        symbol=rsym,
+                                        direction=str(side),
+                                        entry_low=float(lv) if lv is not None else None,
+                                        entry_high=float(lv) if lv is not None else None,
+                                        sl=None,
+                                        tp1=None,
+                                        tp2=None,
+                                        rr=None,
+                                        status=db_status_for("NEAR_SWEEP"),
+                                        analysis_note=("NEAR_SWEEP\n" + atxt)[:2000],
+                                    )
+                                except Exception as exc_n:
+                                    print(f"[levels] {rsym} near upsert: {exc_n}")
+                                hold_n = allow_proactive_telegram(kind=KIND_SWEEP_NEAR, symbol=rsym)
+                                print(f"[levels] {rsym} {_mode} NEAR db-only ({hold_n.get('reason')})")
+                            elif book.should_notify and not ltxt and not wtxt:
+                                print(f"[levels] {rsym} {_mode} hold (not telegram)")
+                        if level_hits:
+                            pick_mode = preferred_scan_mode(level_hits.keys())
+                            pick_txt = level_hits.get(pick_mode) or next(iter(level_hits.values()))
+                            if await _try_signal_feed(rsym, pick_txt, "levels"):
+                                print(f"[levels] {rsym} {pick_mode} ALERT")
                     except Exception as exc_range:
                         print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
