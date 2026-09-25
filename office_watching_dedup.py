@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, Optional
 
 from office_bridge import _fetchall, log_event, signal_get_active
+from office_level_parse import zone_is_plausible
 
 # Вікно ключа expiry — як історичний WATCHING_COOLDOWN (4 год), не ATR T0.
 SKIP_SCENARIO_EXPIRY_SEC = 4 * 3600
@@ -153,11 +154,29 @@ def apply_skip_watching_gate(
     timeframe: str = DEFAULT_TIMEFRAME,
     setup_name: str = "",
     now_ts: float,
+    current_price: Any = None,
 ) -> Dict[str, Any]:
-    """Рішення: створювати новий WATCHING після SKIP чи ні. Активний рядок не чіпаємо."""
+    """Рішення: створювати новий WATCHING після SKIP чи ні. Активний рядок не чіпаємо.
+
+    Некоректна зона (уламок парсера 82–963) не створює рядок і не пише T3-ключ,
+    тож правильна зона 82 963–83 434 лишається вільною.
+    """
     setup = setup_from_levels(direction, entry_low, entry_high, setup_name=setup_name)
     expiry = expiry_label(now_ts)
     key = scenario_key(symbol, timeframe, setup, expiry)
+    plausible = zone_is_plausible(entry_low, entry_high, current_price)
+    if not plausible:
+        return {
+            "key": key,
+            "setup": setup,
+            "expiry": expiry,
+            "already_active": False,
+            "already_skipped": False,
+            "create": False,
+            "invalid_zone": True,
+            "keep_existing": should_keep_watching_on_skip(),
+            "active_signal_id": None,
+        }
     active = find_active_watching_same_setup(
         db_path, symbol=symbol, timeframe=timeframe, setup=setup
     )
@@ -173,6 +192,32 @@ def apply_skip_watching_gate(
         "already_active": bool(active),
         "already_skipped": skipped,
         "create": create,
+        "invalid_zone": False,
         "keep_existing": should_keep_watching_on_skip(),
         "active_signal_id": (active or {}).get("signal_id") if active else None,
     }
+
+
+def record_skip_if_valid(
+    db_path: str,
+    gate: Dict[str, Any],
+    *,
+    symbol: str = "",
+    timeframe: str = DEFAULT_TIMEFRAME,
+) -> None:
+    """T3-ключ лише для правдоподібної зони — сміття 82–963 не дедупиться."""
+    if not isinstance(gate, dict):
+        return
+    if gate.get("invalid_zone"):
+        return
+    key = str(gate.get("key") or "")
+    if not key:
+        return
+    record_skip_scenario(
+        db_path,
+        key,
+        symbol=symbol,
+        timeframe=timeframe,
+        setup=str(gate.get("setup") or ""),
+        expiry=str(gate.get("expiry") or ""),
+    )
