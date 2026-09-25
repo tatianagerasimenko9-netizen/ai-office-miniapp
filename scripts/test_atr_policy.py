@@ -13,6 +13,7 @@ from office_atr_policy import (  # noqa: E402
     GERCHIK_TREND_ENTRY_BLOCK_PCT,
     T0_ENTRY_BLOCK_PCT,
     classify_atr_day_used,
+    explain_atr_day_used,
     new_daily_bar_resets_atr,
     no_trade_means_price_wont_move,
     probability_no_trade_payload,
@@ -47,6 +48,11 @@ def main() -> int:
         return _fail("NO_TRADE is rule not forecast")
     if "правило" not in payload["reason"].lower() and "вето" not in payload["reason"].lower():
         return _fail(f"reason wording {payload['reason']}")
+    exp = explain_atr_day_used(120.7)
+    if exp.get("excess_pct_over_atr") != 20.7 or exp.get("more_than_double_atr"):
+        return _fail(f"120.7 explain {exp}")
+    if exp.get("new_d1_is_entry") or new_daily_bar_resets_atr():
+        return _fail("D1 is not entry")
     print("OK: test_atr_policy")
     return 0
 

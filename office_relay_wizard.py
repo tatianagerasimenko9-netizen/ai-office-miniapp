@@ -115,6 +115,7 @@ from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 from office_session_radar import evaluate_session_radar
 from office_external_signal import (
     VERDICT_CONDITIONAL,
+    VERDICT_CONFIRMED,
     format_external_review,
     ingest_external_signal,
     persist_external_original,
@@ -131,6 +132,7 @@ from office_market_scout import (
     screen_futures_market,
 )
 from office_level_scalp import evaluate_level_book, format_level_book
+from office_skip_plan import build_skip_plan, format_skip_plan, persist_skip_case
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -2883,22 +2885,15 @@ async def run() -> None:
                     market={"bot_action": _ext_ms.get("bot_action")},
                 )
                 await send_office(format_external_review(_ext_rev))
-                if _ext_rev.verdict == VERDICT_CONDITIONAL and _ext_orig.get("symbol"):
-                    _plan = _ext_rev.office_plan or {}
-                    signal_upsert(
-                        db_path,
-                        signal_id=str(_ext_orig.get("signal_id") or f"ext-{event.id}"),
-                        symbol=str(_ext_orig.get("symbol")),
-                        direction=str(_ext_orig.get("direction") or "LONG"),
-                        entry_low=_ext_orig.get("entry_low") or _ext_orig.get("entry"),
-                        entry_high=_ext_orig.get("entry_high") or _ext_orig.get("entry"),
-                        sl=_ext_orig.get("sl"),
-                        tp1=_ext_orig.get("tp1"),
-                        tp2=_ext_orig.get("tp2"),
-                        rr=_plan.get("rr"),
-                        status="WATCHING",
-                        analysis_note=(format_external_review(_ext_rev))[:2000],
+                if _ext_rev.verdict != VERDICT_CONFIRMED:
+                    _skip = build_skip_plan(
+                        _ext_orig,
+                        _ext_rev,
+                        market={"bot_action": _ext_ms.get("bot_action")},
+                        t7_snap=BTC_FORCE_ORDER_BOOK.snapshot(),
                     )
+                    await send_office(format_skip_plan(_skip))
+                    persist_skip_case(db_path, _skip, now_ts=time.time())
             except Exception as exc_ext:
                 print(f"[relay][WARN] external signal review failed: {type(exc_ext).__name__}: {exc_ext}")
             # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.
