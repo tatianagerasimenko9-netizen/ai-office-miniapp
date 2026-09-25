@@ -2,20 +2,20 @@
 
 **Оновлено:** 2026-09-25  
 **T0:** ЗАКРИТО LIVE / ПЕРЕВІРЕНО (`993c720`).  
-**T4:** таблиця `market_state` LIVE на Worker `dfa1369`.  
+**T4:** таблиця `market_state` LIVE (read/write).  
 **T5:** LIVE / ПЕРЕВІРЕНО (`f383795`) — Лев `BLOCKED`, ENTER не запускався.  
-**T1:** `/review` ≠ `/position` — **ГОТОВО В КОДІ** (цей PR). Production не деплоїмо.
+**T1:** Worker `37a5779` **LIVE / ПЕРЕВІРЕНО**. `/review T1LIVEUSDT` → подія `T1_REVIEW`, журнал не зріс (23). Неповний `/position` без entry/SL/status → угоди немає. Повний `/position` з реальною угодою не слали. Probe `T1LIVEUSDT` з `market_state` видалено.
 
 Статуси: `НЕ ПОЧАТО` · `В РОБОТІ` · `ГОТОВО В КОДІ` · `LIVE НА RENDER` · `ПЕРЕВІРЕНО`
 
-Порядок: **T0 ✅ → T4 ✅ → T5 ✅ → T1 (цей PR) → T3 → T2 → T6 → T7**.
+Порядок: **T0 ✅ → T4 ✅ → T5 ✅ → T1 ✅ → T3 → T2 → T6 → T7**.
 
 | Задача | Зміст | Статус |
 |--------|--------|--------|
 | T0 | ZONE_REACHED | LIVE / ПЕРЕВІРЕНО |
 | T4 | таблиця `market_state` | LIVE (read/write) |
 | T5 | MAIN шанує `bot_action` | LIVE / ПЕРЕВІРЕНО |
-| T1 | `/review` ≠ `/position` | ГОТОВО В КОДІ |
+| T1 | `/review` ≠ `/position` | LIVE / ПЕРЕВІРЕНО |
 | T3 | дедуп WATCHING після SKIP | НЕ ПОЧАТО |
 | T2 | Назар fail-closed | НЕ ПОЧАТО |
 | T6 | радар BTC stub | НЕ ПОЧАТО |
@@ -27,10 +27,10 @@
 |---|--------|------|
 | 1 рівні | НЕ ПОЧАТО | |
 | 2 проактивний моніторинг | LIVE / ПЕРЕВІРЕНО | T0 |
-| 9 сигнал ≠ позиція | ГОТОВО В КОДІ | T1: `/review` без журналу; `/position` лише з entry+SL+status; сканер ENTER не відкриває угоду |
+| 9 сигнал ≠ позиція | LIVE / ПЕРЕВІРЕНО | T1 на `37a5779` |
 | 3–8, 10 | НЕ ПОЧАТО | T2/T6… |
-| 11 єдиний стан | В РОБОТІ | T4+T5 LIVE; T1 intent REVIEW vs MY_POSITION; Mini App ще ні |
+| 11 єдиний стан | В РОБОТІ | T4+T5+T1 LIVE; Mini App ще ні |
 | 12 Mini App | НЕ ПОЧАТО | T7 |
-| 13 GitHub→Render | В РОБОТІ | T0+T4+T5 Live; T1 чекає окремого дозволу на деплой |
+| 13 GitHub→Render | В РОБОТІ | T0+T4+T5+T1 Live; T3 ще ні |
 
-До Mini App: злити T1 (без автодеплою, доки не скажеш), далі T3, T2, T6, T7.
+До Mini App: T3, T2, T6, T7. T3 з цього кроку не стартуємо.
