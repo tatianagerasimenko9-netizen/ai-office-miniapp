@@ -15,6 +15,7 @@ from office_radar import MIN_RR, detect_sweep_from_candles
 from office_range_radar import classify_range_event, detect_range_bounds
 from office_skip_plan import SkipPlan, build_skip_plan, case_key
 from office_telegram_filter import format_px
+from office_topdown import clock_pair_ua
 
 KIND_TRADER = "trader_plan"
 WICK_SWEEP_RETURN = "SWEEP_RETURN"
@@ -161,6 +162,13 @@ def compose_trader_plan(
         levels=mkt.get("levels"),
     )
     extras_stale = bool((review.extras or {}).get("signal_stale"))
+    clock = str((review.extras or {}).get("clock_line") or "")
+    if extras_stale and not clock:
+        clock = clock_pair_ua(
+            orig.get("source_at") or orig.get("received_at"),
+            mkt.get("review_at") or (review.extras or {}).get("review_at"),
+            scalp=True,
+        )
     sp = skip
     if sp is None and review.verdict != VERDICT_CONFIRMED:
         sp = build_skip_plan(
@@ -171,7 +179,7 @@ def compose_trader_plan(
             candles=candles,
         )
     if entry_view["late"] or review.verdict != VERDICT_CONFIRMED or extras_stale:
-        stale_bit = "Первинний сигнал застарів. " if extras_stale else ""
+        stale_bit = f"{clock} " if clock else "Первинний сигнал застарів. "
         bot_v = (
             f"{stale_bit}Сигнал бота: {orig.get('direction')} entry={format_px(orig.get('entry'))} "
             f"(картка {orig.get('source_at') or orig.get('received_at') or 'н/д'}). "
@@ -229,6 +237,7 @@ def compose_trader_plan(
             "review": review.verdict,
             "reasons": list(review.reasons or []),
             "signal_stale": extras_stale,
+            "clock_line": clock,
             "quote_asof": mkt.get("quote_asof") or asof,
             "review_at": (review.extras or {}).get("review_at") or mkt.get("review_at") or "",
             "source_at": orig.get("source_at") or "",
@@ -244,10 +253,17 @@ def format_trader_plan(plan: TraderPlan) -> str:
     sym = str(o.get("symbol") or "")
     lines = [
         f"🦁 {sym or 'розбір'} · зовнішній сигнал",
-        "1) Статус первинного сигналу",
-        plan.bot_verdict,
-        "2) Чому так",
     ]
+    clock = str((plan.extras or {}).get("clock_line") or "")
+    if clock:
+        lines.append(clock)
+    lines.extend(
+        [
+            "1) Статус первинного сигналу",
+            plan.bot_verdict,
+            "2) Чому так",
+        ]
+    )
     reasons = list((plan.extras or {}).get("reasons") or [])
     if reasons:
         for r in reasons[:6]:
@@ -264,12 +280,6 @@ def format_trader_plan(plan: TraderPlan) -> str:
     lines.append(plan.own_plan)
     lines.append(plan.opposite)
     lines.append(plan.office_action)
-    asof = plan.asof or (plan.extras or {}).get("quote_asof") or ""
-    if asof:
-        lines.append(f"Котирування: {asof}")
-    src = (plan.extras or {}).get("source_at") or ""
-    if src:
-        lines.append(f"Час картки бота: {src}")
     liq = (plan.extras or {}).get("liq_state")
     if liq and liq != "connected":
         lines.append(

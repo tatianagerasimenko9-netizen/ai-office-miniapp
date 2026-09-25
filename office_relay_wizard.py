@@ -137,6 +137,7 @@ from office_telegram_filter import (
     quote_is_stale,
     range_result_to_alert,
 )
+from office_lifecycle import format_manage_update, format_tp1_hit
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -4759,12 +4760,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 if e_high is not None:
                                     be_level = e_high * (1.001 if direction == "LONG" else 0.999)
                                 if _allow_notify(symbol, "HIT_TP1"):
-                                    be_txt = f"{be_level:.6f}" if isinstance(be_level, (int, float)) else "BE"
-                                    lev_note = _lev_msg(
-                                        symbol,
-                                        f"ціна досягла TP1 {tp1_v}",
-                                        f"фіксуй 50%, перенеси SL у BE, решту тримай до TP2 {tp2_v}",
-                                        be_txt,
+                                    entry_px = e_high if e_high is not None else e_low
+                                    if direction == "SHORT" and e_low is not None:
+                                        entry_px = e_low
+                                    lev_note = format_tp1_hit(
+                                        symbol=symbol,
+                                        direction=direction,
+                                        entry=entry_px,
+                                        tp1=tp1_v,
+                                        tp2=tp2_v,
                                     )
                                     await send_office(lev_note, stream="general")
                                 continue
@@ -4832,9 +4836,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     near_tp1 = current_price > tp1_v and (current_price - tp1_v) / tp1_v * 100.0 < near_pct
                                 if near_tp1 and _allow_notify(symbol, "TP1_NEAR"):
                                     await send_office(
-                                        f"🎯 Тетяно, {symbol}: ціна близько до першої цілі.\n"
-                                        f"Зараз {current_price}, TP1 {tp1_v}.\n"
-                                        "Розглянь часткову фіксацію і перенос стопу в беззбиток.",
+                                        format_manage_update(
+                                            symbol=symbol,
+                                            direction=direction,
+                                            price=current_price,
+                                            tp1=tp1_v,
+                                            sl=sl_v,
+                                        ),
                                         stream="general",
                                     )
 
@@ -5129,8 +5137,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                 )
                 for rsym in deep_syms:
                     try:
+                        rd1 = fetch_candles(rsym, "1d", 30)
+                        rh4 = fetch_candles(rsym, "4h", 30)
                         rh1 = fetch_candles(rsym, "1h", 30)
-                        rm15 = fetch_candles(rsym, "15m", 12)
+                        rm15 = fetch_candles(rsym, "15m", 96)
                         rm5 = fetch_candles(rsym, "5m", 20)
                         if not isinstance(rh1, list) or len(rh1) < 8:
                             continue
@@ -5154,6 +5164,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                             day_used_pct=r_used,
                             btc_context=btc_ctx,
                             prev_fingerprint=_range_fp.get(rsym, ""),
+                            d1_candles=rd1 if isinstance(rd1, list) else None,
+                            h4_candles=rh4 if isinstance(rh4, list) else None,
+                            m15_candles=rm15 if isinstance(rm15, list) else None,
+                            m5_candles=rm5 if isinstance(rm5, list) else None,
                         )
                         _fp = str((rres.extras or {}).get("fingerprint") or "")
                         if _fp:
@@ -5197,6 +5211,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 day_used_pct=r_used,
                                 mode=_mode,
                                 prev_fingerprint=_level_fp.get(f"{rsym}:{_mode}", ""),
+                                d1_candles=rd1 if isinstance(rd1, list) else None,
+                                h4_candles=rh4 if isinstance(rh4, list) else None,
+                                m15_candles=rm15 if isinstance(rm15, list) else None,
+                                m5_candles=rm5 if isinstance(rm5, list) else None,
                             )
                             _lfp = str((book.extras or {}).get("fingerprint") or "")
                             if _lfp:

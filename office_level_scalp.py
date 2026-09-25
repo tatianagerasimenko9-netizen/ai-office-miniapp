@@ -22,10 +22,11 @@ from office_radar import (
     cluster_sr_levels,
     detect_sweep_from_candles,
     m15_confirmation,
-    sl_with_buffer,
 )
 from office_range_radar import detect_range_bounds
 from office_session_radar import detect_breakout_retest
+from office_telegram_filter import format_px
+from office_topdown import build_topdown, calc_sl_with_buffer
 
 KIND_LEVEL = "level_scalp"
 # Ті самі витрати що office_t6_backtest / office_t8_backtest, не нові пороги ATR/Edge.
@@ -248,6 +249,7 @@ class LevelScenario:
     rr_gross: Optional[float] = None
     rr_net: Optional[float] = None
     cancel: str = ""
+    sl_note: str = ""
     mode: str = "intraday"
     opens_position: bool = False
 
@@ -274,6 +276,11 @@ def evaluate_level_book(
     edge_score: Any = None,
     mode: str = "intraday",
     prev_fingerprint: str = "",
+    topdown: Optional[Dict[str, Any]] = None,
+    d1_candles: Optional[List[Dict[str, Any]]] = None,
+    h4_candles: Optional[List[Dict[str, Any]]] = None,
+    m15_candles: Optional[List[Dict[str, Any]]] = None,
+    m5_candles: Optional[List[Dict[str, Any]]] = None,
 ) -> LevelBook:
     """Два сценарії від рівнів. Дотик без реакції — WATCHING."""
     sym = str(symbol or "").upper()
@@ -291,6 +298,18 @@ def evaluate_level_book(
         "mode": md,
         "costs": {"commission": COMMISSION, "slippage": SLIPPAGE},
     }
+    td = topdown
+    if not isinstance(td, dict):
+        td = build_topdown(
+            symbol=sym,
+            d1=d1_candles,
+            h4=h4_candles,
+            h1=candles,
+            m15=m15_candles or confirm_candles,
+            m5=m5_candles,
+            direction="",
+        )
+    extras["topdown"] = td
     book = LevelBook(symbol=sym, mode=md, levels=levels, extras=extras)
     if px is None or not levels or not rows:
         book.extras["reason"] = "немає ціни або рівнів"
@@ -329,7 +348,9 @@ def evaluate_level_book(
             sc.confirmation = "ціна біля підтримки, чекаємо свіп/закриття вище"
         if reacted and not blocked:
             entry = px
-            sl = sl_with_buffer(entry, direction="LONG", structure_sl=lvl_px)
+            packed = calc_sl_with_buffer(lvl_px, "LONG", price=entry)
+            sl = packed.get("sl")
+            sc.sl_note = str(packed.get("explain") or "")
             tp1 = nearest_target(levels, direction="LONG", entry=entry)
             if tp1:
                 net = rr_after_costs(entry=entry, sl=sl, tp=tp1)
@@ -344,7 +365,10 @@ def evaluate_level_book(
                 if net is not None and net >= MIN_RR:
                     sc.status = "CONFIRMED"
                     sc.setup = "sweep_reclaim" if sweep.get("ssl_sweep") else "bounce"
-                    sc.confirmation = "реакція + закриття вище рівня"
+                    sc.confirmation = "ретест зони після реакції, M15 закрита вище"
+                    sl_s = format_px(sl)
+                    if sl_s:
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається нижче {sl_s}"
                 else:
                     sc.confirmation = "після комісій/прослизання RR недостатній для цього режиму"
         if blocked:
@@ -372,7 +396,9 @@ def evaluate_level_book(
             sc.confirmation = "ціна біля опору, чекаємо свіп/закриття нижче"
         if (reacted or retest) and not blocked:
             entry = px
-            sl = sl_with_buffer(entry, direction="SHORT", structure_sl=lvl_px)
+            packed = calc_sl_with_buffer(lvl_px, "SHORT", price=entry)
+            sl = packed.get("sl")
+            sc.sl_note = str(packed.get("explain") or "")
             tp1 = nearest_target(levels, direction="SHORT", entry=entry)
             if tp1:
                 net = rr_after_costs(entry=entry, sl=sl, tp=tp1)
@@ -382,7 +408,10 @@ def evaluate_level_book(
                 if net is not None and net >= MIN_RR:
                     sc.status = "CONFIRMED"
                     sc.setup = "break_retest" if retest else ("sweep_reclaim" if sweep.get("bsl_sweep") else "bounce")
-                    sc.confirmation = "реакція + закриття нижче рівня"
+                    sc.confirmation = "ретест зони після свіпу, M5 закрита нижче"
+                    sl_s = format_px(sl)
+                    if sl_s:
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається вище {sl_s}"
                 else:
                     sc.confirmation = "після комісій/прослизання RR недостатній для цього режиму"
         if blocked:
@@ -395,6 +424,16 @@ def evaluate_level_book(
     )
     extras["fingerprint"] = fp
     confirmed = [s for s in book.scenarios if s.status == "CONFIRMED"]
+    if confirmed:
+        extras["topdown"] = build_topdown(
+            symbol=sym,
+            d1=d1_candles,
+            h4=h4_candles,
+            h1=candles,
+            m15=m15_candles or confirm_candles,
+            m5=m5_candles,
+            direction=str(confirmed[0].direction),
+        )
     book.should_notify = bool(confirmed) and fp != str(prev_fingerprint or "")
     book.opens_position = False
     return book

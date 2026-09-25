@@ -130,6 +130,16 @@ def main() -> int:
     alert = level_book_to_alert(wide)
     if not alert or "SOLUSDT" not in alert or "None" in alert:
         return _fail(f"wide {alert}")
+    banned = (
+        "Чому звернув увагу",
+        "Котирування:",
+        "умови підтверджені всередині офісу",
+        "Не ордер. Угода лише через /position",
+    )
+    if any(b in alert for b in banned):
+        return _fail(f"template leaked {alert}")
+    if "Скасування:" in alert and "закривається" not in alert:
+        return _fail(f"cancel not numeric {alert}")
     silent = SimpleNamespace(status="RANGE_WATCHING", card=None, symbol="BTCUSDT", event="INSIDE")
     if range_result_to_alert(silent) is not None:
         return _fail("inside range must not telegram")

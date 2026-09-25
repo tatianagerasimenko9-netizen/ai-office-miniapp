@@ -222,6 +222,10 @@ def evaluate_range_radar(
     btc_context: Optional[Dict[str, Any]] = None,
     gold_context: Optional[Dict[str, Any]] = None,
     prev_fingerprint: str = "",
+    d1_candles: Optional[List[Dict[str, Any]]] = None,
+    h4_candles: Optional[List[Dict[str, Any]]] = None,
+    m15_candles: Optional[List[Dict[str, Any]]] = None,
+    m5_candles: Optional[List[Dict[str, Any]]] = None,
 ) -> RangeRadarResult:
     """Один інструмент. Контекст BTC/XAU не копіює напрямок."""
     sym = str(symbol or "").upper().strip()
@@ -297,6 +301,26 @@ def evaluate_range_radar(
     sweep = detect_sweep_from_candles(candles)
     extras["sweep"] = sweep
     extras["fingerprint"] = fp
+    from office_topdown import build_topdown, calc_sl_with_buffer
+
+    extras["topdown"] = build_topdown(
+        symbol=sym,
+        d1=d1_candles,
+        h4=h4_candles,
+        h1=candles,
+        m15=m15_candles or confirm_candles,
+        m5=m5_candles,
+        direction=direction,
+    )
+    if card and direction:
+        packed = calc_sl_with_buffer(
+            float(bounds["low"] if direction == "LONG" else bounds["high"]),
+            direction,
+            price=px,
+        )
+        if packed.get("sl") is not None:
+            card["sl"] = packed["sl"]
+            card["sl_explain"] = packed.get("explain") or ""
     return RangeRadarResult(
         symbol=sym,
         status=status,
