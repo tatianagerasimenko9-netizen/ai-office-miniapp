@@ -133,10 +133,13 @@ from office_skip_plan import persist_skip_case
 from office_trader_plan import compose_trader_plan, format_trader_plan
 from office_telegram_filter import (
     level_book_to_alert,
+    level_book_to_sweep_approach,
+    level_book_to_watching,
     newest_quote_asof,
     quote_is_stale,
     range_result_to_alert,
 )
+from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
@@ -5270,8 +5273,47 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if ltxt:
                                 await send_office(fmt_agent_line("lev", ltxt))
                                 print(f"[levels] {rsym} {_mode} ALERT")
-                            elif book.should_notify:
-                                print(f"[levels] {rsym} {_mode} hold (not telegram)")
+                            else:
+                                wtxt = level_book_to_watching(book)
+                                if wtxt:
+                                    try:
+                                        sw = ((book.extras or {}).get("topdown") or {}).get("sweep") or {}
+                                        lv = sw.get("level")
+                                        side = next((s.direction for s in book.scenarios if s.direction), "LONG")
+                                        signal_upsert(
+                                            db_path,
+                                            signal_id=f"watch-sweep-{rsym}-{_mode}",
+                                            symbol=rsym,
+                                            direction=str(side),
+                                            entry_low=float(lv) if lv is not None else None,
+                                            entry_high=float(lv) if lv is not None else None,
+                                            sl=None,
+                                            tp1=None,
+                                            tp2=None,
+                                            rr=None,
+                                            status=db_status_for("WAITING_SWEEP"),
+                                            analysis_note=wtxt[:2000],
+                                        )
+                                    except Exception as exc_ws:
+                                        print(f"[levels] {rsym} watching upsert: {exc_ws}")
+                                    nkey = f"{rsym}::WAITING_SWEEP::{_mode}"
+                                    now_ts = time.time()
+                                    last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
+                                    if (now_ts - last_ts) >= 14400:
+                                        _last_notified[nkey] = now_ts
+                                        await send_office(fmt_agent_line("lev", wtxt))
+                                        print(f"[levels] {rsym} {_mode} WATCHING sweep")
+                                atxt = level_book_to_sweep_approach(book, price=rprice)
+                                if atxt:
+                                    nkey_a = f"{rsym}::SWEEP_NEAR::{_mode}"
+                                    now_ts = time.time()
+                                    last_ts = float(_last_notified.get(nkey_a, 0.0) or 0.0)
+                                    if (now_ts - last_ts) >= 1800:
+                                        _last_notified[nkey_a] = now_ts
+                                        await send_office(fmt_agent_line("lev", atxt))
+                                        print(f"[levels] {rsym} {_mode} SWEEP NEAR")
+                                elif book.should_notify:
+                                    print(f"[levels] {rsym} {_mode} hold (not telegram)")
                     except Exception as exc_range:
                         print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:

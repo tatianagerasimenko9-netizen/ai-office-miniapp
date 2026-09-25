@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from office_radar import MIN_RR
+from office_topdown import ENTRY_WAITING_SWEEP
 
 KIND_ALERT = "telegram_opportunity"
 # Стрічка Telegram, не торговий поріг ATR 80/90 і не Edge 85.
@@ -146,10 +147,12 @@ def alert_decision(
     chase: bool = False,
     quote_stale: bool = False,
     liquid_enough: bool = True,
+    entry_mode: str = "",
 ) -> Dict[str, Any]:
     """Чи варто показувати Тетяні. Аналіз у коді може лишатися CONFIRMED."""
     st = str(status or "").upper()
-    if st != "CONFIRMED":
+    mode = str(entry_mode or "").upper()
+    if st != "CONFIRMED" or st == "WAITING_SWEEP" or mode == ENTRY_WAITING_SWEEP:
         return {
             "send": False,
             "reason": "не CONFIRMED — у стрічку не кладемо внутрішній WATCHING/INSIDE",
@@ -228,6 +231,9 @@ def format_opportunity_alert(
     entry_note: str = "",
     mode: str = "",
     live_price: Any = None,
+    logic_line: str = "",
+    entry_mode: str = "",
+    sweep_level: Any = None,
 ) -> str:
     """Картка практика: тип/ТФ, цифри SL/TP, скасування цифрою. Без шаблонного статусу."""
     e, s, t1 = format_px(entry), format_px(sl), format_px(tp1)
@@ -255,6 +261,9 @@ def format_opportunity_alert(
         lines.append(f"Структура: {why_s}")
     else:
         lines.append("Структура: DATA_UNAVAILABLE (немає свічок)")
+    logic = str(logic_line or "").strip()
+    if logic:
+        lines.append(f"Логіка: {logic}")
     if sweep_line:
         lines.append(f"Свіп: {sweep_line}")
     else:
@@ -264,7 +273,17 @@ def format_opportunity_alert(
         lines.append(f"Діапазон сесії: Asian High {ah} · Low {al}")
     else:
         lines.append("Діапазон сесії: Asian High/Low DATA_UNAVAILABLE")
-    lines.append(f"Вхід: {e}")
+    waiting = str(entry_mode or "").upper() == ENTRY_WAITING_SWEEP
+    if waiting:
+        slv = format_px(sweep_level)
+        if side == "SHORT":
+            wait_e = f"після свіпу і закриття {style['entry_tf']} нижче {slv}" if slv else "після свіпу"
+        else:
+            wait_e = f"після свіпу і закриття {style['entry_tf']} вище {slv}" if slv else "після свіпу"
+        lines.append(f"Вхід: {wait_e}")
+        lines.append("Спостереження: якщо ціна дійде до рівня свіпу і відскочить")
+    else:
+        lines.append(f"Вхід: {e}")
     lines.append(f"SL: {s}")
     lines.append(f"TP1: {t1}")
     if move_pct is not None:
@@ -362,8 +381,10 @@ def level_book_to_alert(
     extras = getattr(book, "extras", None) or {}
     td = extras.get("topdown") if isinstance(extras, dict) else None
     td = td if isinstance(td, dict) else {}
-    asia = td.get("asia") if isinstance(td.get("asia"), dict) else {}
     sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
+    if str(td.get("entry_mode") or sweep.get("entry_mode") or "") == ENTRY_WAITING_SWEEP or sweep.get("ahead"):
+        return None
+    asia = td.get("asia") if isinstance(td.get("asia"), dict) else {}
     extras_px = extras.get("price") if isinstance(extras, dict) else None
     return format_opportunity_alert(
         symbol=str(getattr(book, "symbol", "")),
@@ -387,6 +408,9 @@ def level_book_to_alert(
         entry_note="",
         mode=mode,
         live_price=extras_px if extras_px is not None else picked.entry,
+        logic_line=str(td.get("logic_line") or ""),
+        entry_mode=str(td.get("entry_mode") or sweep.get("entry_mode") or getattr(picked, "entry_mode", "") or ""),
+        sweep_level=sweep.get("level"),
     )
 
 
@@ -417,6 +441,8 @@ def range_result_to_alert(
     td = td if isinstance(td, dict) else {}
     asia = td.get("asia") if isinstance(td.get("asia"), dict) else {}
     sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
+    if str(td.get("entry_mode") or sweep.get("entry_mode") or "") == ENTRY_WAITING_SWEEP or sweep.get("ahead"):
+        return None
     return format_opportunity_alert(
         symbol=str(getattr(res, "symbol", "")),
         direction=str(getattr(res, "direction", "")),
@@ -439,4 +465,83 @@ def range_result_to_alert(
         entry_note="",
         mode="intraday",
         live_price=c.get("entry"),
+        logic_line=str(td.get("logic_line") or ""),
+        entry_mode=str(td.get("entry_mode") or sweep.get("entry_mode") or ""),
+        sweep_level=sweep.get("level"),
+    )
+
+
+def _book_tf(book: Any) -> str:
+    mode = str(getattr(book, "mode", "") or "")
+    if mode == "scalp":
+        return "M5"
+    if mode == "swing":
+        return "H4"
+    return "H1"
+
+
+def level_book_to_watching(book: Any) -> Optional[str]:
+    """WATCHING-картка очікування свіпу. Не сигнал у стрічку."""
+    from office_lifecycle import format_waiting_sweep_watch
+
+    extras = getattr(book, "extras", None) or {}
+    td = extras.get("topdown") if isinstance(extras, dict) else {}
+    td = td if isinstance(td, dict) else {}
+    sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
+    waiting = False
+    for sc in list(getattr(book, "scenarios", None) or []):
+        if str(getattr(sc, "entry_mode", "") or "").upper() == ENTRY_WAITING_SWEEP:
+            waiting = True
+            break
+    if not waiting and str(td.get("entry_mode") or "") == ENTRY_WAITING_SWEEP:
+        waiting = True
+    if not waiting:
+        return None
+    direction = ""
+    for sc in list(getattr(book, "scenarios", None) or []):
+        if str(getattr(sc, "direction", "")):
+            direction = str(sc.direction)
+            if str(getattr(sc, "entry_mode", "") or "").upper() == ENTRY_WAITING_SWEEP:
+                break
+    if not direction:
+        direction = "LONG" if str(sweep.get("kind") or "") == "SSL" else "SHORT"
+    return format_waiting_sweep_watch(
+        symbol=str(getattr(book, "symbol", "")),
+        timeframe=_book_tf(book),
+        direction=direction,
+        sweep_level=sweep.get("level"),
+        sweep_kind=str(sweep.get("kind") or "SSL"),
+    )
+
+
+def level_book_to_sweep_approach(book: Any, *, price: Any = None) -> Optional[str]:
+    """Алерт ±0.3% до рівня свіпу. Не картка входу."""
+    from office_lifecycle import format_sweep_approach_alert, sweep_approach_due
+
+    extras = getattr(book, "extras", None) or {}
+    td = extras.get("topdown") if isinstance(extras, dict) else {}
+    td = td if isinstance(td, dict) else {}
+    sweep = td.get("sweep") if isinstance(td.get("sweep"), dict) else {}
+    waiting_sc = any(
+        str(getattr(sc, "entry_mode", "") or "").upper() == ENTRY_WAITING_SWEEP
+        for sc in list(getattr(book, "scenarios", None) or [])
+    )
+    if not waiting_sc and str(td.get("entry_mode") or extras.get("entry_mode") or "") != ENTRY_WAITING_SWEEP:
+        return None
+    if not (sweep.get("ahead") or str(sweep.get("entry_mode") or "") == ENTRY_WAITING_SWEEP):
+        return None
+    px = price if price is not None else (extras.get("price") if isinstance(extras, dict) else None)
+    if not sweep_approach_due(price=px, level=sweep.get("level"), already_happened=bool(sweep.get("happened"))):
+        return None
+    direction = "LONG" if str(sweep.get("kind") or "") == "SSL" else "SHORT"
+    for sc in list(getattr(book, "scenarios", None) or []):
+        if str(getattr(sc, "direction", "")):
+            direction = str(sc.direction)
+            break
+    return format_sweep_approach_alert(
+        symbol=str(getattr(book, "symbol", "")),
+        level=sweep.get("level"),
+        price=px,
+        direction=direction,
+        sweep_kind=str(sweep.get("kind") or "SSL"),
     )
