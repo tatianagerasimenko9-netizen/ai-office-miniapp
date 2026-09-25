@@ -595,6 +595,24 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS feedback_source TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS agent_suggested TEXT")
                 cur.execute("ALTER TABLE trade_journal ADD COLUMN IF NOT EXISTS learning_note TEXT")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS market_state (
+                        symbol TEXT PRIMARY KEY,
+                        regime TEXT,
+                        watch_json TEXT NOT NULL DEFAULT '[]',
+                        event TEXT NOT NULL DEFAULT 'none',
+                        confirmation TEXT NOT NULL DEFAULT 'none',
+                        signal_json TEXT,
+                        office_decision TEXT,
+                        bot_action TEXT,
+                        trade TEXT NOT NULL DEFAULT 'none',
+                        intent TEXT NOT NULL DEFAULT 'none',
+                        data_quality TEXT NOT NULL DEFAULT 'OK',
+                        ts_updated TEXT NOT NULL
+                    )
+                    """
+                )
             conn.commit()
         return
 
@@ -778,6 +796,24 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             conn.execute("ALTER TABLE trade_journal ADD COLUMN agent_suggested TEXT")
         if "learning_note" not in cols:
             conn.execute("ALTER TABLE trade_journal ADD COLUMN learning_note TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_state (
+                symbol TEXT PRIMARY KEY,
+                regime TEXT,
+                watch_json TEXT NOT NULL DEFAULT '[]',
+                event TEXT NOT NULL DEFAULT 'none',
+                confirmation TEXT NOT NULL DEFAULT 'none',
+                signal_json TEXT,
+                office_decision TEXT,
+                bot_action TEXT,
+                trade TEXT NOT NULL DEFAULT 'none',
+                intent TEXT NOT NULL DEFAULT 'none',
+                data_quality TEXT NOT NULL DEFAULT 'OK',
+                ts_updated TEXT NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
