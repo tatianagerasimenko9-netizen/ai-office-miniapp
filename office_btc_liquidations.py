@@ -172,9 +172,12 @@ class BtcForceOrderBook:
         self.last_event_mono: float = 0.0
         self.last_error = ""
         self.reconnects = 0
+        self.loop_started = False
 
     def mark_connecting(self) -> None:
-        self.connected = False
+        """Handshake: не вважаємо це reconnect і не затираємо loop_started."""
+        if not self.connected:
+            self.connected = False
 
     def mark_connected(self) -> None:
         self.connected = True
@@ -250,6 +253,16 @@ class BtcForceOrderBook:
             "connected": bool(self.connected),
             "ws_fresh": self.ws_fresh(now),
             "reconnects": int(self.reconnects),
+            "loop_started": bool(self.loop_started),
+            "book_state": (
+                "connected"
+                if self.connected
+                else (
+                    "disconnected"
+                    if int(self.reconnects) > 0 or bool(self.last_error)
+                    else ("connecting" if self.loop_started else "idle_cold")
+                )
+            ),
             "last_error": self.last_error,
             "count": len(events),
             "long_liq": long_n,
@@ -268,11 +281,16 @@ def format_radar_liq_summary(book: BtcForceOrderBook, *, now_mono: Optional[floa
     lines = [
         "Фактичні ліквідації BTCUSDT (Binance forceOrder, не прогнозна heatmap):",
     ]
-    if snap["connected"] and snap["ws_fresh"]:
+    book_state = str(snap.get("book_state") or "")
+    if book_state == "idle_cold":
+        lines.append(
+            "Знімок холодний (цикл WS не стартував у цій книзі). Це не доказ відсутності ліквідацій."
+        )
+    elif snap["connected"] and snap["ws_fresh"]:
         lines.append("Потік живий.")
     else:
         err = snap["last_error"] or "немає живого потоку"
-        lines.append(f"Потік не свіжий ({err}). Це не сигнал і не магніт ліквідності.")
+        lines.append(f"Потік не свіжий ({err}). Стан книги: {book_state or 'н/д'}. Це не сигнал.")
     if snap["count"] <= 0:
         lines.append(f"За вікно {int(EVENT_WINDOW_SEC // 60)} хв подій немає.")
         lines.append("Не вхід, не позиція, не ордер.")
@@ -305,6 +323,7 @@ async def run_btc_force_order_loop(
     import aiohttp
 
     target = book if book is not None else BTC_FORCE_ORDER_BOOK
+    target.loop_started = True
     attempt = 0
     while stop is None or not stop.is_set():
         target.mark_connecting()
