@@ -193,3 +193,15 @@ def market_state_list(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
         (lim,),
     )
     return [_row_to_state(r) for r in rows]
+
+
+def scanner_signal_blocked(bot_action: Any) -> bool:
+    """True лише для явного BLOCKED. Відсутній стан / ACCEPT / IGNORE_SOURCE — не блокує."""
+    return str(bot_action or "").strip().upper() == "BLOCKED"
+
+
+def scanner_blocked_notice(symbol: str) -> str:
+    return (
+        f"Сканер BLOCKED офісом · {_norm_symbol(symbol)}\n"
+        "Картку з MAIN не перетворюємо на торговий сигнал. ENTER не запускаємо."
+    )

@@ -90,6 +90,7 @@ from office_bridge import (
     ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
+from office_market_state import market_state_get, scanner_blocked_notice, scanner_signal_blocked
 from office_zone_alert import (
     T0_PROBE_PREFIX,
     ZONE_REACHED_COOLDOWN_SEC,
@@ -2996,6 +2997,16 @@ async def run() -> None:
             )
             _history_reset()
             sig = parse_signal(text, event.id)
+            # T5: SOURCE форвард вище не чіпаємо. BLOCKED лише зупиняє kickoff/ENTER.
+            try:
+                _ms = market_state_get(db_path, getattr(sig, "symbol", "") or "")
+            except Exception as exc_ms:
+                print(f"[relay][WARN] market_state_get failed: {type(exc_ms).__name__}: {exc_ms}")
+                _ms = None
+            if scanner_signal_blocked((_ms or {}).get("bot_action")):
+                await send_office(scanner_blocked_notice(getattr(sig, "symbol", "") or ""))
+                print(f"[relay] scanner BLOCKED by office symbol={getattr(sig, 'symbol', '')}")
+                return
             if news_api_key:
                 news_timeout = aiohttp.ClientTimeout(total=10)
                 try:
