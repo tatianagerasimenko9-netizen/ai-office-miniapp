@@ -90,6 +90,7 @@ from office_bridge import (
     ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
+from office_zone_alert import ZONE_REACHED_COOLDOWN_SEC, plan_watching_zone_hit
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -4622,7 +4623,7 @@ EV позитивне: {prob.get('ev_positive', '')}
             key = f"{str(sym or '').upper()}::{event}"
             now_ts = time.time()
             last_ts = float(_last_notified.get(key, 0.0) or 0.0)
-            window = 14400 if event == "WATCHING_REANALYZE" else 1800
+            window = ZONE_REACHED_COOLDOWN_SEC if event in ("WATCHING_REANALYZE", "ZONE_REACHED") else 1800
             if (now_ts - last_ts) < window:
                 return False
             _last_notified[key] = now_ts
@@ -4690,27 +4691,60 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if sym_u in processed_watching_symbols:
                                 continue
                             processed_watching_symbols.add(sym_u)
-                            try:
-                                atr_row = fetch_atr_context(symbol)
-                                day_used_row = float((atr_row or {}).get("day_used_pct", 0) or 0)
-                                if day_used_row > 90:
+                            # ATR рахуємо лише коли ціна вже в зоні: інакше WATCHING
+                            # зникав до алерту (IRYS). Поріг >90 лишається блоком входу.
+                            day_used_row: float | None = None
+                            watch_high = e_high if e_high is not None else e_low
+                            in_zone_now = (
+                                watch_high is not None
+                                and min(e_low, watch_high) <= current_price <= max(e_low, watch_high)
+                            )
+                            if in_zone_now:
+                                try:
+                                    atr_row = fetch_atr_context(symbol)
+                                    day_used_row = float((atr_row or {}).get("day_used_pct", 0) or 0)
+                                except Exception:
+                                    day_used_row = None
+                            plan = plan_watching_zone_hit(
+                                current_price=current_price,
+                                entry_low=e_low,
+                                entry_high=e_high,
+                                day_used_pct=day_used_row,
+                                sl=sl_v,
+                                tp1=tp1_v,
+                                tp2=tp2_v,
+                                symbol=symbol,
+                            )
+                            if plan.in_zone:
+                                if _allow_notify(signal_id, "ZONE_REACHED"):
+                                    log_event(
+                                        db_path,
+                                        "ZONE_REACHED",
+                                        {
+                                            "symbol": symbol,
+                                            "price": current_price,
+                                            "signal": "YES" if plan.signal_ok else "NO",
+                                            "reason": plan.block_reason,
+                                        },
+                                        signal_id,
+                                    )
+                                    await send_office(plan.message, stream="general")
+                                if plan.expire_after_alert:
                                     signal_update(
                                         db_path,
                                         signal_id=signal_id,
                                         status="EXPIRED",
                                         outcome="ATR_DEAD",
-                                        analysis_note="WATCHING: ATR day_used_pct>90",
+                                        analysis_note="WATCHING: ZONE_REACHED, ATR day_used_pct>90, вхід заблоковано",
                                     )
                                     continue
-                            except Exception:
-                                pass
-
-                            watch_high = e_high if e_high is not None else e_low
-                            if watch_high is not None and min(e_low, watch_high) <= current_price <= max(e_low, watch_high):
-                                missing_levels = sl_v is None and tp1_v is None and tp2_v is None
-                                if missing_levels:
+                                if plan.promote_active:
+                                    signal_update(db_path, signal_id=signal_id, status="ACTIVE")
+                                    continue
+                                if plan.run_reanalyze:
                                     ts_upd_s = str(row.get("ts_updated") or "")
                                     ts_cre_s = str(row.get("ts_created") or "")
+                                    skip_reanalyze = False
                                     if ts_upd_s and ts_cre_s:
                                         try:
                                             upd_dt_w = datetime.fromisoformat(ts_upd_s.replace("Z", "+00:00"))
@@ -4721,15 +4755,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                                 cre_dt_w = cre_dt_w.replace(tzinfo=timezone.utc)
                                             if upd_dt_w > cre_dt_w + timedelta(seconds=30):
                                                 if (now_utc - upd_dt_w).total_seconds() < WATCHING_COOLDOWN_SEC:
-                                                    continue
+                                                    skip_reanalyze = True
                                         except Exception:
                                             pass
-                                    if _allow_notify(symbol, "WATCHING_REANALYZE"):
-                                        await send_office(
-                                            f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ WATCHING.\n"
-                                            "Рівні SL/TP відсутні, запускаю повний аналіз зараз...",
-                                            stream="general",
-                                        )
+                                    if not skip_reanalyze and _allow_notify(symbol, "WATCHING_REANALYZE"):
                                         async def _watching_sender(msg: str) -> None:
                                             await send_office(msg, stream="general")
                                         expired_w = await full_auto_analysis(
@@ -4740,17 +4769,6 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         )
                                         if not expired_w:
                                             signal_touch_updated(db_path, signal_id=signal_id)
-                                else:
-                                    signal_update(db_path, signal_id=signal_id, status="ACTIVE")
-                                    if _allow_notify(symbol, "WATCHING_HIT_ZONE"):
-                                        await send_office(
-                                            f"⚡ ТЕТЯНО! {symbol} — ЦІНА В ЗОНІ!\n"
-                                            f"Зараз {current_price}\n"
-                                            f"Entry зона: {e_low}–{watch_high}\n"
-                                            f"SL: {sl_v}\n"
-                                            "Це той відкат що чекали — входь!",
-                                            stream="general",
-                                        )
                                 continue
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
