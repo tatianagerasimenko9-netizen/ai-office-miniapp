@@ -130,7 +130,12 @@ from office_market_scout import (
 from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
 from office_trader_plan import compose_trader_plan, format_trader_plan
-from office_telegram_filter import level_book_to_alert, range_result_to_alert
+from office_telegram_filter import (
+    level_book_to_alert,
+    newest_quote_asof,
+    quote_is_stale,
+    range_result_to_alert,
+)
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -5163,17 +5168,25 @@ EV позитивне: {prob.get('ev_positive', '')}
                             _range_fp[rsym] = _fp
                         if rres.opens_position:
                             continue
+                        has_intra = (isinstance(rm5, list) and len(rm5) > 0) or (
+                            isinstance(rm15, list) and len(rm15) > 0
+                        )
+                        r_asof = newest_quote_asof(rm5, rm15, rh1)
+                        r_stale = quote_is_stale(r_asof, has_intraday=has_intra)
+                        chase_rng = False
                         if rres.card and already_ran_without_entry(
                             direction=rres.direction,
                             entry=(rres.card or {}).get("entry"),
                             price=rprice,
                             sl=(rres.card or {}).get("sl"),
                         ):
-                            print(f"[scout] skip chase {rsym}")
-                            continue
+                            print(f"[scout] skip chase {rsym} range-alert only")
+                            chase_rng = True
                         rng_txt = range_result_to_alert(
                             rres,
-                            chase=False,
+                            quote_asof=r_asof,
+                            chase=chase_rng,
+                            quote_stale=r_stale,
                         )
                         if rng_txt:
                             await send_office(fmt_agent_line("lev", rng_txt))
@@ -5208,7 +5221,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 ):
                                     chase_lvl = True
                                     break
-                            ltxt = level_book_to_alert(book, chase=chase_lvl)
+                            ltxt = level_book_to_alert(
+                                book,
+                                quote_asof=r_asof,
+                                chase=chase_lvl,
+                                quote_stale=r_stale,
+                            )
                             if ltxt:
                                 await send_office(fmt_agent_line("lev", ltxt))
                                 print(f"[levels] {rsym} {_mode} ALERT")

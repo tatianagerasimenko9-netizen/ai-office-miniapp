@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from office_level_scalp import nearest_target  # noqa: E402
 from office_radar import MIN_RR  # noqa: E402
 from office_telegram_filter import (  # noqa: E402
     MIN_ALERT_MOVE_PCT,
@@ -18,6 +20,8 @@ from office_telegram_filter import (  # noqa: E402
     format_px,
     level_book_to_alert,
     move_pct_to_tp,
+    newest_quote_asof,
+    quote_is_stale,
     range_result_to_alert,
 )
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
@@ -129,6 +133,116 @@ def main() -> int:
     silent = SimpleNamespace(status="RANGE_WATCHING", card=None, symbol="BTCUSDT", event="INSIDE")
     if range_result_to_alert(silent) is not None:
         return _fail("inside range must not telegram")
+    # Повторний INSIDE навіть із should_notify — не в стрічку.
+    silent2 = SimpleNamespace(
+        status="RANGE_WATCHING",
+        card=None,
+        symbol="BTCUSDT",
+        event="INSIDE",
+        should_notify=True,
+    )
+    if range_result_to_alert(silent2) is not None or range_result_to_alert(silent2) is not None:
+        return _fail("repeat inside")
+    # 3% — фільтр стрічки: внутрішній CONFIRMED/WATCHING (скальп) не стирається.
+    if str(book.scenarios[0].status) != "CONFIRMED":
+        return _fail("velvet must stay CONFIRMED internally")
+    scalp_watch = SimpleNamespace(
+        symbol="KAITOUSDT",
+        mode="scalp",
+        scenarios=[
+            SimpleNamespace(
+                status="WATCHING",
+                direction="SHORT",
+                setup="bounce",
+                entry=0.35,
+                sl=0.356,
+                tp1=0.353,
+                tp2=None,
+                rr_net=1.8,
+                confirmation="дотик",
+                cancel="",
+            )
+        ],
+    )
+    if level_book_to_alert(scalp_watch) is not None:
+        return _fail("bare watching must not telegram")
+    if scalp_watch.scenarios[0].status != "WATCHING":
+        return _fail("scalp watching lost after filter")
+    # Найближчий рівень, не дальній TP2.
+    lv = [
+        {"low": 100.0, "kind": "support"},
+        {"low": 101.0, "kind": "resistance"},
+        {"low": 105.0, "kind": "resistance"},
+    ]
+    near = nearest_target(lv, direction="LONG", entry=100.0)
+    if near != 101.0:
+        return _fail(f"nearest {near}")
+    stretched = alert_decision(
+        status="CONFIRMED",
+        entry=100.0,
+        sl=98.8,
+        tp1=101.0,
+        rr_net=2.0,
+    )
+    far_as_tp1 = alert_decision(
+        status="CONFIRMED",
+        entry=100.0,
+        sl=98.8,
+        tp1=105.0,
+        rr_net=2.0,
+    )
+    if stretched["send"]:
+        return _fail("1% nearest must not send")
+    if not far_as_tp1["send"]:
+        return _fail("5% would send only if wrongly used as TP1")
+    mixed = SimpleNamespace(
+        symbol="DEMOUSDT",
+        mode="intraday",
+        scenarios=[
+            SimpleNamespace(
+                status="CONFIRMED",
+                direction="LONG",
+                setup="bounce",
+                entry=100.0,
+                sl=98.8,
+                tp1=101.0,
+                tp2=105.0,
+                rr_net=2.4,
+                confirmation="реакція",
+                cancel="",
+            )
+        ],
+    )
+    if level_book_to_alert(mixed) is not None:
+        return _fail("must not stretch TP2 to pass 3%")
+    if mixed.scenarios[0].status != "CONFIRMED":
+        return _fail("scenario lost after 3% filter")
+    now = datetime(2026, 9, 25, 20, 0, tzinfo=timezone.utc)
+    if quote_is_stale("2026-09-25T19:59:00+00:00", now=now, has_intraday=True):
+        return _fail("fresh m5")
+    if not quote_is_stale("2026-09-25T19:30:00+00:00", now=now, has_intraday=True):
+        return _fail("stale m5")
+    if not quote_is_stale("", now=now):
+        return _fail("missing ts is stale")
+    asof = newest_quote_asof(
+        [{"ts": "2026-09-25T19:00:00+00:00"}],
+        [{"ts": "2026-09-25T19:55:00+00:00"}],
+    )
+    if "19:55" not in asof:
+        return _fail(f"newest {asof}")
+    if alert_decision(
+        status="CONFIRMED",
+        entry=100.0,
+        sl=98.8,
+        tp1=103.2,
+        rr_net=2.0,
+        quote_stale=True,
+    ).get("send"):
+        return _fail("stale quote must not telegram")
+    if level_book_to_alert(wide, chase=True) is not None:
+        return _fail("chase blocks telegram, not analysis")
+    if wide.scenarios[0].status != "CONFIRMED":
+        return _fail("chase must not drop scenario")
     print("OK: test_t8_telegram_filter")
     return 0
 

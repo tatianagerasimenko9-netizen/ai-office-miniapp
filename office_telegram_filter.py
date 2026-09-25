@@ -3,9 +3,11 @@
 3% — мінімальний очікуваний рух entry→TP1 для стандартного алерту, не чистий PnL
 і не ATR/Edge. Не можна малювати дальній TP, щоб натягнути 3%.
 CONFIRMED у коді ≠ автоматична розсилка.
+Скальп <3% лишається у внутрішньому WATCHING/CONFIRMED — фільтр лише стрічки.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from office_radar import MIN_RR
@@ -14,6 +16,9 @@ KIND_ALERT = "telegram_opportunity"
 # Стрічка Telegram, не торговий поріг ATR 80/90 і не Edge 85.
 MIN_ALERT_MOVE_PCT = 3.0
 ALERT_COOLDOWN_SEC = 4 * 3600
+# M5/M15: свіжіше за 20 хв. Лише H1: поточна година + буфер.
+QUOTE_STALE_SEC_INTRADAY = 20 * 60
+QUOTE_STALE_SEC_HOURLY = 70 * 60
 
 
 def format_px(value: Any) -> str:
@@ -42,6 +47,62 @@ def format_level_span(low: Any, high: Any) -> str:
     if not b or a == b:
         return a
     return f"{a}–{b}"
+
+
+def parse_quote_dt(ts: Any) -> Optional[datetime]:
+    """UTC-мітка котирування зі свічки Binance (`ts`) або ISO."""
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        dt = ts
+    else:
+        s = str(ts).strip()
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def newest_quote_asof(*candle_groups: Any) -> str:
+    """Найсвіжіший `ts` серед наборів свічок (M5/M15/H1)."""
+    best_dt: Optional[datetime] = None
+    for group in candle_groups:
+        if not isinstance(group, list) or not group:
+            continue
+        last = group[-1] if isinstance(group[-1], dict) else None
+        if not last:
+            continue
+        dt = parse_quote_dt(last.get("ts") or last.get("asof"))
+        if dt is not None and (best_dt is None or dt > best_dt):
+            best_dt = dt
+    return best_dt.isoformat() if best_dt is not None else ""
+
+
+def quote_is_stale(
+    ts: Any,
+    *,
+    now: Any = None,
+    has_intraday: bool = True,
+) -> bool:
+    """Перед алертом: без мітки або застаріле — не надсилаємо, аналіз не чіпаємо."""
+    dt = parse_quote_dt(ts)
+    if dt is None:
+        return True
+    now_dt = parse_quote_dt(now) if now is not None else datetime.now(timezone.utc)
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    else:
+        now_dt = now_dt.astimezone(timezone.utc)
+    age = (now_dt - dt).total_seconds()
+    limit = QUOTE_STALE_SEC_INTRADAY if has_intraday else QUOTE_STALE_SEC_HOURLY
+    return age > float(limit)
 
 
 def move_pct_to_tp(*, entry: Any, tp: Any) -> Optional[float]:
@@ -188,8 +249,17 @@ def format_watch_nudge(
     )
 
 
-def level_book_to_alert(book: Any, *, quote_asof: str = "", chase: bool = False) -> Optional[str]:
-    """З внутрішньої книги рівнів — щонайбільше один алерт, не вісім ліній."""
+def level_book_to_alert(
+    book: Any,
+    *,
+    quote_asof: str = "",
+    chase: bool = False,
+    quote_stale: bool = False,
+) -> Optional[str]:
+    """З внутрішньої книги рівнів — щонайбільше один алерт, не вісім ліній.
+
+    send=False не змінює status сценаріїв: WATCHING/CONFIRMED лишаються всередині.
+    """
     scenarios = list(getattr(book, "scenarios", None) or [])
     confirmed = [s for s in scenarios if str(getattr(s, "status", "")).upper() == "CONFIRMED"]
     if not confirmed:
@@ -205,6 +275,7 @@ def level_book_to_alert(book: Any, *, quote_asof: str = "", chase: bool = False)
             tp1=sc.tp1,
             rr_net=sc.rr_net,
             chase=chase,
+            quote_stale=quote_stale,
         )
         if not dec.get("send"):
             continue
@@ -232,7 +303,13 @@ def level_book_to_alert(book: Any, *, quote_asof: str = "", chase: bool = False)
     )
 
 
-def range_result_to_alert(res: Any, *, quote_asof: str = "", chase: bool = False) -> Optional[str]:
+def range_result_to_alert(
+    res: Any,
+    *,
+    quote_asof: str = "",
+    chase: bool = False,
+    quote_stale: bool = False,
+) -> Optional[str]:
     """INSIDE/прокол без картки — мовчання. CONFIRMED — лише якщо ≥ 3% до TP1."""
     if str(getattr(res, "status", "")).upper() != "CONFIRMED" or not getattr(res, "card", None):
         return None
@@ -244,6 +321,7 @@ def range_result_to_alert(res: Any, *, quote_asof: str = "", chase: bool = False
         tp1=c.get("tp1") or c.get("tp"),
         rr_net=c.get("rr"),
         chase=chase,
+        quote_stale=quote_stale,
     )
     if not dec.get("send"):
         return None
