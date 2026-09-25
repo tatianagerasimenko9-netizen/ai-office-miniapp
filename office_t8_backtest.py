@@ -27,6 +27,7 @@ from office_t6_backtest import (
     close_time,
     load_ohlcv_file,
     simulate_exit_on_bar,
+    _fill_price,
 )
 from office_t7_health import diagnose_force_order_snapshot, probe_fstream_tcp
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT, price_in_watching_zone
@@ -122,6 +123,7 @@ def run_t8_backtest(path: str | Path | None = None) -> T8Report:
     max_dd = 0.0
     r_closed: List[float] = []
     commission = 0.0004
+    slippage = 0.0005
 
     for i, bar in enumerate(m15_all):
         asof = close_time(bar, "15m")
@@ -263,7 +265,7 @@ def run_t8_backtest(path: str | Path | None = None) -> T8Report:
                         if c.get("tp") and c.get("sl"):
                             sim_open = {
                                 "direction": res.direction,
-                                "entry": float(c["entry"]),
+                                "entry": _fill_price(res.direction, float(c["entry"]), slippage),
                                 "sl": float(c["sl"]),
                                 "tp": float(c["tp"]),
                             }

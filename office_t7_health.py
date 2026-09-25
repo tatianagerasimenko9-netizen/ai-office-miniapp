@@ -33,8 +33,8 @@ def diagnose_force_order_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     if state == "idle_cold":
         why = (
             "Знімок холодний: цикл WS у цьому процесі не стартував "
-            "(reconnects=0, немає last_error). Це не доказ що Binance мовчить — "
-            "часто лог пишеться з порожньої книги до create_task або іншим процесом."
+            "(reconnects=0, немає last_error). Це НЕ означає, що на ринку не було ліквідацій — "
+            "книга просто не підключена. Часто лог пишеться з порожньої книги до create_task."
         )
     elif state == "connecting":
         why = "Цикл стартував, сокет ще не mark_connected (handshake). forceOrder не потрібен."
@@ -53,6 +53,7 @@ def diagnose_force_order_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
         "last_error": err,
         "creates_enter": False,
         "needs_force_order_to_prove_ws": False,
+        "idle_cold_means_no_liquidations": False,
     }
 
 
