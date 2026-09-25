@@ -23,6 +23,7 @@ from office_telegram_filter import (  # noqa: E402
     newest_quote_asof,
     quote_is_stale,
     range_result_to_alert,
+    resolve_trade_style,
 )
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
 from office_market_data import SIGNAL_THRESHOLD  # noqa: E402
@@ -138,8 +139,20 @@ def main() -> int:
     )
     if any(b in alert for b in banned):
         return _fail(f"template leaked {alert}")
-    if "Скасування:" in alert and "закривається" not in alert:
-        return _fail(f"cancel not numeric {alert}")
+    if "Тип: ІНТРАДЕЙ · Вхід на M15" not in alert:
+        return _fail(f"type line {alert}")
+    if "Скасування: H1 свічка закривається нижче 98.8" not in alert:
+        return _fail(f"cancel numeric {alert}")
+    sl_only = next((ln for ln in alert.splitlines() if ln.startswith("SL:")), "")
+    if sl_only != "SL: 98.8":
+        return _fail(f"sl text {sl_only}")
+    if "структурного" in alert.lower() or "люфт" in sl_only.lower():
+        return _fail("verbal sl/cancel")
+    sty = resolve_trade_style("scalp")
+    if sty["type_ua"] != "СКАЛЬП" or sty["entry_tf"] != "M5":
+        return _fail(f"scalp style {sty}")
+    if resolve_trade_style("swing")["entry_tf"] != "H4":
+        return _fail("swing")
     silent = SimpleNamespace(status="RANGE_WATCHING", card=None, symbol="BTCUSDT", event="INSIDE")
     if range_result_to_alert(silent) is not None:
         return _fail("inside range must not telegram")

@@ -74,6 +74,8 @@ def main() -> int:
         return _fail("scalp mode")
     if infer_trade_mode("1h", "") != "intraday":
         return _fail("intraday mode")
+    if infer_trade_mode("4h", "SWING") != "swing":
+        return _fail("swing mode")
 
     overlay = parse_bot_card_overlay(PENGU)
     if overlay["symbol"] != "PENGUUSDT" or overlay["direction"] != "LONG":

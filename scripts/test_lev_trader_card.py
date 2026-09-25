@@ -153,23 +153,34 @@ def main() -> int:
         asia_high=td["asia"]["high"],
         asia_low=td["asia"]["low"],
         sl_explain=packed["explain"],
-        entry_note="ретест зони після свіпу, M5 закрита нижче",
+        entry_note="",
+        mode="intraday",
+        live_price=0.1306,
     )
     for need in (
         "🔴 SHORT · DEMOUSDT · H1",
+        "Тип: ІНТРАДЕЙ · Вхід на M15",
+        "Ціна зараз: 0.1306",
         "Структура:",
         "Свіп:",
         "Asian High 0.1315",
         "Low 0.1298",
         "BSL знято",
-        "SL:",
-        "люфт",
+        "SL: " + format_px(packed["sl"]),
         "Ведення:",
         "50–70%",
-        "Скасування:",
+        "Скасування: H1 свічка закривається вище",
+        "Позиція: немає",
     ):
         if need not in card:
             return _fail(f"card missing {need!r} in {card}")
+    sl_line = next((ln for ln in card.splitlines() if ln.startswith("SL:")), "")
+    if sl_line != f"SL: {format_px(packed['sl'])}":
+        return _fail(f"sl must be number only {sl_line!r}")
+    if "люфт" in card.split("SL:", 1)[-1].split("\n", 1)[0]:
+        return _fail("sl explain leaked")
+    if "структурного" in card.lower():
+        return _fail("verbal cancel")
     if "21:14" not in card and "00:14" not in card:
         return _fail(f"sweep time {card}")
     for ban in (
@@ -180,8 +191,36 @@ def main() -> int:
     ):
         if ban in card:
             return _fail(f"banned {ban}")
-    if "0.13063000000001" in card:
-        return _fail("float junk in card")
+    scalp_card = format_opportunity_alert(
+        symbol="AAAUSDT",
+        direction="LONG",
+        timeframe="M5",
+        mode="scalp",
+        entry=1.0,
+        sl=0.99,
+        tp1=1.04,
+        rr_net=2.0,
+        move_pct=4.0,
+    )
+    if "Тип: СКАЛЬП · Вхід на M5" not in scalp_card:
+        return _fail(scalp_card)
+    if "Скасування: M5 свічка закривається нижче 0.99" not in scalp_card:
+        return _fail(scalp_card)
+    swing_card = format_opportunity_alert(
+        symbol="BBBUSDT",
+        direction="SHORT",
+        timeframe="H4",
+        mode="swing",
+        entry=10.0,
+        sl=10.15,
+        tp1=9.4,
+        rr_net=2.2,
+        move_pct=6.0,
+    )
+    if "Тип: СВІНГ · Вхід на H4" not in swing_card:
+        return _fail(swing_card)
+    if "Скасування: H4 свічка закривається вище 10.15" not in swing_card:
+        return _fail(swing_card)
 
     upd = format_manage_update(
         symbol="DEMOUSDT",

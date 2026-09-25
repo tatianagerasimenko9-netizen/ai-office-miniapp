@@ -48,6 +48,8 @@ def infer_trade_mode(timeframe: Any, style_hint: Any = "") -> str:
     raw = f"{timeframe or ''} {style_hint or ''}".lower()
     if any(x in raw for x in ("1m", "m1", "5m", "m5", "scalp", "скальп")):
         return "scalp"
+    if any(x in raw for x in ("4h", "h4", "1d", "d1", "swing", "свінг")):
+        return "swing"
     return "intraday"
 
 
@@ -296,6 +298,7 @@ def evaluate_level_book(
         "atr": atr,
         "edge_threshold": SIGNAL_THRESHOLD,
         "mode": md,
+        "price": px,
         "costs": {"commission": COMMISSION, "slippage": SLIPPAGE},
     }
     td = topdown
