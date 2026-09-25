@@ -109,6 +109,7 @@ from office_watching_dedup import (
     record_skip_scenario,
     should_keep_watching_on_skip,
 )
+from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -5149,6 +5150,99 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(120 if fast_poll else 900)
 
     asyncio.create_task(monitor_active_signals())
+
+    async def monitor_trade_radar() -> None:
+        """T6: радар BTC — рівні, наближення, sweep+M15. SIGNAL без журналу позиції."""
+        from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
+
+        while True:
+            try:
+                for symbol in RADAR_SYMBOLS:
+                    try:
+                        ms = market_state_get(db_path, symbol) or {}
+                        if scanner_signal_blocked(ms.get("bot_action")):
+                            print(f"[radar] skip BLOCKED {symbol}")
+                            continue
+                        daily = fetch_candles(symbol, "1d", 30)
+                        h1 = fetch_candles(symbol, "1h", 10)
+                        m15 = fetch_candles(symbol, "15m", 8)
+                        if not isinstance(daily, list) or not isinstance(h1, list) or not daily or not h1:
+                            print(f"[radar] no candles {symbol}")
+                            continue
+                        price = 0.0
+                        try:
+                            liq = fetch_liquidations_proxy(symbol)
+                            if isinstance(liq, dict):
+                                price = float(liq.get("current_price") or 0.0)
+                        except Exception:
+                            price = 0.0
+                        if price <= 0:
+                            try:
+                                price = float((h1[-1] or {}).get("close") or 0.0)
+                            except Exception:
+                                price = 0.0
+                        day_used = None
+                        try:
+                            atr = fetch_atr_context(symbol) or {}
+                            if atr.get("day_used_pct") is not None:
+                                day_used = float(atr.get("day_used_pct"))
+                        except Exception:
+                            day_used = None
+                        res = evaluate_radar(
+                            symbol=symbol,
+                            price=price,
+                            daily_candles=daily,
+                            sweep_candles=h1,
+                            m15_candles=m15 if isinstance(m15, list) else [],
+                            day_used_pct=day_used,
+                            bot_action=ms.get("bot_action"),
+                        )
+                        if res.status == "NONE":
+                            continue
+                        if res.status == "WATCHING" and res.level_price is not None:
+                            gate = apply_skip_watching_gate(
+                                db_path,
+                                symbol=symbol,
+                                direction=res.direction or "LONG",
+                                entry_low=float(res.level_price),
+                                entry_high=float(res.level_price),
+                                timeframe="1h",
+                                now_ts=time.time(),
+                            )
+                            if gate.get("create"):
+                                signal_upsert(
+                                    db_path,
+                                    signal_id=f"radar-watch-{symbol}-{int(time.time())}",
+                                    symbol=symbol,
+                                    direction=res.direction or "LONG",
+                                    entry_low=float(res.level_price),
+                                    entry_high=float(res.level_price),
+                                    sl=None,
+                                    tp1=None,
+                                    tp2=None,
+                                    rr=None,
+                                    status="WATCHING",
+                                    analysis_note=(res.reason or "T6 radar watching")[:2000],
+                                )
+                                print(f"[radar] WATCHING {symbol} {res.level_price}")
+                        if res.status == "SIGNAL":
+                            nkey = f"{symbol}::RADAR_SIGNAL"
+                            now_ts = time.time()
+                            last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
+                            if (now_ts - last_ts) >= 1800:
+                                _last_notified[nkey] = now_ts
+                                await send_office(fmt_agent_line("lev", format_radar_card(res)))
+                                print(f"[radar] SIGNAL card {symbol} (no position)")
+                    except Exception as exc_sym:
+                        print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
+            except Exception as exc:
+                print(f"[radar] monitor failed: {exc}")
+            utc_now = datetime.now(timezone.utc)
+            minute_of_day = utc_now.hour * 60 + utc_now.minute
+            fast = (480 <= minute_of_day < 660) or (780 <= minute_of_day < 960)
+            await asyncio.sleep(180 if fast else 600)
+
+    asyncio.create_task(monitor_trade_radar())
 
     async def process_tv_signal(signal: Dict[str, Any]) -> None:
         """
