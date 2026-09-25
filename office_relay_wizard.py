@@ -58,6 +58,7 @@ from office_bridge import (
     office_db_identity,
     office_desk_user_question,
     office_evening_debrief,
+    build_evening_journal_summary,
     office_handle_signal,
     office_morning_briefing,
     office_news_trigger,
@@ -1050,81 +1051,8 @@ def build_stoploss_postmortem(
 
 
 def build_daily_journal_report(db_path: str) -> str:
-    try:
-        is_pg = str(db_path).lower().startswith("postgres://") or str(db_path).lower().startswith("postgresql://")
-        if is_pg:
-            if psycopg is None:
-                raise RuntimeError("psycopg is required for PostgreSQL mode")
-            with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT outcome, pnl_pct, r_multiple, mistake_tags_json
-                        FROM trade_journal
-                        WHERE status = 'CLOSED' AND LEFT(COALESCE(ts_close_utc, ''), 10) = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')
-                        """
-                    )
-                    rows = cur.fetchall()
-        else:
-            if str(db_path).lower().startswith("sqlite:///"):
-                db_path = str(db_path)[10:]
-            with sqlite3.connect(db_path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT outcome, pnl_pct, r_multiple, mistake_tags_json
-                    FROM trade_journal
-                    WHERE status = 'CLOSED' AND date(ts_close_utc) = date('now')
-                    """
-                ).fetchall()
-    except Exception:
-        rows = []
-
-    wins = 0
-    losses = 0
-    be = 0
-    pnl_sum = 0.0
-    r_vals: List[float] = []
-    tags_count: Dict[str, int] = {}
-
-    for outcome, pnl_pct, r_multiple, tags_json in rows:
-        o = str(outcome or "").upper()
-        if o == "WIN":
-            wins += 1
-        elif o == "LOSS":
-            losses += 1
-        elif o == "BE":
-            be += 1
-        try:
-            pnl_sum += float(pnl_pct or 0.0)
-        except Exception:
-            pass
-        try:
-            if r_multiple is not None:
-                r_vals.append(float(r_multiple))
-        except Exception:
-            pass
-        try:
-            tags = json.loads(str(tags_json or "[]"))
-            if isinstance(tags, list):
-                for t in tags:
-                    k = str(t).strip().lower()
-                    if k:
-                        tags_count[k] = tags_count.get(k, 0) + 1
-        except Exception:
-            pass
-
-    total = wins + losses + be
-    wr = (wins / (wins + losses) * 100.0) if (wins + losses) > 0 else 0.0
-    avg_r = (sum(r_vals) / len(r_vals)) if r_vals else 0.0
-    top_tags = sorted(tags_count.items(), key=lambda x: (-x[1], x[0]))[:3]
-    tags_text = ", ".join(f"{k} x{v}" for k, v in top_tags) if top_tags else "нема"
-
-    return (
-        "Щоденний журнал:\n"
-        f"Угод: {total} | W {wins} · L {losses} · BE {be} | WR {wr:.1f}%\n"
-        f"PnL сумарно: {pnl_sum:+.2f}% | Avg R: {avg_r:+.2f}\n"
-        f"Топ помилок: {tags_text}"
-    )
+    """Щоденний зріз журналу: Київ, /position окремо, без фейкових 0%."""
+    return build_evening_journal_summary(db_path)
 
 
 def build_weekly_journal_report(db_path: str) -> str:
@@ -5427,8 +5355,7 @@ TradingView сигнал:
                     print("[relay] auto morning briefing sent")
 
                 if h == eh and mi == em and last_evening_date != today:
-                    report = build_daily_journal_report(db_path)
-                    summary = "\n".join(report.split("\n")[:4]).strip()
+                    summary = build_evening_journal_summary(db_path)
                     async with aiohttp.ClientSession(timeout=http_timeout) as http:
                         btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
                         btc_pct = float(btc.get("pct", 0.0))
