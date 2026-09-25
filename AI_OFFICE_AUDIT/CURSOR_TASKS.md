@@ -2,6 +2,15 @@
 
 Виконувати **лише після** `МОЖНА ВНОСИТИ ЗМІНИ`. Одна задача = один PR. Не чіпати `file-1`, книги, CONFIG торгівлі без ТЗ.
 
+**Порядок:** T0 → T4 → T1 → T3 → T5 → T2. T6–T8 після цього, якщо немає окремої команди. Повна карта: `26_TZ_CONSISTENCY.md`.
+
+## T0 — ZONE_REACHED ≠ SIGNAL (перша задача)
+Файли: `office_relay_wizard.py` (`monitor_active_signals`, гілка `day_used_pct>90` → `EXPIRED` + `continue` без чату).  
+Поведінка: ціна в WATCHING-зоні → **завжди** одне повідомлення (символ, ціна, зона, ATR, `SIGNAL=NO|YES`). «Входь!» лише якщо SIGNAL=YES.  
+Заборона: не міняти edge 85, сканер, промпти.  
+Тест: фікстура ATR>90 + ціна в зоні → 1 notify, 0 «входь!».  
+Rollback: revert PR.
+
 ## T1 — Intent review ≠ position
 Файли: `office_relay_wizard.py` (хендлер тексту), `office_bridge.py` (journal insert).  
 Поведінка: `/review` або «сигнал бота» → оцінка, **не** ACTIVE position. `/position` → журнал MY_POSITION.  

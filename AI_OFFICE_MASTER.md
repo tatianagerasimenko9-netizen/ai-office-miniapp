@@ -24,7 +24,7 @@ Telegram-офіс з травня 2026: Лев/команда, NO TRADE замі
 **5. Скільки етапів до MVP і що першим**  
 Етапи 0–5: аудит (цей пакет) → P0 стан/intent/новини → радар → перевірка фільтрів на даних → журнал → Mini App MVP.  
 Етап 6 — paper / автоордери лише після окремого дозволу.  
-**Першим після дозволу:** не UI. Каркас спільного стану + BLOCK сканера при OFFICE SIGNAL=NO **або** `/review`≠`/position`.
+**Першим після дозволу:** **T0** — `ZONE_REACHED` навіть якщо ATR/NO TRADE (IRYS 13.05). Далі T4 `market_state` → T1 `/review`≠`/position` → T3 дедуп → T5 BLOCK сканера. Не починати з T2 лише бо простіше. Деталі: `AI_OFFICE_AUDIT/26_TZ_CONSISTENCY.md`.
 
 ---
 
@@ -42,6 +42,6 @@ Telegram-офіс з травня 2026: Лев/команда, NO TRADE замі
 | `AI_OFFICE_AUDIT/IMPLEMENTATION_ROADMAP.md` | етапи 0–6 |
 | `AI_OFFICE_AUDIT/CURSOR_TASKS.md` | дрібні задачі |
 | `AI_OFFICE_AUDIT/OPEN_QUESTIONS.md` | дірки даних |
-| `AI_OFFICE_AUDIT/00…25_*.md` | розтин по темах |
+| `AI_OFFICE_AUDIT/00…26_*.md` | розтин по темах + фінальна перевірка ТЗ |
 
 Код, промпти агентів, CONFIG, БД — **не чіпати** до дозволу.
