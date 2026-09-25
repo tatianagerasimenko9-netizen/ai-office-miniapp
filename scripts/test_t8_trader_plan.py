@@ -51,12 +51,14 @@ def main() -> int:
     txt = format_trader_plan(plan)
     if plan.opens_position or plan.mm_intent_claimed:
         return _fail("order/mm")
-    if "1) Вердикт щодо сигналу бота" not in txt:
+    if "1) Статус первинного сигналу" not in txt:
         return _fail("block1")
-    if "2) Власний торговий план" not in txt or "3) Протилежний сценарій" not in txt:
+    if "2) Чому так" not in txt or "4) Зараз" not in txt:
         return _fail("blocks")
-    if "4) Дія офісу" not in txt:
-        return _fail("block4")
+    if "УГОДИ НЕМАЄ" not in txt:
+        return _fail("no trade now")
+    if "0.009726" in txt or "бак" in txt.lower() or "пального" in txt.lower():
+        return _fail("invented fuel")
     if txt.lower().count("1) ") != 1:
         return _fail("must be one telegram card")
     if "ймовірніш" in txt.lower() and "без" not in txt.lower():
@@ -65,7 +67,7 @@ def main() -> int:
         return _fail("mm claim")
     if "пропускаємо" not in txt.lower() and "SKIP" not in plan.bot_verdict:
         pass
-    if "початковий вхід пропускаємо" not in txt.lower():
+    if "початковий вхід не копіюємо" not in txt.lower() and "застарів" not in txt.lower():
         return _fail("late/skip entry")
     orig2 = ingest_external_signal(text=raw, msg_id=99)
     if case_key(orig) != case_key(orig2) or plan.case_key != case_key(orig):

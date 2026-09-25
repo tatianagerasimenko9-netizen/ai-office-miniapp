@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from office_atr_policy import classify_atr_day_used
 from office_level_parse import _extract_line_value
@@ -71,6 +73,8 @@ def rr_after_costs(
 def parse_bot_card_overlay(text: str) -> Dict[str, Any]:
     """Картка зовнішнього бота (Вхід/Добір/SL/TP, PENGUUSDT · 5m, СКАЛЬП)."""
     src = str(text or "")
+    src_px = re.sub(r"\(\s*[+-]?\d+(?:[.,]\d+)?\s*%\s*\)", " ", src)
+    src_px = re.sub(r"[+-]\d+(?:[.,]\d+)?\s*%", " ", src_px)
     up = src.upper()
     out: Dict[str, Any] = {
         "symbol": "",
@@ -99,12 +103,12 @@ def parse_bot_card_overlay(text: str) -> Dict[str, Any]:
         out["style"] = "scalp"
     elif "TREND" in up:
         out["style"] = "intraday"
-    entry = _extract_line_value("Вхід", src) or _extract_line_value("Entry", src)
-    add_on = _extract_line_value("Добір", src)
-    sl = _extract_line_value("SL", src, hint=entry)
-    tp1 = _extract_line_value("TP1", src, hint=entry)
-    tp2 = _extract_line_value("TP2", src, hint=entry)
-    tp3 = _extract_line_value("TP3", src, hint=entry)
+    entry = _extract_line_value("Вхід", src_px) or _extract_line_value("Entry", src_px)
+    add_on = _extract_line_value("Добір", src_px)
+    sl = _extract_line_value("SL", src_px, hint=entry)
+    tp1 = _extract_line_value("TP1", src_px, hint=entry)
+    tp2 = _extract_line_value("TP2", src_px, hint=entry)
+    tp3 = _extract_line_value("TP3", src_px, hint=entry)
     out["entry"] = entry
     out["add_on"] = add_on
     out["sl"] = sl
@@ -112,7 +116,26 @@ def parse_bot_card_overlay(text: str) -> Dict[str, Any]:
     out["tp2"] = tp2
     out["tp3"] = tp3
     out["mode"] = infer_trade_mode(out["timeframe"], out["style"])
+    out["source_at"] = parse_bot_card_clock(src)
     return out
+
+
+def parse_bot_card_clock(text: str) -> Optional[str]:
+    """Час на картці бота (Київ, якщо без зони) — не час пересилки в Telegram."""
+    src = str(text or "")
+    m = re.search(
+        r"(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})\.(\d{4})",
+        src,
+    )
+    if not m:
+        return None
+    hh, mm, dd, mo, yy = (int(m.group(i)) for i in range(1, 6))
+    try:
+        kyiv = ZoneInfo("Europe/Kyiv")
+        dt = datetime(yy, mo, dd, hh, mm, tzinfo=kyiv)
+    except Exception:
+        return None
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _c(bar: Any) -> Optional[Dict[str, float]]:
