@@ -5,7 +5,7 @@
 **Людина:** Тетяна (Tatiana Duziak / Duzyak). Торгує близько $1000 — сума психологічно велика. Віктор підтримує; Лев — стратег.  
 **Продукт:** живий AI-офіс (не бот з правилами): Telegram Worker + Mini App.  
 **Репо:** `tatianagerasimenko9-netizen/ai-office-miniapp`.  
-**Дата зрізу:** 25 вересня 2026, після створення PR №36 (не злитий).
+**Дата зрізу:** 25 вересня 2026, після merge PR №36 у `main` (`f537d0a`). Worker/Mini App Auto-Deploy може підхопити цей SHA; Cursor Render API не має — Live Worker треба звірити в логах Render.
 
 ---
 
@@ -13,8 +13,8 @@
 
 | Шар | Що це означає |
 |-----|----------------|
-| **main / Live Worker+Mini App** | Зараз на Render коміт **`714bc7a`** = merge **PR №35**. Фільтр стрічки 3% Live. Контур review PR №36 **ще не на Worker**. |
-| **PR №36 (draft)** | Гілка `cursor/office-lev-full-contour-5134` HEAD **`1f7f27c`**. Виправлення якості розбору зовнішнього сигналу. **Не merge, не deploy**, поки Тетяна окремо не дасть дозвіл. |
+| **main** | **`f537d0a`** = merge **PR №36** поверх PR №35. Код review-контуру і цей бриф уже в main. |
+| **Live Render** | До merge №36 Worker+Mini App були на **`714bc7a`** (PR35). Після `f537d0a` Auto-Deploy *може* оновити сервіси; **Cursor не підтвердив Worker SHA** (немає Render API). Перевіряти логи: Start Command `office_multibot_bootstrap.py` і коміт `f537d0a`. |
 | **Offline PASS** | Скрипти `scripts/test_*.py`. **Не** Live PASS і **не** доказ прибутковості. |
 | **Live PASS стрічки ≥3%** | **Ще не підтверджений.** Бачили, що INSIDE більше не в чат. Не бачили нової торгової картки ≥3% після 23:46. |
 
@@ -158,7 +158,7 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 
 **Висновок Тетяни:** фільтр PR №35 **не** виправляє якість відповіді на пересланий сигнал. З цього повідомлення **не** випливає, що 3% зламаний. PENGU **не** є підтвердженим новим входом. **Не відкривати** ні стару картку бота, ні зону Лева без нового аналізу. Пороги ATR/Edge **не чіпати**.
 
-### 3.6 Єдине комплексне ТЗ на 16 кроків → PR №36 (не злитий)
+### 3.6 Єдине комплексне ТЗ на 16 кроків → PR №36 (злитий)
 
 Тетяна явно: один цикл аудит → фікс → тести → **один PR** → один звіт. Не merge/deploy/угоди.
 
@@ -172,13 +172,13 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 - `(50%)` на рядку входу більше не парситься як ціна 50.
 - `scripts/test_t8_contour_review.py` + повна офлайн-регресія T0–T8/PR35.
 
-**PR №36 не на Worker.** Поки він не злитий і не задеплоєний, Live Лев на пересланих сигналах може ще говорити по-старому.
+**PR №36 злитий у main (`f537d0a`).** Тетяна 25.09 написала «роби» — виконано merge. Деплой Cursor не робив (немає Render API). Якщо Auto-Deploy увімкнений, як після №35, Worker має вийти на `f537d0a`. Поки логи Worker не покажуть цей SHA, Live Лев на пересланих сигналах може ще говорити по-старому (`714bc7a`).
 
 ---
 
-## 4. Що Live зараз (Worker+Mini App = `714bc7a`)
+## 4. Що було Live на Worker до merge №36 (`714bc7a`)
 
-Працює:
+Працює на підтвердженому Worker `714bc7a` (і лишається після №36, плюс новий review-контур коли Worker дійде до `f537d0a`):
 - Весь T0–T8 контур аналізу (scout, range, levels, lifecycle, skip_plan у коді).
 - Фільтр Telegram ≥3% до TP1 + RR після витрат; INSIDE/голий WATCHING не в чат.
 - Спільна БД Mini App ↔ Worker.
@@ -186,18 +186,17 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 
 Не доведено Live:
 - Перша **зрозуміла** картка можливості ≥3% у чаті після 23:46.
-- Якість **повторного** розбору зовнішнього сигналу (це PR36).
+- Якість **повторного** розбору зовнішнього сигналу — у main з №36; Live лише після Worker `f537d0a`.
 
 Не використовувати як live-підтвердження входу: forceOrder поки connecting; новини після timeout.
 
 ---
 
-## 5. Що в коді, але не Live (PR №36)
+## 5. PR №36 — у main, Live Worker ще звірити
 
-Гілка `cursor/office-lev-full-contour-5134`.  
-Файли: `office_external_signal.py`, `office_trader_plan.py`, `office_relay_wizard.py` (ранній return), `office_level_scalp.py` (clock + strip %), `office_atr_policy.py` (plain), `office_bridge.py` (LEV_RULE ПРОПУСК), `office_skip_plan.py`, тести.
+Код на `origin/main` `f537d0a`. Файли: `office_external_signal.py`, `office_trader_plan.py`, `office_relay_wizard.py` (ранній return), `office_level_scalp.py` (clock + strip %), `office_atr_policy.py` (plain), `office_bridge.py` (LEV_RULE ПРОПУСК), `office_skip_plan.py`, `CLAUDE_FULL_CONTEXT_UA.md`, тести.
 
-Чекати **окремий** дозвіл Тетяни на merge №36 і деплой Worker (Mini App уже на 35; після merge 36 Auto-Deploy може підхопити обидва — не деплоїти Mini App «другий раз» без потреби, але Worker має бути саме новий SHA).
+Не деплоїти Mini App вручну «другий раз», якщо Auto-Deploy уже взяв `f537d0a`. Worker перевіряти окремо: коміт у логах = `f537d0a`, старт `office_multibot_bootstrap.py`.
 
 ---
 
@@ -210,7 +209,8 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 | CoinGlass / Hyblock liquidation heatmap | OPEN, немає інтеграції. Не називати підключеною |
 | Прогнозна карта ліквідацій | заборонена підміна forceOrder |
 | Live PASS картки ≥3% у Telegram | чекаємо перше нове повідомлення Лева після 23:46 на `714bc7a` |
-| Merge/deploy PR №36 | не дозволено на момент цього файлу |
+| Merge PR №36 | зроблено 25.09 (`f537d0a`) |
+| Підтверджений Live Worker на `f537d0a` | ще ні (немає Render API в Cursor) |
 | Реальні угоди | заборонені |
 | Зміна ATR 80/90, Edge 85 | заборонена без бектесту і явної команди |
 | Окремий режим scalp-алертів &lt;3% у Telegram | не вмикати, поки Тетяна явно не попросить |
@@ -268,12 +268,12 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 
 ## 10. План / наступні рішення Тетяни (Cursor сам не робить)
 
-1. **Не merge №36**, поки вона не напише окрему команду merge (як було з №34/№35).
-2. Після дозволу: злити №36 → переконатися, що Worker SHA = новий main (не логи Mini App).
-3. Live-перевірка стрічки: перше нове повідомлення Лева після деплою — чи це одна картка ≥3%.
-4. Live-перевірка review: переслати застарілий бот ще раз — чи каже «застарів» і «угоди немає», без бака і без вигаданої зони.
-5. Окремо, якщо попросить: heatmap (нове джерело), T2 Назар, Mini App Home, scalp-стрічка &lt;3% як **окремий режим**.
-6. Реальні угоди — тільки після явного «відкривай» / `/position`. Зараз — ні.
+1. ~~Merge №36~~ — зроблено (`f537d0a`).
+2. Звірити в Render, що **Worker** (не Mini App) на `f537d0a`.
+3. Live-перевірка стрічки: перше нове повідомлення Лева — одна картка ≥3%.
+4. Live-перевірка review: переслати застарілий бот — «застарів» і «угоди немає», без бака і без вигаданої зони.
+5. Окремо, якщо попросить: heatmap, T2 Назар, Mini App Home, scalp-стрічка &lt;3% як окремий режим.
+6. Реальні угоди — тільки після явного «відкривай» / `/position`.
 
 ---
 
@@ -291,10 +291,11 @@ Merge PR №35 у main: **`714bc7aefc8eebe427a9ab47342b247aa836a933`** (25.09.20
 
 | Що | SHA |
 |----|-----|
-| main / Live зараз | `714bc7aefc8eebe427a9ab47342b247aa836a933` (PR35) |
-| Попередній main (T8 без фільтра стрічки) | `2149e9c` (PR34) |
-| PR36 HEAD (не злитий) | `1f7f27c777518efe2a404a4847a9a89440a1688f` |
+| main зараз | `f537d0a613aa32da0a2a8e7d55fea2570cbf1edc` (PR36) |
+| Попередній Live Worker (підтверджений) | `714bc7a` (PR35) |
+| T8 без фільтра стрічки | `2149e9c` (PR34) |
+| PR36 tip до merge | `4916c77` (код `1f7f27c` + цей бриф) |
 | PR35 | https://github.com/tatianagerasimenko9-netizen/ai-office-miniapp/pull/35 MERGED |
-| PR36 | https://github.com/tatianagerasimenko9-netizen/ai-office-miniapp/pull/36 DRAFT, чекає рішення |
+| PR36 | https://github.com/tatianagerasimenko9-netizen/ai-office-miniapp/pull/36 MERGED |
 
 Кінець брифа. Далі дивись актуальний код гілки, з якої працюєш, і не відкочуй пороги ATR/Edge.
