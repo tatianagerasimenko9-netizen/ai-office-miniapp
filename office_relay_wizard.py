@@ -120,7 +120,6 @@ from office_external_signal import (
 )
 from office_range_radar import (
     evaluate_range_radar,
-    format_range_card,
 )
 from office_market_scout import (
     already_ran_without_entry,
@@ -128,9 +127,15 @@ from office_market_scout import (
     promote_for_deep_scan,
     screen_futures_market,
 )
-from office_level_scalp import evaluate_level_book, format_level_book
+from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
 from office_trader_plan import compose_trader_plan, format_trader_plan
+from office_telegram_filter import (
+    level_book_to_alert,
+    newest_quote_asof,
+    quote_is_stale,
+    range_result_to_alert,
+)
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -5163,19 +5168,31 @@ EV позитивне: {prob.get('ev_positive', '')}
                             _range_fp[rsym] = _fp
                         if rres.opens_position:
                             continue
+                        has_intra = (isinstance(rm5, list) and len(rm5) > 0) or (
+                            isinstance(rm15, list) and len(rm15) > 0
+                        )
+                        r_asof = newest_quote_asof(rm5, rm15, rh1)
+                        r_stale = quote_is_stale(r_asof, has_intraday=has_intra)
+                        chase_rng = False
                         if rres.card and already_ran_without_entry(
                             direction=rres.direction,
                             entry=(rres.card or {}).get("entry"),
                             price=rprice,
                             sl=(rres.card or {}).get("sl"),
                         ):
-                            print(f"[scout] skip chase {rsym}")
-                            continue
-                        if rres.should_notify and rres.status != "NONE":
-                            card_txt = format_range_card(rres)
-                            if card_txt:
-                                await send_office(fmt_agent_line("lev", card_txt))
-                                print(f"[range] {rsym} {rres.status} {rres.event} notify")
+                            print(f"[scout] skip chase {rsym} range-alert only")
+                            chase_rng = True
+                        rng_txt = range_result_to_alert(
+                            rres,
+                            quote_asof=r_asof,
+                            chase=chase_rng,
+                            quote_stale=r_stale,
+                        )
+                        if rng_txt:
+                            await send_office(fmt_agent_line("lev", rng_txt))
+                            print(f"[range] {rsym} ALERT {rres.status}")
+                        elif rres.should_notify:
+                            print(f"[range] {rsym} hold {rres.status} {rres.event} (not telegram)")
                         for _mode, _candles, _confirm in (
                             ("intraday", rh1, rm15 if isinstance(rm15, list) else rh1),
                             ("scalp", rm5 if isinstance(rm5, list) and rm5 else rh1, rm5 if isinstance(rm5, list) and rm5 else rm15),
@@ -5194,11 +5211,27 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _level_fp[f"{rsym}:{_mode}"] = _lfp
                             if book.opens_position:
                                 continue
-                            if book.should_notify:
-                                ltxt = format_level_book(book)
-                                if ltxt:
-                                    await send_office(fmt_agent_line("lev", ltxt))
-                                    print(f"[levels] {rsym} {_mode} notify")
+                            chase_lvl = False
+                            for _sc in book.scenarios:
+                                if _sc.status == "CONFIRMED" and already_ran_without_entry(
+                                    direction=_sc.direction,
+                                    entry=_sc.entry,
+                                    price=rprice,
+                                    sl=_sc.sl,
+                                ):
+                                    chase_lvl = True
+                                    break
+                            ltxt = level_book_to_alert(
+                                book,
+                                quote_asof=r_asof,
+                                chase=chase_lvl,
+                                quote_stale=r_stale,
+                            )
+                            if ltxt:
+                                await send_office(fmt_agent_line("lev", ltxt))
+                                print(f"[levels] {rsym} {_mode} ALERT")
+                            elif book.should_notify:
+                                print(f"[levels] {rsym} {_mode} hold (not telegram)")
                     except Exception as exc_range:
                         print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
