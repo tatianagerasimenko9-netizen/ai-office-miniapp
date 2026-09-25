@@ -3527,22 +3527,76 @@ async def office_morning_briefing(
     await agent_say(sender, "olesya", "Веду лог desk-рішень та статистику змін у реальному часі.", 0.08)
 
 
+def build_olesya_evening_debrief(db_path: str, *, now: Optional[datetime] = None) -> str:
+    """Короткий підсумок закритих підтверджених угод за Київ-день. Без LLM. Порожньо = тиша."""
+    today = kyiv_calendar_date(now)
+    try:
+        rows = _fetchall(
+            db_path,
+            """
+            SELECT trade_id, status, outcome, pnl_pct, symbol,
+                   ts_close_utc, entry_reason, setup_name
+            FROM trade_journal
+            """,
+            (),
+        )
+    except Exception:
+        rows = []
+    closed: List[tuple] = []
+    for trade_id, status, outcome, pnl_pct, symbol, ts_close, entry_reason, setup_name in rows:
+        if str(status or "").upper() != "CLOSED":
+            continue
+        if not is_confirmed_position_row(entry_reason, setup_name, trade_id):
+            continue
+        if _journal_row_kyiv_date(ts_close) != today:
+            continue
+        try:
+            pnl = float(pnl_pct or 0.0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        closed.append((str(symbol or "").upper(), str(outcome or "").upper(), pnl))
+    if not closed:
+        return ""
+    tp_n = sum(1 for _s, o, _p in closed if o in ("WIN", "TP", "TP1", "TP2"))
+    sl_n = sum(1 for _s, o, _p in closed if o in ("LOSS", "SL"))
+    pnl_sum = sum(p for _s, _o, p in closed)
+    best_sym, _bo, best_pnl = max(closed, key=lambda x: x[2])
+    try:
+        day_lbl = datetime.strptime(today, "%Y-%m-%d").strftime("%d.%m")
+    except Exception:
+        day_lbl = today
+    best_line = f"Найкраща: {best_sym} {best_pnl:+.1f}%" if best_sym else ""
+    lines = [
+        f"📊 Підсумок {day_lbl}",
+        f"Угод: {len(closed)} · TP: {tp_n} · SL: {sl_n}",
+        f"Результат: {pnl_sum:+.1f}%",
+    ]
+    if best_line:
+        lines.append(best_line)
+    return "\n".join(lines)
+
+
 async def office_evening_debrief(
     sender: AsyncSender,
     *,
-    btc_change_pct: float,
-    journal_summary: str,
-) -> None:
+    btc_change_pct: float = 0.0,
+    journal_summary: str = "",
+    db_path: str = "",
+    now: Optional[datetime] = None,
+) -> bool:
     """
-    Вечірній debrief після сесії (MASTER п.28). Один звіт Лева, без шаблонного хору.
+    Вечірній debrief о 21:00: лише якщо були закриті підтверджені угоди.
+    Текст з journal, без LLM і без шаблонів Лева/Віктора.
     """
-    js = (journal_summary or "").strip()[:1800]
-    body = (
-        f"🌆 Вечірній debrief\n"
-        f"Час за Києвом: `{_now_kyiv_hm()}` · BTC 24г `{btc_change_pct:+.2f}%`\n"
-        f"{js}"
-    )
-    await sender(fmt_agent_line("lev", body[:3900]))
+    _ = btc_change_pct, journal_summary
+    body = ""
+    if db_path:
+        body = build_olesya_evening_debrief(db_path, now=now)
+    if not body:
+        print("[debrief] silent: no confirmed closed trades today")
+        return False
+    await sender(fmt_agent_line("olesya", body[:3900]))
+    return True
 
 
 async def office_emergency_alert(
@@ -3672,8 +3726,7 @@ async def office_handle_signal(
         )
         if not ok:
             log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
-        olesya_note = _olesya_reply(signal, verdict, db_path)
-        await agent_say(sender, "olesya", olesya_note, 0.05)
+        print(f"[desk] olesya silent on {verdict.action}")
         log_verdict(db_path, signal, verdict)
         return verdict
 
@@ -3794,8 +3847,11 @@ async def office_handle_signal(
     )
     if not ok:
         log_event(db_path, "TASK_TRANSITION_ERROR", {"task_id": task_id, "reason": reason, "agent": "olesya"})
-    olesya_note = _olesya_reply(signal, verdict, db_path)
-    await agent_say(sender, "olesya", olesya_note, 0.05)
+    if verdict.action == "ENTER":
+        olesya_note = _olesya_reply(signal, verdict, db_path)
+        await agent_say(sender, "olesya", olesya_note, 0.05)
+    else:
+        print(f"[desk] olesya silent on {verdict.action}")
     log_verdict(db_path, signal, verdict)
     return verdict
 
@@ -3809,14 +3865,6 @@ async def office_trade_closed(
     db_path: str = "office_bridge.db",
 ) -> None:
     await sender(_fmt_closed_case(symbol, outcome, pnl_pct, note))
-    if outcome == "WIN":
-        await agent_say(sender, "marko", "План виконано чисто. Фіксація без жадібності спрацювала.", 0.06)
-        await agent_say(sender, "olesya", "Додаю патерн у best-practices та піднімаю вагу цього сценарію.", 0.06)
-    elif outcome == "LOSS":
-        await agent_say(sender, "daryna", "Лосс контрольований. Капітал цілий — це головне.", 0.06)
-        await agent_say(sender, "olesya", "Роблю короткий розбір: контекст, таймінг і що виправити далі.", 0.06)
-    else:
-        await agent_say(sender, "lev", "Нейтральне закриття — це нормально. Переходимо до наступного чистого сетапу.", 0.06)
     log_event(db_path, "CASE_CLOSED", {"symbol": symbol, "outcome": outcome, "pnl_pct": pnl_pct, "note": note})
 
 
@@ -3857,13 +3905,6 @@ async def office_news_trigger(
         )
         return
     await agent_say(sender, "news", msg, 0.02)
-    if data_status == DATA_UNAVAILABLE:
-        return
-    if risk_level == "HIGH RISK":
-        await agent_say(sender, "daryna", "Вето по новинах. Нові входи тимчасово блокуємо.", 0.02)
-        await agent_say(sender, "marko", "Рішення: пауза, діє новинне блокування.", 0.02)
-    elif risk_level == "RISK":
-        await agent_say(sender, "lev", "Знижаємо агресію. Тільки преміум-кейси.", 0.02)
     log_event(
         db_path,
         "NEWS_TRIGGER",

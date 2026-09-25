@@ -195,3 +195,27 @@ def plan_watching_zone_hit(
         run_reanalyze=incomplete and not atr_block,
         message=message,
     )
+
+
+def zone_reached_to_telegram(plan: WatchingZonePlan) -> bool:
+    """PR41: SIGNAL=NO лише БД. Готовий вхід іде як SIGNAL_ENTRY, не текст ZONE_REACHED."""
+    return bool(plan.in_zone and plan.signal_ok)
+
+
+def format_zone_signal_entry(
+    *,
+    symbol: str,
+    current_price: Any,
+    entry_low: Any,
+    entry_high: Any,
+    sl: Any,
+    tp1: Any,
+    tp2: Any = None,
+) -> str:
+    """Картка входу після готової зони (не службовий ZONE_REACHED)."""
+    return (
+        f"Тетяно, {symbol} підтвердив зону входу {entry_low}–{entry_high}.\n"
+        f"Ціна: {current_price}. SL: {sl} · TP1: {tp1}"
+        + (f" · TP2: {tp2}" if tp2 is not None else "")
+        + "\nМожна входити."
+    )

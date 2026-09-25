@@ -16,6 +16,7 @@ from office_bridge import (  # noqa: E402
     _execute,
     _fetchone,
     build_evening_journal_summary,
+    build_olesya_evening_debrief,
     init_office_db,
     is_confirmed_position_row,
     journal_open_trade,
@@ -101,13 +102,24 @@ def main() -> int:
         ("2026-05-06T10:00:00+00:00", "relay-closed-0"),
     )
 
+    sent: list[str] = []
+
+    async def _sender(msg: str) -> None:
+        sent.append(msg)
+
+    asyncio.run(office_evening_debrief(_sender, btc_change_pct=-0.35, journal_summary=text, db_path=db, now=NOW))
+    if sent:
+        return _fail(f"no trades today must be silent, got {sent}")
+    empty = build_olesya_evening_debrief(db, now=NOW)
+    if empty:
+        return _fail("empty debrief text")
+
     pos = handle_position_command(
         "/position DEBRIEFUSDT LONG entry=100 sl=95 status=CLOSED pnl=-1.2",
         db,
     )
     if not pos.get("ok"):
         return _fail(f"position {pos}")
-    # дата закриття /position = now машини; підженемо під Київ 25.09
     _execute(
         db,
         "UPDATE trade_journal SET ts_close_utc=?, outcome=?, pnl_pct=?, r_multiple=? WHERE trade_id=?",
@@ -134,18 +146,24 @@ def main() -> int:
     if open_desk != 20:
         return _fail("must not auto-close Desk ENTER OPEN")
 
-    sent: list[str] = []
-
-    async def _sender(msg: str) -> None:
-        sent.append(msg)
-
-    asyncio.run(office_evening_debrief(_sender, btc_change_pct=-0.35, journal_summary=text))
+    _execute(
+        db,
+        "UPDATE trade_journal SET outcome=?, pnl_pct=? WHERE trade_id=?",
+        ("WIN", 5.6, pos["trade_id"]),
+    )
+    card = build_olesya_evening_debrief(db, now=NOW)
+    if "Підсумок" not in card or "Угод: 1" not in card or "TP: 1" not in card:
+        return _fail(f"olesya card\n{card}")
+    if "DEBRIEFUSDT" not in card:
+        return _fail(f"best trade\n{card}")
+    sent.clear()
+    asyncio.run(office_evening_debrief(_sender, db_path=db, now=NOW))
     if len(sent) != 1:
-        return _fail(f"must be one message, got {len(sent)}")
-    if "Олеся" in sent[0] or "Дарина" in sent[0] or "Віктор" in sent[0]:
-        return _fail("no chorus templates")
-    if "Лев" not in sent[0] and "лев" not in sent[0].lower() and "🦁" not in sent[0]:
-        return _fail("must be Lev report")
+        return _fail(f"must be one olesya message, got {len(sent)}")
+    if "Олеся" not in sent[0] and "olesya" not in sent[0].lower() and "📊" not in sent[0]:
+        return _fail(f"must be Olesya report {sent[0]}")
+    if "Віктор" in sent[0] or "Лев" in sent[0]:
+        return _fail("no lev/victor templates")
     print("OK evening debrief")
     return 0
 

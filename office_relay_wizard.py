@@ -103,7 +103,9 @@ from office_zone_alert import (
     T0_PROBE_PREFIX,
     ZONE_REACHED_COOLDOWN_SEC,
     after_zone_reached_action,
+    format_zone_signal_entry,
     plan_watching_zone_hit,
+    zone_reached_to_telegram,
 )
 from office_level_parse import apply_zone_sanity, parse_signal_levels_from_text
 from office_watching_dedup import (
@@ -140,11 +142,17 @@ from office_telegram_filter import (
     range_result_to_alert,
 )
 from office_telegram_policy import (
+    EVENT_EVENING_DEBRIEF,
+    EVENT_NEWS_CRITICAL,
+    EVENT_SIGNAL_ENTRY,
+    EVENT_TRADE_CLOSED,
+    EVENT_TRADE_UPDATE,
     KIND_SIGNAL,
     KIND_SWEEP_NEAR,
     KIND_WATCHING,
     allow_proactive_telegram,
     mark_cycle_sent,
+    may_send_proactive,
     preferred_scan_mode,
 )
 from office_lifecycle import db_status_for
@@ -1540,255 +1548,259 @@ async def full_auto_analysis(
     db_path: str,
     *,
     watching_signal_id: Optional[str] = None,
+    reply_to_user: bool = True,
 ) -> bool:
     """
     Full automatic desk analysis for a symbol when user sends symbol-only text.
 
     Returns True if an existing WATCHING row was expired (Lev SKIP — зупинка циклу).
+    Проактивний скан/зона: без LLM і без Telegram (reply_to_user=False).
     """
-    await sender(f"🔍 Аналізую {symbol}...")
-    try:
-        from office_market_data import (
-            fetch_atr_context,
-            fetch_candles,
-            fetch_funding_rate,
-            fetch_key_levels,
-            fetch_liquidations_proxy,
-            fetch_long_short_ratio,
-            fetch_market_regime,
-            fetch_open_interest,
-            fetch_ote_levels,
-            fetch_probability_score,
-        )
-    except Exception as exc:
-        await agent_say(sender, "lev", f"Не можу підняти модулі аналізу для {symbol}: {exc}")
+    if not reply_to_user:
+        print(f"[desk] skip proactive LLM/Telegram for {symbol}")
         return False
+    analyzing_hint: Optional[asyncio.Task] = None
 
+    async def _analyzing_after_delay() -> None:
+        await asyncio.sleep(10.0)
+        await sender(f"🔍 Аналізую {symbol}...")
+
+    analyzing_hint = asyncio.create_task(_analyzing_after_delay())
     try:
-        candles_1h = fetch_candles(symbol, "1h", 5)
-        candles_4h = fetch_candles(symbol, "4h", 5)
-        atr = fetch_atr_context(symbol)
-        oi = fetch_open_interest(symbol)
-        liq = fetch_liquidations_proxy(symbol)
-        ls = fetch_long_short_ratio(symbol)
-        levels = fetch_key_levels(symbol)
-        ote = fetch_ote_levels(symbol, "1h")
-        funding = fetch_funding_rate(symbol)
-    except Exception as exc:
-        await agent_say(sender, "lev", f"Не змогла зібрати ринкові дані по {symbol}: {exc}")
-        return False
-
-    def _tf_snapshot(label: str, candles: Any) -> str:
-        if not isinstance(candles, list) or len(candles) < 2:
-            return f"{label}: n/a"
         try:
-            last_price = float((candles[-1] or {}).get("close"))
-            prev_price = float((candles[-2] or {}).get("close"))
-            if prev_price == 0:
-                return f"{label}: {last_price:.6f} (+0.0%)"
-            change = (last_price - prev_price) / prev_price * 100.0
-            return f"{label}: {last_price:.6f} ({change:+.1f}%)"
-        except Exception:
-            return f"{label}: n/a"
+            from office_market_data import (
+                fetch_atr_context,
+                fetch_candles,
+                fetch_funding_rate,
+                fetch_key_levels,
+                fetch_liquidations_proxy,
+                fetch_long_short_ratio,
+                fetch_market_regime,
+                fetch_open_interest,
+                fetch_ote_levels,
+                fetch_probability_score,
+            )
+        except Exception as exc:
+            await agent_say(sender, "lev", f"Не можу підняти модулі аналізу для {symbol}: {exc}")
+            return False
 
-    system = f"{LEV_RULE}"
-    current_price = liq.get("current_price") if isinstance(liq, dict) else None
-    h1_snapshot = _tf_snapshot("H1", candles_1h)
-    h4_snapshot = _tf_snapshot("H4", candles_4h)
-    context = (
-        f"Монета: {symbol}\n\n"
-        f"Поточна ціна: {current_price}\n\n"
-        f"ATR стан: {(atr.get('assessment') if isinstance(atr, dict) else None)}\n"
-        f"Пройдено за день: {(atr.get('day_used_pct') if isinstance(atr, dict) else None)}%\n\n"
-        f"Funding: {(funding.get('funding_rate_pct') if isinstance(funding, dict) else None)}%\n\n"
-        f"OI тренд: {(oi.get('history', []) if isinstance(oi, dict) else [])}\n\n"
-        f"Long/Short: {(ls.get('current_ratio') if isinstance(ls, dict) else None)}\n\n"
-        f"Ліквідності:\n"
-        f"Зверху: {(liq.get('liq_zone_above') if isinstance(liq, dict) else None)}\n"
-        f"Знизу: {(liq.get('liq_zone_below') if isinstance(liq, dict) else None)}\n\n"
-        f"Ключові рівні: {(levels.get('levels', []) if isinstance(levels, dict) else [])}\n\n"
-        f"OTE зона: {ote}\n\n"
-        f"{h1_snapshot}\n"
-        f"{h4_snapshot}\n"
-        f"current_price: {current_price}\n"
-    )
-    try:
-        prob = fetch_probability_score(symbol, db_path)
-        regime = fetch_market_regime(symbol)
-        context += f"""
-Додаткові дані:
-Хто контролює: {regime.get('controller', '')}
-Очікувана цінність (EV): {prob.get('expected_value', '')}
-EV позитивне: {prob.get('ev_positive', '')}
-Ймовірність маніпуляції: {prob.get('sweep_probability', '')}%
-Ймовірність фейкового пробою: {prob.get('fake_breakout_prob', '')}%
-"""
-    except Exception:
-        pass
-    print(f"[debug] lev context tail: {context[-300:]}")
-    response = clean_llm_note(
-        ask_agent("lev", system, context, max_tokens=3000, db_path=db_path)
-    )
-    if response:
-        # Повна відповідь для парсингу рівнів (обрізка до N рядків лише для Telegram).
-        response_for_parse = response
-        lines = response.split('\n')
-        lines = [l for l in lines if l.strip()]
-        if len(lines) > 16:
-            response_send = '\n'.join(lines[:16])
-        else:
-            response_send = response
-        _sent = False
-        if not _sent:
-            msg_out = response_send
-            if len(msg_out) > 3900:
-                msg_out = msg_out[:3897] + "..."
-            await agent_say(sender, "lev", msg_out)
-            _sent = True
+        try:
+            candles_1h = fetch_candles(symbol, "1h", 5)
+            candles_4h = fetch_candles(symbol, "4h", 5)
+            atr = fetch_atr_context(symbol)
+            oi = fetch_open_interest(symbol)
+            liq = fetch_liquidations_proxy(symbol)
+            ls = fetch_long_short_ratio(symbol)
+            levels = fetch_key_levels(symbol)
+            ote = fetch_ote_levels(symbol, "1h")
+            funding = fetch_funding_rate(symbol)
+        except Exception as exc:
+            await agent_say(sender, "lev", f"Не змогла зібрати ринкові дані по {symbol}: {exc}")
+            return False
 
-        no_entry_phrases = [
-            "не входжу",
-            "не входимо",
-            "пропуск",
-            "пропускаю",
-            "пропускаємо",
-            "немає входу",
-            "no entry",
-        ]
+        def _tf_snapshot(label: str, candles: Any) -> str:
+            if not isinstance(candles, list) or len(candles) < 2:
+                return f"{label}: n/a"
+            try:
+                last_price = float((candles[-1] or {}).get("close"))
+                prev_price = float((candles[-2] or {}).get("close"))
+                if prev_price == 0:
+                    return f"{label}: {last_price:.6f} (+0.0%)"
+                change = (last_price - prev_price) / prev_price * 100.0
+                return f"{label}: {last_price:.6f} ({change:+.1f}%)"
+            except Exception:
+                return f"{label}: n/a"
 
-        levels = apply_zone_sanity(
-            _parse_signal_levels_from_text(response_for_parse),
-            current_price,
+        system = f"{LEV_RULE}"
+        current_price = liq.get("current_price") if isinstance(liq, dict) else None
+        h1_snapshot = _tf_snapshot("H1", candles_1h)
+        h4_snapshot = _tf_snapshot("H4", candles_4h)
+        context = (
+            f"Монета: {symbol}\n\n"
+            f"Поточна ціна: {current_price}\n\n"
+            f"ATR стан: {(atr.get('assessment') if isinstance(atr, dict) else None)}\n"
+            f"Пройдено за день: {(atr.get('day_used_pct') if isinstance(atr, dict) else None)}%\n\n"
+            f"Funding: {(funding.get('funding_rate_pct') if isinstance(funding, dict) else None)}%\n\n"
+            f"OI тренд: {(oi.get('history', []) if isinstance(oi, dict) else [])}\n\n"
+            f"Long/Short: {(ls.get('current_ratio') if isinstance(ls, dict) else None)}\n\n"
+            f"Ліквідності:\n"
+            f"Зверху: {(liq.get('liq_zone_above') if isinstance(liq, dict) else None)}\n"
+            f"Знизу: {(liq.get('liq_zone_below') if isinstance(liq, dict) else None)}\n\n"
+            f"Ключові рівні: {(levels.get('levels', []) if isinstance(levels, dict) else [])}\n\n"
+            f"OTE зона: {ote}\n\n"
+            f"{h1_snapshot}\n"
+            f"{h4_snapshot}\n"
+            f"current_price: {current_price}\n"
         )
-        parsed = levels
-        if levels.get("entry_low"):
-            print(f"[signal] {symbol} levels OK: {levels}")
-        else:
-            print(f"[signal] {symbol} no levels in response")
-        low_resp = response_for_parse.lower()
-        if any(p in low_resp for p in no_entry_phrases):
-            if watching_signal_id and should_keep_watching_on_skip():
-                if parsed.get("entry_low") is not None:
-                    gate_keep = apply_skip_watching_gate(
-                        db_path,
-                        symbol=symbol,
-                        direction="SHORT"
-                        if ("SHORT" in response_for_parse.upper() or "ШОРТ" in response_for_parse.upper())
-                        else "LONG",
-                        entry_low=parsed.get("entry_low"),
-                        entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
-                        timeframe="1h",
-                        now_ts=time.time(),
-                        current_price=current_price,
-                    )
-                    record_skip_if_valid(
-                        db_path,
-                        gate_keep,
-                        symbol=symbol,
-                        timeframe="1h",
-                    )
-                await agent_say(
-                    sender,
-                    "olesya",
-                    f"{symbol}: Лев дав ПРОПУСК по входу — WATCHING лишається, ZONE_REACHED не глушу.",
-                )
+        try:
+            prob = fetch_probability_score(symbol, db_path)
+            regime = fetch_market_regime(symbol)
+            context += f"""
+    Додаткові дані:
+    Хто контролює: {regime.get('controller', '')}
+    Очікувана цінність (EV): {prob.get('expected_value', '')}
+    EV позитивне: {prob.get('ev_positive', '')}
+    Ймовірність маніпуляції: {prob.get('sweep_probability', '')}%
+    Ймовірність фейкового пробою: {prob.get('fake_breakout_prob', '')}%
+    """
+        except Exception:
+            pass
+        print(f"[debug] lev context tail: {context[-300:]}")
+        response = clean_llm_note(
+            ask_agent("lev", system, context, max_tokens=3000, db_path=db_path)
+        )
+        if response:
+            # Повна відповідь для парсингу рівнів (обрізка до N рядків лише для Telegram).
+            response_for_parse = response
+            lines = response.split('\n')
+            lines = [l for l in lines if l.strip()]
+            if len(lines) > 16:
+                response_send = '\n'.join(lines[:16])
+            else:
+                response_send = response
+            _sent = False
+            if not _sent:
+                msg_out = response_send
+                if len(msg_out) > 3900:
+                    msg_out = msg_out[:3897] + "..."
+                await agent_say(sender, "lev", msg_out)
+                _sent = True
+
+            no_entry_phrases = [
+                "не входжу",
+                "не входимо",
+                "пропуск",
+                "пропускаю",
+                "пропускаємо",
+                "немає входу",
+                "no entry",
+            ]
+
+            levels = apply_zone_sanity(
+                _parse_signal_levels_from_text(response_for_parse),
+                current_price,
+            )
+            parsed = levels
+            if levels.get("entry_low"):
+                print(f"[signal] {symbol} levels OK: {levels}")
+            else:
+                print(f"[signal] {symbol} no levels in response")
+            low_resp = response_for_parse.lower()
+            if any(p in low_resp for p in no_entry_phrases):
+                if watching_signal_id and should_keep_watching_on_skip():
+                    if parsed.get("entry_low") is not None:
+                        gate_keep = apply_skip_watching_gate(
+                            db_path,
+                            symbol=symbol,
+                            direction="SHORT"
+                            if ("SHORT" in response_for_parse.upper() or "ШОРТ" in response_for_parse.upper())
+                            else "LONG",
+                            entry_low=parsed.get("entry_low"),
+                            entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
+                            timeframe="1h",
+                            now_ts=time.time(),
+                            current_price=current_price,
+                        )
+                        record_skip_if_valid(
+                            db_path,
+                            gate_keep,
+                            symbol=symbol,
+                            timeframe="1h",
+                        )
+                print(f"[desk] {symbol}: Lev SKIP — WATCHING stays, Olesya silent")
                 return True
-            # T3: новий WATCHING після SKIP лише якщо сценарій ще не скіпали і зони немає.
-            if parsed.get("entry_low") is not None:
-                correlation = check_portfolio_correlation(db_path)
-                if not correlation.get("safe"):
-                    await agent_say(sender, "daryna", correlation["message"])
-                    return False
-                direction_watch = "LONG"
-                up_watch = response_for_parse.upper()
-                if "SHORT" in up_watch or "ШОРТ" in up_watch:
-                    direction_watch = "SHORT"
-                elif "LONG" in up_watch or "ЛОНГ" in up_watch:
+                # T3: новий WATCHING після SKIP лише якщо сценарій ще не скіпали і зони немає.
+                if parsed.get("entry_low") is not None:
+                    correlation = check_portfolio_correlation(db_path)
+                    if not correlation.get("safe"):
+                        await agent_say(sender, "daryna", correlation["message"])
+                        return False
                     direction_watch = "LONG"
-                now_ts = time.time()
-                gate = apply_skip_watching_gate(
-                    db_path,
-                    symbol=symbol,
-                    direction=direction_watch,
-                    entry_low=parsed.get("entry_low"),
-                    entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
-                    timeframe="1h",
-                    now_ts=now_ts,
-                    current_price=current_price,
-                )
-                if gate.get("create"):
-                    signal_id = f"watch-{symbol}-{int(now_ts)}"
-                    signal_upsert(
+                    up_watch = response_for_parse.upper()
+                    if "SHORT" in up_watch or "ШОРТ" in up_watch:
+                        direction_watch = "SHORT"
+                    elif "LONG" in up_watch or "ЛОНГ" in up_watch:
+                        direction_watch = "LONG"
+                    now_ts = time.time()
+                    gate = apply_skip_watching_gate(
                         db_path,
-                        signal_id=signal_id,
                         symbol=symbol,
                         direction=direction_watch,
                         entry_low=parsed.get("entry_low"),
                         entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
-                        sl=parsed.get("sl"),
-                        tp1=parsed.get("tp1"),
-                        tp2=parsed.get("tp2"),
-                        rr=parsed.get("rr"),
-                        status="WATCHING",
-                        analysis_note=response_for_parse,
+                        timeframe="1h",
+                        now_ts=now_ts,
+                        current_price=current_price,
                     )
-                    await agent_say(
-                        sender,
-                        "olesya",
-                        f"Зона {symbol} {parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} в WATCHING. "
-                        "Повідомлю як ціна дійде.",
+                    if gate.get("create"):
+                        signal_id = f"watch-{symbol}-{int(now_ts)}"
+                        signal_upsert(
+                            db_path,
+                            signal_id=signal_id,
+                            symbol=symbol,
+                            direction=direction_watch,
+                            entry_low=parsed.get("entry_low"),
+                            entry_high=parsed.get("entry_high") or parsed.get("entry_low"),
+                            sl=parsed.get("sl"),
+                            tp1=parsed.get("tp1"),
+                            tp2=parsed.get("tp2"),
+                            rr=parsed.get("rr"),
+                            status="WATCHING",
+                            analysis_note=response_for_parse,
+                        )
+                        print(
+                            f"[desk] {symbol} WATCHING zone "
+                            f"{parsed.get('entry_low')}–{parsed.get('entry_high') or parsed.get('entry_low')} (Telegram silent)"
+                        )
+                    else:
+                        print(f"[relay] T3 skip duplicate WATCHING {symbol} key={gate.get('key')}")
+                    record_skip_if_valid(
+                        db_path,
+                        gate,
+                        symbol=symbol,
+                        timeframe="1h",
                     )
-                else:
-                    print(f"[relay] T3 skip duplicate WATCHING {symbol} key={gate.get('key')}")
-                record_skip_if_valid(
-                    db_path,
-                    gate,
-                    symbol=symbol,
-                    timeframe="1h",
-                )
-            return False
-        if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
-            parsed.get("tp1") is not None or parsed.get("tp2") is not None
-        ):
-            candles_check = fetch_candles(symbol, "1h", 1)
-            if not candles_check:
-                await sender(f"{symbol} — символ не знайдено на Binance.")
                 return False
-            direction = "LONG"
-            up = response_for_parse.upper()
-            if "SHORT" in up or "ШОРТ" in up:
-                direction = "SHORT"
-            elif "LONG" in up or "ЛОНГ" in up:
+            if parsed.get("entry_low") is not None and parsed.get("sl") is not None and (
+                parsed.get("tp1") is not None or parsed.get("tp2") is not None
+            ):
+                candles_check = fetch_candles(symbol, "1h", 1)
+                if not candles_check:
+                    await sender(f"{symbol} — символ не знайдено на Binance.")
+                    return False
                 direction = "LONG"
-            correlation = check_portfolio_correlation(db_path)
-            if not correlation.get("safe"):
-                await agent_say(sender, "daryna", correlation["message"])
-                return False
-            signal_id = f"manual-{symbol}-{int(time.time())}"
-            signal_upsert(
-                db_path,
-                signal_id=signal_id,
-                symbol=symbol,
-                direction=direction,
-                entry_low=parsed.get("entry_low"),
-                entry_high=parsed.get("entry_high"),
-                sl=parsed.get("sl"),
-                tp1=parsed.get("tp1"),
-                tp2=parsed.get("tp2"),
-                rr=parsed.get("rr"),
-                status="ACTIVE",
-                analysis_note=response_for_parse,
-            )
-            print(f"[signal] saved {symbol} {direction}")
-            await agent_say(
-                sender,
-                "olesya",
-                f"Сигнал {symbol} {direction} зафіксовано в журнал. Моніторинг активовано 24/7.",
-            )
-    else:
-        await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
-    return False
+                up = response_for_parse.upper()
+                if "SHORT" in up or "ШОРТ" in up:
+                    direction = "SHORT"
+                elif "LONG" in up or "ЛОНГ" in up:
+                    direction = "LONG"
+                correlation = check_portfolio_correlation(db_path)
+                if not correlation.get("safe"):
+                    await agent_say(sender, "daryna", correlation["message"])
+                    return False
+                signal_id = f"manual-{symbol}-{int(time.time())}"
+                signal_upsert(
+                    db_path,
+                    signal_id=signal_id,
+                    symbol=symbol,
+                    direction=direction,
+                    entry_low=parsed.get("entry_low"),
+                    entry_high=parsed.get("entry_high"),
+                    sl=parsed.get("sl"),
+                    tp1=parsed.get("tp1"),
+                    tp2=parsed.get("tp2"),
+                    rr=parsed.get("rr"),
+                    status="ACTIVE",
+                    analysis_note=response_for_parse,
+                )
+            print(f"[signal] saved {symbol} {direction} (Olesya journal silent)")
+        else:
+            await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
+        return False
 
+    finally:
+        if analyzing_hint is not None and not analyzing_hint.done():
+            analyzing_hint.cancel()
 
 async def office_free_chat(
     sender,
@@ -2544,44 +2556,25 @@ async def run() -> None:
                 await asyncio.sleep(0.5)
         return first_id
 
+    async def send_proactive(
+        event_type: str,
+        message: str,
+        reply_to_message_id: Optional[int] = None,
+        stream: str = "general",
+    ) -> Optional[int]:
+        if not may_send_proactive(event_type):
+            print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
+            return None
+        return await send_office(message, reply_to_message_id=reply_to_message_id, stream=stream)
+
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
-            await send_office(
-                "Офіс на зв'язку. Готові працювати.\n\n"
-                + get_session_status_kyiv(include_kill_zone=False)
-            )
             _RELAY_OFFICE_STARTUP_PING_SENT = True
-            print("[relay] startup ping sent to OFFICE")
-            try:
-                tz = _briefing_tzinfo()
-                now_k = datetime.now(tz)
-                h = now_k.hour
-                if 5 <= h < 12:
-                    slot = "ранок"
-                elif 12 <= h < 18:
-                    slot = "день"
-                elif 18 <= h < 23:
-                    slot = "вечір"
-                else:
-                    slot = "ніч"
-                ctx_hi = (
-                    f"Зараз за Києвом: {slot}, {now_k.strftime('%H:%M')}. "
-                    "Офіс щойно увімкнувся — один короткий привіт Тетяні й команді в чаті, по-людськи."
-                )
-                olesya_hi = clean_llm_note(
-                    ask_agent(
-                        "olesya",
-                        OLESYA_RULE,
-                        ctx_hi,
-                        max_tokens=60,
-                        db_path=db_path,
-                    )
-                )
-                if olesya_hi:
-                    olesya_hi = clean_self_naming(olesya_hi, "olesya")
-                    await send_office(fmt_agent_line("olesya", olesya_hi), stream="general")
-            except Exception as exc_ohi:
-                print(f"[relay][WARN] olesya startup greet failed: {exc_ohi}")
+            print(
+                "[relay] startup ping logged only (no Telegram). "
+                "Duplicate pings mean two Worker processes or a restart loop; "
+                "_RELAY_OFFICE_STARTUP_PING_SENT is per-process."
+            )
 
         # П.19: технічний канал Артема — короткий health у гілку «Техніка» (якщо задано OFFICE_TECH_THREAD_ID).
         tech_health_off = os.getenv("RELAY_TECH_HEALTH_ON_START", "0").strip() == "0"
@@ -2954,8 +2947,7 @@ async def run() -> None:
                 print(f"[relay][WARN] market_state_get failed: {type(exc_ms).__name__}: {exc_ms}")
                 _ms = None
             if scanner_signal_blocked((_ms or {}).get("bot_action")):
-                await send_office(scanner_blocked_notice(getattr(sig, "symbol", "") or ""))
-                print(f"[relay] scanner BLOCKED by office symbol={getattr(sig, 'symbol', '')}")
+                print(f"[relay] scanner BLOCKED by office symbol={getattr(sig, 'symbol', '')} (Telegram silent)")
                 return
             if news_api_key:
                 news_timeout = aiohttp.ClientTimeout(total=10)
@@ -2976,88 +2968,11 @@ async def run() -> None:
                     sig.meta["news_importance"] = live_news.importance or "low"
                 except Exception as exc:
                     print(f"[relay][WARN] live news risk refresh failed: {type(exc).__name__}: {exc}")
-            kickoff_msg_id = await send_office(build_signal_kickoff(sig.symbol, sig.direction))
-            mirror_msg_id = await send_office(
-                "🔔 Новий сигнал від My Crypto Scanner:\n"
-                f"{text[:3800]}",
-                reply_to_message_id=kickoff_msg_id,
+            print(
+                f"[relay] scanner auto {getattr(sig, 'symbol', '')}: "
+                "no kickoff/desk LLM (proactive SKIP silent; SIGNAL_ENTRY comes from radar card)"
             )
-            print("[relay] mirror sent")
-            thread_root_id = mirror_msg_id or kickoff_msg_id
-
-            async def sender(msg: str) -> None:
-                await send_office(msg[:3900], reply_to_message_id=thread_root_id)
-
-            verdict = await office_handle_signal(sender=sender, signal=sig, db_path=db_path)
-            if verdict.action == "ENTER":
-                # T1: ENTER по картці сканера — розбір, не позиція Тетяни.
-                if not scanner_enter_opens_position(verdict.action):
-                    await send_office(scanner_review_notice(sig.symbol, verdict.action))
-                    print(f"[relay] T1 scanner ENTER kept as review symbol={sig.symbol}")
-                else:
-                    recurring = journal_recurring_mistakes(db_path, lookback_losses=60, min_count=2)
-                    if recurring:
-                        hints = journal_learning_hints_from_tags(recurring)[:3]
-                        await send_office(
-                            "Нагадування перед входом (з минулих помилок):\n"
-                            + "\n".join(f"- {h}" for h in hints),
-                            stream="tasks",
-                        )
-                    active_positions[sig.signal_id] = ActivePosition(
-                        signal_id=sig.signal_id,
-                        symbol=sig.symbol,
-                        direction=sig.direction,
-                        opened_ts=time.time(),
-                        stage=0,
-                        initial_volatility_pct=float(sig.meta.get("volatility_pct", 0.0)),
-                        initial_news_risk=str(sig.meta.get("news_risk", "SAFE")),
-                    )
-                    setup_tag = detect_setup_type(sig)
-                    journal_open_trade(
-                        db_path,
-                        trade_id=sig.signal_id,
-                        symbol=sig.symbol,
-                        direction=sig.direction,
-                        entry_price=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                        stop_loss=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
-                        take_profit=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
-                        setup_name=setup_tag,
-                        timeframe="auto",
-                        entry_reason="Desk ENTER after agent chain",
-                        context={
-                            "setup_type": setup_tag,
-                            "session": sig.session,
-                            "regime": sig.regime,
-                            "score": sig.score,
-                        },
-                    )
-                    signal_upsert(
-                        db_path,
-                        signal_id=sig.signal_id,
-                        symbol=sig.symbol,
-                        direction=sig.direction,
-                        entry_low=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                        entry_high=(float(sig.meta.get("entry_price")) if sig.meta.get("entry_price") else None),
-                        sl=(float(sig.meta.get("stop_loss")) if sig.meta.get("stop_loss") else None),
-                        tp1=(float(sig.meta.get("take_profit")) if sig.meta.get("take_profit") else None),
-                        tp2=None,
-                        rr=(float(sig.meta.get("rr")) if sig.meta.get("rr") else None),
-                        status="ACTIVE",
-                        analysis_note=str(verdict.summary or ""),
-                    )
-                    await agent_say(
-                        sender,
-                        "olesya",
-                        f"Сигнал {sig.symbol} {sig.direction} зафіксовано. Стежу 24/7.",
-                    )
-                    await office_position_event(
-                        sender=sender,
-                        symbol=sig.symbol,
-                        event_type="PRICE_UPDATE",
-                        details="Позицію відкрито. Моніторинг активовано (24/7).",
-                        db_path=db_path,
-                    )
-            print("[relay] office_handle_signal done")
+            return
         except Exception as exc:
             print(f"[relay][ERROR] handler failed: {exc}")
 
@@ -3108,7 +3023,7 @@ async def run() -> None:
                     age = now - p.opened_ts
 
                     async def sender(msg: str) -> None:
-                        await send_office(msg[:3900])
+                        await send_proactive(EVENT_TRADE_UPDATE, msg[:3900])
 
                     # LIVE PRICE trigger: initialize entry from first fetched price.
                     try:
@@ -3131,7 +3046,10 @@ async def run() -> None:
                                 details="Через 60с немає живої ціни: часткова фіксація 50% у запасному режимі.",
                                 db_path=db_path,
                             )
-                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: частково закрити 50% по {p.symbol}.")
+                            await send_proactive(
+                                EVENT_TRADE_UPDATE,
+                                f"{p.symbol}: часткова фіксація 50%.",
+                            )
                             p.stage = 1
                             continue
                         if p.stage == 1 and age >= 120:
@@ -3142,7 +3060,10 @@ async def run() -> None:
                                 details="Через 120с: переносимо стоп у беззбиток у запасному режимі.",
                                 db_path=db_path,
                             )
-                            await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: перенести SL в беззбиток по {p.symbol}.")
+                            await send_proactive(
+                                EVENT_TRADE_UPDATE,
+                                f"{p.symbol}: стоп у беззбиток.",
+                            )
                             p.stage = 2
                             continue
                         if p.stage == 2 and age >= 180:
@@ -3189,7 +3110,10 @@ async def run() -> None:
                             details=f"Жива ціна +{move_pct:.2f}%: часткова фіксація 50%.",
                             db_path=db_path,
                         )
-                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: частково закрити 50% по {p.symbol}.")
+                        await send_proactive(
+                            EVENT_TRADE_UPDATE,
+                            f"{p.symbol}: часткова фіксація 50%.",
+                        )
                         p.partial_sent = True
                         continue
                     if p.partial_sent and (not p.moved_sl) and move_pct >= 2.0:
@@ -3200,7 +3124,10 @@ async def run() -> None:
                             details=f"Жива ціна +{move_pct:.2f}%: переносимо стоп у беззбиток.",
                             db_path=db_path,
                         )
-                        await send_office(f"⚙️ *Марко «Алгоритм»:*\nРішення: перенести SL в беззбиток по {p.symbol}.")
+                        await send_proactive(
+                            EVENT_TRADE_UPDATE,
+                            f"{p.symbol}: стоп у беззбиток.",
+                        )
                         p.moved_sl = True
                         continue
                     if p.moved_sl and move_pct >= 3.0:
@@ -3265,9 +3192,9 @@ async def run() -> None:
                             review_note=review_note,
                             context_patch={"stoploss_analysis": {"tags": tags, "age_sec": int(age), "move_pct": move_pct}},
                         )
-                        await send_office(
-                            f"STOP REVIEW по {p.symbol}: {review_note}\n"
-                            f"Теги: {', '.join(tags)}"
+                        await send_proactive(
+                            EVENT_TRADE_CLOSED,
+                            f"{p.symbol} закрито по стопу. {review_note}",
                         )
                         active_positions.pop(sig_id, None)
             except Exception as exc:
@@ -3285,7 +3212,7 @@ async def run() -> None:
                     risk = await fetch_news_risk(session, news_api_key)
                     if risk.level != last_news_level:
                         async def sender(msg: str) -> None:
-                            await send_office(msg[:3900], stream="tech")
+                            await send_proactive(EVENT_NEWS_CRITICAL, msg[:3900], stream="tech")
                         await office_news_trigger(
                             sender=sender,
                             risk_level=risk.level,  # type: ignore[arg-type]
@@ -3424,10 +3351,7 @@ async def run() -> None:
                     continue
 
             if not candidates:
-                await send_office(
-                    "🌙 Марічка: Сьогодні немає чітких кандидатів на завтра. Ринок відпочиває.",
-                    stream="general",
-                )
+                print("[homework] no candidates — silent")
                 return
 
             candidates.sort(key=lambda x: float(x.get("day_used") or 100.0))
@@ -3530,17 +3454,14 @@ async def run() -> None:
                     for chunk in split_telegram_chunks(
                         fmt_agent_line("marichka", card),
                     ):
-                        await send_office(chunk, stream="general")
+                        print(f"[homework] silent card {symbol}: {chunk[:80]}")
                     await asyncio.sleep(2.0)
                 except Exception as e:
                     print(f"[homework] {symbol}: {e}")
                     continue
 
             if not homework_results:
-                await send_office(
-                    "🌙 Марічка: Нічого цікавого сьогодні. Ринок без чітких сетапів на завтра.",
-                    stream="general",
-                )
+                print("[homework] nothing interesting — silent")
                 return
 
             any_bad = any(not r.get("confirmed") for r in homework_results)
@@ -3559,7 +3480,7 @@ async def run() -> None:
                     f"{recent_setups_note(setups)}\n\n{facts_joined}"
                 )
                 for chunk in split_telegram_chunks(fmt_agent_line("lev", lev_body)):
-                    await send_office(chunk, stream="general")
+                    print(f"[homework] silent lev incomplete: {chunk[:80]}")
                 try:
                     briefing_save(db_path, "ALL", "evening_homework", lev_body)
                 except Exception as save_exc:
@@ -3597,7 +3518,7 @@ async def run() -> None:
                     + format_facts_block(homework_results[0]["facts"])
                 )
             for chunk in split_telegram_chunks(fmt_agent_line("lev", f"Огляд на завтра:\n\n{lev_text}")):
-                await send_office(chunk, stream="general")
+                print(f"[homework] silent lev: {chunk[:80]}")
             try:
                 briefing_save(db_path, "ALL", "evening_homework", lev_text)
             except Exception as save_exc:
@@ -3709,13 +3630,7 @@ SYMBOL
                     )
                 )
                 if response:
-                    header = f"🌅 МАРІЧКА | Ранок {symbol}"
-                    # ФІКС 1: ранковий аналіз — від бота Марічки.
-                    await send_office(
-                        fmt_agent_line("marichka", f"{header}\n{response[:3800]}"),
-                        stream="general",
-                    )
-                    await asyncio.sleep(2.0)
+                    print(f"[marichka-morning] silent {symbol}: {response[:80]}")
             except Exception as exc:
                 print(f"[marichka-morning] {symbol}: {exc}")
                 continue
@@ -3759,6 +3674,8 @@ SYMBOL
         try:
             if os.getenv("OFFICE_SESSION_PLAYBOOK_DISABLE", "").strip() == "1":
                 return
+            print(f"[session-playbook] skip LLM/Telegram for {session} (PR41 quiet office)")
+            return
             from office_market_data import (
                 fetch_atr_context,
                 fetch_liquidity_sweep,
@@ -3871,15 +3788,9 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             sn = session_names.get(session, session)
 
             if not any(p in response.lower() for p in skip_phrases):
-                await send_office(
-                    f"{emoji} {sn.upper()}\n\n{response[:3800]}",
-                    stream="general",
-                )
+                print(f"[session-playbook] silent {session}: {(response or '')[:120]}")
             else:
-                await send_office(
-                    f"{emoji} {sn}: немає сетапу. Чекаємо.",
-                    stream="general",
-                )
+                print(f"[session-playbook] silent {session}: no setup")
         except Exception as e:
             print(f"[session-playbook] {e}")
 
@@ -3920,7 +3831,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         )
                     if msg:
                         announced.add(key)
-                        await send_office(msg, stream="general")
+                        print(f"[session-announcer] silent: {msg.splitlines()[0]}")
                         if now.hour == 3:
                             asyncio.create_task(run_session_playbook("asia"))
                         elif now.hour == 11:
@@ -3956,11 +3867,11 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
 
             drawdown = check_drawdown_alert(db_path)
             if not drawdown.get("safe"):
-                await send_office(drawdown["message"], stream="general")
+                print(f"[scanner] drawdown hold (silent): {drawdown.get('message')}")
                 return  # зупиняємо сканер
 
             async def _scan_sender(msg: str) -> None:
-                await send_office(msg[:3800], stream="general")
+                print(f"[scanner] silent: {str(msg)[:160]}")
 
             from office_market_data import (
                 fetch_atr_context,
@@ -4183,16 +4094,12 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         continue
                     correlation = check_portfolio_correlation(db_path)
                     if not correlation.get("safe"):
-                        await agent_say(_scan_sender, "daryna", correlation["message"])
+                        print(f"[scanner] wyckoff correlation silent: {correlation.get('message')}")
                         continue
                     _last_signal_time[acc_key] = time.time()
-                    await send_office(
-                        fmt_agent_line(
-                            "lev",
-                            f"{acc_symbol} — накопичення {acc_days} днів. "
-                            f"Зона {acc_low:.6f}–{acc_high:.6f}. WATCHING до пробою вгору.",
-                        ),
-                        stream="general",
+                    print(
+                        f"[scanner] wyckoff WATCHING {acc_symbol} {acc_days}d "
+                        f"{acc_low:.6f}–{acc_high:.6f} (Telegram silent)"
                     )
                     signal_upsert(
                         db_path,
@@ -4214,12 +4121,17 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
 
             correlation = check_portfolio_correlation(db_path)
             if not correlation.get("safe"):
-                await agent_say(_scan_sender, "daryna", correlation["message"])
+                print(f"[scanner] correlation hold silent: {correlation.get('message')}")
                 return
 
             best = min(setups_found, key=lambda x: float(x.get("atr_used") or 100))
             symbol = str(best.get("symbol") or "BTCUSDT")
             direction = str(best.get("direction") or "LONG")
+            print(
+                f"[scanner] skip desk LLM/Telegram for {symbol} {direction} "
+                "(PR41: ПРОПУСК мовчки; SIGNAL_ENTRY лише з радара після свіпу/BOS)"
+            )
+            return
             skip_pro, skip_reason = signal_should_skip_proactive_scan(db_path, symbol)
             if skip_pro:
                 print(f"[scanner] proactive skip {symbol}: {skip_reason}")
@@ -4546,7 +4458,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     )
                 )
                 if response:
-                    await send_office(response, stream="general")
+                    print(f"[victor] silent (no Telegram): {response[:160]}")
             _victor_sl_streak_prev = sl_streak
         except Exception as e:
             print(f"[victor] error: {e}")
@@ -4587,7 +4499,7 @@ EV позитивне: {prob.get('ev_positive', '')}
             )
             if response:
                 response = clean_self_naming(response, key)
-                await send_office(fmt_agent_line(key, response), stream="general")
+                print(f"[agent-live] skip telegram {key}: {response[:120]}")
         except Exception as exc:
             print(f"[agent-live] {agent_key}: {exc}")
 
@@ -4710,7 +4622,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         },
                                         signal_id,
                                     )
-                                    await send_office(plan.message, stream="general")
+                                    if zone_reached_to_telegram(plan):
+                                        card = format_zone_signal_entry(
+                                            symbol=symbol,
+                                            current_price=current_price,
+                                            entry_low=e_low,
+                                            entry_high=e_high if e_high is not None else e_low,
+                                            sl=sl_v,
+                                            tp1=tp1_v,
+                                            tp2=tp2_v,
+                                        )
+                                        await send_proactive(
+                                            EVENT_SIGNAL_ENTRY,
+                                            fmt_agent_line("lev", card),
+                                            stream="general",
+                                        )
+                                    else:
+                                        print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
                                 post = after_zone_reached_action(
                                     analysis_note=row.get("analysis_note"),
                                     plan=plan,
@@ -4738,52 +4666,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     signal_update(db_path, signal_id=signal_id, status="ACTIVE")
                                     continue
                                 if plan.run_reanalyze:
-                                    ts_upd_s = str(row.get("ts_updated") or "")
-                                    ts_cre_s = str(row.get("ts_created") or "")
-                                    skip_reanalyze = False
-                                    if ts_upd_s and ts_cre_s:
-                                        try:
-                                            upd_dt_w = datetime.fromisoformat(ts_upd_s.replace("Z", "+00:00"))
-                                            if upd_dt_w.tzinfo is None:
-                                                upd_dt_w = upd_dt_w.replace(tzinfo=timezone.utc)
-                                            cre_dt_w = datetime.fromisoformat(ts_cre_s.replace("Z", "+00:00"))
-                                            if cre_dt_w.tzinfo is None:
-                                                cre_dt_w = cre_dt_w.replace(tzinfo=timezone.utc)
-                                            if upd_dt_w > cre_dt_w + timedelta(seconds=30):
-                                                if (now_utc - upd_dt_w).total_seconds() < WATCHING_COOLDOWN_SEC:
-                                                    skip_reanalyze = True
-                                        except Exception:
-                                            pass
-                                    if not skip_reanalyze and _allow_notify(symbol, "WATCHING_REANALYZE"):
-                                        async def _watching_sender(msg: str) -> None:
-                                            await send_office(msg, stream="general")
-                                        expired_w = await full_auto_analysis(
-                                            symbol=symbol,
-                                            sender=_watching_sender,
-                                            db_path=db_path,
-                                            watching_signal_id=signal_id,
-                                        )
-                                        if not expired_w:
-                                            signal_touch_updated(db_path, signal_id=signal_id)
+                                    print(
+                                        f"[t0] skip proactive desk LLM for {symbol} "
+                                        f"(ZONE_REACHED SIGNAL=NO, saved {2} LLM calls)"
+                                    )
+                                    signal_touch_updated(db_path, signal_id=signal_id)
                                 continue
 
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
                             missing_levels_active = sl_v is None or (tp1_v is None and tp2_v is None)
                             if missing_levels_active:
-                                if _allow_notify(symbol, "ACTIVE_REANALYZE"):
-                                    await send_office(
-                                        f"⚠️ {symbol}: ціна в entry-зоні, але рівні SL/TP неповні. "
-                                        "Запускаю уточнюючий аналіз перед входом.",
-                                        stream="general",
-                                    )
-                                    async def _active_sender(msg: str) -> None:
-                                        await send_office(msg, stream="general")
-                                    await full_auto_analysis(symbol=symbol, sender=_active_sender, db_path=db_path)
+                                print(f"[t0] ACTIVE incomplete SL/TP {symbol}: silent, no desk LLM")
                                 continue
                             signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
                             if _allow_notify(symbol, "HIT_ENTRY"):
                                 _kyiv_hm = _now_kyiv_hm()
-                                await send_office(
+                                await send_proactive(
+                                    EVENT_SIGNAL_ENTRY,
                                     f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
                                     f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}\n"
                                     f"🕐 Зараз за Києвом: {_kyiv_hm}",
@@ -4811,7 +4710,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         tp1=tp1_v,
                                         tp2=tp2_v,
                                     )
-                                    await send_office(lev_note, stream="general")
+                                    await send_proactive(EVENT_TRADE_UPDATE, lev_note, stream="general")
                                 continue
 
                         if (
@@ -4828,7 +4727,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     "можливий добір позиції малим обсягом у зоні",
                                     f"{sl_v}",
                                 )
-                                await send_office(add_note, stream="general")
+                                await send_proactive(EVENT_TRADE_UPDATE, add_note, stream="general")
 
                         if status == "HIT_TP1" and tp2_v is not None:
                             try:
@@ -4853,7 +4752,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             "розглянь фіксацію ще 50% поки в плюсі",
                                             f"{sl_v}",
                                         )
-                                        await send_office(rev_note, stream="general")
+                                        await send_proactive(EVENT_TRADE_UPDATE, rev_note, stream="general")
 
                         # ФІКС 3: попередження про наближення до SL / TP1 (до фактичного спрацювання).
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1"):
@@ -4864,7 +4763,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 else:
                                     near_sl = current_price < sl_v and (sl_v - current_price) / sl_v * 100.0 < near_pct
                                 if near_sl and _allow_notify(symbol, "SL_NEAR"):
-                                    await send_office(
+                                    await send_proactive(
+                                        EVENT_TRADE_UPDATE,
                                         f"⚠️ Тетяно, {symbol}: ціна близько до стопу.\n"
                                         f"Зараз {current_price}, стоп {sl_v}.\n"
                                         "Перевір позицію — без добору проти руху.",
@@ -4876,7 +4776,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 else:
                                     near_tp1 = current_price > tp1_v and (current_price - tp1_v) / tp1_v * 100.0 < near_pct
                                 if near_tp1 and _allow_notify(symbol, "TP1_NEAR"):
-                                    await send_office(
+                                    await send_proactive(
+                                        EVENT_TRADE_UPDATE,
                                         format_manage_update(
                                             symbol=symbol,
                                             direction=direction,
@@ -4892,40 +4793,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 direction == "SHORT" and current_price >= sl_v
                             )
                             if hit_sl:
-                                analysis_note = ""
-                                try:
-                                    n_risk = "SAFE"
-                                    if news_api_key:
-                                        timeout_news = aiohttp.ClientTimeout(total=10)
-                                        async with aiohttp.ClientSession(timeout=timeout_news) as s_news:
-                                            n = await fetch_news_risk(s_news, news_api_key)
-                                            n_risk = str(n.level)
-                                    system = (
-                                        f"{LEV_RULE}"
-                                        "Аналізуй чому вибило стоп. Перевір:\n"
-                                        "1) Чи були новини в цей момент?\n"
-                                        "2) Чи була маніпуляція (sweep)?\n"
-                                        "3) Чи правильна була точка входу?\n"
-                                        "4) Яка сесія була активна (час за Києвом)?\n"
-                                        "5) Що можна покращити наступного разу?\n"
-                                        "Говориш українською. Конкретно."
-                                    )
-                                    kyiv_ts = datetime.now(_briefing_tzinfo()).strftime("%Y-%m-%d %H:%M")
-                                    sess_kyiv = get_session_status_kyiv()
-                                    context = (
-                                        f"Сигнал: {direction} {symbol}\n"
-                                        f"Entry: {e_low}-{e_high}\n"
-                                        f"SL: {sl_v}\n"
-                                        f"Час сигналу: {ts_created}\n"
-                                        f"Час вибивання за Києвом: {kyiv_ts}\n"
-                                        f"{sess_kyiv}\n"
-                                        f"Поточна ціна: {current_price}\n"
-                                        f"Новинний ризик зараз: {n_risk}\n"
-                                    )
-                                    analysis_note = clean_llm_note(ask_agent("lev", system, context, max_tokens=200))
-                                    analysis_note = _trim_lines(analysis_note, max_lines=6)
-                                except Exception:
-                                    analysis_note = ""
+                                analysis_note = f"HIT_SL {symbol} @ {current_price} sl={sl_v}"
                                 signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
                                 if _allow_notify(symbol, "HIT_SL"):
                                     stop_note = _lev_msg(
@@ -4934,19 +4802,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         "повний вихід з позиції зараз",
                                         "позиція закрита",
                                     )
-                                    await send_office(stop_note, stream="general")
-                                    if analysis_note:
-                                        for part in split_long_message(analysis_note):
-                                            await send_office(part, stream="general")
-                                await check_victor_trigger()
-                                try:
-                                    await _olesya_live_signal_line(
-                                        f"{symbol} вибило по стопу.\n"
-                                        "Капітал захищено стопом.",
-                                        80,
-                                    )
-                                except Exception:
-                                    pass
+                                    await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:
@@ -4956,71 +4812,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if hit_tp2:
                                 signal_update(db_path, signal_id=signal_id, status="HIT_TP2", outcome="WIN")
                                 if _allow_notify(symbol, "HIT_TP2"):
-                                    await send_office(
-                                        f"{symbol} досяг TP2 {tp2_v} 🎯\nВідмінний результат! Фіксуємо і шукаємо наступний сетап.",
+                                    await send_proactive(
+                                        EVENT_TRADE_CLOSED,
+                                        f"{symbol} закрито по TP2 {tp2_v}.",
                                         stream="general",
                                     )
-                                try:
-                                    await _olesya_live_signal_line(
-                                        f"{symbol} досяг другого тейку.\n"
-                                        "Команда добре відпрацювала.",
-                                        80,
-                                    )
-                                    await _agent_live_reaction(
-                                        "lev",
-                                        f"{symbol} досяг другого тейку. "
-                                        f"Команда відпрацювала план.",
-                                        max_tokens=60,
-                                    )
-                                    await asyncio.sleep(1.0)
-                                    await _agent_live_reaction(
-                                        "marko",
-                                        f"{symbol} TP2 досягнуто. "
-                                        f"Execution план виконано.",
-                                        max_tokens=60,
-                                    )
-                                    streak_tp = office_signals_tp2_streak(db_path)
-                                    if streak_tp < 3:
-                                        _win_streak_celebrated_at = 0
-                                    elif streak_tp >= 5 and _win_streak_celebrated_at < 5:
-                                        ctx5 = (
-                                            "П'ять других тейків підряд по всьому офісу. "
-                                            "Одне щире коротке речення від твоєї ролі — без списків і без сленгу."
-                                        )
-                                        for ak in (
-                                            "lev",
-                                            "maks",
-                                            "marichka",
-                                            "news",
-                                            "daryna",
-                                            "marko",
-                                            "olesya",
-                                            "memory",
-                                            "psych",
-                                            "dev",
-                                        ):
-                                            await _agent_live_reaction(ak, ctx5, max_tokens=50)
-                                            await asyncio.sleep(0.35)
-                                        _win_streak_celebrated_at = 5
-                                    elif streak_tp >= 3 and _win_streak_celebrated_at < 3:
-                                        await _olesya_live_signal_line(
-                                            "Три виграші підряд по команді.",
-                                            80,
-                                        )
-                                        await _agent_live_reaction(
-                                            "lev",
-                                            "Три виграші підряд по команді. "
-                                            "Коротко — що це дає офісу зараз.",
-                                            max_tokens=60,
-                                        )
-                                        _win_streak_celebrated_at = 3
-                                    elif streak_tp >= 5:
-                                        _win_streak_celebrated_at = max(_win_streak_celebrated_at, 5)
-                                    elif streak_tp >= 3:
-                                        _win_streak_celebrated_at = max(_win_streak_celebrated_at, 3)
-                                except Exception as exc_st:
-                                    print(f"[olesya-live-tp2] {exc_st}")
                                 continue
+
                     except Exception as exc_row:
                         print(f"[signals] row monitor failed: {exc_row}")
             except Exception as exc:
@@ -5409,64 +5207,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                     tv_signal_mark_processed(db_path, row_id)
                 return
 
-            system = f"""Ти Лев.
-TradingView знайшов патерн на {tf}.
-Перевір через top-down аналіз:
-
-1. Денний/тижневий тренд:
-   get_market_structure — який тренд?
-
-2. H4 структура і режим:
-   get_market_regime — який режим ринку?
-
-3. H1 підтвердження:
-   get_liquidity_sweep — чи був sweep?
-   get_pd_array — Premium чи Discount?
-
-4. Вхід:
-   get_edge_score — score >= 85 і has_edge, інакше відхилення
-   get_order_book_walls — де стіни китів?
-   get_key_levels — ключові рівні Герчика?
-
-Якщо score >= 85 і 3+ факторів підтверджують {direction}
-— дай Entry/SL/TP/RR.
-Якщо менше — відхиляй з поясненням.
-
-Говориш тільки українською.
-Жодних англійських слів."""
-
-            context = f"""
-TradingView сигнал:
-Символ: {symbol}
-Патерн: {pattern}
-Таймфрейм патерну: {tf}
-Напрямок: {direction}
-Ціна виявлення: {price}
-Сила сигналу: {strength}
-
-Завдання: підтвердити або відхилити
-через ICT top-down аналіз.
-"""
-
-            response = clean_llm_note(
-                ask_agent("lev", system, context, max_tokens=800, db_path=db_path)
-            )
-
-            if response:
-                header = (
-                    f"📡 TradingView → {symbol}\n"
-                    f"Патерн: {pattern} на {tf}\n"
-                    f"Напрямок: {direction} | "
-                    f"Ціна: {price}\n"
-                    f"Лев перевірив:"
-                )
-                await send_office(
-                    f"{header}\n{response}",
-                    stream="general",
-                )
-            else:
-                print(f"[tv-webhook] empty lev response id={row_id}")
-            tv_signal_mark_processed(db_path, row_id)
+            print(f"[tv-webhook] silent {symbol} {direction} {pattern} (no desk LLM/Telegram)")
+            if row_id:
+                tv_signal_mark_processed(db_path, row_id)
+            return
         except Exception as e:
             print(f"[tv-webhook] error: {e}")
 
@@ -5482,29 +5226,8 @@ TradingView сигнал:
     asyncio.create_task(monitor_tradingview_signals())
 
     async def morning_macro_brief() -> None:
-        """
-        Daily 09:00 Kyiv macro briefing from Maks (LLM + live macro data).
-        """
-        try:
-            from office_market_data import fetch_macro_context
-
-            macro = fetch_macro_context()
-            system = (
-                "Ти Макс, ранковий макро-аналітик трейдинг-офісу. "
-                "Пишеш ТІЛЬКИ українською, просто і конкретно. "
-                "Завдання: коротко пояснити що зараз роблять DXY, S&P500, золото, BTC і що це означає для ризику по крипті сьогодні. "
-                "Формат Telegram: 4-7 коротких речень, без таблиць, без markdown-заголовків."
-            )
-            context = (
-                "Ранковий макро-зріз (live):\n"
-                f"{json.dumps(macro, ensure_ascii=False)}\n"
-                "Дай практичний висновок для команди: risk-on / risk-off / mixed і як діяти з ризиком."
-            )
-            response = clean_llm_note(ask_agent("maks", system, context, max_tokens=300))
-            await send_office(response or "Ранковий макро-зріз тимчасово недоступний.", stream="general")
-        except Exception as exc:
-            print(f"[relay][WARN] morning_macro_brief failed: {type(exc).__name__}: {exc}")
-            await send_office(f"Технічне попередження macro-brief: {exc}", stream="tech")
+        """Daily 09:00 Kyiv macro — лише лог (PR41)."""
+        print("[relay] macro briefing silent (no Telegram/LLM)")
 
     async def monitor_briefing_scheduler() -> None:
         """MASTER п.28: ранковий брифінг + вечірній debrief за локальним часом."""
@@ -5531,39 +5254,19 @@ TradingView сигнал:
                     print("[relay] auto macro briefing sent")
 
                 if h == mh and mi == mm and last_morning_date != today:
-                    async with aiohttp.ClientSession(timeout=http_timeout) as http:
-                        btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
-                        regime = "CHOP" if float(btc.get("volatility_pct", 0.0)) >= 6.0 else "TREND"
-                        sess = _session_label_from_hour(h)
-
-                        async def sender_m(msg: str) -> None:
-                            await send_office(msg[:3900])
-
-                        await office_morning_briefing(
-                            sender_m,
-                            session=sess,
-                            market_state=regime,
-                            btc_bias=f"{float(btc.get('pct', 0.0)):+.2f}%",
-                        )
                     last_morning_date = today
-                    print("[relay] auto morning briefing sent")
+                    print("[relay] auto morning briefing silent")
 
                 if h == eh and mi == em and last_evening_date != today:
-                    summary = build_evening_journal_summary(db_path)
-                    async with aiohttp.ClientSession(timeout=http_timeout) as http:
-                        btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
-                        btc_pct = float(btc.get("pct", 0.0))
+                    async def sender_e(msg: str) -> None:
+                        await send_proactive(EVENT_EVENING_DEBRIEF, msg[:3900])
 
-                        async def sender_e(msg: str) -> None:
-                            await send_office(msg[:3900])
-
-                        await office_evening_debrief(
-                            sender_e,
-                            btc_change_pct=btc_pct,
-                            journal_summary=summary,
-                        )
+                    sent = await office_evening_debrief(
+                        sender_e,
+                        db_path=db_path,
+                    )
                     last_evening_date = today
-                    print("[relay] auto evening debrief sent")
+                    print(f"[relay] auto evening debrief sent={bool(sent)}")
             except Exception as exc:
                 print(f"[relay][WARN] monitor_briefing_scheduler failed: {exc}")
             await asyncio.sleep(40)
@@ -5592,7 +5295,7 @@ TradingView сигнал:
                 h, mi = now.hour, now.minute
                 if now.isoweekday() == target_dow and h == wh and mi == wm and last_week_key != week_key:
                     report = build_weekly_journal_report(db_path)
-                    await send_office("📆 Тижневий розбір (ролінг 7д):\n" + report[:3600])
+                    print(f"[relay] weekly journal silent: {report[:120]}")
                     last_week_key = week_key
                     print("[relay] weekly journal report sent")
             except Exception as exc:
@@ -5608,13 +5311,8 @@ TradingView сигнал:
             if report.get("error"):
                 print(f"[meta] report error: {report.get('error')}")
                 return
-            if int(report.get("total_signals") or 0) == 0:
-                await send_office(
-                    "📊 Тижневий звіт: "
-                    "немає угод за тиждень.",
-                    stream="general",
-                )
-                return
+            print(f"[meta] silent stats signals={report.get('total_signals')}")
+            return
 
             context = f"""
 Статистика офісу за 7 днів:
@@ -5657,11 +5355,7 @@ TradingView сигнал:
             )
 
             if response:
-                await send_office(
-                    f"📊 МЕТ АНАЛІЗ ТИЖНЯ\n\n"
-                    f"{response}",
-                    stream="general",
-                )
+                print(f"[meta] silent week report: {response[:120]}")
 
         except Exception as e:
             print(f"[meta] error: {e}")
@@ -5731,11 +5425,9 @@ TradingView сигнал:
                         "RISK_COMMITTEE",
                         {"day_losses": day_losses, "streak": streak, "thresholds": [need_day, need_streak]},
                     )
-                    await send_office(
-                        "⚖️ Risk committee:\n"
-                        f"За сьогодні LOSS: {day_losses} (поріг {need_day}). "
-                        f"Серія SL підряд у журналі: {streak} (поріг {need_streak}).\n"
-                        "Короткий обов’язковий розбір: що повторюється, де форс, що вимкнути до завтра."
+                    print(
+                        "[relay] risk committee silent: "
+                        f"LOSS {day_losses} streak {streak}"
                     )
                     last_sent_day = today
                     _risk_committee_last_sent = time.time()
@@ -5774,17 +5466,13 @@ TradingView сигнал:
                 now_m = time.monotonic()
                 fr = prem.get("funding_rate_pct") if prem else None
                 if fr is not None and abs(float(fr)) >= fund_thr and (now_m - last_fund_mono) >= cooldown:
-                    await send_office(
-                        f"📈 Funding alert (BTC): |{float(fr):.4f}|% ≥ {fund_thr:.4f}% — перевірити bias/перекіс перед новими входами.",
-                        stream="tech",
+                    print(
+                        f"[relay] funding alert silent BTC |{float(fr):.4f}|%"
                     )
                     last_fund_mono = now_m
                 vol = float(btc.get("volatility_pct") or 0.0)
                 if vol >= atr_thr and (now_m - last_atr_mono) >= cooldown:
-                    await send_office(
-                        f"📉 ATR/волатильність (BTC 24h range): {vol:.2f}% ≥ {atr_thr:.2f}% — зменшити агресію, більше фільтрації.",
-                        stream="tech",
-                    )
+                    print(f"[relay] btc vol alert silent {vol:.2f}%")
                     last_atr_mono = now_m
             except Exception as exc:
                 print(f"[relay][WARN] monitor_funding_atr_alerts failed: {exc!r}")
@@ -5802,12 +5490,12 @@ TradingView сигнал:
                 today = now_local.strftime("%Y-%m-%d")
                 if now_local.hour >= 22 and last_daily_report_date != today:
                     report = build_daily_journal_report(db_path)
-                    await send_office(report, stream="tasks")
+                    print(f"[relay] daily journal silent: {report[:80]}")
                     last_daily_report_date = today
                     print("[relay] daily journal report sent")
             except Exception as exc:
                 print(f"[relay][WARN] monitor_daily_report failed: {exc}")
-                await send_office(f"Технічне попередження daily-report: {exc}", stream="tech")
+                print(f"[relay][WARN] monitor_daily_report failed: {exc}")
             await asyncio.sleep(60)
 
     async def monitor_office_autosave() -> None:
