@@ -3482,6 +3482,21 @@ async def run() -> None:
 
             homework_results: List[Dict[str, Any]] = []
 
+            from office_evening_homework import (
+                build_homework_facts,
+                format_facts_block,
+                homework_card_text,
+                lev_system_prompt,
+                marichka_system_prompt,
+                recent_setups_note,
+                split_telegram_chunks,
+                unexplained_levels,
+                collect_allowed_prices,
+                validate_card_text,
+            )
+            from office_market_data import fetch_edge_score, fetch_funding_rate, fetch_probability_score
+            from office_bridge import signal_get_recent
+
             for cand in top5:
                 symbol = str(cand.get("symbol") or "")
                 if not symbol:
@@ -3495,118 +3510,74 @@ async def run() -> None:
                     dom = fetch_order_book_walls(symbol)
                     ls = fetch_long_short_ratio(symbol)
                     oi = fetch_open_interest(symbol)
+                    funding = fetch_funding_rate(symbol)
+                    edge = fetch_edge_score(symbol)
+                    probability = fetch_probability_score(symbol, db_path)
 
-                    weekly_high = weekly_low = 0.0
+                    weekly_high = weekly_low = None
                     if isinstance(weekly, list) and weekly:
-                        weekly_high = max(
-                            float(c.get("high", 0) or 0) for c in weekly if isinstance(c, dict)
-                        )
-                        weekly_low = min(
-                            float(c.get("low", 0) or 0) for c in weekly if isinstance(c, dict)
-                        )
+                        highs = [float(c.get("high", 0) or 0) for c in weekly if isinstance(c, dict)]
+                        lows = [float(c.get("low", 0) or 0) for c in weekly if isinstance(c, dict)]
+                        if highs:
+                            weekly_high = max(highs)
+                        if lows:
+                            weekly_low = min(lows)
 
                     current = 0.0
                     if isinstance(daily, list) and daily and isinstance(daily[-1], dict):
                         current = float(daily[-1].get("close") or 0.0)
 
-                    ls_d = ls if isinstance(ls, dict) else {}
-                    ls_ratio = float(ls_d.get("current_ratio") or 1.0)
-                    ls_hist = ls_d.get("history")
-                    ls_last = ls_hist[-1] if isinstance(ls_hist, list) and ls_hist else {}
-                    long_pct_v = ls_last.get("long_pct") if isinstance(ls_last, dict) else ""
-
-                    sess_d = session if isinstance(session, dict) else {}
-                    oi_d = oi if isinstance(oi, dict) else {}
-                    oi_usdt = oi_d.get("oi", "")
-
-                    pd_c = cand["pd_arr"] if isinstance(cand.get("pd_arr"), dict) else {}
-                    st_c = cand["structure"] if isinstance(cand.get("structure"), dict) else {}
-                    sw_c = cand["sweep"] if isinstance(cand.get("sweep"), dict) else {}
-                    fvg_d = fvg_data if isinstance(fvg_data, dict) else {}
-                    ob_d = ob_data if isinstance(ob_data, dict) else {}
-                    dom_d = dom if isinstance(dom, dict) else {}
-
-                    context = f"""
-Символ: {symbol}
-Поточна ціна: {current}
-
-ТИЖНЕВИЙ ТФ:
-Максимум тижня: {weekly_high}
-Мінімум тижня: {weekly_low}
-
-СТРУКТУРА 4H: {st_c.get("event", "")}
-PD ARRAY: {pd_c.get("zone", "")}
-  Рівноважна ціна: {pd_c.get("equilibrium", "")}
-
-SWEEP: {sw_c}
-FVG: {fvg_d.get("description", "")}
-ORDER BLOCK: {ob_d.get("description", "")}
-
-СТАКАН КИТІВ: {dom_d.get("description", "")}
-Long/Short: {ls_ratio} ({long_pct_v}% лонгів)
-OI: {oi_usdt}
-
-СЕСІЙНІ РІВНІ:
-Азія H/L: {sess_d.get("asia_high", "")} / {sess_d.get("asia_low", "")}
-Лондон H/L: {sess_d.get("london_high", "")} / {sess_d.get("london_low", "")}
-NY H/L: {sess_d.get("ny_high", "")} / {sess_d.get("ny_low", "")}
-PDH/PDL: {sess_d.get("pdh", "")} / {sess_d.get("pdl", "")}
-
-ATR використано: {float(cand.get("day_used") or 0):.0f}%
-"""
-
-                    system = """Ти Марічка.
-Готуєш домашнє завдання на завтра.
-Проста українська. Коротко.
-
-Аналізуй зверху вниз:
-1. Тижневий: куди глобально іде монета?
-2. Денний: де зараз ціна відносно вчорашніх максимуму/мінімуму?
-3. 4H: яка структура? де незаповнені розриви?
-4. Де великі гроші (стакан китів)?
-5. Напрямок на завтра: вгору/вниз/нейтрально
-6. Зона входу для снайперського входу
-7. На що чекати при відкритті сесії
-
-Пиши тільки якщо є конкретний план.
-Якщо нічого — одне речення і далі."""
-
+                    facts = build_homework_facts(
+                        symbol=symbol,
+                        price=current,
+                        weekly_high=weekly_high,
+                        weekly_low=weekly_low,
+                        session=session if isinstance(session, dict) else {},
+                        structure=cand.get("structure") if isinstance(cand.get("structure"), dict) else {},
+                        pd_arr=cand.get("pd_arr") if isinstance(cand.get("pd_arr"), dict) else {},
+                        sweep=cand.get("sweep") if isinstance(cand.get("sweep"), dict) else {},
+                        fvg=fvg_data if isinstance(fvg_data, dict) else {},
+                        order_blocks=ob_data if isinstance(ob_data, dict) else {},
+                        dom=dom if isinstance(dom, dict) else {},
+                        ls=ls if isinstance(ls, dict) else {},
+                        oi=oi if isinstance(oi, dict) else {},
+                        atr_day_used=cand.get("day_used"),
+                        funding=funding if isinstance(funding, dict) else None,
+                        edge=edge if isinstance(edge, dict) else None,
+                        probability=probability if isinstance(probability, dict) else None,
+                    )
+                    context = format_facts_block(facts)
                     response = clean_llm_note(
                         ask_agent(
                             "marichka",
-                            system,
+                            marichka_system_prompt(),
                             context,
-                            max_tokens=500,
+                            max_tokens=1000,
                             db_path=db_path,
                         )
                     )
-                    if not response:
-                        continue
-                    skip_phrases = [
-                        "нічого цікавого",
-                        "немає сетапу",
-                        "пропускаємо",
-                        "не цікаво",
-                        "мовчу",
-                    ]
-                    if any(p in response.lower() for p in skip_phrases):
-                        continue
+                    check = validate_card_text(response or "", facts)
+                    card = homework_card_text(
+                        facts=facts,
+                        llm_text=response or "немає тексту моделі",
+                        issues=list(check.get("issues") or []),
+                    )
                     homework_results.append(
                         {
                             "symbol": symbol,
-                            "analysis": response,
-                            "context": context,
+                            "analysis": card,
+                            "facts": facts,
+                            "confirmed": bool(facts.get("confirmed") and check.get("ok")),
                         }
                     )
                     try:
-                        briefing_save(db_path, symbol, "evening", response)
+                        briefing_save(db_path, symbol, "evening", card)
                     except Exception as save_exc:
                         print(f"[homework] briefing_save {symbol}: {save_exc}")
-                    # ФІКС 1: Марічка публікує аналіз від СВОГО бота (а не через головний).
-                    await send_office(
-                        fmt_agent_line("marichka", f"{symbol}\n{response[:3800]}"),
-                        stream="general",
-                    )
+                    for chunk in split_telegram_chunks(
+                        fmt_agent_line("marichka", card),
+                    ):
+                        await send_office(chunk, stream="general")
                     await asyncio.sleep(2.0)
                 except Exception as e:
                     print(f"[homework] {symbol}: {e}")
@@ -3619,54 +3590,65 @@ ATR використано: {float(cand.get("day_used") or 0):.0f}%
                 )
                 return
 
-            all_analyses = "\n\n".join(
-                f"{r['symbol']}:\n{r['analysis']}" for r in homework_results
+            any_bad = any(not r.get("confirmed") for r in homework_results)
+            facts_joined = "\n\n".join(format_facts_block(r["facts"]) for r in homework_results if r.get("facts"))
+            analyses = "\n\n".join(f"{r['symbol']}:\n{r['analysis']}" for r in homework_results)
+            setups = []
+            try:
+                setups = signal_get_recent(db_path, limit=5)
+            except Exception:
+                setups = []
+            if any_bad:
+                lev_body = (
+                    "дані не підтверджені — готовий торговий план не складаємо.\n"
+                    "Марічка передала суперечливі або неповні факти. "
+                    "Нових entry/SL/TP немає.\n"
+                    f"{recent_setups_note(setups)}\n\n{facts_joined}"
+                )
+                for chunk in split_telegram_chunks(fmt_agent_line("lev", lev_body)):
+                    await send_office(chunk, stream="general")
+                try:
+                    briefing_save(db_path, "ALL", "evening_homework", lev_body)
+                except Exception as save_exc:
+                    print(f"[homework] briefing_save ALL evening_homework: {save_exc}")
+                return
+
+            lev_context = (
+                f"{recent_setups_note(setups)}\n\n"
+                f"ФАКТИ по монетах (єдине джерело рівнів):\n{facts_joined}\n\n"
+                f"Тексти Марічки:\n{analyses}\n\n"
+                "Склади огляд. Не додавай рівнів поза ФАКТАМИ. "
+                "SKIP/ATR_DEAD/EXPIRED — не угоди."
             )
-
-            lev_context = f"""
-Марічка проаналізувала {len(homework_results)} монет на завтра:
-
-{all_analyses}
-
-Дай фінальний план на завтра:
-- Які монети в пріоритеті?
-- В яку сесію входити?
-- Який напрямок?
-- Конкретні зони входу.
-"""
-
-            lev_system = """Ти Лев.
-Підсумовуєш домашнє завдання команди.
-Коротко і конкретно. Тільки українська.
-
-Дай план на завтра:
-1. Топ 2-3 монети з конкретними зонами
-2. В яку сесію входити (Азія/Лондон/NY)
-3. Напрямок і умова входу
-4. Що скасовує план
-
-Максимум 10 речень."""
-
             lev_response = clean_llm_note(
                 ask_agent(
                     "lev",
-                    lev_system,
+                    lev_system_prompt(),
                     lev_context,
-                    max_tokens=600,
+                    max_tokens=1200,
                     db_path=db_path,
                 )
             )
-
-            if lev_response:
-                # ФІКС 1: фінальний план — від бота Лева (а не через головний бот).
-                await send_office(
-                    fmt_agent_line("lev", f"ПЛАН НА ЗАВТРА:\n\n{lev_response[:3800]}"),
-                    stream="general",
+            lev_text = lev_response or "немає тексту"
+            allowed: set = set()
+            for r in homework_results:
+                allowed |= collect_allowed_prices(r.get("facts") or {})
+            extra = unexplained_levels(lev_text, allowed)
+            extra = [x for x in extra if not (1.0 <= x <= 10.0)]
+            if extra:
+                lev_text = (
+                    "дані не підтверджені — готовий торговий план не складаємо.\n"
+                    "У відповіді з'явились рівні без джерела: "
+                    + ", ".join(f"{x:g}" for x in extra[:8])
+                    + "\n\n"
+                    + format_facts_block(homework_results[0]["facts"])
                 )
-                try:
-                    briefing_save(db_path, "ALL", "evening_homework", lev_response)
-                except Exception as save_exc:
-                    print(f"[homework] briefing_save ALL evening_homework: {save_exc}")
+            for chunk in split_telegram_chunks(fmt_agent_line("lev", f"Огляд на завтра:\n\n{lev_text}")):
+                await send_office(chunk, stream="general")
+            try:
+                briefing_save(db_path, "ALL", "evening_homework", lev_text)
+            except Exception as save_exc:
+                print(f"[homework] briefing_save ALL evening_homework: {save_exc}")
         except Exception as e:
             print(f"[evening-homework] error: {e}")
 
