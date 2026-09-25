@@ -556,7 +556,7 @@ def get_data(
     overlays = build_live_overlays(chart_symbol)
     risk_heatmap = build_risk_heatmap()
 
-    return {
+    out = {
         "now_utc": datetime.now(timezone.utc).isoformat(),
         "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f, "chart": chart_symbol.strip().upper()},
         "db_identity": office_db_identity(_db_target_for_identity()),
@@ -634,6 +634,130 @@ def get_data(
                 if str(r[1] or "") == "BTC_FORCE_ORDERS"
             ],
         ),
+    }
+    live = build_live_state(summary_events=out["events"], watching_n=len(rows_watch))
+    out["t7_status"] = live.get("t7_status")
+    out["last_signal_ago_min"] = live.get("last_signal_ago_min")
+    out["live_state"] = live
+    return out
+
+
+def _null_btc() -> dict:
+    return {"price": None, "change_24h": None, "regime": None, "dom": None}
+
+
+def build_live_state(
+    *,
+    summary_events: list | None = None,
+    watching_n: int | None = None,
+) -> dict:
+    """Живий знімок для Home. Немає даних → null, без вигадки greed/OI."""
+    from office_session_radar import session_clock
+    from office_t7_health import t7_health_payload
+
+    btc = _null_btc()
+    try:
+        from office_market_data import _http_get_json
+
+        raw = _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": "BTCUSDT"})
+        if isinstance(raw, dict):
+            px = raw.get("lastPrice")
+            ch = raw.get("priceChangePercent")
+            btc = {
+                "price": float(px) if px not in (None, "") else None,
+                "change_24h": float(ch) if ch not in (None, "") else None,
+                "regime": None,
+                "dom": None,
+            }
+    except Exception:
+        btc = _null_btc()
+
+    t7_status = None
+    last_event_ago = None
+    events = summary_events
+    if events is None:
+        try:
+            events = [
+                {"ts_utc": r[0], "event_type": r[1], "payload_json": str(r[3] or "{}")}
+                for r in q(
+                    """
+                    SELECT ts_utc, event_type, signal_id, payload_json
+                    FROM office_events
+                    ORDER BY id DESC
+                    LIMIT 40
+                    """
+                )
+            ]
+        except Exception:
+            events = []
+    t7_row = next((e for e in events if str(e.get("event_type") or "") == "BTC_FORCE_ORDERS"), None)
+    if t7_row is None:
+        for e in events:
+            try:
+                p = json.loads(str(e.get("payload_json") or "{}"))
+            except Exception:
+                p = {}
+            if isinstance(p, dict) and p.get("source") == "binance_futures_ws:btcusdt@forceOrder":
+                t7_row = e
+                break
+    if t7_row is not None:
+        try:
+            snap = json.loads(str(t7_row.get("payload_json") or "{}"))
+        except Exception:
+            snap = {}
+        if isinstance(snap, dict) and snap:
+            hp = t7_health_payload(snap)
+            t7_status = hp.get("t7_status")
+            last_event_ago = hp.get("last_event_ago_min")
+            if last_event_ago is None and t7_row.get("ts_utc"):
+                dt = _parse_ts_close(t7_row.get("ts_utc"))
+                if dt is not None:
+                    last_event_ago = round(
+                        (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 60.0,
+                        1,
+                    )
+
+    watching_count = watching_n
+    if watching_count is None:
+        try:
+            watching_count = len(
+                q("SELECT signal_id FROM office_signals WHERE status = 'WATCHING' LIMIT 80")
+            )
+        except Exception:
+            watching_count = None
+
+    last_signal_ago = None
+    try:
+        rows = q(
+            """
+            SELECT ts_updated FROM office_signals
+            ORDER BY ts_updated DESC
+            LIMIT 1
+            """
+        )
+        if rows:
+            dt = _parse_ts_close(rows[0][0])
+            if dt is not None:
+                last_signal_ago = round(
+                    (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 60.0,
+                    1,
+                )
+    except Exception:
+        last_signal_ago = None
+
+    clock = session_clock()
+    return {
+        "btc": btc,
+        "market": {"oi": None, "greed_index": None, "sentiment": None},
+        "sessions": {
+            "active": clock.get("active"),
+            "next": clock.get("next"),
+            "next_in_min": clock.get("next_in_min"),
+        },
+        "t7_status": t7_status,
+        "watching_count": watching_count,
+        "last_signal_ago_min": last_signal_ago,
+        "t7_last_event_ago_min": last_event_ago,
     }
 
 
@@ -721,6 +845,11 @@ def html() -> str:
       <div><b>Культура (7д / 14д)</b></div>
       <div id="culture" class="muted">…</div>
     </div>
+  </div>
+
+    <div class="panel" style="margin-top:12px;">
+    <b>Ринок зараз</b> <span class="muted">null = немає даних, без вигадки</span>
+    <div id="liveState" class="muted">…</div>
   </div>
 
   <div class="panel" style="margin-top:12px;">
@@ -895,8 +1024,23 @@ async function loadOffice() {
   t('deskState',
     'WATCHING: <b>' + (c.watching || 0) + '</b> · SIGNAL: <b>' + (c.signals || 0) +
     '</b> · Live /position: <b>' + (c.live_positions || 0) + '</b> · Paper: <b>' + (c.paper || 0) +
-    '</b> · T7: <b>' + (c.t7 || 0) + '</b><br><span class="muted">' + atr + '</span>'
+    '</b> · T7: <b>' + (c.t7 || 0) + '</b> · t7_status: <b>' + (d.t7_status || 'null') +
+    '</b> · last_signal: <b>' + (d.last_signal_ago_min != null ? (d.last_signal_ago_min + ' хв') : 'null') +
+    '</b><br><span class="muted">' + atr + '</span>'
   );
+  try {
+    const st = await fetch('/api/state').then(x => x.json());
+    const b = st.btc || {};
+    const s = st.sessions || {};
+    t('liveState',
+      'BTC: <b>' + (b.price != null ? b.price : 'null') + '</b> · 24h: <b>' + (b.change_24h != null ? b.change_24h : 'null') +
+      '</b> · session: <b>' + (s.active || 'null') + '</b> → ' + (s.next || 'null') +
+      ' (' + (s.next_in_min != null ? s.next_in_min + ' хв' : 'null') + ')' +
+      '<br>T7: <b>' + (st.t7_status || 'null') + '</b> · watching: <b>' + (st.watching_count != null ? st.watching_count : 'null') + '</b>'
+    );
+  } catch (e) {
+    t('liveState', 'state unavailable');
+  }
 
   t('mistakes',
     '<tr><th>Тег</th><th>К-сть</th></tr>' +
@@ -994,7 +1138,7 @@ setInterval(loadOffice, 9000);
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         u = urlparse(self.path)
-        if u.path in ("/", "/api/summary", "/api/office_state", "/api/review_draft", "/api/webhook/tradingview"):
+        if u.path in ("/", "/api/summary", "/api/office_state", "/api/state", "/api/review_draft", "/api/webhook/tradingview"):
             self.send_response(200)
             self.end_headers()
             return
@@ -1082,6 +1226,14 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(u.query)
             tid = (qs.get("trade_id") or [""])[0].strip()
             body = json.dumps(build_review_draft(tid or None), ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path == "/api/state":
+            body = json.dumps(build_live_state(), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

@@ -137,7 +137,7 @@ from office_telegram_filter import (
     quote_is_stale,
     range_result_to_alert,
 )
-from office_lifecycle import format_manage_update, format_tp1_hit
+from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
 from office_btc_liquidations import (
     BTC_FORCE_ORDER_BOOK,
@@ -209,6 +209,7 @@ class NewsRisk:
     event_time_utc: str = ""
     currency: str = "USD"
     importance: str = "low"
+    data_status: str = "DATA_OK"
 
 
 def relay_config_path() -> Path:
@@ -888,17 +889,38 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
     Returns SAFE/RISK/HIGH RISK with nearest headline.
     """
     if not api_key:
-        return NewsRisk("SAFE", "news api key missing", 999, "", "", "USD", "low")
+        return NewsRisk(
+            "SAFE",
+            "news api unavailable",
+            999,
+            "",
+            "",
+            "USD",
+            "low",
+            DATA_UNAVAILABLE,
+        )
     now = datetime.now(timezone.utc)
     from_s = now.strftime("%Y-%m-%d")
     to_s = from_s
     url = "https://financialmodelingprep.com/stable/economic-calendar"
     params = {"from": from_s, "to": to_s, "apikey": api_key}
     news_timeout = aiohttp.ClientTimeout(total=15)
-    async with session.get(url, params=params, timeout=news_timeout) as resp:
-        if resp.status != 200:
-            return NewsRisk("SAFE", f"news status {resp.status}", 999, "", "", "USD", "low")
-        data = await resp.json()
+    try:
+        async with session.get(url, params=params, timeout=news_timeout) as resp:
+            if resp.status != 200:
+                return NewsRisk(
+                    "SAFE",
+                    f"news status {resp.status}",
+                    999,
+                    "",
+                    "",
+                    "USD",
+                    "low",
+                    DATA_UNAVAILABLE,
+                )
+            data = await resp.json()
+    except Exception:
+        return NewsRisk("SAFE", "news timeout", 999, "", "", "USD", "low", DATA_UNAVAILABLE)
     nearest_min = 999
     nearest_title = "no high impact events"
     nearest_time_utc = ""
@@ -936,6 +958,7 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
             nearest_time_utc,
             nearest_currency,
             nearest_importance,
+            "DATA_OK",
         )
     if nearest_min <= 180:
         return NewsRisk(
@@ -946,15 +969,18 @@ async def fetch_news_risk(session: aiohttp.ClientSession, api_key: str) -> NewsR
             nearest_time_utc,
             nearest_currency,
             nearest_importance,
+            "DATA_OK",
         )
+    empty = nearest_min >= 999
     return NewsRisk(
         "SAFE",
-        nearest_title,
+        nearest_title if not empty else "",
         nearest_min,
-        nearest_title,
+        nearest_title if not empty else "",
         nearest_time_utc,
         nearest_currency,
         nearest_importance,
+        DATA_EMPTY if empty else "DATA_OK",
     )
 
 
@@ -3255,12 +3281,15 @@ async def run() -> None:
                             headline=risk.headline,
                             minutes_to_event=risk.minutes_to_event,
                             db_path=db_path,
+                            event_name=risk.event_name,
+                            event_time_utc=risk.event_time_utc,
+                            data_status=risk.data_status,
                         )
-                        print(f"[relay] news trigger -> {risk.level} ({risk.minutes_to_event}m)")
+                        print(f"[relay] news trigger -> {risk.level} ({risk.minutes_to_event}m) {risk.data_status}")
                         last_news_level = risk.level
                 except Exception as exc:
                     print(f"[relay][WARN] monitor_news failed: {type(exc).__name__}: {exc}")
-                    await send_office(f"Технічне попередження news-монітора: {exc}", stream="tech")
+                    # Fail-closed: timeout/помилка — Назар мовчить, у Telegram нічого.
                 await asyncio.sleep(120)
 
     asyncio.create_task(monitor_news())
@@ -4191,8 +4220,9 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
             news_risk = "SAFE"
             news_mins = 999
-            news_event_name = "подія"
+            news_event_name = ""
             news_kyiv_time = ""
+            news_data_status = DATA_UNAVAILABLE
             if news_api_key:
                 try:
                     timeout_news = aiohttp.ClientTimeout(total=10)
@@ -4200,14 +4230,15 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         n = await fetch_news_risk(s_news, news_api_key)
                         news_risk = str(n.level)
                         news_mins = int(n.minutes_to_event)
-                        news_event_name = str(n.event_name or n.headline or "подія")
+                        news_event_name = str(n.event_name or n.headline or "")
+                        news_data_status = str(n.data_status or DATA_UNAVAILABLE)
                         if news_mins >= 0:
                             news_kyiv_time = _to_kyiv_time_from_utc(
                                 str(getattr(n, "event_time_utc", "") or ""),
                                 news_mins,
                             )
                 except Exception:
-                    pass
+                    news_data_status = DATA_UNAVAILABLE
             risk_snapshot = live_risk_snapshot(db_path)
             active_signals = signal_get_active(db_path)
 
@@ -4274,16 +4305,15 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             await _send_agent_turn("marichka", mar_msg or "На H4/Daily структура підтверджує поточний напрямок.")
             await asyncio.sleep(1.5)
 
-            news_msg = (
-                "Новинний фон чистий. Входити можна."
-                if news_mins >= 999
-                else (
-                    f"Увага! {news_event_name} через {news_mins} хв "
-                    f"о {news_kyiv_time or '??:??'} за Києвом."
-                )
+            news_msg = format_nazar_update(
+                data_status=news_data_status,
+                minutes_to_event=news_mins,
+                event_name=news_event_name,
+                event_time_ua=news_kyiv_time,
             )
-            news_msg = _trim_lines(news_msg, 3)
-            await _send_agent_turn("news", news_msg or "Новинний фон керований, критичних тригерів поруч немає.")
+            if news_msg:
+                news_msg = _trim_lines(news_msg, 3)
+                await _send_agent_turn("news", news_msg)
             await asyncio.sleep(1.5)
 
             daryna_ctx = (

@@ -48,6 +48,40 @@ def session_at_utc(ts: Optional[datetime] = None) -> str:
     return names[0]
 
 
+def session_clock(ts: Optional[datetime] = None) -> Dict[str, Any]:
+    """Активна сесія і хвилини до наступної. З годинника, не з вигаданого ринку."""
+    dt = ts or datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(timezone.utc)
+    active = session_at_utc(dt)
+    label = {
+        "asia": "ASIA",
+        "london": "LONDON",
+        "ny": "NY",
+        "london_ny_overlap": "NY",
+        "off_session": "OFF",
+    }.get(active, active.upper() if active else None)
+    h, m = dt.hour, dt.minute
+    now_min = h * 60 + m
+    # Наступне вікно: London 08:00, NY 13:00, Asia 00:00 наступної доби.
+    starts = [("LONDON", 8 * 60), ("NY", 13 * 60), ("ASIA", 24 * 60)]
+    nxt_name = None
+    nxt_in = None
+    for name, start in starts:
+        if start > now_min:
+            nxt_name, nxt_in = name, start - now_min
+            break
+    if nxt_name is None:
+        nxt_name, nxt_in = "ASIA", (24 * 60 - now_min)
+    return {
+        "active": label,
+        "next": nxt_name,
+        "next_in_min": int(nxt_in) if nxt_in is not None else None,
+        "code": active,
+    }
+
+
 def _f(v: Any) -> Optional[float]:
     try:
         x = float(v)

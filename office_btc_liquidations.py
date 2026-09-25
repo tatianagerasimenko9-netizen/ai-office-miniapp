@@ -27,6 +27,56 @@ TOP_BUCKETS = 6
 CREATES_ENTER = False
 CREATES_POSITION = False
 CREATES_ORDER = False
+STUCK_CONNECTING_SEC = 300.0
+IDLE_COLD_QUIET_SEC = 1800.0
+RECONNECT_FIXED_SEC = 60.0
+MAX_RECONNECT_ATTEMPTS = 10
+
+
+def reconnect_plan(
+    *,
+    state: str,
+    age_sec: float,
+    attempt: int = 1,
+) -> Dict[str, Any]:
+    """Що робити з WS. Не торгове рішення і не «немає ліквідацій»."""
+    st = str(state or "").strip().lower()
+    age = float(age_sec or 0.0)
+    n = max(1, min(int(attempt or 1), MAX_RECONNECT_ATTEMPTS))
+    if st in ("connecting", "disconnected") and age + 1e-9 >= STUCK_CONNECTING_SEC:
+        return {
+            "reconnect": True,
+            "delay_sec": RECONNECT_FIXED_SEC,
+            "attempt": n,
+            "max_attempts": MAX_RECONNECT_ATTEMPTS,
+            "log": f"[T7] Відключено, спроба reconnect {n}/{MAX_RECONNECT_ATTEMPTS}",
+            "means_no_liquidations": False,
+        }
+    if st == "idle_cold" and age + 1e-9 >= IDLE_COLD_QUIET_SEC:
+        return {
+            "reconnect": False,
+            "delay_sec": RECONNECT_FIXED_SEC,
+            "quiet_log": True,
+            "log": "[T7] Немає подій ліквідацій 30+ хв — потік живий але ринок тихий",
+            "means_no_liquidations": False,
+        }
+    return {
+        "reconnect": False,
+        "delay_sec": next_reconnect_delay(max(0, int(attempt) - 1)),
+        "means_no_liquidations": False,
+    }
+
+
+def last_event_ago_min(snap: Dict[str, Any], *, now_mono: Optional[float] = None) -> Optional[float]:
+    now = float(now_mono if now_mono is not None else time.monotonic())
+    last = snap.get("last_event_mono")
+    try:
+        last_f = float(last or 0.0)
+    except (TypeError, ValueError):
+        last_f = 0.0
+    if last_f <= 0:
+        return None
+    return round((now - last_f) / 60.0, 1)
 
 
 def next_reconnect_delay(attempt: int) -> float:
@@ -173,15 +223,23 @@ class BtcForceOrderBook:
         self.last_error = ""
         self.reconnects = 0
         self.loop_started = False
+        self.connecting_since_mono: float = 0.0
+        self.loop_started_mono: float = 0.0
+        self.last_quiet_log_mono: float = 0.0
+        self.reconnect_try: int = 0
 
     def mark_connecting(self) -> None:
         """Handshake: не вважаємо це reconnect і не затираємо loop_started."""
         if not self.connected:
             self.connected = False
+            if self.connecting_since_mono <= 0:
+                self.connecting_since_mono = time.monotonic()
 
     def mark_connected(self) -> None:
         self.connected = True
         self.last_error = ""
+        self.connecting_since_mono = 0.0
+        self.reconnect_try = 0
         self.touch_ws()
 
     def mark_disconnected(self, err: str = "") -> None:
@@ -189,6 +247,8 @@ class BtcForceOrderBook:
         if err:
             self.last_error = str(err)[:300]
         self.reconnects += 1
+        self.reconnect_try = min(int(self.reconnect_try) + 1, MAX_RECONNECT_ATTEMPTS)
+        self.connecting_since_mono = time.monotonic()
 
     def touch_ws(self) -> None:
         self.last_ws_rx_mono = time.monotonic()
@@ -272,6 +332,10 @@ class BtcForceOrderBook:
             "bucket_usd": BUCKET_USD,
             "buckets": buckets,
             "last_event_ts_ms": last_ts_ms,
+            "last_event_mono": float(self.last_event_mono or 0.0),
+            "connecting_since_mono": float(self.connecting_since_mono or 0.0),
+            "loop_started_mono": float(self.loop_started_mono or 0.0),
+            "reconnect_try": int(self.reconnect_try or 0),
         }
 
 
@@ -286,11 +350,18 @@ def format_radar_liq_summary(book: BtcForceOrderBook, *, now_mono: Optional[floa
         lines.append(
             "Знімок холодний (цикл WS не стартував у цій книзі). Це не доказ відсутності ліквідацій."
         )
+    elif book_state == "connecting":
+        lines.append(
+            "WS handshake (connecting). Це технічний статус, не «ліквідацій не було на ринку»."
+        )
     elif snap["connected"] and snap["ws_fresh"]:
         lines.append("Потік живий.")
     else:
         err = snap["last_error"] or "немає живого потоку"
-        lines.append(f"Потік не свіжий ({err}). Стан книги: {book_state or 'н/д'}. Це не сигнал.")
+        lines.append(
+            f"Потік не свіжий ({err}). Стан книги: {book_state or 'н/д'}. "
+            "Технічний статус, не ринкова відсутність ліквідацій."
+        )
     if snap["count"] <= 0:
         lines.append(f"За вікно {int(EVENT_WINDOW_SEC // 60)} хв подій немає.")
         lines.append("Не вхід, не позиція, не ордер.")
@@ -324,9 +395,14 @@ async def run_btc_force_order_loop(
 
     target = book if book is not None else BTC_FORCE_ORDER_BOOK
     target.loop_started = True
+    if target.loop_started_mono <= 0:
+        target.loop_started_mono = time.monotonic()
     attempt = 0
     while stop is None or not stop.is_set():
         target.mark_connecting()
+        if attempt > 0:
+            n = min(attempt, MAX_RECONNECT_ATTEMPTS)
+            print(f"[T7] Відключено, спроба reconnect {n}/{MAX_RECONNECT_ATTEMPTS}")
         try:
             timeout = aiohttp.ClientTimeout(total=None, sock_connect=20, sock_read=90)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -356,8 +432,23 @@ async def run_btc_force_order_loop(
             target.mark_disconnected("ws closed")
         if stop is not None and stop.is_set():
             return
-        delay = next_reconnect_delay(attempt)
+        age = 0.0
+        if target.connecting_since_mono > 0:
+            age = time.monotonic() - float(target.connecting_since_mono)
+        plan = reconnect_plan(
+            state="disconnected",
+            age_sec=max(age, STUCK_CONNECTING_SEC if attempt >= 1 else age),
+            attempt=attempt + 1,
+        )
+        delay = float(plan.get("delay_sec") or RECONNECT_FIXED_SEC)
+        if attempt == 0:
+            delay = next_reconnect_delay(0)
         attempt += 1
+        if str((target.snapshot() or {}).get("book_state") or "") == "idle_cold":
+            q = reconnect_plan(state="idle_cold", age_sec=time.monotonic() - (target.loop_started_mono or 0), attempt=1)
+            if q.get("quiet_log") and (time.monotonic() - target.last_quiet_log_mono) > IDLE_COLD_QUIET_SEC:
+                print(q.get("log"))
+                target.last_quiet_log_mono = time.monotonic()
         if stop is None:
             await asyncio.sleep(delay)
             continue
@@ -365,3 +456,4 @@ async def run_btc_force_order_loop(
             await asyncio.wait_for(stop.wait(), timeout=delay)
         except asyncio.TimeoutError:
             pass
+
