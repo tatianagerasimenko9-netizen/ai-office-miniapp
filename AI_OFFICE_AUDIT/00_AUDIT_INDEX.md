@@ -49,9 +49,12 @@
 | 20 | `20_ROOT_CAUSES.md` |
 | 21 | `21_CURRENT_VS_REQUIRED.md` |
 | 22 | `22_OFFICE_2_ARCHITECTURE.md` |
+| 23 | `23_OFFICE_VS_SCANNER.md` |
 | — | `telegram_audit_stats.json` |
 
-Детальний roadmap — у `22_OFFICE_2_ARCHITECTURE.md`.
+Корінь репо: `AI_OFFICE_MASTER.md` — єдиний збірник висновків і вимог 2.0.
+
+Детальний roadmap — у `22_OFFICE_2_ARCHITECTURE.md`. Стик зі сканером — `23_OFFICE_VS_SCANNER.md`. MASTER — `../AI_OFFICE_MASTER.md`.
 
 ## Доповнення 2026-09-25 (GEX)
 
