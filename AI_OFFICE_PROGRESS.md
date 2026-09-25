@@ -1,13 +1,13 @@
 # AI Office — прогрес до готової Mini App
 
-**Оновлено:** 2026-09-25  
-**Гілка коду T0:** `cursor/office-t0-zone-reached-5134` (`203421e`)  
-**Production / Render:** T0 **не** LIVE. Merge і деплой — лише за окремим дозволом.
+**Оновлено:** 2026-09-25 15:16 UTC  
+**T0 у GitHub `main`:** `f4f3315`  
+**Render SHA / логи / Telegram ZONE_REACHED:** **не підтверджено** з цього середовища (немає Render API; `office_events` без `ZONE_REACHED`; Telethon не прочитав чат).
 
 Статуси: `НЕ ПОЧАТО` · `В РОБОТІ` · `ГОТОВО В КОДІ` · `LIVE НА RENDER` · `ПЕРЕВІРЕНО`  
 `ПЕРЕВІРЕНО` ставити лише після тесту реальної функції (чат або апка на Render).
 
-Погоджений код-порядок (після `МОЖНА ВНОСИТИ ЗМІНИ`): **T0 → T4 → T1 → T3 → T5 → T2 → T6 → T7**.
+Погоджений код-порядок (після `МОЖНА ВНОСИТИ ЗМІНИ`): **T0 → T4 → T1 → T3 → T5 → T2 → T6 → T7**. T4 не почато.
 
 | Задача | Зміст | Статус |
 |--------|--------|--------|
@@ -27,7 +27,7 @@
 | # | Результат | Статус | Факт |
 |---|-----------|--------|------|
 | 1 | Рівні S/R / зони BTC + монети сканера, офіс знаходить сам | НЕ ПОЧАТО | Зони зараз з тексту сигналу / WATCHING, не автономний детектор рівнів |
-| 2 | Проактивний моніторинг наближення й досягнення рівня | ГОТОВО В КОДІ | T0: перший hit WATCHING → один `ZONE_REACHED`. Не LIVE. Немає PRE-ALERT / BTC-радара 24/7 |
+| 2 | Проактивний моніторинг наближення й досягнення рівня | ГОТОВО В КОДІ | T0 в `main` (`f4f3315`). LIVE/Telegram **не** доведено. Немає PRE-ALERT / BTC-радара 24/7 |
 | 3 | Вхід за Герчиком (реакція / хибний пробій, SL+люфт, TP, RR) | НЕ ПОЧАТО | Є gerchik-скоринг у коді, немає цього сценарію як продукту |
 | 4 | Малі ТФ: патерни Булковскі з перевіркою, не лише назва | НЕ ПОЧАТО | Книги в бібліотеці; живого верифікатора свічок немає |
 | 5 | SMC/ICT: ліквідність, sweep, MSS/CHOCH, FVG/OB, підтвердження | НЕ ПОЧАТО | Фрагменти в edge-score; немає event-стріму |
@@ -38,22 +38,23 @@
 | 10 | Slash: `/levels` `/heatmap` `/scan` `/watch` `/setup` `/position` `/review` `/stats` | НЕ ПОЧАТО | Команд у relay немає |
 | 11 | Єдиний стан: офіс, сканер, Telegram, Mini App | НЕ ПОЧАТО | T4/T5 ще немає; сканер поза репо |
 | 12 | Mini App: Home, Scanner, Signals, My Positions, Statistics, Notifications | НЕ ПОЧАТО | Є зародок журналу HTML, не 6 екранів |
-| 13 | GitHub → Render: push, PR, тести, деплой, перевірка LIVE | В РОБОТІ | T0: push+PR+локальні тести. CI checks немає. Render не задеплоєно. Telegram LIVE не перевірено |
+| 13 | GitHub → Render: push, PR, тести, деплой, перевірка LIVE | В РОБОТІ | PR #14 злито; `main=f4f3315`. Деплой заявлено вручну. SHA/логи Render і Telegram ZONE_REACHED — не підтверджено |
 
 ---
 
 ## T0 — доказ
 
-- Код: `office_zone_alert.py`, гілка `monitor_active_signals` у `office_relay_wizard.py`
-- Тест скрипта: `python3 scripts/test_zone_reached_notify.py` → PASS
-- Цикл монітора (temp SQLite, 3 проходи): 1 алерт, `signal_id=t0-irys-watch-20260925`, `SIGNAL=NO`, без «входь», `2026-09-25T14:59:50Z`
-- Telegram / Render: **не перевірено** (production не чіпали)
+- Код у `main`: `office_zone_alert.py` + `monitor_active_signals`
+- Локальний тест: `python3 scripts/test_zone_reached_notify.py` → PASS
+- Mini App LIVE (`ai-office-miniapp.onrender.com`) відповідає 200; спільна Postgres `office_events` (останні 40) — **немає** `ZONE_REACHED`, найновіші події ~2026-07-01
+- Telegram: bot `getMe` ок; `getUpdates` без ZONE_REACHED; історія групи через Telethon — збій з’єднання
+- Логи Render: немає API-ключа в цьому середовищі
+- Тестову торгову позицію **не** створювали
 
 ---
 
 ## Блокер зараз
 
-Немає команди `МОЖНА ВНОСИТИ ЗМІНИ` на **T4** і немає дозволу merge/deploy T0 на Render.
+Щоб підтвердити LIVE: доступ до логів Worker **Office runtime / relay** (revision = `f4f3315`) або один реальний `ZONE_REACHED` у чаті AI Office без нової угоди.
 
-Наступна дія після дозволу на код: **T4 `market_state`**.  
-Після дозволу на production: Manual Deploy сервісу **Office runtime / relay**, commit `203421e`, потім перевірка LIVE `ZONE_REACHED`.
+T4 не починати, доки LIVE T0 не підтверджено або не буде окремої команди.
