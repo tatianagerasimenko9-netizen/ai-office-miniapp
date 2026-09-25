@@ -94,6 +94,10 @@ def main() -> int:
     txt = format_skip_plan(p1)
     if "0.009726" in txt or "0.009800" in txt:
         return _fail("must not copy Lev chat zones")
+    if "Цей вхід пропускаємо" not in txt:
+        return _fail("skip headline")
+    if "Ось що відстежуємо" not in txt or "Ось за якої події повідомимо" not in txt:
+        return _fail("watch/event headlines")
     if "forceOrder" not in txt and "ліквідац" not in txt.lower():
         return _fail("liq note")
     if not p1.liquidations.get("kind") == "forceOrder_actual_not_map":

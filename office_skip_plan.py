@@ -248,13 +248,24 @@ def build_skip_plan(
 def format_skip_plan(plan: SkipPlan) -> str:
     """Факти після SKIP. Не шаблон особистості Лева."""
     o = plan.original
+    a, b = plan.alt_a, plan.alt_b
+    watch_bits = []
+    if a.get("zone_low") is not None:
+        watch_bits.append(f"LONG-відкат {a.get('zone_low')}–{a.get('zone_high')}")
+    else:
+        watch_bits.append("LONG-відкат: чекаємо свічки, зону не вигадуємо")
+    if b.get("zone_low") is not None:
+        watch_bits.append(f"SHORT-гіпотеза {b.get('zone_low')}–{b.get('zone_high')}")
+    else:
+        watch_bits.append("SHORT: чекаємо BOS, не RSI")
     lines = [
-        f"Поточний сигнал: SKIP · {o.get('symbol')} {o.get('direction')} entry={o.get('entry')}",
+        f"Цей вхід пропускаємо · {o.get('symbol')} {o.get('direction')} entry={o.get('entry')}",
+        "Ось що відстежуємо: " + "; ".join(watch_bits),
+        "Ось за якої події повідомимо: " + "; ".join(plan.retrigger),
         "Чому зараз не копіюємо бота:",
     ]
     for w in plan.why:
         lines.append(f"— {w}")
-    a, b = plan.alt_a, plan.alt_b
     lines.append("Альтернатива A · LONG після відкату:")
     if a.get("zone_low") is not None:
         lines.append(f"  зона {a.get('zone_low')}–{a.get('zone_high')} (зі свічок, не з чату)")
