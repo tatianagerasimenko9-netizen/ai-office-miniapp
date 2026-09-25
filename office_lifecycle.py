@@ -1,7 +1,7 @@
 """T8: життєвий цикл сетапу. Не змінює evaluate_radar і не відкриває ордери.
 
-Стани: WATCHING → ZONE_REACHED → CONFIRMED | INVALIDATED | EXPIRED.
-CONFIRMED = картка сетапу після зони й підтвердження, не позиція в журналі.
+Стани: WATCHING / WAITING_SWEEP → ZONE_REACHED → CONFIRMED | INVALIDATED | EXPIRED.
+WAITING_SWEEP у БД зберігається як WATCHING. CONFIRMED = картка, не ордер.
 """
 from __future__ import annotations
 
@@ -10,9 +10,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from office_session_radar import independent_flip_ok
+from office_topdown import ENTRY_WAITING_SWEEP, SWEEP_NEAR_PCT, sweep_near
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT, price_in_watching_zone
 
-STATES = ("WATCHING", "ZONE_REACHED", "CONFIRMED", "INVALIDATED", "EXPIRED")
+STATES = ("WATCHING", "WAITING_SWEEP", "ZONE_REACHED", "CONFIRMED", "INVALIDATED", "EXPIRED")
 WATCHING_EXPIRE_SEC = 4 * 3600
 KIND_LIFECYCLE = "lifecycle"
 
@@ -55,6 +56,69 @@ class LifecycleTrace:
         return self.steps[-1].state
 
 
+def db_status_for(state: str) -> str:
+    """WAITING_SWEEP у таблиці office_signals = WATCHING, не окремий SIGNAL."""
+    st = str(state or "WATCHING").upper()
+    if st in (ENTRY_WAITING_SWEEP, "WAITING_SWEEP"):
+        return "WATCHING"
+    return st
+
+
+def format_waiting_sweep_watch(
+    *,
+    symbol: str,
+    timeframe: str = "H1",
+    direction: str = "LONG",
+    sweep_level: Any,
+    sweep_kind: str = "SSL",
+) -> str:
+    from office_telegram_filter import format_px
+
+    side = str(direction or "LONG").upper() or "LONG"
+    kind = str(sweep_kind or "SSL").upper()
+    lv = format_px(sweep_level)
+    where = "нижче" if kind == "SSL" else "вище"
+    return "\n".join(
+        [
+            f"👀 {str(symbol or '').upper()} · {str(timeframe or 'H1')}",
+            f"Чекаємо свіп {kind} {where} {lv}",
+            f"Якщо ціна туди дійде і відскочить → можливий {side}",
+            "Нічого не робити поки свіп не підтверджено",
+        ]
+    )
+
+
+def format_sweep_approach_alert(
+    *,
+    symbol: str,
+    level: Any,
+    price: Any,
+    direction: str = "LONG",
+    sweep_kind: str = "SSL",
+) -> str:
+    from office_telegram_filter import format_px
+
+    side = str(direction or "LONG").upper() or "LONG"
+    kind = str(sweep_kind or "SSL").upper()
+    if kind == "SSL" or side == "LONG":
+        wait = "Якщо пробій і закриття нижче → чекаємо відскік для LONG"
+    else:
+        wait = "Якщо пробій і закриття вище → чекаємо відскік для SHORT"
+    return "\n".join(
+        [
+            f"⚡ {str(symbol or '').upper()} наближається до зони свіпу",
+            f"Рівень: {format_px(level)} (зараз {format_px(price)})",
+            wait,
+        ]
+    )
+
+
+def sweep_approach_due(*, price: Any, level: Any, already_happened: bool = False) -> bool:
+    if already_happened:
+        return False
+    return sweep_near(price=price, level=level, pct=SWEEP_NEAR_PCT)
+
+
 def age_sec(created: Any, now: Any) -> Optional[float]:
     a, b = _ts(created), _ts(now)
     if a is None or b is None:
@@ -75,6 +139,7 @@ def next_lifecycle_state(
     day_used_pct: Any = None,
     invalidated: bool = False,
     invalidate_reason: str = "",
+    sweep_happened: bool = False,
 ) -> Dict[str, str]:
     """Один крок. CONFIRMED не означає ордер."""
     cur = str(current or "WATCHING").upper()
@@ -82,8 +147,16 @@ def next_lifecycle_state(
         return {"state": cur, "reason": "термінал"}
     now = now_ts
     age = age_sec(created_ts, now)
-    if age is not None and age > WATCHING_EXPIRE_SEC and cur == "WATCHING":
+    if cur in ("WATCHING", "WAITING_SWEEP") and age is not None and age > WATCHING_EXPIRE_SEC:
         return {"state": "EXPIRED", "reason": "WATCHING старший за 4 год без зони"}
+    if cur == "WAITING_SWEEP":
+        if invalidated:
+            return {"state": "INVALIDATED", "reason": invalidate_reason or "свіп-сценарій знято"}
+        if sweep_happened and confirmed and not entry_blocked:
+            return {"state": "CONFIRMED", "reason": "свіп стався — картка, не ордер"}
+        if sweep_happened:
+            return {"state": "ZONE_REACHED", "reason": "свіп стався, чекаємо підтвердження малого ТФ"}
+        return {"state": "WAITING_SWEEP", "reason": "чекаємо свіп, у стрічку як сигнал не кладемо"}
     in_zone = price_in_watching_zone(price, entry_low, entry_high)
     if cur == "WATCHING":
         if not in_zone:

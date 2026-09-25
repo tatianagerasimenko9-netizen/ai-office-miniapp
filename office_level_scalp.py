@@ -26,7 +26,15 @@ from office_radar import (
 from office_range_radar import detect_range_bounds
 from office_session_radar import detect_breakout_retest
 from office_telegram_filter import format_px
-from office_topdown import build_topdown, calc_sl_with_buffer
+from office_topdown import (
+    ENTRY_WAITING_SWEEP,
+    build_topdown,
+    calc_sl_with_buffer,
+    entry_gate_from_topdown,
+    m15_bos_confirmed,
+    plan_entry_point,
+    sweep_story,
+)
 
 KIND_LEVEL = "level_scalp"
 # Ті самі витрати що office_t6_backtest / office_t8_backtest, не нові пороги ATR/Edge.
@@ -254,6 +262,8 @@ class LevelScenario:
     sl_note: str = ""
     mode: str = "intraday"
     opens_position: bool = False
+    entry_mode: str = ""
+    entry_note: str = ""
 
 
 @dataclass
@@ -422,11 +432,69 @@ def evaluate_level_book(
             sc.status = "WATCHING"
         book.scenarios.append(sc)
 
+    def _apply_gates(sc: LevelScenario) -> None:
+        side = str(sc.direction or "").upper()
+        td_side = build_topdown(
+            symbol=sym,
+            d1=d1_candles,
+            h4=h4_candles,
+            h1=candles,
+            m15=m15_candles or confirm_candles,
+            m5=m5_candles,
+            direction=side,
+        )
+        extras["topdown"] = td_side
+        sw = td_side.get("sweep") if isinstance(td_side.get("sweep"), dict) else sweep_story([], direction=side)
+        conf = td_side.get("confluence") if isinstance(td_side.get("confluence"), dict) else {}
+        bos = m15_bos_confirmed(m15_candles or confirm, direction=side)
+        gate = entry_gate_from_topdown(
+            sweep=sw,
+            confluence=conf,
+            direction=side,
+            rr_net=sc.rr_net,
+            m15_bos=bos,
+            already_confirmed=sc.status == "CONFIRMED",
+        )
+        sc.entry_mode = str(gate.get("entry_mode") or "")
+        if sc.status == "CONFIRMED" and not gate.get("allow_signal"):
+            sc.status = "WATCHING"
+            sc.confirmation = str(gate.get("reason") or sc.confirmation)
+        if sc.status == "CONFIRMED":
+            tf_e = "M5" if md == "scalp" else "M15"
+            plan = plan_entry_point(
+                direction=side,
+                price=px,
+                candles=m15_candles or confirm,
+                sweep_level=sw.get("level"),
+                sweep_happened=bool(sw.get("happened")),
+                tf=tf_e,
+            )
+            sc.entry_note = str(plan.get("card_note") or "")
+            if plan.get("entry") is not None:
+                sc.entry = float(plan["entry"])
+            if plan.get("sl_anchor") is not None:
+                packed = calc_sl_with_buffer(plan["sl_anchor"], side, price=sc.entry)
+                if packed.get("sl") is not None:
+                    sc.sl = packed["sl"]
+                    sl_s = format_px(sc.sl)
+                    if sl_s and side == "SHORT":
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається вище {sl_s}"
+                    elif sl_s:
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається нижче {sl_s}"
+            if sc.entry is not None and sc.sl is not None and sc.tp1 is not None:
+                sc.rr_net = rr_after_costs(entry=sc.entry, sl=sc.sl, tp=sc.tp1)
+                den = abs(float(sc.entry) - float(sc.sl))
+                sc.rr_gross = abs(float(sc.tp1) - float(sc.entry)) / den if den else None
+
+    for sc in book.scenarios:
+        _apply_gates(sc)
+
     fp = "|".join(
-        f"{s.direction}:{s.status}:{s.setup}" for s in book.scenarios
+        f"{s.direction}:{s.status}:{s.setup}:{s.entry_mode}" for s in book.scenarios
     )
     extras["fingerprint"] = fp
     confirmed = [s for s in book.scenarios if s.status == "CONFIRMED"]
+    waiting = [s for s in book.scenarios if s.entry_mode == ENTRY_WAITING_SWEEP]
     if confirmed:
         extras["topdown"] = build_topdown(
             symbol=sym,
@@ -437,7 +505,22 @@ def evaluate_level_book(
             m5=m5_candles,
             direction=str(confirmed[0].direction),
         )
-    book.should_notify = bool(confirmed) and fp != str(prev_fingerprint or "")
+    elif waiting:
+        extras["topdown"] = build_topdown(
+            symbol=sym,
+            d1=d1_candles,
+            h4=h4_candles,
+            h1=candles,
+            m15=m15_candles or confirm_candles,
+            m5=m5_candles,
+            direction=str(waiting[0].direction),
+        )
+    extras["entry_mode"] = (
+        str(confirmed[0].entry_mode)
+        if confirmed
+        else (str(waiting[0].entry_mode) if waiting else "")
+    )
+    book.should_notify = bool(confirmed or waiting) and fp != str(prev_fingerprint or "")
     book.opens_position = False
     return book
 
