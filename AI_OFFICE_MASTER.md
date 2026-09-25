@@ -45,3 +45,5 @@ Telegram-офіс з травня 2026: Лев/команда, NO TRADE замі
 | `AI_OFFICE_AUDIT/00…26_*.md` | розтин по темах + фінальна перевірка ТЗ |
 
 Код, промпти агентів, CONFIG, БД — **не чіпати** до дозволу.
+
+Закриття кожної задачі — `AI_OFFICE_AUDIT/CURSOR_TASKS.md` §8 (GitHub → Render). Push не дорівнює LIVE.
