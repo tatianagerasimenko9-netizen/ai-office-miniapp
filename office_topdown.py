@@ -24,6 +24,13 @@ ENTRY_CONFIRMED = "CONFIRMED_ENTRY"
 SWEEP_AHEAD = "ще попереду"
 SWEEP_DONE = "стався"
 COUNTER_TREND_MIN_RR = 2.5
+ENTRY_KIND_PULLBACK = "impulse_pullback"
+ENTRY_KIND_MARKET = "market"
+ENTRY_KIND_RETEST = "sweep_retest"
+IMPULSE_BODY_RATIO = 0.55
+IMPULSE_MIN_BODY_PCT = 0.002
+PULLBACK_38 = 0.38
+PULLBACK_50 = 0.50
 # Люфт Герчика: 0.12% ціни або 3 кроки округлення — що більше, у коридорі 0.10–0.15%.
 BUFFER_PCT = 0.0012
 BUFFER_TICKS = 3
@@ -252,6 +259,147 @@ def _hhmm_kyiv(ts: Any) -> str:
     except Exception:
         local = dt
     return f"{local.hour:02d}:{local.minute:02d}"
+
+
+def last_impulse_candle(candles: Any, *, direction: str) -> Optional[Dict[str, Any]]:
+    """Остання імпульсна свічка в бік сетапу. Без сильного тіла — None, зону не вигадуємо."""
+    rows = _bars(candles)
+    side = str(direction or "").upper()
+    best: Optional[Dict[str, Any]] = None
+    for c in reversed(rows[-16:]):
+        o, h, l, cl = float(c["open"]), float(c["high"]), float(c["low"]), float(c["close"])
+        rng = h - l
+        body = abs(cl - o)
+        if rng <= 0 or body / rng + 1e-12 < IMPULSE_BODY_RATIO:
+            continue
+        mid = (h + l) / 2.0 or cl
+        if mid > 0 and body / mid + 1e-12 < IMPULSE_MIN_BODY_PCT:
+            continue
+        if side == "LONG" and cl <= o:
+            continue
+        if side == "SHORT" and cl >= o:
+            continue
+        if side not in ("LONG", "SHORT"):
+            continue
+        best = {
+            "open": o,
+            "high": h,
+            "low": l,
+            "close": cl,
+            "ts": c.get("ts") or "",
+            "body": body,
+        }
+        break
+    return best
+
+
+def _same_px(a: Any, b: Any) -> bool:
+    fa, fb = _f(a), _f(b)
+    if fa is None or fb is None or fa <= 0 or fb <= 0:
+        return False
+    if abs(fa - fb) / max(fa, fb) <= 1e-6:
+        return True
+    from office_telegram_filter import format_px
+
+    return format_px(fa) == format_px(fb) and bool(format_px(fa))
+
+
+def plan_entry_point(
+    *,
+    direction: str,
+    price: Any,
+    candles: Any = None,
+    sweep_level: Any = None,
+    sweep_happened: bool = False,
+    tf: str = "M15",
+) -> Dict[str, Any]:
+    """Точка входу: відкат 38–50% імпульсу, ретест свіпу або явно «по ринку»."""
+    from office_telegram_filter import format_px
+
+    side = str(direction or "").upper()
+    px = _f(price)
+    tf_s = str(tf or "M15").upper()
+    if tf_s in ("1H", "H1", "60"):
+        tf_s = "M15"
+    if tf_s in ("5M", "5"):
+        tf_s = "M5"
+    market = {
+        "kind": ENTRY_KIND_MARKET,
+        "entry": px,
+        "sl_anchor": None,
+        "wait": False,
+        "tf": tf_s,
+        "retrace_pct": None,
+        "card_note": f"по ринку {format_px(px)} (зона вже досягнута)" if format_px(px) else "",
+    }
+    if px is None:
+        market["card_note"] = ""
+        return market
+    impulse = last_impulse_candle(candles, direction=side)
+    if impulse:
+        body = float(impulse["body"])
+        o, cl = float(impulse["open"]), float(impulse["close"])
+        if side == "LONG":
+            top = max(o, cl)
+            fib38 = top - PULLBACK_38 * body
+            fib50 = top - PULLBACK_50 * body
+            zone_lo, zone_hi = min(fib50, fib38), max(fib50, fib38)
+            in_zone = zone_lo - 1e-12 <= px <= zone_hi + 1e-12
+            need_wait = px > zone_hi
+            entry_px = fib50
+            sl_anchor = float(impulse["low"])
+        else:
+            bot = min(o, cl)
+            fib38 = bot + PULLBACK_38 * body
+            fib50 = bot + PULLBACK_50 * body
+            zone_lo, zone_hi = min(fib38, fib50), max(fib38, fib50)
+            in_zone = zone_lo - 1e-12 <= px <= zone_hi + 1e-12
+            need_wait = px < zone_lo
+            entry_px = fib50
+            sl_anchor = float(impulse["high"])
+        if in_zone:
+            return {
+                "kind": ENTRY_KIND_MARKET,
+                "entry": px,
+                "sl_anchor": sl_anchor,
+                "wait": False,
+                "tf": tf_s,
+                "retrace_pct": 50,
+                "card_note": f"по ринку {format_px(px)} (зона вже досягнута)",
+            }
+        if need_wait and entry_px and entry_px > 0:
+            return {
+                "kind": ENTRY_KIND_PULLBACK,
+                "entry": entry_px,
+                "sl_anchor": sl_anchor,
+                "wait": True,
+                "tf": tf_s,
+                "retrace_pct": 50,
+                "card_note": f"{format_px(entry_px)} (відкат 50% імпульсної свічки {tf_s})",
+            }
+    sw_lv = _f(sweep_level)
+    if sweep_happened and sw_lv is not None and not _same_px(px, sw_lv):
+        away = abs(px - sw_lv) / px
+        if away > 0.0015:
+            return {
+                "kind": ENTRY_KIND_RETEST,
+                "entry": sw_lv,
+                "sl_anchor": sw_lv,
+                "wait": True,
+                "tf": tf_s,
+                "retrace_pct": None,
+                "card_note": f"{format_px(sw_lv)} (ретест після свіпу — чекати)",
+            }
+    note = f"по ринку {format_px(px)} (зона вже досягнута)"
+    return {
+        "kind": ENTRY_KIND_MARKET,
+        "entry": px,
+        "sl_anchor": None,
+        "wait": False,
+        "tf": tf_s,
+        "retrace_pct": None,
+        "card_note": note,
+    }
 
 
 def _bias_key(bias: Any) -> str:

@@ -265,7 +265,10 @@ def format_opportunity_alert(
     if logic:
         lines.append(f"Логіка: {logic}")
     if sweep_line:
-        lines.append(f"Свіп: {sweep_line}")
+        sw = str(sweep_line).strip()
+        if "знято" in sw.lower() and "✅" not in sw:
+            sw = f"{sw} ✅"
+        lines.append(f"Свіп: {sw}")
     else:
         lines.append("Свіп: DATA_UNAVAILABLE (немає підтверджених свічок)")
     ah, al = format_px(asia_high), format_px(asia_low)
@@ -274,6 +277,7 @@ def format_opportunity_alert(
     else:
         lines.append("Діапазон сесії: Asian High/Low DATA_UNAVAILABLE")
     waiting = str(entry_mode or "").upper() == ENTRY_WAITING_SWEEP
+    note = str(entry_note or "").strip()
     if waiting:
         slv = format_px(sweep_level)
         if side == "SHORT":
@@ -282,8 +286,17 @@ def format_opportunity_alert(
             wait_e = f"після свіпу і закриття {style['entry_tf']} вище {slv}" if slv else "після свіпу"
         lines.append(f"Вхід: {wait_e}")
         lines.append("Спостереження: якщо ціна дійде до рівня свіпу і відскочить")
+        lines.append("Нічого не робити поки свіп не підтверджено")
+        blob = "\n".join(lines)
+        return blob
+    if note:
+        lines.append(f"Вхід: {note}" if not note.lower().startswith("вхід:") else note)
+    elif live and e and live == e:
+        lines.append(f"Вхід: по ринку {e} (зона вже досягнута)")
+    elif e:
+        lines.append(f"Вхід: {e} ({style['entry_tf']} закрита {'нижче' if side == 'SHORT' else 'вище'})")
     else:
-        lines.append(f"Вхід: {e}")
+        lines.append("Вхід: DATA_UNAVAILABLE")
     lines.append(f"SL: {s}")
     lines.append(f"TP1: {t1}")
     if move_pct is not None:
@@ -315,7 +328,7 @@ def format_opportunity_alert(
         lines.append(
             f"Скасування: {style['cancel_tf']} свічка закривається {above} {format_px(cancel)}"
         )
-    lines.append("Позиція: немає")
+    lines.append("→ Олеся фіксує в журнал")
     blob = "\n".join(lines)
     return blob
 
@@ -405,7 +418,7 @@ def level_book_to_alert(
         asia_high=asia.get("high"),
         asia_low=asia.get("low"),
         sl_explain="",
-        entry_note="",
+        entry_note=str(getattr(picked, "entry_note", "") or ""),
         mode=mode,
         live_price=extras_px if extras_px is not None else picked.entry,
         logic_line=str(td.get("logic_line") or ""),

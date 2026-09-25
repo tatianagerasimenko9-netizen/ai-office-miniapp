@@ -38,9 +38,13 @@ from office_telegram_filter import (  # noqa: E402
 from office_topdown import (  # noqa: E402
     COUNTER_TREND_MIN_RR,
     DATA_UNAVAILABLE,
+    ENTRY_KIND_MARKET,
+    ENTRY_KIND_PULLBACK,
+    ENTRY_KIND_RETEST,
     ENTRY_WAITING_SWEEP,
     asian_session_range,
     entry_gate_from_topdown,
+    plan_entry_point,
     structure_confluence,
     sweep_near,
     sweep_story,
@@ -158,10 +162,14 @@ def main() -> int:
         sweep_level=0.032122,
         sweep_kind="SSL",
     )
-    if "👀 WATCHING · AKEUSDT · H1" not in watch:
+    if "👀 AKEUSDT · H1" not in watch:
         return _fail(watch)
-    if "SSL sweep нижче 0.032122" not in watch:
+    if "Чекаємо свіп SSL нижче 0.032122" not in watch:
         return _fail(watch)
+    if "Нічого не робити поки свіп не підтверджено" not in watch:
+        return _fail(watch)
+    if "🟢 LONG" in watch or "Вхід:" in watch:
+        return _fail("watching must not look like signal")
     if db_status_for("WAITING_SWEEP") != "WATCHING":
         return _fail("db status")
     step = next_lifecycle_state(
@@ -277,8 +285,10 @@ def main() -> int:
     if level_book_to_alert(ake_book) is not None:
         return _fail("waiting must not be signal")
     wtxt = level_book_to_watching(ake_book)
-    if wtxt is None or "WATCHING · AKEUSDT" not in wtxt:
+    if wtxt is None or "👀 AKEUSDT · H1" not in wtxt:
         return _fail(f"watching card {wtxt}")
+    if "Нічого не робити" not in wtxt:
+        return _fail(wtxt)
     ake_book.extras["price"] = 0.032250
     ahead_near = dict(ahead)
     ahead_near["level"] = 0.032122
@@ -319,6 +329,57 @@ def main() -> int:
     sig = level_book_to_alert(done_book)
     if sig is None or "BSL знято" not in sig or "на рівні" not in sig:
         return _fail(f"signal {sig}")
+    if "✅" not in sig:
+        return _fail(f"signal check {sig}")
+    if "Позиція: немає" in sig:
+        return _fail("signal position marker")
+    if "по ринку" not in sig and "відкат" not in sig and "ретест" not in sig and "закрита" not in sig:
+        return _fail(f"entry unexplained {sig}")
+
+    impulse_up = [
+        _c(0.0320, 0.0322, 0.0319, 0.0321, "2026-09-25T09:00:00+00:00"),
+        _c(0.0320, 0.0331, 0.03195, 0.0330, "2026-09-25T09:15:00+00:00"),
+    ]
+    pb = plan_entry_point(direction="LONG", price=0.032889, candles=impulse_up, tf="M15")
+    if pb.get("kind") != ENTRY_KIND_PULLBACK:
+        return _fail(f"pullback {pb}")
+    if abs(float(pb["entry"]) - 0.0325) > 1e-9:
+        return _fail(f"50pct {pb}")
+    if "відкат 50% імпульсної свічки M15" not in str(pb.get("card_note") or ""):
+        return _fail(pb)
+    mkt = plan_entry_point(direction="LONG", price=0.03255, candles=impulse_up, tf="M15")
+    if mkt.get("kind") != ENTRY_KIND_MARKET or "по ринку" not in str(mkt.get("card_note") or ""):
+        return _fail(f"market {mkt}")
+    dojis = [
+        _c(0.0330, 0.03305, 0.03295, 0.0330, "2026-09-25T10:00:00+00:00"),
+        _c(0.0330, 0.03304, 0.03296, 0.03301, "2026-09-25T10:15:00+00:00"),
+    ]
+    rt = plan_entry_point(
+        direction="LONG",
+        price=0.032889,
+        candles=dojis,
+        sweep_level=0.032122,
+        sweep_happened=True,
+        tf="M15",
+    )
+    if rt.get("kind") != ENTRY_KIND_RETEST or "ретест після свіпу" not in str(rt.get("card_note") or ""):
+        return _fail(f"retest {rt}")
+    same = format_opportunity_alert(
+        symbol="AKEUSDT",
+        direction="LONG",
+        timeframe="H1",
+        entry=0.032889,
+        sl=0.0319,
+        tp1=0.0350,
+        rr_net=2.2,
+        move_pct=6.4,
+        live_price=0.032889,
+        sweep_line="SSL знято о 02:14 на рівні 0.032122",
+    )
+    if "Вхід: по ринку 0.032889" not in same:
+        return _fail(same)
+    if "Позиція: немає" in same:
+        return _fail("marker")
 
     orig = ingest_external_signal(text=PENGU, msg_id=17, received_at="2026-09-25T20:53:00+00:00")
     rev = review_external_signal(

@@ -80,9 +80,10 @@ def format_waiting_sweep_watch(
     where = "нижче" if kind == "SSL" else "вище"
     return "\n".join(
         [
-            f"👀 WATCHING · {str(symbol or '').upper()} · {str(timeframe or 'H1')}",
-            f"Чекаємо: {kind} sweep {where} {lv}",
-            f"Якщо створиться і відскочить → можливий {side}",
+            f"👀 {str(symbol or '').upper()} · {str(timeframe or 'H1')}",
+            f"Чекаємо свіп {kind} {where} {lv}",
+            f"Якщо ціна туди дійде і відскочить → можливий {side}",
+            "Нічого не робити поки свіп не підтверджено",
         ]
     )
 

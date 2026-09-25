@@ -170,10 +170,12 @@ def main() -> int:
         "Ведення:",
         "50–70%",
         "Скасування: H1 свічка закривається вище",
-        "Позиція: немає",
+        "→ Олеся фіксує в журнал",
     ):
         if need not in card:
             return _fail(f"card missing {need!r} in {card}")
+    if "Позиція: немає" in card:
+        return _fail("position marker leaked")
     sl_line = next((ln for ln in card.splitlines() if ln.startswith("SL:")), "")
     if sl_line != f"SL: {format_px(packed['sl'])}":
         return _fail(f"sl must be number only {sl_line!r}")

@@ -32,6 +32,7 @@ from office_topdown import (
     calc_sl_with_buffer,
     entry_gate_from_topdown,
     m15_bos_confirmed,
+    plan_entry_point,
     sweep_story,
 )
 
@@ -262,6 +263,7 @@ class LevelScenario:
     mode: str = "intraday"
     opens_position: bool = False
     entry_mode: str = ""
+    entry_note: str = ""
 
 
 @dataclass
@@ -457,6 +459,32 @@ def evaluate_level_book(
         if sc.status == "CONFIRMED" and not gate.get("allow_signal"):
             sc.status = "WATCHING"
             sc.confirmation = str(gate.get("reason") or sc.confirmation)
+        if sc.status == "CONFIRMED":
+            tf_e = "M5" if md == "scalp" else "M15"
+            plan = plan_entry_point(
+                direction=side,
+                price=px,
+                candles=m15_candles or confirm,
+                sweep_level=sw.get("level"),
+                sweep_happened=bool(sw.get("happened")),
+                tf=tf_e,
+            )
+            sc.entry_note = str(plan.get("card_note") or "")
+            if plan.get("entry") is not None:
+                sc.entry = float(plan["entry"])
+            if plan.get("sl_anchor") is not None:
+                packed = calc_sl_with_buffer(plan["sl_anchor"], side, price=sc.entry)
+                if packed.get("sl") is not None:
+                    sc.sl = packed["sl"]
+                    sl_s = format_px(sc.sl)
+                    if sl_s and side == "SHORT":
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається вище {sl_s}"
+                    elif sl_s:
+                        sc.cancel = f"{'M5' if md == 'scalp' else 'H1'} свічка закривається нижче {sl_s}"
+            if sc.entry is not None and sc.sl is not None and sc.tp1 is not None:
+                sc.rr_net = rr_after_costs(entry=sc.entry, sl=sc.sl, tp=sc.tp1)
+                den = abs(float(sc.entry) - float(sc.sl))
+                sc.rr_gross = abs(float(sc.tp1) - float(sc.entry)) / den if den else None
 
     for sc in book.scenarios:
         _apply_gates(sc)
