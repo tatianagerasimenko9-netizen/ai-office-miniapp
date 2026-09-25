@@ -52,4 +52,4 @@ Rollback: revert PR.
 `scripts/classify_office_messages.py` по JSON експорту → counts MENTION/SETUP/WATCH/SIGNAL. Не міняти прод.  
 Критерій: не називати 804 SIGNAL.
 
-Не починати T6–T8 до T1–T5, якщо немає явного «можна радар першим».
+Не починати T6–T8 до **T0–T5**, якщо немає явного «можна радар першим».

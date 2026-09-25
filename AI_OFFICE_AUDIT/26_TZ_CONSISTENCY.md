@@ -10,11 +10,11 @@
 | Не чіпати код до дозволу | MASTER, CURSOR_TASKS, ROADMAP | узгоджено |
 | Офіс ≠ радар | MASTER §2, 21, 22 | узгоджено |
 | Scanner окремий процес | 23, MASTER | узгоджено; конфлікт угод **не доведений** |
-| `ZONE_REACHED` окремо від входу | MASTER слабко; IRYS у листі Тетяни / цьому файлі | **пропуск у T1–T5** — T3 навіть **суперечить** (після SKIP не обіцяти «повідомлю») |
+| `ZONE_REACHED` окремо від входу | T0 у MASTER і CURSOR | узгоджено; T3 лишається антиспамом **нових** watch після SKIP, не глушінням існуючого WATCHING |
 | `/review` ≠ `/position` | T1, 18 | узгоджено |
 | ATR як стоп пошуку | 07, 05 | узгоджено з вересневим чатом |
 | 804 SIGNAL | старі чернетки ChatGPT | **заборонено** (T8) |
-| Перша задача | MASTER: «стан **або** review»; CURSOR: T1–T5 без пріоритету; ROADMAP: етап 1 пакетом | **суперечність** — нижче карта |
+| Перша задача | MASTER + CURSOR: T0 першим | **узгоджено 2026-09-25**. Залишок: ROADMAP етап 1 ще описує пакет змін одним абзацом — виконувати не пакетом, а T0 окремим PR |
 
 **Дублікати:** `KEEP_CHANGE_REMOVE.md` ≈ `24_`; `OFFICE_2_ARCHITECTURE.md` ≈ `22_`; `MINI_APP_SPEC.md` ≈ `25_`. Це навмисні імена з ТЗ, не різні плани.
 
@@ -49,10 +49,13 @@
 
 **ПІДТВЕРДЖЕНО кодом цього репо**
 
-- Сканер `file-1.py.py` / `2scanner_bot_1.py` **немає в git**. Офіс читає чужий Telegram (`SOURCE_CHAT_ID`, `office_relay_wizard.py` ~2747, хендлер ~2907–3088).
-- Стан угод офісу: SQLite/Postgres таблиця `office_signals` (`office_bridge.py`, статуси WATCHING/ACTIVE/HIT_* / ATR_DEAD) — **немає** колонки `bot_action`, **немає** таблиці `market_state`.
-- Після SKIP офіс пише `office_signals` / чат. **Немає** HTTP/IPC/файлу команди в процес сканера.
-- Журнал Mini App і `trade_journal` не є execution log біржі.
+Шлях даних (односторонній текст, не спільна БД):
+
+1. `SOURCE_CHAT_ID` (`office_relay_wizard.py`) — якщо чат = SOURCE і `looks_like_signal(text)` → `client.send_message(main_entity, text)` і **`return`**. Ядро сканера не викликається.
+2. MAIN: `from_scanner` якщо `sender_id in OFFICE_SIGNAL_SOURCE_BOT_IDS`. Дзеркало в OFFICE + `parse_signal` + **`office_handle_signal`** (`office_bridge.py`).
+3. `verdict.action == "ENTER"` → in-memory `active_positions` + `journal_open_trade`. SKIP лишається в `office_decisions` / чаті.
+4. Таблиця `office_signals`: колонки `signal_id, symbol, direction, entry_*, sl, tp*, rr, status, ts_*, outcome, analysis_note`. **Немає** `bot_action`, **немає** таблиці `market_state`. Рядок `market_state=` у wizard — рядок режиму BTC в промпт, не таблиця.
+5. `file-1.py.py` / `2scanner_bot_1.py` **відсутні** в git (`Glob` = 0 файлів). Mini App пише `tv_signals` з webhook, не зі сканера.
 
 **НЕ ДОВЕДЕНО (архітектурне припущення)**
 
