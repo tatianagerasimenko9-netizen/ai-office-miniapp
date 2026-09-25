@@ -1,19 +1,19 @@
 # AI Office — прогрес до готової Mini App
 
 **Оновлено:** 2026-09-25  
-**T0:** ЗАКРИТО LIVE / ПЕРЕВІРЕНО (`993c720`).  
+**T0:** ЗАКРИТО LIVE / ПЕРЕВІРЕНО (`993c720`). Telegram 25.09 18:50 Лев ZONE_REACHED BTCUSDT, SIGNAL=NO.  
 **T4:** таблиця `market_state` LIVE на Worker `dfa1369` (upsert/get перевірено).  
-**T5:** `bot_action=BLOCKED` зупиняє kickoff/ENTER у MAIN. SOURCE-форвард не глушиться. **Ще не LIVE.**
+**T5:** Worker `f383795` **LIVE / ПЕРЕВІРЕНО**. Telegram 25.09 19:19 Лев: «Сканер BLOCKED офісом · T5PROBEUSDT» / ENTER не запускаємо. У БД немає kickoff/journal по probe; рядок `T5PROBEUSDT` видалено. Картка `T5-LIVE-PROBE` була в чаті Signal Source, бо Cursor `MAIN_CHAT_ID` вказує на цю групу (тест, не бойовий ордер). SOURCE-форвард T5 не глушить.
 
 Статуси: `НЕ ПОЧАТО` · `В РОБОТІ` · `ГОТОВО В КОДІ` · `LIVE НА RENDER` · `ПЕРЕВІРЕНО`
 
-Порядок: **T0 ✅ → T4 ✅ → T5 (цей PR) → T1 → T3 → T2 → T6 → T7**.
+Порядок: **T0 ✅ → T4 ✅ → T5 ✅ → T1 → T3 → T2 → T6 → T7**.
 
 | Задача | Зміст | Статус |
 |--------|--------|--------|
 | T0 | ZONE_REACHED | LIVE / ПЕРЕВІРЕНО |
 | T4 | таблиця `market_state` | LIVE (read/write) |
-| T5 | MAIN шанує `bot_action` | ГОТОВО В КОДІ |
+| T5 | MAIN шанує `bot_action` | LIVE / ПЕРЕВІРЕНО |
 | T1 | `/review` ≠ `/position` | НЕ ПОЧАТО |
 | T3 | дедуп WATCHING після SKIP | НЕ ПОЧАТО |
 | T2 | Назар fail-closed | НЕ ПОЧАТО |
@@ -27,8 +27,8 @@
 | 1 рівні | НЕ ПОЧАТО | |
 | 2 проактивний моніторинг | LIVE / ПЕРЕВІРЕНО | T0 |
 | 3–10 | НЕ ПОЧАТО | T1/T2/T6… |
-| 11 єдиний стан | В РОБОТІ | таблиця LIVE; T5 у коді, не на Render; Mini App ще ні |
+| 11 єдиний стан | В РОБОТІ | таблиця LIVE; T5 BLOCKED на прод підтверджено чатом; Mini App ще ні |
 | 12 Mini App | НЕ ПОЧАТО | T7 |
-| 13 GitHub→Render | В РОБОТІ | T0+T4 LIVE; T5 чекає злиття/деплой |
+| 13 GitHub→Render | В РОБОТІ | T0+T4+T5 Worker Live / ПЕРЕВІРЕНО |
 
-До Mini App: злити/задеплоїти T5, далі T1, T3, T2, T6, T7 і пункти 1,3–10,12.
+До Mini App: T1, T3, T2, T6, T7 і пункти 1,3–10,12. Наступну задачу з цього кроку не стартуємо.
