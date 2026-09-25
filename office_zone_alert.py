@@ -12,6 +12,28 @@ from typing import Any, Optional
 # Збігається з історичним `if day_used_row > 90` у monitor_active_signals.
 ATR_DAY_USED_ENTRY_BLOCK_PCT = 90.0
 ZONE_REACHED_COOLDOWN_SEC = 14400
+T0_PROBE_PREFIX = "T0-PROBE"
+
+
+def is_t0_probe_note(analysis_note: Any) -> bool:
+    """Тестовий WATCHING: лише ZONE_REACHED, без аналізу входу."""
+    return str(analysis_note or "").startswith(T0_PROBE_PREFIX)
+
+
+def after_zone_reached_action(*, analysis_note: Any, plan: WatchingZonePlan) -> str:
+    """
+    STOP — T0-PROBE: алерт уже надіслано, далі ні reanalyze, ні ACTIVE.
+    EXPIRE_ATR / PROMOTE / REANALYZE / HOLD — звичайний монітор.
+    """
+    if is_t0_probe_note(analysis_note):
+        return "STOP"
+    if plan.expire_after_alert:
+        return "EXPIRE_ATR"
+    if plan.promote_active:
+        return "PROMOTE"
+    if plan.run_reanalyze:
+        return "REANALYZE"
+    return "HOLD"
 
 
 def should_emit_zone_reached(

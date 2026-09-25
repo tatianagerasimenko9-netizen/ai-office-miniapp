@@ -10,7 +10,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from office_zone_alert import (  # noqa: E402
+    T0_PROBE_PREFIX,
     ZONE_REACHED_COOLDOWN_SEC,
+    after_zone_reached_action,
+    is_t0_probe_note,
     plan_watching_zone_hit,
     should_emit_zone_reached,
 )
@@ -102,6 +105,30 @@ def main() -> int:
         t += 60.0
     if emits != 1:
         return _fail(f"monitor loops must emit once, got {emits}")
+
+    # T0-PROBE: навіть при ATR≤90 і без SL — лише STOP, не REANALYZE.
+    if not is_t0_probe_note("T0-PROBE TTL=5min"):
+        return _fail("prefix detect")
+    if is_t0_probe_note("WATCHING zone"):
+        return _fail("normal note must not be probe")
+    low_atr = plan_watching_zone_hit(
+        current_price=83767.0,
+        entry_low=83348.0,
+        entry_high=84186.0,
+        day_used_pct=40.0,
+        sl=None,
+        tp1=None,
+        tp2=None,
+        symbol="BTCUSDT",
+    )
+    if after_zone_reached_action(analysis_note="T0-PROBE test", plan=low_atr) != "STOP":
+        return _fail("probe must STOP")
+    if after_zone_reached_action(analysis_note="", plan=low_atr) != "REANALYZE":
+        return _fail("non-probe incomplete+low ATR still reanalyze")
+    if after_zone_reached_action(analysis_note="T0-PROBE", plan=ready) != "STOP":
+        return _fail("probe stops even if plan would promote")
+    if T0_PROBE_PREFIX != "T0-PROBE":
+        return _fail("prefix constant")
 
     print("OK: test_zone_reached_notify")
     return 0

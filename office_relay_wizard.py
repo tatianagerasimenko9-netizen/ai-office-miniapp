@@ -90,7 +90,12 @@ from office_bridge import (
     ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
-from office_zone_alert import ZONE_REACHED_COOLDOWN_SEC, plan_watching_zone_hit
+from office_zone_alert import (
+    T0_PROBE_PREFIX,
+    ZONE_REACHED_COOLDOWN_SEC,
+    after_zone_reached_action,
+    plan_watching_zone_hit,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent
 MASTER_PROMPT_PATH = ROOT_DIR / "OFFICE_MASTER_PROMPT_UA.md"
@@ -4729,7 +4734,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         signal_id,
                                     )
                                     await send_office(plan.message, stream="general")
-                                if plan.expire_after_alert:
+                                post = after_zone_reached_action(
+                                    analysis_note=row.get("analysis_note"),
+                                    plan=plan,
+                                )
+                                # T0-PROBE: зупинка одразу після алерту, пороги ATR/edge без змін.
+                                if post == "STOP":
+                                    signal_update(
+                                        db_path,
+                                        signal_id=signal_id,
+                                        status="EXPIRED",
+                                        outcome="T0_PROBE",
+                                        analysis_note=str(row.get("analysis_note") or T0_PROBE_PREFIX),
+                                    )
+                                    continue
+                                if post == "EXPIRE_ATR":
                                     signal_update(
                                         db_path,
                                         signal_id=signal_id,
