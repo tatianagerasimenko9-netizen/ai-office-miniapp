@@ -168,13 +168,20 @@ def card_levels(*, direction: str, entry: float, structure_sl: float, rr: float 
 def format_radar_card(result: "RadarResult") -> str:
     if result.status == "SIGNAL" and result.card:
         c = result.card
-        return (
-            f"Радар · {result.symbol} {result.direction}\n"
-            f"Рівень: {result.level_price} ({result.level_type}) · {result.proximity}\n"
-            f"Sweep: так · M15: підтверджено\n"
-            f"Entry: {c['entry']:.6g} | SL: {c['sl']:.6g} (з люфтом) | TP: {c['tp']:.6g} | RR: {c['rr']:.1f}\n"
-            "Це картка сетапу, не відкрита позиція. Угода лише через /position."
+        trig = str(c.get("trigger") or "").strip()
+        lines = [
+            f"Радар · {result.symbol} {result.direction}",
+            f"Рівень: {result.level_price} ({result.level_type}) · {result.proximity}",
+            "Sweep: так · M15: підтверджено",
+        ]
+        if trig:
+            lines.append(trig)
+        lines.append(
+            f"Entry: {c['entry']:.6g} | SL: {c['sl']:.6g} (за зоною маніпуляції) | "
+            f"TP: {c['tp']:.6g} | RR: {c['rr']:.1f}"
         )
+        lines.append("Це картка сетапу, не відкрита позиція. Угода лише через /position.")
+        return "\n".join(lines)
     return (
         f"Радар · {result.symbol} WATCHING\n"
         f"Рівень: {result.level_price} ({result.level_type}) · {result.proximity}\n"
@@ -255,6 +262,44 @@ def evaluate_radar(
 
     structure_sl = float(sweep_lv)
     card = card_levels(direction=direction, entry=px, structure_sl=structure_sl, rr=DEFAULT_RR)
+    try:
+        from office_trade_steer import format_entry_trigger, plan_stop_behind_manipulation
+
+        planned = plan_stop_behind_manipulation(
+            entry=px,
+            tp1=card.get("tp"),
+            direction=direction,
+            candles_m15=m15_candles,
+            candles_h1=sweep_candles,
+            current_sl=card.get("sl"),
+        )
+        if planned.get("data_status") == "DATA_OK" and planned.get("sl") is not None:
+            orig_rr = float(card.get("rr") or 0)
+            if not planned.get("send"):
+                # RR>6 і після зони маніпуляції RR < MIN_RR — не сигнал.
+                if orig_rr > 6.0:
+                    base.reason = str(planned.get("reason") or "стоп/RR після зони маніпуляції")
+                    base.card = card
+                    return base
+            else:
+                card = dict(card)
+                card["sl"] = float(planned["sl"])
+                if card.get("tp") is not None:
+                    risk = abs(px - float(card["sl"]))
+                    if risk > 0:
+                        card["rr"] = abs(float(card["tp"]) - px) / risk
+                card["stop_note"] = planned.get("reason")
+        if not card.get("trigger"):
+            card = dict(card)
+            card["trigger"] = format_entry_trigger(
+                direction=direction,
+                tf="M15",
+                level=sweep_lv,
+                entry=px,
+                already_done=True,
+            )
+    except Exception:
+        pass
     base.card = card
     if float(card.get("rr") or 0) < MIN_RR:
         base.reason = f"RR {card.get('rr')} < {MIN_RR} — не сигнал"

@@ -205,6 +205,19 @@ def compose_trader_plan(
             if (e and s and t1)
             else "Власний план: поточна картка офісу після підтвердження (не копія бота)."
         )
+        try:
+            from office_trade_steer import format_entry_trigger
+
+            trig = format_entry_trigger(
+                direction=str(p.get("direction") or orig.get("direction") or ""),
+                tf=str(p.get("tf") or orig.get("timeframe") or "M15"),
+                level=p.get("trigger_level") or p.get("entry") or orig.get("entry"),
+                entry=p.get("entry"),
+                already_done=bool(p.get("trigger_done")),
+            )
+            own = own + " " + trig
+        except Exception:
+            pass
         opp = "Протилежний сценарій лишається гіпотезою, доки немає зворотного BOS."
         action = "Картка після підтвердження. Угода лише через /position."
     else:

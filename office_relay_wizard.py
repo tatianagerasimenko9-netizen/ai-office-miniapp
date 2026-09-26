@@ -52,8 +52,11 @@ from office_bridge import (
     journal_add_feedback,
     journal_learning_hints_from_tags,
     journal_open_trade,
+    journal_open_office_signal,
     journal_recurring_mistakes,
     journal_total_closed,
+    journal_update_excursions,
+    office_signal_trade_id,
     log_event,
     office_db_identity,
     office_desk_user_question,
@@ -141,6 +144,16 @@ from office_telegram_filter import (
     quote_is_stale,
     range_result_to_alert,
 )
+from office_trade_steer import (
+    ManageBook,
+    format_entry_trigger,
+    format_signal_steer_card,
+    next_manage_event,
+    plan_stop_behind_manipulation,
+    plan_sweep_reentry,
+    signal_case_key,
+    tp3_from_liquidity,
+)
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -174,6 +187,54 @@ _chat_history: List[Dict[str, str]] = []
 _chat_history_ts: float = 0.0
 _last_signal_time: Dict[str, float] = {}
 _last_notified: Dict[str, float] = {}
+_steer_books: Dict[str, ManageBook] = {}
+_reentry_done: Set[str] = set()
+
+
+def _ensure_steer_book(
+    *,
+    signal_id: str,
+    symbol: str,
+    direction: str,
+    entry: float,
+    sl: float,
+    tp1: float,
+    tp2: Optional[float] = None,
+    status: str = "ACTIVE",
+) -> ManageBook:
+    book = _steer_books.get(signal_id)
+    if book is None:
+        st = "ACTIVE"
+        su = str(status or "").upper()
+        if su == "HIT_TP1":
+            st = "TP1"
+        elif su == "HIT_TP2":
+            st = "TP2"
+        book = ManageBook(
+            symbol=str(symbol or "").upper(),
+            direction=str(direction or "LONG").upper(),
+            entry=float(entry),
+            sl=float(sl),
+            tp1=float(tp1),
+            tp2=tp2,
+            state=st,
+            trail_sl=float(entry) if st in ("TP1", "TP2", "TRAIL") else None,
+        )
+        _steer_books[signal_id] = book
+    return book
+
+
+def _journal_signal_excursions(db_path: str, signal_id: str, book: ManageBook, extra: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        journal_update_excursions(
+            db_path,
+            trade_id=office_signal_trade_id(signal_id),
+            mfe_pct=float(book.mfe),
+            mae_pct=float(book.mae),
+            extra=extra,
+        )
+    except Exception as exc:
+        print(f"[steer] journal mfe/mae failed: {exc}")
 _risk_committee_last_sent: float = 0.0
 _lev_last_response: Dict[str, float] = {}
 
@@ -4637,6 +4698,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             fmt_agent_line("lev", card),
                                             stream="general",
                                         )
+                                        try:
+                                            journal_open_office_signal(
+                                                db_path,
+                                                signal_id=signal_id,
+                                                symbol=symbol,
+                                                direction=str(row.get("direction") or "LONG"),
+                                                entry_price=float(current_price),
+                                                stop_loss=sl_v,
+                                                take_profit=tp1_v,
+                                                tp2=tp2_v,
+                                                timeframe="M15",
+                                                setup_note="ZONE_REACHED",
+                                            )
+                                        except Exception as exc_j:
+                                            print(f"[steer] journal zone signal failed: {exc_j}")
                                     else:
                                         print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
                                 post = after_zone_reached_action(
@@ -4803,6 +4879,116 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         "позиція закрита",
                                     )
                                     await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
+                                try:
+                                    journal_close_trade(
+                                        db_path,
+                                        trade_id=office_signal_trade_id(signal_id),
+                                        outcome="LOSS",
+                                        exit_price=float(current_price),
+                                        pnl_pct=0.0,
+                                        exit_reason="SL",
+                                        context_patch={"result": "SL"},
+                                    )
+                                except Exception as exc_js:
+                                    print(f"[steer] journal SL failed: {exc_js}")
+                                try:
+                                    m15_sl = fetch_candles(symbol, "15m", 16)
+                                    h1_sl = fetch_candles(symbol, "1h", 12)
+                                except Exception:
+                                    m15_sl, h1_sl = [], []
+                                last_c = m15_sl[-1] if isinstance(m15_sl, list) and m15_sl else None
+                                reclaim = e_high if direction == "SHORT" else e_low
+                                if reclaim is None:
+                                    reclaim = e_low if e_low is not None else e_high
+                                day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                                ck = signal_case_key(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    timeframe="H1",
+                                    day=day_key,
+                                )
+                                re_plan = plan_sweep_reentry(
+                                    case_key=ck,
+                                    already_reentered=ck in _reentry_done,
+                                    direction=direction,
+                                    sl=sl_v,
+                                    reclaim_level=reclaim,
+                                    last_candle=last_c,
+                                    candles_h1=h1_sl if isinstance(h1_sl, list) else None,
+                                )
+                                if re_plan.get("allow"):
+                                    _reentry_done.add(ck)
+                                    planned = plan_stop_behind_manipulation(
+                                        entry=current_price,
+                                        tp1=tp1_v,
+                                        direction=direction,
+                                        candles_m15=m15_sl if isinstance(m15_sl, list) else None,
+                                        candles_h1=h1_sl if isinstance(h1_sl, list) else None,
+                                        current_sl=sl_v,
+                                    )
+                                    new_sl = planned.get("sl") if planned.get("send") else None
+                                    if new_sl is not None and planned.get("send"):
+                                        sweep_ext = re_plan.get("wick_extreme")
+                                        note = (
+                                            f"Стоп вибило свіпом до {sweep_ext} — "
+                                            f"ціна повернулась {'нижче' if direction == 'SHORT' else 'вище'} {reclaim}"
+                                        )
+                                        card = format_signal_steer_card(
+                                            symbol=symbol,
+                                            direction=direction,
+                                            timeframe="H1",
+                                            entry=current_price,
+                                            sl=new_sl,
+                                            tp1=tp1_v,
+                                            tp2=tp2_v,
+                                            trigger=format_entry_trigger(
+                                                direction=direction,
+                                                tf="M15",
+                                                level=reclaim,
+                                                entry=current_price,
+                                                already_done=True,
+                                            ),
+                                            reentry=True,
+                                            sweep_note=note,
+                                        )
+                                        new_id = f"reentry-{symbol}-{int(time.time())}"
+                                        signal_upsert(
+                                            db_path,
+                                            signal_id=new_id,
+                                            symbol=symbol,
+                                            direction=direction,
+                                            entry_low=float(current_price),
+                                            entry_high=float(current_price),
+                                            sl=float(new_sl),
+                                            tp1=tp1_v,
+                                            tp2=tp2_v,
+                                            rr=planned.get("rr"),
+                                            status="ACTIVE",
+                                            analysis_note=f"PR42 reentry {ck}",
+                                        )
+                                        journal_open_office_signal(
+                                            db_path,
+                                            signal_id=new_id,
+                                            symbol=symbol,
+                                            direction=direction,
+                                            entry_price=float(current_price),
+                                            stop_loss=float(new_sl),
+                                            take_profit=tp1_v,
+                                            tp2=tp2_v,
+                                            timeframe="H1",
+                                            setup_note="SWEEP_REENTRY",
+                                        )
+                                        if _allow_notify(symbol, "REENTRY"):
+                                            await send_proactive(
+                                                EVENT_SIGNAL_ENTRY,
+                                                fmt_agent_line("lev", card),
+                                                stream="general",
+                                            )
+                                        print(f"[steer] reentry SIGNAL_ENTRY {symbol} {ck}")
+                                    else:
+                                        print(f"[steer] reentry skip {symbol}: {planned.get('reason')}")
+                                else:
+                                    print(f"[steer] no reentry {symbol}: {re_plan.get('reason')}")
                                 continue
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and tp2_v is not None:
@@ -4811,13 +4997,114 @@ EV позитивне: {prob.get('ev_positive', '')}
                             )
                             if hit_tp2:
                                 signal_update(db_path, signal_id=signal_id, status="HIT_TP2", outcome="WIN")
+                                status = "HIT_TP2"
                                 if _allow_notify(symbol, "HIT_TP2"):
+                                    trail_lv = e_high if direction == "LONG" else e_low
+                                    if direction == "LONG" and e_low is not None:
+                                        trail_lv = e_low
                                     await send_proactive(
-                                        EVENT_TRADE_CLOSED,
-                                        f"{symbol} закрито по TP2 {tp2_v}.",
+                                        EVENT_TRADE_UPDATE,
+                                        (
+                                            f"✅ TP2 · {symbol} {direction}\n"
+                                            "Закрий ще частину\n"
+                                            f"SL на {tp1_v if tp1_v is not None else trail_lv}"
+                                        ),
                                         stream="general",
                                     )
-                                continue
+                                try:
+                                    ent = float(e_low or e_high or current_price)
+                                    sl_b = float(sl_v or ent)
+                                    t1_b = float(tp1_v or ent)
+                                    book = _ensure_steer_book(
+                                        signal_id=signal_id,
+                                        symbol=symbol,
+                                        direction=direction,
+                                        entry=ent,
+                                        sl=sl_b,
+                                        tp1=t1_b,
+                                        tp2=tp2_v,
+                                        status="HIT_TP2",
+                                    )
+                                    book.state = "TP2"
+                                    book.last_event = "TP2"
+                                    book.trail_sl = float(tp1_v) if tp1_v is not None else book.entry
+                                    _journal_signal_excursions(
+                                        db_path, signal_id, book, extra={"result": "TP2"}
+                                    )
+                                except Exception as exc_b:
+                                    print(f"[steer] tp2 book failed: {exc_b}")
+
+                        if status == "HIT_TP2" and sl_v is not None and tp1_v is not None:
+                            try:
+                                m15_now = fetch_candles(symbol, "15m", 24)
+                            except Exception:
+                                m15_now = []
+                            if not isinstance(m15_now, list):
+                                m15_now = []
+                            try:
+                                d1_now = fetch_candles(symbol, "1d", 5)
+                            except Exception:
+                                d1_now = []
+                            last_m = m15_now[-1] if m15_now else {}
+                            hi = last_m.get("high") if isinstance(last_m, dict) else None
+                            lo = last_m.get("low") if isinstance(last_m, dict) else None
+                            try:
+                                ent = float(e_low or e_high or current_price)
+                                book = _ensure_steer_book(
+                                    signal_id=signal_id,
+                                    symbol=symbol,
+                                    direction=direction,
+                                    entry=ent,
+                                    sl=float(sl_v),
+                                    tp1=float(tp1_v),
+                                    tp2=tp2_v,
+                                    status="HIT_TP2",
+                                )
+                                if book.tp3 is None:
+                                    book.tp3 = tp3_from_liquidity(
+                                        direction=direction,
+                                        daily_candles=d1_now if isinstance(d1_now, list) else None,
+                                    )
+                                ev = next_manage_event(
+                                    book,
+                                    price=current_price,
+                                    candles_m15=m15_now,
+                                    high=hi,
+                                    low=lo,
+                                )
+                                _journal_signal_excursions(db_path, signal_id, book)
+                                if ev and _allow_notify(symbol, str(ev.get("kind") or ev.get("event"))):
+                                    await send_proactive(
+                                        str(ev.get("event") or EVENT_TRADE_UPDATE),
+                                        str(ev.get("message") or ""),
+                                        stream="general",
+                                    )
+                                    if str(ev.get("event")) == EVENT_TRADE_CLOSED:
+                                        signal_update(
+                                            db_path,
+                                            signal_id=signal_id,
+                                            status="CLOSED",
+                                            outcome="WIN" if str(ev.get("kind")) != "SL" else "LOSS",
+                                            analysis_note=str(ev.get("kind") or ""),
+                                        )
+                                        try:
+                                            journal_close_trade(
+                                                db_path,
+                                                trade_id=office_signal_trade_id(signal_id),
+                                                outcome="LOSS" if str(ev.get("kind")) == "SL" else "WIN",
+                                                exit_price=float(current_price),
+                                                pnl_pct=float(book.mfe if str(ev.get("kind")) != "SL" else -book.mae),
+                                                exit_reason=str(ev.get("kind") or "TRADE_CLOSED"),
+                                                context_patch={
+                                                    "result": str(ev.get("kind")),
+                                                    "mfe_pct": book.mfe,
+                                                    "mae_pct": book.mae,
+                                                },
+                                            )
+                                        except Exception as exc_c:
+                                            print(f"[steer] journal close failed: {exc_c}")
+                            except Exception as exc_m:
+                                print(f"[steer] manage tick failed: {exc_m}")
 
                     except Exception as exc_row:
                         print(f"[signals] row monitor failed: {exc_row}")
@@ -4851,7 +5138,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                     return False
                 _last_notified["__FEED_COOLDOWN__"] = now_ts
                 mark_cycle_sent(sent_this_cycle, sym)
-                await send_office(fmt_agent_line("lev", text))
+                await send_proactive(EVENT_SIGNAL_ENTRY, fmt_agent_line("lev", text))
+                try:
+                    parsed = parse_signal_levels_from_text(text) or {}
+                    journal_open_office_signal(
+                        db_path,
+                        signal_id=f"feed-{tag}-{sym}-{int(now_ts)}",
+                        symbol=sym,
+                        direction=str(parsed.get("direction") or "LONG"),
+                        entry_price=parsed.get("entry") or parsed.get("entry_low"),
+                        stop_loss=parsed.get("sl"),
+                        take_profit=parsed.get("tp1") or parsed.get("tp"),
+                        tp2=parsed.get("tp2"),
+                        timeframe=str(parsed.get("timeframe") or "H1"),
+                        setup_note=tag,
+                    )
+                except Exception as exc_jf:
+                    print(f"[steer] journal feed {sym} failed: {exc_jf}")
                 return True
 
             try:
@@ -4962,12 +5265,44 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _last_notified[nkey] = now_ts
                                 _last_notified["__FEED_COOLDOWN__"] = now_ts
                                 mark_cycle_sent(sent_this_cycle, symbol)
-                                await send_office(
+                                card = res.card or {}
+                                sid = f"radar-{symbol}"
+                                try:
+                                    signal_upsert(
+                                        db_path,
+                                        signal_id=sid,
+                                        symbol=symbol,
+                                        direction=res.direction or "LONG",
+                                        entry_low=float(card.get("entry") or price),
+                                        entry_high=float(card.get("entry") or price),
+                                        sl=card.get("sl"),
+                                        tp1=card.get("tp") or card.get("tp1"),
+                                        tp2=card.get("tp2"),
+                                        rr=card.get("rr"),
+                                        status="ACTIVE",
+                                        analysis_note=(res.reason or "radar SIGNAL")[:2000],
+                                    )
+                                    journal_open_office_signal(
+                                        db_path,
+                                        signal_id=sid,
+                                        symbol=symbol,
+                                        direction=res.direction or "LONG",
+                                        entry_price=card.get("entry") or price,
+                                        stop_loss=card.get("sl"),
+                                        take_profit=card.get("tp") or card.get("tp1"),
+                                        tp2=card.get("tp2"),
+                                        timeframe="H1",
+                                        setup_note="RADAR",
+                                    )
+                                except Exception as exc_rj:
+                                    print(f"[steer] radar journal {symbol} failed: {exc_rj}")
+                                await send_proactive(
+                                    EVENT_SIGNAL_ENTRY,
                                     fmt_agent_line(
                                         "lev",
                                         f"{format_radar_card(res)}\n"
                                         f"{format_radar_liq_summary(BTC_FORCE_ORDER_BOOK)}",
-                                    )
+                                    ),
                                 )
                                 print(f"[radar] SIGNAL card {symbol} (no position)")
                             elif not gate.get("send"):
