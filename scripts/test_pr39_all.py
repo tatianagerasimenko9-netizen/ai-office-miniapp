@@ -247,10 +247,8 @@ def main() -> int:
         entry_mode=ENTRY_WAITING_SWEEP,
         sweep_level=0.032122,
     )
-    if "Логіка: купуємо корекцію" not in card:
-        return _fail(card)
-    if "після свіпу" not in card:
-        return _fail(f"entry wait {card}")
+    if card:
+        return _fail(f"waiting sweep must not be SIGNAL card {card}")
 
     ake_book = SimpleNamespace(
         symbol="AKEUSDT",
@@ -327,13 +325,11 @@ def main() -> int:
         ],
     )
     sig = level_book_to_alert(done_book)
-    if sig is None or "BSL знято" not in sig or "на рівні" not in sig:
+    if sig is None or "🔴 SHORT · DEMOUSDT · H1" not in sig or "🎯 Вхід · 0.1306" not in sig:
         return _fail(f"signal {sig}")
-    if "✅" not in sig:
-        return _fail(f"signal check {sig}")
-    if "Позиція: немає" in sig:
-        return _fail("signal position marker")
-    if "по ринку" not in sig and "відкат" not in sig and "ретест" not in sig and "закрита" not in sig:
+    if "Позиція: немає" in sig or "Entry:" in sig or "BSL знято" in sig:
+        return _fail("signal extras")
+    if "після закриття" not in sig:
         return _fail(f"entry unexplained {sig}")
 
     impulse_up = [
@@ -376,7 +372,9 @@ def main() -> int:
         live_price=0.032889,
         sweep_line="SSL знято о 02:14 на рівні 0.032122",
     )
-    if "Вхід: по ринку 0.032889" not in same:
+    if "🎯 Вхід · 0.032889" not in same:
+        return _fail(same)
+    if "Entry:" in same:
         return _fail(same)
     if "Позиція: немає" in same:
         return _fail("marker")

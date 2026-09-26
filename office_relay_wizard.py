@@ -117,7 +117,7 @@ from office_watching_dedup import (
     record_skip_if_valid,
     should_keep_watching_on_skip,
 )
-from office_radar import RADAR_SYMBOLS, evaluate_radar, format_radar_card
+from office_radar import RADAR_SYMBOLS, evaluate_radar
 from office_session_radar import evaluate_session_radar
 from office_external_signal import (
     gather_external_market,
@@ -4986,13 +4986,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     near_sl = current_price > sl_v and (current_price - sl_v) / sl_v * 100.0 < near_pct
                                 else:
                                     near_sl = current_price < sl_v and (sl_v - current_price) / sl_v * 100.0 < near_pct
-                                if near_sl and _allow_notify(symbol, "SL_NEAR"):
-                                    await send_proactive(
-                                        EVENT_TRADE_UPDATE,
-                                        f"⚠️ Тетяно, {symbol}: ціна близько до стопу.\n"
-                                        f"Зараз {current_price}, стоп {sl_v}.\n"
-                                        "Перевір позицію — без добору проти руху.",
-                                        stream="general",
+                                # «Близько до стопу» лише для /position, не для office_signals.
+                                if near_sl:
+                                    print(
+                                        f"[signals] {symbol} near SL {sl_v} @ {current_price} "
+                                        "(office signal — мовчки до TRADE_CLOSED)"
                                     )
                             if tp1_v is not None and tp1_v > 0 and status in ("ACTIVE", "HIT_ENTRY"):
                                 if direction == "LONG":
@@ -5286,6 +5284,45 @@ EV позитивне: {prob.get('ev_positive', '')}
 
                     except Exception as exc_row:
                         print(f"[signals] row monitor failed: {exc_row}")
+                from office_desk_card import (
+                    format_near_stop,
+                    list_confirmed_open_positions,
+                    may_send_near_stop,
+                )
+
+                for pos in list_confirmed_open_positions(db_path):
+                    psym = str(pos.get("symbol") or "")
+                    psl = pos.get("sl")
+                    if not psym or psl is None:
+                        continue
+                    try:
+                        liq_p = fetch_liquidations_proxy(psym)
+                        px = float((liq_p or {}).get("current_price") or 0.0) if isinstance(liq_p, dict) else 0.0
+                    except Exception:
+                        px = 0.0
+                    if px <= 0:
+                        continue
+                    try:
+                        slp = float(psl)
+                    except (TypeError, ValueError):
+                        continue
+                    if slp <= 0:
+                        continue
+                    pdir = str(pos.get("direction") or "LONG").upper()
+                    near_pct = 0.5
+                    if pdir == "LONG":
+                        near_ok = px > slp and (px - slp) / slp * 100.0 < near_pct
+                    else:
+                        near_ok = px < slp and (slp - px) / slp * 100.0 < near_pct
+                    if near_ok and may_send_near_stop(
+                        trade_id=str(pos.get("trade_id") or ""),
+                        confirmed_position=True,
+                    ):
+                        await send_proactive(
+                            EVENT_TRADE_UPDATE,
+                            format_near_stop(symbol=psym, price=px, sl=slp),
+                            stream="general",
+                        )
             except Exception as exc:
                 print(f"[signals] monitor failed: {exc}")
             await asyncio.sleep(120 if fast_poll else 900)
@@ -5301,7 +5338,29 @@ EV позитивне: {prob.get('ev_positive', '')}
         while True:
             sent_this_cycle: Set[str] = set()
 
-            async def _try_signal_feed(sym: str, text: str, tag: str) -> bool:
+            async def _desk_send(
+                sym: str,
+                tag: str,
+                *,
+                direction: str,
+                timeframe: str,
+                entry: Any,
+                sl: Any,
+                tp1: Any,
+                tp2: Any = None,
+                tp3: Any = None,
+                add_px: Any = None,
+                atr_h1: Any = None,
+                score: Any = None,
+                min_score: Any = 10,
+                setup_type: str = "",
+                m15_close: Any = None,
+                candle: Any = None,
+                cancel_level: Any = None,
+            ) -> bool:
+                from office_desk_card import prepare_desk_send
+                from office_trade_steer import atr_from_candles
+
                 now_ts = time.time()
                 last_feed = float(_last_notified.get("__FEED_COOLDOWN__", 0.0) or 0.0)
                 gate = allow_proactive_telegram(
@@ -5314,26 +5373,98 @@ EV позитивне: {prob.get('ev_positive', '')}
                 if not gate.get("send"):
                     print(f"[{tag}] {sym} hold: {gate.get('reason')}")
                     return False
+                atr_v = atr_h1
+                if atr_v is None:
+                    try:
+                        h1_bars = fetch_candles(sym, "1h", 22)
+                        atr_v = atr_from_candles(h1_bars)
+                    except Exception:
+                        atr_v = None
+                prep = prepare_desk_send(
+                    db_path=db_path,
+                    symbol=sym,
+                    direction=direction,
+                    timeframe=timeframe,
+                    entry=entry,
+                    sl=sl,
+                    tp1=tp1,
+                    tp2=tp2,
+                    tp3=tp3,
+                    add_px=add_px,
+                    atr_h1=atr_v,
+                    score=score,
+                    min_score=min_score,
+                    setup_type=setup_type or tag,
+                    m15_close=m15_close,
+                    candle=candle,
+                )
+                if not prep.get("send"):
+                    print(f"[{tag}] {sym} hold: {prep.get('reason')}")
+                    return False
                 _last_notified["__FEED_COOLDOWN__"] = now_ts
                 mark_cycle_sent(sent_this_cycle, sym)
-                await send_proactive(EVENT_SIGNAL_ENTRY, fmt_agent_line("lev", text))
+                await send_proactive(
+                    EVENT_SIGNAL_ENTRY,
+                    fmt_agent_line("lev", str(prep.get("text") or "")),
+                )
+                sid = f"desk-{tag}-{sym}-{int(now_ts)}"
+                e_px = float(entry) if entry is not None else None
+                sl_px = prep.get("sl")
                 try:
-                    parsed = parse_signal_levels_from_text(text) or {}
+                    signal_upsert(
+                        db_path,
+                        signal_id=sid,
+                        symbol=sym,
+                        direction=str(direction or "LONG"),
+                        entry_low=e_px,
+                        entry_high=e_px,
+                        sl=sl_px,
+                        tp1=tp1,
+                        tp2=tp2,
+                        rr=None,
+                        status="ACTIVE",
+                        analysis_note=(
+                            f"{setup_type or tag}"
+                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
+                        )[:2000],
+                    )
                     journal_open_office_signal(
                         db_path,
-                        signal_id=f"feed-{tag}-{sym}-{int(now_ts)}",
+                        signal_id=sid,
                         symbol=sym,
-                        direction=str(parsed.get("direction") or "LONG"),
-                        entry_price=parsed.get("entry") or parsed.get("entry_low"),
-                        stop_loss=parsed.get("sl"),
-                        take_profit=parsed.get("tp1") or parsed.get("tp"),
-                        tp2=parsed.get("tp2"),
-                        timeframe=str(parsed.get("timeframe") or "H1"),
-                        setup_note=tag,
+                        direction=str(direction or "LONG"),
+                        entry_price=e_px,
+                        stop_loss=sl_px,
+                        take_profit=tp1,
+                        tp2=tp2,
+                        timeframe=str(timeframe or "H1"),
+                        setup_note=str(setup_type or tag),
                     )
                 except Exception as exc_jf:
                     print(f"[steer] journal feed {sym} failed: {exc_jf}")
                 return True
+
+            async def _try_signal_feed(sym: str, text: str, tag: str, **extra: Any) -> bool:
+                parsed = parse_signal_levels_from_text(text) or {}
+                return await _desk_send(
+                    sym,
+                    tag,
+                    direction=str(extra.get("direction") or parsed.get("direction") or "LONG"),
+                    timeframe=str(extra.get("timeframe") or parsed.get("timeframe") or "H1"),
+                    entry=extra.get("entry") or parsed.get("entry") or parsed.get("entry_low"),
+                    sl=extra.get("sl") or parsed.get("sl"),
+                    tp1=extra.get("tp1") or parsed.get("tp1") or parsed.get("tp"),
+                    tp2=extra.get("tp2") or parsed.get("tp2"),
+                    tp3=extra.get("tp3"),
+                    add_px=extra.get("add_px"),
+                    atr_h1=extra.get("atr_h1"),
+                    score=extra.get("score"),
+                    min_score=extra.get("min_score", 10),
+                    setup_type=str(extra.get("setup_type") or tag),
+                    m15_close=extra.get("m15_close"),
+                    candle=extra.get("candle"),
+                    cancel_level=extra.get("cancel_level"),
+                )
 
             try:
                 for symbol in RADAR_SYMBOLS:
@@ -5431,65 +5562,39 @@ EV позитивне: {prob.get('ev_positive', '')}
                             nkey = f"{symbol}::RADAR_SIGNAL"
                             now_ts = time.time()
                             last_ts = float(_last_notified.get(nkey, 0.0) or 0.0)
-                            last_feed = float(_last_notified.get("__FEED_COOLDOWN__", 0.0) or 0.0)
-                            gate = allow_proactive_telegram(
-                                kind=KIND_SIGNAL,
-                                symbol=symbol,
-                                sent_symbols=sent_this_cycle,
-                                last_feed_ts=last_feed,
-                                now_ts=now_ts,
-                            )
-                            if gate.get("send") and (now_ts - last_ts) >= 1800:
-                                _last_notified[nkey] = now_ts
-                                _last_notified["__FEED_COOLDOWN__"] = now_ts
-                                mark_cycle_sent(sent_this_cycle, symbol)
+                            if (now_ts - last_ts) < 1800:
+                                print(f"[radar] SIGNAL cooldown {symbol}")
+                            else:
                                 card = res.card or {}
-                                sid = f"radar-{symbol}"
-                                e_lo = card.get("entry_low") or card.get("entry") or price
-                                e_hi = card.get("entry_high") or card.get("entry") or price
-                                sc_bit = str(card.get("sc_note") or "")
+                                from office_trade_steer import atr_from_candles
+
+                                atr_h = atr_from_candles(h1)
+                                m15_cl = None
                                 try:
-                                    signal_upsert(
-                                        db_path,
-                                        signal_id=sid,
-                                        symbol=symbol,
-                                        direction=res.direction or "LONG",
-                                        entry_low=float(e_lo),
-                                        entry_high=float(e_hi),
-                                        sl=card.get("sl"),
-                                        tp1=card.get("tp") or card.get("tp1"),
-                                        tp2=card.get("tp2"),
-                                        rr=card.get("rr"),
-                                        status="ACTIVE",
-                                        analysis_note=(
-                                            f"{sc_bit} {res.reason or 'radar SIGNAL'}"
-                                        ).strip()[:2000],
-                                    )
-                                    journal_open_office_signal(
-                                        db_path,
-                                        signal_id=sid,
-                                        symbol=symbol,
-                                        direction=res.direction or "LONG",
-                                        entry_price=card.get("entry") or price,
-                                        stop_loss=card.get("sl"),
-                                        take_profit=card.get("tp") or card.get("tp1"),
-                                        tp2=card.get("tp2"),
-                                        timeframe="H1",
-                                        setup_note="RADAR",
-                                    )
-                                except Exception as exc_rj:
-                                    print(f"[steer] radar journal {symbol} failed: {exc_rj}")
-                                await send_proactive(
-                                    EVENT_SIGNAL_ENTRY,
-                                    fmt_agent_line(
-                                        "lev",
-                                        f"{format_radar_card(res)}\n"
-                                        f"{format_radar_liq_summary(BTC_FORCE_ORDER_BOOK)}",
-                                    ),
+                                    if isinstance(m15, list) and m15:
+                                        m15_cl = float((m15[-1] or {}).get("close") or 0.0) or None
+                                except Exception:
+                                    m15_cl = None
+                                sent = await _desk_send(
+                                    symbol,
+                                    "radar",
+                                    direction=str(res.direction or "LONG"),
+                                    timeframe="H1",
+                                    entry=card.get("entry") or price,
+                                    sl=card.get("sl"),
+                                    tp1=card.get("tp") or card.get("tp1"),
+                                    tp2=card.get("tp2"),
+                                    atr_h1=atr_h,
+                                    score=card.get("score"),
+                                    min_score=card.get("min_score") or 8,
+                                    setup_type=str(card.get("setup_type") or "РАДАР"),
+                                    m15_close=m15_cl,
+                                    candle=(m15[-1] if isinstance(m15, list) and m15 else None),
+                                    cancel_level=card.get("cancel") or res.level_price,
                                 )
-                                print(f"[radar] SIGNAL card {symbol} (no position)")
-                            elif not gate.get("send"):
-                                print(f"[radar] SIGNAL hold {symbol}: {gate.get('reason')}")
+                                if sent:
+                                    _last_notified[nkey] = now_ts
+                                    print(f"[radar] SIGNAL card {symbol} (no position)")
                     except Exception as exc_sym:
                         print(f"[radar] {symbol}: {type(exc_sym).__name__}: {exc_sym}")
                 tickers_24: Any = None
@@ -5564,8 +5669,35 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         f"{heat.get('kind')} {heat.get('message')}"
                                     )
                                     continue
-                                ptxt = format_pump_card(rsym, tf_name, pd)
-                                if await _try_signal_feed(rsym, ptxt, f"pump-{tf_name.lower()}"):
+                                from office_trade_steer import atr_from_candles as _atr_h1
+
+                                tps = pd.get("tps") or {}
+                                sc = pd.get("total_l") if pd.get("signal") == "PUMP" else pd.get("total_s")
+                                m15_cl = None
+                                try:
+                                    if isinstance(rm15, list) and rm15:
+                                        m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
+                                except Exception:
+                                    m15_cl = None
+                                if await _desk_send(
+                                    rsym,
+                                    f"pump-{tf_name.lower()}",
+                                    direction=str(pd.get("direction") or ""),
+                                    timeframe=tf_name,
+                                    entry=pd.get("entry"),
+                                    sl=pd.get("sl"),
+                                    tp1=tps.get("tp1"),
+                                    tp2=tps.get("tp2"),
+                                    tp3=tps.get("tp3"),
+                                    add_px=tps.get("add"),
+                                    atr_h1=_atr_h1(rh1),
+                                    score=sc,
+                                    min_score=10,
+                                    setup_type=str(pd.get("signal") or "PUMP"),
+                                    m15_close=m15_cl,
+                                    candle=(bars[-1] if bars else None),
+                                    cancel_level=pd.get("cancel"),
+                                ):
                                     print(f"[pump] {rsym} {pd.get('signal')} {tf_name}")
                                     break
                             hunt = evaluate_ict_hunter(

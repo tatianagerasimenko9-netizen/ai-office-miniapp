@@ -701,50 +701,34 @@ def format_signal_steer_card(
     size_line: str = "",
     ote_model: str = "",
     patterns: Any = None,
+    add_px: Any = None,
 ) -> str:
-    from office_telegram_filter import format_px
-    from office_position_size import plan_position_size
+    from office_desk_card import format_desk_card
 
-    side = str(direction or "").upper()
-    tf = str(timeframe or "H1").upper()
-    kind = str(setup_type or "").upper().strip()
-    title = f"🔁 ПОВТОРНИЙ {side} · {symbol} · {tf}" if reentry else f"{side} · {symbol} · {tf}"
-    lines = [title]
-    if kind in ("PUMP", "DUMP"):
-        lines.append(f"Тип: {kind}")
-    elif kind:
-        lines.append(f"Тип: {kind}")
-    if score is not None:
-        mx = score_max if score_max is not None else (18 if kind in ("PUMP", "DUMP") else 20)
-        extra = f" (поріг {min_score})" if min_score is not None else ""
-        lines.append(f"Бали: {int(float(score))}/{int(float(mx))}{extra}")
-    if patterns:
-        names = [str(x) for x in patterns if x]
-        if names:
-            lines.append("Патерни: " + ", ".join(names))
-    if sweep_note:
-        lines.append(sweep_note)
-    if kind not in ("PUMP", "DUMP"):
-        lines.extend(format_sc_plan_lines(sc_plan, direction=side))
-    elif ote_model:
-        lines.append(f"Модель рівнів: {ote_model}")
-    if trigger:
-        lines.append(trigger)
-    else:
-        lines.append(format_entry_trigger(direction=side, tf="M15", level=entry, entry=entry))
-    lines.append(
-        f"SL: {format_px(sl)} · TP1: {format_px(tp1)}"
-        + (f" · TP2: {format_px(tp2)}" if tp2 is not None else "")
-        + (f" · TP3: {format_px(tp3)}" if tp3 is not None else "")
+    _ = trigger, sweep_note, score_max, size_line, ote_model, patterns
+    kind = str(setup_type or "").strip()
+    add_v = add_px
+    if sc_plan and isinstance(sc_plan, dict):
+        kind = kind or "Відкат у сильну свічку"
+        if add_v is None:
+            add_v = sc_plan.get("add")
+    if reentry:
+        kind = "Повторний вхід"
+    return format_desk_card(
+        symbol=symbol,
+        direction=direction,
+        timeframe=timeframe,
+        entry=entry,
+        sl=sl,
+        tp1=tp1,
+        tp2=tp2,
+        tp3=tp3,
+        add_px=add_v,
+        setup_type=kind or "Сетап",
+        score=score,
+        min_score=min_score if min_score is not None else (10 if str(kind).upper() in ("PUMP", "DUMP") else 8),
+        reentry=reentry,
     )
-    sized = str(size_line or "").strip()
-    if not sized:
-        mn = min_score if min_score is not None else (10 if kind in ("PUMP", "DUMP") else 8)
-        sized = str(plan_position_size(entry=entry, sl=sl, score=score, min_score=mn).get("line") or "")
-    if sized:
-        lines.append(sized)
-    lines.append("Картка сетапу, не ордер. Угода лише через /position.")
-    return "\n".join(lines)
 
 
 def signal_case_key(*, symbol: str, direction: str, timeframe: str = "H1", day: str = "") -> str:

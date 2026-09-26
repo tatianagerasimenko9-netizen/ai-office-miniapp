@@ -185,13 +185,16 @@ def evaluate_pump_dump(
     side = "LONG" if sig_pump else ("SHORT" if sig_dump else None)
     sl = None
     tps = {}
+    cancel = None
     if side:
         last7 = rows[-7:]
         if side == "LONG":
-            raw = min(r["low"] for r in last7) - atr * SL_ATR
+            structure = min(r["low"] for r in last7)
+            sl = structure - atr * SL_ATR
         else:
-            raw = max(r["high"] for r in last7) + atr * SL_ATR
-        sl = raw
+            structure = max(r["high"] for r in last7)
+            sl = structure + atr * SL_ATR
+        cancel = structure
         risk = abs(close - sl)
         if side == "LONG":
             tps = {"tp1": close + risk * 1.5, "tp2": close + risk * 3.0, "tp3": close + risk * 5.0, "add": close - risk * 0.4}
@@ -205,6 +208,7 @@ def evaluate_pump_dump(
         "total_s": total_s,
         "entry": close,
         "sl": sl,
+        "cancel": cancel,
         "tps": tps,
         "vol_spike": vol_spike,
         "rsi": rsi,
@@ -231,6 +235,7 @@ def format_pump_card(symbol: str, timeframe: str, ev: Dict[str, Any]) -> str:
         tp1=tps.get("tp1"),
         tp2=tps.get("tp2"),
         tp3=tps.get("tp3"),
+        add_px=tps.get("add"),
         setup_type=str(ev.get("signal") or ""),
         score=sc,
         min_score=SIGNAL_MIN,

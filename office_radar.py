@@ -166,39 +166,23 @@ def card_levels(*, direction: str, entry: float, structure_sl: float, rr: float 
 
 
 def format_radar_card(result: "RadarResult") -> str:
-    from office_trade_steer import format_sc_plan_lines
+    from office_desk_card import format_desk_card
 
     if result.status == "SIGNAL" and result.card:
         c = result.card
-        trig = str(c.get("trigger") or "").strip()
-        lines = [
-            f"Радар · {result.symbol} {result.direction}",
-            f"Рівень: {result.level_price} ({result.level_type}) · {result.proximity}",
-            "Sweep: так · M15: підтверджено",
-        ]
-        if trig:
-            lines.append(trig)
-        for extra in format_sc_plan_lines(c.get("sc_plan") if isinstance(c, dict) else None, direction=str(result.direction or "")):
-            lines.append(extra)
-        if c.get("setup_type"):
-            lines.append(f"Тип: {c.get('setup_type')}")
-        if c.get("score") is not None:
-            mx = c.get("score_max") or 20
-            lines.append(f"Бали: {int(c['score'])}/{int(mx)}")
-        lines.append(
-            f"Entry: {c['entry']:.6g} | SL: {c['sl']:.6g} (за зоною маніпуляції) | "
-            f"TP: {c['tp']:.6g} | RR: {c['rr']:.1f}"
+        return format_desk_card(
+            symbol=result.symbol,
+            direction=str(result.direction or ""),
+            timeframe="H1",
+            entry=c.get("entry"),
+            sl=c.get("sl"),
+            tp1=c.get("tp") or c.get("tp1"),
+            tp2=c.get("tp2"),
+            setup_type=str(c.get("setup_type") or "РАДАР"),
+            score=c.get("score"),
+            min_score=c.get("min_score") or 8,
         )
-        if c.get("size_line"):
-            lines.append(str(c["size_line"]))
-        lines.append("Це картка сетапу, не відкрита позиція. Угода лише через /position.")
-        return "\n".join(lines)
-    return (
-        f"Радар · {result.symbol} WATCHING\n"
-        f"Рівень: {result.level_price} ({result.level_type}) · {result.proximity}\n"
-        f"Причина: {result.reason}\n"
-        "Без підтвердження на M15 — не сигнал."
-    )
+    return ""
 
 
 @dataclass
@@ -273,6 +257,8 @@ def evaluate_radar(
 
     structure_sl = float(sweep_lv)
     card = card_levels(direction=direction, entry=px, structure_sl=structure_sl, rr=DEFAULT_RR)
+    card = dict(card)
+    card["cancel"] = structure_sl
     try:
         from office_trade_steer import (
             encode_sc_zone_note,

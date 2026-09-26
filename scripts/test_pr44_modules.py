@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+os.environ["OFFICE_DEPO_USDT"] = "1000"
 
 from office_atr_policy import GERCHIK_TREND_ENTRY_BLOCK_PCT  # noqa: E402
 from office_bridge import (  # noqa: E402
@@ -93,6 +94,7 @@ def _pump_bars() -> list:
 
 
 def main() -> int:
+    os.environ["OFFICE_DEPO_USDT"] = "1000"
     pine_p = ROOT / "office_worker_library/indicator/pump_dump_hunter_v2.pine"
     pine_h = ROOT / "office_worker_library/indicator/ict_smc_hunter_v9_9.pine"
     txtp = pine_p.read_text(encoding="utf-8") if pine_p.exists() else ""
@@ -166,8 +168,10 @@ def main() -> int:
     if abs(float(ev["tps"]["add"]) - (float(ev["entry"]) - risk * 0.4)) > 1e-9:
         return _fail("add 40%")
     card = format_pump_card("AKEUSDT", "M15", ev)
-    if "Тип: PUMP" not in card or "Розмір:" not in card:
+    if "PUMP" not in card or "🎯 Вхід" not in card:
         return _fail(f"pump card {card}")
+    if "Entry:" in card or "SL:" in card or "Балі" in card or "Модель рівнів" in card:
+        return _fail(f"pump card banned {card}")
     if "OTE 62–79%" in card:
         return _fail("pump card mixed hunter ote")
 
@@ -314,7 +318,7 @@ def main() -> int:
         min_score=8,
         score_max=20,
     )
-    if "Розмір:" not in txt or "ризик" not in txt:
+    if "🎯 Вхід" not in txt or "Відкат у сильну свічку" not in txt:
         return _fail(txt)
     if not exhaustion_candle(_c(1.0, 1.04, 0.99, 1.035), side="LONG"):
         return _fail("exhaust")
