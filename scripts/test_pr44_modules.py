@@ -54,8 +54,17 @@ from office_telegram_policy import (  # noqa: E402
     EVENT_TRADE_UPDATE,
     PROACTIVE_ALLOWED,
     may_send_proactive,
+    reset_trade_telegram_dedup,
+    should_send_trade_telegram,
+    trade_update_streams,
 )
-from office_trade_steer import ManageBook, format_signal_steer_card, next_manage_event  # noqa: E402
+from office_trade_steer import (  # noqa: E402
+    ManageBook,
+    format_hold_update,
+    format_signal_steer_card,
+    format_trail_update,
+    next_manage_event,
+)
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT  # noqa: E402
 from scripts.test_pr42_steer import fetch_vision_day  # noqa: E402
 
@@ -309,6 +318,71 @@ def main() -> int:
         return _fail(txt)
     if not exhaustion_candle(_c(1.0, 1.04, 0.99, 1.035), side="LONG"):
         return _fail("exhaust")
+
+    trail_txt = format_trail_update(
+        symbol="AKEUSDT",
+        direction="LONG",
+        new_sl=0.04548,
+        old_sl=0.04390,
+        entry=0.04324,
+    )
+    if not trail_txt.startswith("📍 AKEUSDT LONG · стоп вище"):
+        return _fail(f"trail header {trail_txt}")
+    if "M15" in trail_txt or "HL/LH" in trail_txt:
+        return _fail(f"jargon {trail_txt}")
+    if "SL: 0.04548" not in trail_txt or "було 0.0439" not in trail_txt:
+        return _fail(f"trail sl {trail_txt}")
+    if "Прибуток захищено:" not in trail_txt:
+        return _fail(f"prot {trail_txt}")
+    hold_txt = format_hold_update(symbol="AKEUSDT", direction="LONG", sl=0.04548)
+    if "📍 AKEUSDT LONG · рух продовжується" not in hold_txt or "0.04548" not in hold_txt:
+        return _fail(f"hold {hold_txt}")
+
+    hl_bars = [
+        _c(0.0460, 0.0470, 0.04560, 0.0464, "a", vol=10),
+        _c(0.0462, 0.0465, 0.04548, 0.0459, "hl", vol=10),
+        _c(0.0460, 0.0472, 0.04570, 0.0468, "b", vol=10),
+    ]
+    book_tr = ManageBook(
+        symbol="AKEUSDT",
+        direction="LONG",
+        entry=0.04324,
+        sl=0.0400,
+        tp1=0.0445,
+        tp2=0.0452,
+        state="TRAIL",
+        trail_sl=0.04390,
+        last_event="TP2",
+    )
+    t1 = next_manage_event(book_tr, price=0.0468, candles_m15=hl_bars, high=0.0472, low=0.0457)
+    if not t1 or t1.get("kind") != "TRAIL":
+        return _fail(f"trail1 {t1}")
+    if "📍 AKEUSDT LONG" not in str(t1.get("message")):
+        return _fail(f"trail msg {t1}")
+    t2 = next_manage_event(book_tr, price=0.0468, candles_m15=hl_bars, high=0.0472, low=0.0457)
+    if t2 is not None and t2.get("kind") == "TRAIL":
+        return _fail(f"same sl twice {t2}")
+    book_tr.trail_sl = 0.04390
+    t3 = next_manage_event(book_tr, price=0.0468, candles_m15=hl_bars, high=0.0472, low=0.0457)
+    if t3 is not None and t3.get("kind") == "TRAIL":
+        return _fail(f"stale trail_sl resent {t3}")
+
+    reset_trade_telegram_dedup()
+    if trade_update_streams() != ("general",):
+        return _fail(f"streams {trade_update_streams()}")
+    g1 = should_send_trade_telegram(
+        text=trail_txt, kind="TRAIL", symbol="AKEUSDT", sl=0.04548, stream="general", now_ts=100.0
+    )
+    g2 = should_send_trade_telegram(
+        text=trail_txt, kind="TRAIL", symbol="AKEUSDT", sl=0.04548, stream="general", now_ts=101.0
+    )
+    g3 = should_send_trade_telegram(
+        text=trail_txt, kind="TRAIL", symbol="AKEUSDT", sl=0.04548, stream="tasks", now_ts=102.0
+    )
+    if not g1.get("send") or g2.get("send") or g3.get("send"):
+        return _fail(f"branch/sl dedup {g1} {g2} {g3}")
+    if g1.get("stream") != "general":
+        return _fail("must force general")
 
     # RSI series ~86
     closes = [1.0]

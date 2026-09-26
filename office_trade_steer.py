@@ -994,6 +994,77 @@ def _hit_sl(side: str, price: float, sl: float) -> bool:
     return price >= sl
 
 
+def protected_profit_pct(*, direction: str, entry: Any, sl: Any) -> Optional[float]:
+    """Скільки % від входу вже закрито стопом (BE/трейл)."""
+    e, s = _f(entry), _f(sl)
+    if e is None or s is None or e <= 0:
+        return None
+    side = str(direction or "").upper()
+    if side == "LONG":
+        return (s - e) / e * 100.0
+    if side == "SHORT":
+        return (e - s) / e * 100.0
+    return None
+
+
+def format_trade_update_card(
+    *,
+    symbol: str,
+    direction: str,
+    headline: str,
+    lines: Optional[List[str]] = None,
+) -> str:
+    """Кожен TRADE_UPDATE: символ і напрям першим рядком. Без жаргону M15 HL/LH."""
+    side = str(direction or "").upper()
+    head = f"📍 {str(symbol or '').upper()} {side} · {headline.strip()}"
+    body = [x for x in (lines or []) if str(x).strip()]
+    return "\n".join([head] + body)
+
+
+def format_trail_update(
+    *,
+    symbol: str,
+    direction: str,
+    new_sl: Any,
+    old_sl: Any,
+    entry: Any = None,
+) -> str:
+    from office_telegram_filter import format_px
+
+    side = str(direction or "").upper()
+    move_ua = "стоп вище" if side == "LONG" else "стоп нижче"
+    ns, os_ = format_px(new_sl), format_px(old_sl)
+    lines = [f"SL: {ns}" + (f" (було {os_})" if os_ and os_ != ns else "")]
+    prot = protected_profit_pct(direction=side, entry=entry, sl=new_sl)
+    if prot is not None:
+        sign = "+" if prot >= 0 else ""
+        lines.append(f"Прибуток захищено: {sign}{prot:.1f}%")
+    return format_trade_update_card(symbol=symbol, direction=side, headline=move_ua, lines=lines)
+
+
+def format_hold_update(*, symbol: str, direction: str, sl: Any) -> str:
+    from office_telegram_filter import format_px
+
+    return format_trade_update_card(
+        symbol=symbol,
+        direction=direction,
+        headline="рух продовжується",
+        lines=[f"Тримай, SL {format_px(sl)}"],
+    )
+
+
+def sl_price_changed(old_sl: Any, new_sl: Any) -> bool:
+    from office_telegram_filter import format_px
+
+    a, b = format_px(old_sl), format_px(new_sl)
+    if not a or not b:
+        o, n = _f(old_sl), _f(new_sl)
+        if o is None or n is None:
+            return n is not None
+        return abs(o - n) > 1e-12
+    return a != b
+
+
 def next_manage_event(
     book: ManageBook,
     *,
@@ -1039,10 +1110,14 @@ def next_manage_event(
         return {
             "event": "TRADE_UPDATE",
             "kind": "TP1",
-            "message": (
-                f"✅ TP1 · {book.symbol} {side}\n"
-                "Закрий 50–70% позиції зараз\n"
-                f"Перестав SL в беззбиток: {book.entry}"
+            "message": format_trade_update_card(
+                symbol=book.symbol,
+                direction=side,
+                headline="TP1",
+                lines=[
+                    "Закрий 50–70% позиції зараз",
+                    f"Перестав SL в беззбиток: {book.entry}",
+                ],
             ),
             "state": book.state,
         }
@@ -1060,15 +1135,21 @@ def next_manage_event(
                 book.extras["arm_extreme"] = max(r["high"] for r in rows)
             else:
                 book.extras["arm_extreme"] = min(r["low"] for r in rows)
-        extra = f"\nTP3: {book.tp3}" if book.tp3 is not None else ""
+        extra = f"TP3: {book.tp3}" if book.tp3 is not None else ""
+        tp2_lines = [
+            "Закрий ще частину",
+            f"SL в беззбиток {book.trail_sl}, далі підтягую стоп за рухом",
+        ]
+        if extra:
+            tp2_lines.append(extra)
         return {
             "event": "TRADE_UPDATE",
             "kind": "TP2",
-            "message": (
-                f"✅ TP2 · {book.symbol} {side}\n"
-                "Закрий ще частину\n"
-                f"SL в BE {book.trail_sl}, далі трейл за M15 HL/LH після нового екстремуму"
-                f"{extra}"
+            "message": format_trade_update_card(
+                symbol=book.symbol,
+                direction=side,
+                headline="TP2",
+                lines=tp2_lines,
             ),
             "state": book.state,
         }
@@ -1092,23 +1173,38 @@ def next_manage_event(
             fallback=book.trail_sl,
         )
         if new_trail is not None and book.trail_sl is not None:
-            moved = (side == "LONG" and new_trail > book.trail_sl) or (
-                side == "SHORT" and new_trail < book.trail_sl
+            old_sl = float(book.trail_sl)
+            moved = (side == "LONG" and new_trail > old_sl) or (
+                side == "SHORT" and new_trail < old_sl
             )
-            if moved:
+            if moved and sl_price_changed(old_sl, new_trail):
+                last_sent = book.extras.get("last_sent_sl")
+                if last_sent is not None and not sl_price_changed(last_sent, new_trail):
+                    print(
+                        f"[steer] trail same SL {book.symbol} {new_trail} — тільки лог"
+                    )
+                    return None
                 book.trail_sl = float(new_trail)
                 book.state = "TRAIL"
-                if book.last_event == "TRAIL" and abs(new_trail - float(book.extras.get("last_trail") or 0)) < 1e-12:
-                    return None
                 book.extras["last_trail"] = new_trail
+                book.extras["last_sent_sl"] = new_trail
                 book.last_event = "TRAIL"
                 return {
                     "event": "TRADE_UPDATE",
                     "kind": "TRAIL",
-                    "message": f"Трейлінг: SL переставлено на {new_trail} (M15 HL/LH)",
+                    "message": format_trail_update(
+                        symbol=book.symbol,
+                        direction=side,
+                        new_sl=new_trail,
+                        old_sl=old_sl,
+                        entry=book.entry,
+                    ),
                     "state": book.state,
                     "trail_sl": float(new_trail),
+                    "old_sl": old_sl,
                 }
+            if moved and not sl_price_changed(old_sl, new_trail):
+                print(f"[steer] trail unchanged display {book.symbol} {new_trail}")
         if m15_continuation(direction=side, candles_m15=candles_m15):
             if book.last_event == "HOLD":
                 return None
@@ -1116,7 +1212,7 @@ def next_manage_event(
             return {
                 "event": "TRADE_UPDATE",
                 "kind": "HOLD",
-                "message": f"Відкат відпрацьовано, рух продовжується. Тримай, SL {sl_now}",
+                "message": format_hold_update(symbol=book.symbol, direction=side, sl=sl_now),
                 "state": book.state,
             }
 
@@ -1150,7 +1246,12 @@ def next_manage_event(
             return {
                 "event": "TRADE_UPDATE",
                 "kind": "RSI_EXTREME",
-                "message": str(heat.get("message") or "фіксуй частину, підтягни стоп"),
+                "message": format_trade_update_card(
+                    symbol=book.symbol,
+                    direction=side,
+                    headline="фіксуй частину",
+                    lines=[str(heat.get("message") or "підтягни стоп")],
+                ),
                 "state": book.state,
             }
     except Exception:
@@ -1172,7 +1273,9 @@ def next_manage_event(
                     return {
                         "event": "TRADE_UPDATE",
                         "kind": "CONT",
-                        "message": f"{book.symbol} продовження руху на об'ємі — тримай, SL {sl_now}",
+                        "message": format_hold_update(
+                            symbol=book.symbol, direction=side, sl=sl_now
+                        ),
                         "state": book.state,
                     }
             if pump_add_retest(direction=side, entry=book.entry, candle=last_c, candles=rows):
@@ -1181,7 +1284,12 @@ def next_manage_event(
                     return {
                         "event": "TRADE_UPDATE",
                         "kind": "ADD",
-                        "message": f"{book.symbol} ретест входу на об'ємі — добір дозволений",
+                        "message": format_trade_update_card(
+                            symbol=book.symbol,
+                            direction=side,
+                            headline="добір",
+                            lines=["Ретест входу на об'ємі — добір дозволений"],
+                        ),
                         "state": book.state,
                     }
         except Exception:
