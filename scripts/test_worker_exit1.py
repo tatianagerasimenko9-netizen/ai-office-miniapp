@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from office_position_size import depo_usdt, plan_position_size  # noqa: E402
-from office_relay_wizard import _prompt  # noqa: E402
+from office_relay_wizard import _env_int, _prompt  # noqa: E402
 from office_telegram_policy import EVENT_SIGNAL_ENTRY, may_send_proactive  # noqa: E402
 
 
@@ -31,6 +31,14 @@ def main() -> int:
         return _fail("need cloud prompt disable")
     if not may_send_proactive(EVENT_SIGNAL_ENTRY):
         return _fail("quiet policy")
+    os.environ["OFFICE_GENERAL_THREAD_ID"] = "Загальний"
+    if _env_int("OFFICE_GENERAL_THREAD_ID") is not None:
+        return _fail("thread name must not int()")
+    os.environ["OFFICE_GENERAL_THREAD_ID"] = "12345"
+    if _env_int("OFFICE_GENERAL_THREAD_ID") != 12345:
+        return _fail("numeric thread id")
+    os.environ.pop("OFFICE_GENERAL_THREAD_ID", None)
+    print("OK thread id name vs number")
 
     os.environ["OFFICE_DEPO_USDT"] = "=1000"
     if depo_usdt() != 1000.0:
