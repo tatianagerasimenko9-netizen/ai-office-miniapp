@@ -81,8 +81,8 @@ def main() -> int:
     )
     if no_confirm.status != "WATCHING" or no_confirm.opens_position:
         return _fail("no confirm = watching")
-    if "не сигнал" not in format_radar_card(no_confirm).lower() and "WATCHING" not in format_radar_card(no_confirm):
-        return _fail("watching card")
+    if format_radar_card(no_confirm).strip():
+        return _fail("watching must not be a chat card")
 
     ok = evaluate_radar(
         symbol="BTCUSDT",
@@ -100,8 +100,10 @@ def main() -> int:
     if ok.card["rr"] < 1.5:
         return _fail("rr")
     txt = format_radar_card(ok)
-    if "Entry:" not in txt or "не відкрита позиція" not in txt:
+    if "Вхід:" not in txt:
         return _fail("signal card text")
+    if "Entry:" in txt or "away" in txt or "resistance" in txt:
+        return _fail("radar card banned")
 
     atr = evaluate_radar(
         symbol="BTCUSDT",

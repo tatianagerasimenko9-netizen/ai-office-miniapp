@@ -136,18 +136,27 @@ def _extract_line_value(label: str, line_text: str, hint: Optional[float] = None
     return big[0] if big else values[0]
 
 
-def parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
+def parse_signal_levels_from_text(text: str) -> Dict[str, Any]:
     """Entry / чекаю зону / OTE з пробілами в тисячах і десятковими альтами."""
-    out: Dict[str, Optional[float]] = {
+    out: Dict[str, Any] = {
         "entry_low": None,
         "entry_high": None,
         "sl": None,
         "tp1": None,
         "tp2": None,
         "rr": None,
+        "direction": None,
+        "timeframe": None,
     }
     src = str(text or "").replace("`", "")
     range_pat = rf"({PRICE_NUM})\s*[-–—\u2212]\s*({PRICE_NUM})"
+    if re.search(r"\bSHORT\b", src, flags=re.IGNORECASE):
+        out["direction"] = "SHORT"
+    elif re.search(r"\bLONG\b", src, flags=re.IGNORECASE):
+        out["direction"] = "LONG"
+    m_tf = re.search(r"\b(M1|M5|M15|H1|H4|D1)\b", src, flags=re.IGNORECASE)
+    if m_tf:
+        out["timeframe"] = m_tf.group(1).upper()
 
     def _range_from(match: Optional[re.Match[str]]) -> bool:
         if not match:
@@ -161,33 +170,33 @@ def parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
         return True
 
     m_entry = re.search(
-        rf"Entry[^:\n]{{0,24}}:\s*{range_pat}",
+        rf"(?:Entry|Вхід)[^:\n]{{0,24}}:\s*{range_pat}",
         src,
         flags=re.IGNORECASE,
     )
     if not m_entry:
-        m_entry = re.search(rf"Entry:\s*{range_pat}", src, flags=re.IGNORECASE)
+        m_entry = re.search(rf"(?:Entry|Вхід):\s*{range_pat}", src, flags=re.IGNORECASE)
     if _range_from(m_entry):
         pass
     else:
         m_one = re.search(
-            rf"Entry[^:\n]{{0,24}}:\s*({PRICE_NUM})",
+            rf"(?:Entry|Вхід)[^:\n]{{0,40}}:\s*({PRICE_NUM})",
             src,
             flags=re.IGNORECASE,
         )
         if not m_one:
-            m_one = re.search(rf"Entry:\s*({PRICE_NUM})", src, flags=re.IGNORECASE)
+            m_one = re.search(rf"(?:Entry|Вхід):\s*({PRICE_NUM})", src, flags=re.IGNORECASE)
         if m_one:
             v = parse_price_token(m_one.group(1))
             if v is not None:
                 out["entry_low"] = v
                 out["entry_high"] = v
         else:
-            m_nc = re.search(rf"Entry\s+{range_pat}", src, flags=re.IGNORECASE)
+            m_nc = re.search(rf"(?:Entry|Вхід)\s+{range_pat}", src, flags=re.IGNORECASE)
             if _range_from(m_nc):
                 pass
             else:
-                m_one_nc = re.search(rf"Entry\s+({PRICE_NUM})", src, flags=re.IGNORECASE)
+                m_one_nc = re.search(rf"(?:Entry|Вхід)\s+({PRICE_NUM})", src, flags=re.IGNORECASE)
                 if m_one_nc:
                     v = parse_price_token(m_one_nc.group(1))
                     if v is not None:
@@ -206,7 +215,9 @@ def parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
         _range_from(zone_pattern)
 
     entry_hint = out["entry_low"] or out["entry_high"]
-    sl_v = _extract_line_value("SL", src, hint=entry_hint)
+    sl_v = _extract_line_value("Стоп", src, hint=entry_hint)
+    if sl_v is None:
+        sl_v = _extract_line_value("SL", src, hint=entry_hint)
     if sl_v is not None:
         out["sl"] = sl_v
     tp1_v = _extract_line_value("TP1", src, hint=entry_hint)
@@ -215,7 +226,7 @@ def parse_signal_levels_from_text(text: str) -> Dict[str, Optional[float]]:
     tp2_v = _extract_line_value("TP2", src, hint=entry_hint)
     if tp2_v is not None:
         out["tp2"] = tp2_v
-    m_rr = re.search(r"RR:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
+    m_rr = re.search(r"RR(?:\s*1)?:\s*([0-9]+(?:\.[0-9]+)?)", src, flags=re.IGNORECASE)
     if m_rr:
         out["rr"] = float(m_rr.group(1))
     return out

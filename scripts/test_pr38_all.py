@@ -109,11 +109,11 @@ def main() -> int:
         rr_net=4.8,
         move_pct=5.5,
     )
-    if "Потенціал до TP1: 5.5%" not in card:
+    if "TP1: 0.1235" not in card:
         return _fail(card)
     if "приблизно" in card.lower() or "не чистий" in card.lower():
         return _fail("approx")
-    if "RR: 1:4.8" not in card:
+    if "RR 1:" not in card:
         return _fail(f"rr {card}")
     if "RR після витрат" in card:
         return _fail("old rr")

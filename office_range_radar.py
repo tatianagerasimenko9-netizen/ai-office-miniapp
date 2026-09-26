@@ -389,12 +389,13 @@ def format_range_card(res: RangeRadarResult) -> str:
         lines.append(f"Гіпотеза {h.get('direction')}: {h.get('note')}")
     if res.card:
         c = res.card
+        from office_telegram_filter import format_px as fp
+
         lines.append(
             f"Підтверджена картка {res.direction}: "
-            f"entry={c.get('entry')} SL={c.get('sl')} "
-            f"TP1={c.get('tp1') or c.get('tp')} TP2={c.get('tp2')} RR={c.get('rr')}"
+            f"вхід {fp(c.get('entry'))} стоп {fp(c.get('sl'))} "
+            f"TP1 {fp(c.get('tp1') or c.get('tp'))} TP2 {fp(c.get('tp2'))} RR {c.get('rr')}"
         )
-        lines.append("Картка сетапу, не ордер. Угода лише через /position.")
     else:
         lines.append("Підтвердженої картки ще немає — передчасний вхід відсіюємо.")
     if res.symbol not in CONTEXT_ASSETS:

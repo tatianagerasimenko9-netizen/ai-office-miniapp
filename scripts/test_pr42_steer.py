@@ -381,8 +381,10 @@ def main() -> int:
         trigger=trig,
         sc_plan=sc,
     )
-    if "OTE 62–79%" not in txt_sc or "60%" not in txt_sc or "40%" not in txt_sc or "Скасовано" not in txt_sc:
+    if "Вхід:" not in txt_sc or "Стоп:" not in txt_sc or "SHORT" not in txt_sc:
         return _fail(f"sc card {txt_sc}")
+    if "Модель рівнів" in txt_sc or "OTE 62–79%" in txt_sc:
+        return _fail(f"sc card banned {txt_sc}")
     if not is_manip_window_kyiv(datetime(2026, 9, 25, 6, 0, tzinfo=timezone.utc)):
         return _fail("manip 09:00 Kyiv")
     if is_manip_window_kyiv(datetime(2026, 9, 25, 8, 0, tzinfo=timezone.utc)):
@@ -524,8 +526,10 @@ def main() -> int:
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"radar regression {ok.status} {ok.reason}")
     txt = format_radar_card(ok)
-    if "Entry:" not in txt:
+    if "Вхід:" not in txt:
         return _fail("radar card")
+    if "Entry:" in txt or "forceOrder" in txt:
+        return _fail("radar banned")
 
     vision_notes = []
     for sym in ("AKEUSDT", "LONGXIAUSDT"):

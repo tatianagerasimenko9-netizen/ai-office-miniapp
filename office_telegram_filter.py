@@ -148,41 +148,45 @@ def alert_decision(
     quote_stale: bool = False,
     liquid_enough: bool = True,
     entry_mode: str = "",
+    symbol: str = "",
 ) -> Dict[str, Any]:
     """Чи варто показувати Тетяні. Аналіз у коді може лишатися CONFIRMED."""
+    from office_desk_card import min_tp1_pct
+
     st = str(status or "").upper()
     mode = str(entry_mode or "").upper()
+    need = min_tp1_pct(symbol)
     if st != "CONFIRMED" or st == "WAITING_SWEEP" or mode == ENTRY_WAITING_SWEEP:
         return {
             "send": False,
             "reason": "не CONFIRMED — у стрічку не кладемо внутрішній WATCHING/INSIDE",
             "kind": KIND_ALERT,
-            "min_move_pct": MIN_ALERT_MOVE_PCT,
+            "min_move_pct": need,
         }
     if chase or quote_stale or not liquid_enough:
         return {
             "send": False,
             "reason": "ціна/ліквідність не для алерту",
             "kind": KIND_ALERT,
-            "min_move_pct": MIN_ALERT_MOVE_PCT,
+            "min_move_pct": need,
         }
     if not format_px(entry) or not format_px(sl) or not format_px(tp1):
         return {
             "send": False,
             "reason": "немає повного плану entry/SL/TP1",
             "kind": KIND_ALERT,
-            "min_move_pct": MIN_ALERT_MOVE_PCT,
+            "min_move_pct": need,
         }
     move = move_pct_to_tp(entry=entry, tp=tp1)
-    if move is None or move + 1e-12 < MIN_ALERT_MOVE_PCT:
+    if move is None or move + 1e-12 < need:
         return {
             "send": False,
             "reason": (
                 f"до найближчої цілі {move if move is not None else 'н/д'}% "
-                f"< {MIN_ALERT_MOVE_PCT:.0f}% — не натягуємо дальній TP"
+                f"< {need:g}% — не натягуємо дальній TP"
             ),
             "kind": KIND_ALERT,
-            "min_move_pct": MIN_ALERT_MOVE_PCT,
+            "min_move_pct": need,
             "move_pct": move,
         }
     try:
@@ -194,14 +198,14 @@ def alert_decision(
             "send": False,
             "reason": f"RR після витрат {net} < {MIN_RR}",
             "kind": KIND_ALERT,
-            "min_move_pct": MIN_ALERT_MOVE_PCT,
+            "min_move_pct": need,
             "move_pct": move,
         }
     return {
         "send": True,
         "reason": "придатний сетап для стрічки",
         "kind": KIND_ALERT,
-        "min_move_pct": MIN_ALERT_MOVE_PCT,
+        "min_move_pct": need,
         "move_pct": move,
         "rr_net": net,
         "opens_position": False,
@@ -235,102 +239,39 @@ def format_opportunity_alert(
     entry_mode: str = "",
     sweep_level: Any = None,
 ) -> str:
-    """Картка практика: тип/ТФ, цифри SL/TP, скасування цифрою. Без шаблонного статусу."""
-    e, s, t1 = format_px(entry), format_px(sl), format_px(tp1)
-    t2 = format_px(tp2)
-    tf = str(timeframe or "").strip() or "H1"
-    style = resolve_trade_style(mode, tf)
-    side = str(direction or "").upper()
-    mark = "🟢" if side == "LONG" else "🔴"
-    lines = [
-        f"{mark} {side} · {symbol} · {tf}",
-        f"Тип: {style['type_ua']} · Вхід на {style['entry_tf']}",
-    ]
-    live = format_px(live_price) or e
-    if live:
-        lines.append(f"Ціна зараз: {live}")
-    struct = str(structure_line or "").strip()
-    why_s = str(why or "").strip()
-    template_why = any(
-        x in why_s.lower()
-        for x in ("реакція +", "закриття нижче рівня", "закриття вище рівня", "умови підтверджен")
+    """Одна картка для всіх модулів. Без Entry/SL англійською і без forceOrder."""
+    from office_desk_card import format_desk_card
+
+    _ = (
+        why,
+        rr_net,
+        cancel,
+        quote_asof,
+        move_pct,
+        structure_line,
+        sweep_line,
+        asia_high,
+        asia_low,
+        sl_explain,
+        entry_note,
+        mode,
+        live_price,
+        logic_line,
+        entry_mode,
+        sweep_level,
     )
-    if struct:
-        lines.append(f"Структура: {struct}")
-    elif why_s and not template_why:
-        lines.append(f"Структура: {why_s}")
-    else:
-        lines.append("Структура: DATA_UNAVAILABLE (немає свічок)")
-    logic = str(logic_line or "").strip()
-    if logic:
-        lines.append(f"Логіка: {logic}")
-    if sweep_line:
-        sw = str(sweep_line).strip()
-        if "знято" in sw.lower() and "✅" not in sw:
-            sw = f"{sw} ✅"
-        lines.append(f"Свіп: {sw}")
-    else:
-        lines.append("Свіп: DATA_UNAVAILABLE (немає підтверджених свічок)")
-    ah, al = format_px(asia_high), format_px(asia_low)
-    if ah and al:
-        lines.append(f"Діапазон сесії: Asian High {ah} · Low {al}")
-    else:
-        lines.append("Діапазон сесії: Asian High/Low DATA_UNAVAILABLE")
-    waiting = str(entry_mode or "").upper() == ENTRY_WAITING_SWEEP
-    note = str(entry_note or "").strip()
-    if waiting:
-        slv = format_px(sweep_level)
-        if side == "SHORT":
-            wait_e = f"після свіпу і закриття {style['entry_tf']} нижче {slv}" if slv else "після свіпу"
-        else:
-            wait_e = f"після свіпу і закриття {style['entry_tf']} вище {slv}" if slv else "після свіпу"
-        lines.append(f"Вхід: {wait_e}")
-        lines.append("Спостереження: якщо ціна дійде до рівня свіпу і відскочить")
-        lines.append("Нічого не робити поки свіп не підтверджено")
-        blob = "\n".join(lines)
-        return blob
-    if note:
-        lines.append(f"Вхід: {note}" if not note.lower().startswith("вхід:") else note)
-    elif live and e and live == e:
-        lines.append(f"Вхід: по ринку {e} (зона вже досягнута)")
-    elif e:
-        lines.append(f"Вхід: {e} ({style['entry_tf']} закрита {'нижче' if side == 'SHORT' else 'вище'})")
-    else:
-        lines.append("Вхід: DATA_UNAVAILABLE")
-    lines.append(f"SL: {s}")
-    lines.append(f"TP1: {t1}")
-    if move_pct is not None:
-        lines.append(f"Потенціал до TP1: {float(move_pct):.1f}%")
-    if t2 and move_pct is not None and entry:
-        try:
-            m2 = abs(float(tp2) - float(entry)) / float(entry) * 100.0
-            lines.append(f"TP2: {t2}  (+{m2:.1f}%)")
-        except (TypeError, ValueError):
-            lines.append(f"TP2: {t2}")
-    elif t2:
-        lines.append(f"TP2: {t2}")
-    if rr_net is not None:
-        lines.append(f"RR: 1:{float(rr_net):.1f}")
-    if t2:
-        lines.append(
-            "Ведення: при TP1 — закрий 50–70%, перестав SL у беззбиток на рівень входу, "
-            "тримай решту до TP2"
-        )
-    else:
-        lines.append("Ведення: при TP1 — закрий 50–70% і перестав SL у беззбиток на рівень входу")
-    if s:
-        above = "вище" if side == "SHORT" else "нижче"
-        lines.append(
-            f"Скасування: {style['cancel_tf']} свічка закривається {above} {s}"
-        )
-    elif cancel and format_px(cancel):
-        above = "вище" if side == "SHORT" else "нижче"
-        lines.append(
-            f"Скасування: {style['cancel_tf']} свічка закривається {above} {format_px(cancel)}"
-        )
-    lines.append("→ Олеся фіксує в журнал")
-    blob = "\n".join(lines)
-    return blob
+    if str(entry_mode or "").upper() == ENTRY_WAITING_SWEEP:
+        return ""
+    return format_desk_card(
+        symbol=symbol,
+        direction=direction,
+        timeframe=timeframe,
+        entry=entry,
+        sl=sl,
+        tp1=tp1,
+        tp2=tp2,
+        setup_type=str(setup or "СЕТАП"),
+    )
 
 
 def format_watch_nudge(
@@ -377,6 +318,7 @@ def level_book_to_alert(
             rr_net=sc.rr_net,
             chase=chase,
             quote_stale=quote_stale,
+            symbol=str(getattr(book, "symbol", "")),
         )
         if not dec.get("send"):
             continue
@@ -446,6 +388,7 @@ def range_result_to_alert(
         rr_net=c.get("rr"),
         chase=chase,
         quote_stale=quote_stale,
+        symbol=str(getattr(res, "symbol", "")),
     )
     if not dec.get("send"):
         return None

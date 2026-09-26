@@ -139,15 +139,16 @@ def main() -> int:
     )
     if any(b in alert for b in banned):
         return _fail(f"template leaked {alert}")
-    if "Тип: ІНТРАДЕЙ · Вхід на M15" not in alert:
+    if "🟢 LONG · SOLUSDT" not in alert:
         return _fail(f"type line {alert}")
-    if "Скасування: H1 свічка закривається нижче 98.8" not in alert:
-        return _fail(f"cancel numeric {alert}")
-    sl_only = next((ln for ln in alert.splitlines() if ln.startswith("SL:")), "")
-    if sl_only != "SL: 98.8":
-        return _fail(f"sl text {sl_only}")
-    if "структурного" in alert.lower() or "люфт" in sl_only.lower():
-        return _fail("verbal sl/cancel")
+    if "BOUNCE" not in alert:
+        return _fail(f"type line {alert}")
+    if "інтрадей H1" not in alert:
+        return _fail(f"type line {alert}")
+    if "Вхід: 100" not in alert or "Стоп: 98.8" not in alert:
+        return _fail(f"levels {alert}")
+    if "Entry:" in alert or alert.splitlines()[0].startswith("SL:"):
+        return _fail(f"english sl {alert}")
     sty = resolve_trade_style("scalp")
     if sty["type_ua"] != "СКАЛЬП" or sty["entry_tf"] != "M5":
         return _fail(f"scalp style {sty}")

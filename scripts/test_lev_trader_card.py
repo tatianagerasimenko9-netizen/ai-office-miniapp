@@ -161,33 +161,20 @@ def main() -> int:
         live_price=0.1306,
     )
     for need in (
-        "🔴 SHORT · DEMOUSDT · H1",
-        "Тип: ІНТРАДЕЙ · Вхід на M15",
-        "Ціна зараз: 0.1306",
-        "Структура:",
-        "Свіп:",
-        "Asian High 0.1315",
-        "Low 0.1298",
-        "BSL знято",
-        "SL: " + format_px(packed["sl"]),
-        "Ведення:",
-        "50–70%",
-        "Скасування: H1 свічка закривається вище",
-        "→ Олеся фіксує в журнал",
+        "🔴 SHORT · DEMOUSDT",
+        "інтрадей H1",
+        "Вхід: 0.1306",
+        "Стоп: " + format_px(packed["sl"]),
+        "TP1: 0.1235",
     ):
         if need not in card:
             return _fail(f"card missing {need!r} in {card}")
     if "Позиція: немає" in card:
         return _fail("position marker leaked")
-    sl_line = next((ln for ln in card.splitlines() if ln.startswith("SL:")), "")
-    if sl_line != f"SL: {format_px(packed['sl'])}":
-        return _fail(f"sl must be number only {sl_line!r}")
-    if "люфт" in card.split("SL:", 1)[-1].split("\n", 1)[0]:
-        return _fail("sl explain leaked")
-    if "структурного" in card.lower():
-        return _fail("verbal cancel")
-    if "21:14" not in card and "00:14" not in card:
-        return _fail(f"sweep time {card}")
+    if "Entry:" in card or "\nSL:" in card:
+        return _fail(f"english labels {card}")
+    if "Балі" in card or "Картка сетапу" in card or "forceOrder" in card:
+        return _fail(f"banned copy {card}")
     for ban in (
         "Чому звернув увагу",
         "Котирування:",
@@ -207,9 +194,9 @@ def main() -> int:
         rr_net=2.0,
         move_pct=4.0,
     )
-    if "Тип: СКАЛЬП · Вхід на M5" not in scalp_card:
+    if "🟢 LONG · AAAUSDT" not in scalp_card or "скальп M5" not in scalp_card:
         return _fail(scalp_card)
-    if "Скасування: M5 свічка закривається нижче 0.99" not in scalp_card:
+    if "Вхід: 1" not in scalp_card:
         return _fail(scalp_card)
     swing_card = format_opportunity_alert(
         symbol="BBBUSDT",
@@ -222,9 +209,7 @@ def main() -> int:
         rr_net=2.2,
         move_pct=6.0,
     )
-    if "Тип: СВІНГ · Вхід на H4" not in swing_card:
-        return _fail(swing_card)
-    if "Скасування: H4 свічка закривається вище 10.15" not in swing_card:
+    if "🔴 SHORT · BBBUSDT" not in swing_card or "свінг H4" not in swing_card:
         return _fail(swing_card)
 
     upd = format_manage_update(
