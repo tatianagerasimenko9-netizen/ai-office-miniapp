@@ -49,7 +49,12 @@ def prompt_if_missing(cfg: Dict[str, Any], key_env: str, cfg_key: str, label: st
     tokens = cfg.get("agent_bot_tokens")
     if isinstance(tokens, dict) and str(tokens.get(cfg_key, "")).strip():
         return
-    val = input(f"{label} (Enter to skip): ").strip()
+    if os.getenv("TG_BOT_TOKEN", "").strip() or not sys.stdin.isatty():
+        return
+    try:
+        val = input(f"{label} (Enter to skip): ").strip()
+    except EOFError:
+        return
     if not val:
         return
     if not isinstance(cfg.get("agent_bot_tokens"), dict):
