@@ -8,6 +8,7 @@ import os
 import random
 import re
 import sqlite3
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
@@ -2319,6 +2320,18 @@ async def pick_chats(client: TelegramClient) -> Tuple[int, int]:
     return main.chat_id, office.chat_id
 
 
+def _prompt(label: str, default: str = "") -> str:
+    """Render/cloud: stdin не TTY — input() кидає EOFError і процес падає з exit 1."""
+    try:
+        if not sys.stdin.isatty():
+            print("[relay] skip prompt (no TTY)")
+            return default
+        return input(label).strip()
+    except EOFError:
+        print("[relay] EOF on prompt; continue without input")
+        return default
+
+
 async def run() -> None:
     global _RELAY_OFFICE_STARTUP_PING_SENT
     print("=== AI Office Wizard ===")
@@ -2328,9 +2341,14 @@ async def run() -> None:
 
     force_setup = os.getenv("RELAY_FORCE_SETUP", "").strip() == "1"
     interactive = os.getenv("RELAY_INTERACTIVE", "").strip() == "1"
+    tg_bot_token = os.getenv("TG_BOT_TOKEN", "").strip()
+    if tg_bot_token:
+        # Хмара: жодних input(), навіть якщо RELAY_INTERACTIVE=1.
+        interactive = False
+        print("[relay] cloud mode: prompts disabled (TG_BOT_TOKEN set)")
     has_saved = bool(cfg.get("tg_api_id") and cfg.get("tg_api_hash") and cfg.get("main_chat_id") and cfg.get("office_chat_id"))
     if has_saved and not force_setup and interactive:
-        ans = input("Знайдено збережені налаштування. Використати їх? (Y/n): ").strip().lower()
+        ans = _prompt("Знайдено збережені налаштування. Використати їх? (Y/n): ").lower()
         if ans and ans not in ("y", "yes", "д", "так"):
             preserved_tokens = cfg.get("agent_bot_tokens")
             cfg = {}
@@ -2342,11 +2360,10 @@ async def run() -> None:
 
     api_id_raw = (os.getenv("TG_API_ID", "").strip() or cfg.get("tg_api_id", "").strip())
     api_hash = (os.getenv("TG_API_HASH", "").strip() or cfg.get("tg_api_hash", "").strip())
-    tg_bot_token = os.getenv("TG_BOT_TOKEN", "").strip()
     if not api_id_raw:
-        api_id_raw = input("TG_API_ID: ").strip()
+        api_id_raw = _prompt("TG_API_ID: ")
     if not api_hash:
-        api_hash = input("TG_API_HASH: ").strip()
+        api_hash = _prompt("TG_API_HASH: ")
 
     api_id = int(api_id_raw)
     session_name = "office_relay_wizard"
@@ -2407,15 +2424,19 @@ async def run() -> None:
     else:
         main_raw = (env_main or str(cfg.get("main_chat_id", "") or "").strip())
         office_raw = (env_office or str(cfg.get("office_chat_id", "") or "").strip())
-    if force_setup or not (main_raw and office_raw):
+    if cloud_mode:
+        # Env IDs already required above. RELAY_FORCE_SETUP не викликає pick_chats (input/EOF).
+        main_chat_id = int(main_raw)
+        office_chat_id = int(office_raw)
+    elif force_setup or not (main_raw and office_raw):
         main_chat_id, office_chat_id = await pick_chats(client)
     else:
         repick = os.getenv("RELAY_REPICK_CHATS", "").strip() == "1"
         if interactive and not repick:
-            reuse = input(
+            reuse = _prompt(
                 f"MAIN/OFFICE з конфігу:\n- MAIN={main_raw}\n- OFFICE={office_raw}\n"
                 "Залишити як є? (Y/n): "
-            ).strip().lower()
+            ).lower()
             if reuse and reuse not in ("y", "yes", "д", "так"):
                 main_chat_id, office_chat_id = await pick_chats(client)
             else:
@@ -2768,14 +2789,14 @@ async def run() -> None:
         news_api_key = str(cfg.get("news_api_key", "") or "").strip()
     if not news_api_key:
         if interactive or not cfg.get("news_api_key"):
-            news_api_key = input("NEWS_API_KEY (optional, Enter to skip): ").strip()
+            news_api_key = _prompt("NEWS_API_KEY (optional, Enter to skip): ")
         else:
             # Silent mode: keep last saved key without prompting.
             news_api_key = str(cfg.get("news_api_key", "") or "").strip()
     elif interactive and not force_setup:
-        ans = input("NEWS_API_KEY знайдено у збережених налаштуваннях. Використати? (Y/n): ").strip().lower()
+        ans = _prompt("NEWS_API_KEY знайдено у збережених налаштуваннях. Використати? (Y/n): ").lower()
         if ans and ans not in ("y", "yes", "д", "так"):
-            news_api_key = input("NEWS_API_KEY (optional, Enter to skip): ").strip()
+            news_api_key = _prompt("NEWS_API_KEY (optional, Enter to skip): ")
 
     cfg["news_api_key"] = news_api_key
     save_relay_config(cfg)
@@ -6072,20 +6093,28 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     _last_alert_ts = 0.0
     try:
-        await client.run_until_disconnected()
-    except Exception as e:
-        now_ts = time.time()
-        if now_ts - _last_alert_ts >= 300:
-            _last_alert_ts = now_ts
+        while True:
             try:
-                await send_office(
-                    f"⚠️ Relay впав: {type(e).__name__}: {str(e)[:200]}"
-                    f"\nАвтоперезапуск через 30 сек..."
-                )
-            except Exception as alert_exc:
-                print(f"[relay][WARN] crash alert send failed: {alert_exc}")
-        await asyncio.sleep(30)
-        raise
+                if not client.is_connected():
+                    print("[relay] telegram reconnecting…")
+                    await client.connect()
+                await client.run_until_disconnected()
+                print("[relay] telegram disconnected; retry in 15s (process stays up)")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                now_ts = time.time()
+                print(f"[relay] session error {type(e).__name__}: {e}")
+                if now_ts - _last_alert_ts >= 300:
+                    _last_alert_ts = now_ts
+                    try:
+                        await send_office(
+                            f"⚠️ Relay session: {type(e).__name__}: {str(e)[:200]}"
+                            f"\nРеконнект без exit 1."
+                        )
+                    except Exception as alert_exc:
+                        print(f"[relay][WARN] crash alert send failed: {alert_exc}")
+            await asyncio.sleep(15)
     finally:
         await bot_http.close()
 

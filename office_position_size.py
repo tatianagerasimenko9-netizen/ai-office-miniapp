@@ -26,7 +26,8 @@ def _f(v: Any) -> Optional[float]:
 
 
 def depo_usdt() -> Optional[float]:
-    return _f(os.getenv(DEPO_ENV))
+    raw = str(os.getenv(DEPO_ENV) or "").strip().lstrip("=").strip()
+    return _f(raw) if raw else None
 
 
 def risk_pct_for_score(score: Any, min_score: Any) -> float:
