@@ -166,6 +166,8 @@ def card_levels(*, direction: str, entry: float, structure_sl: float, rr: float 
 
 
 def format_radar_card(result: "RadarResult") -> str:
+    from office_trade_steer import format_sc_plan_lines
+
     if result.status == "SIGNAL" and result.card:
         c = result.card
         trig = str(c.get("trigger") or "").strip()
@@ -176,6 +178,8 @@ def format_radar_card(result: "RadarResult") -> str:
         ]
         if trig:
             lines.append(trig)
+        for extra in format_sc_plan_lines(c.get("sc_plan") if isinstance(c, dict) else None, direction=str(result.direction or "")):
+            lines.append(extra)
         lines.append(
             f"Entry: {c['entry']:.6g} | SL: {c['sl']:.6g} (за зоною маніпуляції) | "
             f"TP: {c['tp']:.6g} | RR: {c['rr']:.1f}"
@@ -263,7 +267,12 @@ def evaluate_radar(
     structure_sl = float(sweep_lv)
     card = card_levels(direction=direction, entry=px, structure_sl=structure_sl, rr=DEFAULT_RR)
     try:
-        from office_trade_steer import format_entry_trigger, plan_stop_behind_manipulation
+        from office_trade_steer import (
+            encode_sc_zone_note,
+            format_entry_trigger,
+            plan_stop_behind_manipulation,
+            plan_strong_candle_ote,
+        )
 
         planned = plan_stop_behind_manipulation(
             entry=px,
@@ -298,6 +307,13 @@ def evaluate_radar(
                 entry=px,
                 already_done=True,
             )
+        sc_plan = plan_strong_candle_ote(direction=direction, candles=m15_candles, price=px)
+        if sc_plan.get("data_status") == "DATA_OK":
+            card = dict(card)
+            card["sc_plan"] = sc_plan
+            card["entry_low"] = sc_plan.get("ote_lo")
+            card["entry_high"] = sc_plan.get("ote_hi")
+            card["sc_note"] = encode_sc_zone_note(sc_plan)
     except Exception:
         pass
     base.card = card

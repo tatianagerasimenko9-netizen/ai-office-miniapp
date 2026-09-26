@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from office_radar import MIN_RR
-from office_topdown import DATA_OK, DATA_UNAVAILABLE, calc_sl_with_buffer
+from office_topdown import DATA_OK, DATA_UNAVAILABLE, calc_sl_with_buffer, last_impulse_candle
 
 KIND_STEER = "trade_steer"
 SL_ATR_MULT = 1.0
@@ -21,6 +21,14 @@ ATR_PERIOD = 14
 MIN_MANIP_BARS = 5
 # Хай/лой далеко від входу — не «зона маніпуляції входу».
 MANIP_NEAR_PCT = 0.04
+# Бібліотека: OTE 0.62–0.79 (SMC_ANALIZ / SMART_MANY 0.13.1). 0.618/0.786 — pd_array.
+OTE_062 = 0.62
+OTE_705 = 0.705
+OTE_079 = 0.79
+# Старий сканер (STATISTYKA_SNAPSHOT): вхід 70% / добір 20%. Залишок 10% — друге відро глибше.
+SCALE_ENTRY_PCT = 70
+SCALE_ADD_PCT = 20
+SCALE_ADD2_PCT = 10
 
 
 def _f(v: Any) -> Optional[float]:
@@ -100,6 +108,136 @@ def ema_last(candles: Any, period: int = 21) -> Optional[float]:
     for r in rows[1:]:
         ema = float(r["close"]) * k + ema * (1.0 - k)
     return ema
+
+
+def plan_strong_candle_ote(
+    *,
+    direction: str,
+    candles: Any,
+    tick_size: Any = None,
+    price: Any = None,
+) -> Dict[str, Any]:
+    """Зона сильної свічки + OTE-відкат + відра 70/20/10. Без свічки — DATA_UNAVAILABLE."""
+    side = str(direction or "").upper()
+    empty = {
+        "data_status": DATA_UNAVAILABLE,
+        "high": None,
+        "low": None,
+        "eq": None,
+        "ote_lo": None,
+        "ote_hi": None,
+        "buckets": [],
+        "sl_anchor": None,
+        "sl": None,
+        "cancel_level": None,
+        "trigger_level": None,
+        "source": "last_impulse_candle",
+    }
+    if side not in ("LONG", "SHORT"):
+        return empty
+    sc = last_impulse_candle(candles, direction=side)
+    if not sc:
+        return empty
+    hi, lo = float(sc["high"]), float(sc["low"])
+    if hi <= lo:
+        return empty
+    span = hi - lo
+    eq = (hi + lo) / 2.0
+    if side == "LONG":
+        ote_062 = hi - span * OTE_062
+        ote_705 = hi - span * OTE_705
+        ote_079 = hi - span * OTE_079
+        ote_lo, ote_hi = ote_079, ote_062
+        sl_anchor = lo
+        trigger_level = ote_hi
+        cancel_level = lo
+    else:
+        ote_062 = lo + span * OTE_062
+        ote_705 = lo + span * OTE_705
+        ote_079 = lo + span * OTE_079
+        ote_lo, ote_hi = ote_062, ote_079
+        sl_anchor = hi
+        trigger_level = ote_lo
+        cancel_level = hi
+    packed = calc_sl_with_buffer(sl_anchor, side, tick_size=tick_size, price=price or eq)
+    buckets = [
+        {"label": "Вхід 1", "price": ote_062, "pct": SCALE_ENTRY_PCT},
+        {"label": "Добір", "price": ote_705, "pct": SCALE_ADD_PCT},
+        {"label": "Добір 2", "price": ote_079, "pct": SCALE_ADD2_PCT},
+    ]
+    return {
+        "data_status": DATA_OK,
+        "high": hi,
+        "low": lo,
+        "eq": eq,
+        "ote_lo": ote_lo,
+        "ote_hi": ote_hi,
+        "buckets": buckets,
+        "sl_anchor": sl_anchor,
+        "sl": packed.get("sl"),
+        "cancel_level": cancel_level,
+        "trigger_level": trigger_level,
+        "source": "last_impulse_candle",
+        "explain": packed.get("explain"),
+    }
+
+
+def encode_sc_zone_note(plan: Optional[Dict[str, Any]]) -> str:
+    if not plan or plan.get("data_status") != DATA_OK:
+        return ""
+    return f"SC_ZONE {plan['low']}-{plan['high']}"
+
+
+def parse_sc_zone_note(note: Any) -> Optional[Tuple[float, float]]:
+    text = str(note or "")
+    if "SC_ZONE" not in text:
+        return None
+    try:
+        chunk = text.split("SC_ZONE", 1)[1].strip().split()[0]
+        a, b = chunk.replace("—", "-").split("-", 1)
+        lo, hi = float(a), float(b)
+        if lo > hi:
+            lo, hi = hi, lo
+        return lo, hi
+    except Exception:
+        return None
+
+
+def sc_setup_cancelled(*, direction: str, close: Any, sc_low: Any, sc_high: Any) -> bool:
+    """Закриття за протилежним краєм зони SC до входу — сетап мертвий."""
+    c, lo, hi = _f(close), _f(sc_low), _f(sc_high)
+    if c is None or lo is None or hi is None:
+        return False
+    side = str(direction or "").upper()
+    if side == "SHORT":
+        return c > hi
+    if side == "LONG":
+        return c < lo
+    return False
+
+
+def format_sc_plan_lines(plan: Optional[Dict[str, Any]], *, direction: str) -> List[str]:
+    from office_telegram_filter import format_px, format_level_span
+
+    if not plan or plan.get("data_status") != DATA_OK:
+        return []
+    side = str(direction or "").upper()
+    cmp_in = "нижче" if side == "SHORT" else "вище"
+    cmp_x = "вище" if side == "SHORT" else "нижче"
+    lines = [
+        f"Зона входу: {format_level_span(plan.get('ote_lo'), plan.get('ote_hi'))} "
+        "(відкат у сильну свічку, OTE 62–79%)",
+    ]
+    for b in plan.get("buckets") or []:
+        lines.append(f"{b['label']}: {format_px(b.get('price'))} — {int(b.get('pct') or 0)}% позиції")
+    lines.append(
+        f"Тригер: закриття M15 {cmp_in} {format_px(plan.get('trigger_level'))} в зоні SC"
+    )
+    lines.append(
+        f"Скасування до входу: закриття M15 {cmp_x} {format_px(plan.get('cancel_level'))} "
+        "— ❌ Скасовано"
+    )
+    return lines
 
 
 def _same_side_near(entry: float, level: float, side: str, atr: Optional[float] = None) -> bool:
@@ -199,6 +337,11 @@ def plan_stop_behind_manipulation(
     }
     if e is None or e <= 0 or t1 is None or side not in ("LONG", "SHORT"):
         return empty
+    sc_plan = plan_strong_candle_ote(
+        direction=side, candles=candles_m15, tick_size=tick_size, price=e
+    )
+    if ob_bound is None and sc_plan.get("sl_anchor") is not None:
+        ob_bound = sc_plan.get("sl_anchor")
     tight_rr = _rr(e, float(current_sl), t1) if _f(current_sl) is not None else None
     atr = _f(atr_m15)
     if atr is None:
@@ -214,6 +357,10 @@ def plan_stop_behind_manipulation(
     packed = calc_sl_with_buffer(anchor.get("level"), side, tick_size=tick_size, price=e)
     sl = packed.get("sl")
     notes: List[str] = []
+    if sl is None and sc_plan.get("sl") is not None:
+        sl = sc_plan.get("sl")
+        packed = {"sl": sl, "buffer": sc_plan.get("explain"), "explain": sc_plan.get("explain")}
+        notes.append("стоп за зоною сильної свічки")
     if sl is None:
         reason = "зона маніпуляції DATA_UNAVAILABLE — стоп не вигадуємо"
         if tight_rr is not None and tight_rr > RR_TIGHT_FLAG:
@@ -229,6 +376,14 @@ def plan_stop_behind_manipulation(
             "quality": "skip_tight" if tight_rr and tight_rr > RR_TIGHT_FLAG else "unavailable",
         }
     sl = float(sl)
+    if sc_plan.get("sl") is not None:
+        sc_sl = float(sc_plan["sl"])
+        if side == "SHORT" and sc_sl > sl:
+            sl = sc_sl
+            notes.append("стоп за зоною сильної свічки + люфт")
+        elif side == "LONG" and sc_sl < sl:
+            sl = sc_sl
+            notes.append("стоп за зоною сильної свічки + люфт")
     risk = abs(e - sl)
     if atr is not None and atr > 0 and risk + 1e-12 < SL_ATR_MULT * atr:
         extra = calc_sl_with_buffer(
@@ -286,6 +441,7 @@ def plan_stop_behind_manipulation(
         "buffer": packed.get("buffer"),
         "explain": packed.get("explain"),
         "atr_m15": atr,
+        "sc_plan": sc_plan,
     }
 
 
@@ -328,6 +484,7 @@ def format_signal_steer_card(
     trigger: str = "",
     reentry: bool = False,
     sweep_note: str = "",
+    sc_plan: Optional[Dict[str, Any]] = None,
 ) -> str:
     from office_telegram_filter import format_px
 
@@ -337,6 +494,7 @@ def format_signal_steer_card(
     lines = [title]
     if sweep_note:
         lines.append(sweep_note)
+    lines.extend(format_sc_plan_lines(sc_plan, direction=side))
     if trigger:
         lines.append(trigger)
     else:

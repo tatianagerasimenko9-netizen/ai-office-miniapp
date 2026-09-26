@@ -39,12 +39,19 @@ from office_telegram_policy import (  # noqa: E402
 from office_trade_steer import (  # noqa: E402
     RR_TIGHT_FLAG,
     SL_ATR_MULT,
+    SCALE_ADD2_PCT,
+    SCALE_ADD_PCT,
+    SCALE_ENTRY_PCT,
     ManageBook,
+    encode_sc_zone_note,
     format_entry_trigger,
     format_signal_steer_card,
     plan_stop_behind_manipulation,
+    plan_strong_candle_ote,
     plan_sweep_reentry,
+    parse_sc_zone_note,
     replay_manage,
+    sc_setup_cancelled,
     signal_case_key,
     tp3_from_liquidity,
 )
@@ -67,8 +74,10 @@ def _longxia_m15() -> list:
     for i in range(10):
         rows.append(_c(0.1306, 0.1310, 0.1305, 0.1307, f"c{i}"))
     rows.append(_c(0.1307, 0.1325, 0.1306, 0.1308, "sweep"))
-    for i in range(6):
+    for i in range(4):
         rows.append(_c(0.1307, 0.1310, 0.1304, 0.1306, f"a{i}"))
+    # Сильна червона свічка ~0.130–0.133 (як на індикаторі Тетяни).
+    rows.append(_c(0.1330, 0.1330, 0.1300, 0.13005, "sc"))
     return rows
 
 
@@ -127,6 +136,15 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> lis
 
 
 def main() -> int:
+    print(
+        "KNOWLEDGE: OFFICE_AGENT_SYSTEM_PROMPTS_UA.md (відкат до сильної свічки); "
+        "office_worker_library/shared/SMC_ANALIZ_SNAPSHOT.md OTE 0.62-0.79; "
+        "SMART_MANY_KONSEPT_SNAPSHOT.md §0.13.1; "
+        "STATISTYKA_SNAPSHOT.txt вхід 70%/добір 20%; "
+        "office_topdown.last_impulse_candle; fetch_ote_levels 0.618/0.705/0.786; "
+        "ARKHITEKTURA ENTRY_CONFIRMATION_MODE=SC_OR_ENTRY; "
+        "Pine ICT SMC HUNTER v9.9 — немає в репо"
+    )
     if ATR_DAY_USED_ENTRY_BLOCK_PCT != 90.0 or GERCHIK_TREND_ENTRY_BLOCK_PCT != 80.0:
         return _fail("atr frozen")
     if SIGNAL_THRESHOLD != 85 or MIN_ALERT_MOVE_PCT != 3.0 or MIN_RR < 1.5:
@@ -168,6 +186,8 @@ def main() -> int:
         return _fail(f"longxia plan {planned}")
     if float(planned["sl"]) < 0.1325:
         return _fail(f"sl not behind sweep {planned['sl']}")
+    if float(planned["sl"]) <= 0.1330:
+        return _fail(f"sl must be above SC high 0.133 {planned['sl']}")
     tight_rr = abs(0.12345 - 0.13063) / abs(0.13063 - 0.130986)
     if tight_rr <= RR_TIGHT_FLAG:
         return _fail("fixture rr")
@@ -230,6 +250,46 @@ def main() -> int:
     )
     if r2.get("allow"):
         return _fail("second reentry")
+
+    sc = plan_strong_candle_ote(direction="SHORT", candles=m15, price=0.13063)
+    if sc.get("data_status") != "DATA_OK":
+        return _fail(f"sc {sc}")
+    if float(sc["high"]) < 0.1329 or float(sc["low"]) > 0.1301:
+        return _fail(f"sc zone {sc['low']}-{sc['high']}")
+    pcts = [int(b["pct"]) for b in sc["buckets"]]
+    if pcts != [SCALE_ENTRY_PCT, SCALE_ADD_PCT, SCALE_ADD2_PCT]:
+        return _fail(f"buckets {pcts}")
+    if sc_setup_cancelled(direction="SHORT", close=0.1325, sc_low=sc["low"], sc_high=sc["high"]):
+        return _fail("0.1325 inside SC is not cancel")
+    if not sc_setup_cancelled(direction="SHORT", close=0.1335, sc_low=sc["low"], sc_high=sc["high"]):
+        return _fail("close above SC must cancel")
+    note = f"radar SIGNAL {encode_sc_zone_note(sc)}"
+    parsed = parse_sc_zone_note(note)
+    if not parsed:
+        return _fail("parse sc note")
+
+    # Екран ICT SMC HUNTER: H4 HIGH 0.10952, Відкат SC (OTE) 0.10156–0.10328.
+    hunter = [_c(0.0994, 0.10952, 0.0994, 0.10952, "bull-sc")]
+    long_sc = plan_strong_candle_ote(direction="LONG", candles=hunter, price=0.104)
+    if long_sc.get("data_status") != "DATA_OK":
+        return _fail("hunter sc")
+    if abs(float(long_sc["ote_hi"]) - 0.10328) > 0.0004:
+        return _fail(f"hunter ote hi {long_sc['ote_hi']}")
+    if abs(float(long_sc["ote_lo"]) - 0.10156) > 0.0004:
+        return _fail(f"hunter ote lo {long_sc['ote_lo']}")
+
+    txt_sc = format_signal_steer_card(
+        symbol="LONGXIAUSDT",
+        direction="SHORT",
+        timeframe="H1",
+        entry=0.1306,
+        sl=planned["sl"],
+        tp1=0.12345,
+        trigger=trig,
+        sc_plan=sc,
+    )
+    if "OTE 62–79%" not in txt_sc or "70%" not in txt_sc or "Скасовано" not in txt_sc:
+        return _fail(f"sc card {txt_sc}")
 
     # Широкий стоп не вибивається свіпом 0.1325.
     book_lx = ManageBook(

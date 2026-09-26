@@ -151,6 +151,8 @@ from office_trade_steer import (
     next_manage_event,
     plan_stop_behind_manipulation,
     plan_sweep_reentry,
+    parse_sc_zone_note,
+    sc_setup_cancelled,
     signal_case_key,
     tp3_from_liquidity,
 )
@@ -4749,6 +4751,50 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     signal_touch_updated(db_path, signal_id=signal_id)
                                 continue
 
+                        scz = parse_sc_zone_note(row.get("analysis_note"))
+                        if status == "ACTIVE" and scz is not None:
+                            try:
+                                m15_can = fetch_candles(symbol, "15m", 4)
+                            except Exception:
+                                m15_can = []
+                            last_cl = None
+                            if isinstance(m15_can, list) and m15_can:
+                                last_cl = (m15_can[-1] or {}).get("close")
+                            if last_cl is None:
+                                last_cl = current_price
+                            if sc_setup_cancelled(
+                                direction=direction,
+                                close=last_cl,
+                                sc_low=scz[0],
+                                sc_high=scz[1],
+                            ):
+                                signal_update(
+                                    db_path,
+                                    signal_id=signal_id,
+                                    status="EXPIRED",
+                                    outcome="CANCELLED",
+                                    analysis_note=f"SC cancel close={last_cl} zone={scz[0]}-{scz[1]}",
+                                )
+                                try:
+                                    journal_close_trade(
+                                        db_path,
+                                        trade_id=office_signal_trade_id(signal_id),
+                                        outcome="BE",
+                                        exit_price=float(last_cl or current_price),
+                                        pnl_pct=0.0,
+                                        exit_reason="скасовано до входу (закриття за зоною SC)",
+                                        context_patch={"result": "CANCELLED"},
+                                    )
+                                except Exception:
+                                    pass
+                                if _allow_notify(symbol, "SC_CANCEL"):
+                                    await send_proactive(
+                                        EVENT_TRADE_CLOSED,
+                                        f"❌ Скасовано · {symbol}: закриття за межею зони сильної свічки, вхід не відкриваємо.",
+                                        stream="general",
+                                    )
+                                continue
+
                         if status == "ACTIVE" and e_low is not None and e_high is not None and e_low <= current_price <= e_high:
                             missing_levels_active = sl_v is None or (tp1_v is None and tp2_v is None)
                             if missing_levels_active:
@@ -5267,20 +5313,25 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 mark_cycle_sent(sent_this_cycle, symbol)
                                 card = res.card or {}
                                 sid = f"radar-{symbol}"
+                                e_lo = card.get("entry_low") or card.get("entry") or price
+                                e_hi = card.get("entry_high") or card.get("entry") or price
+                                sc_bit = str(card.get("sc_note") or "")
                                 try:
                                     signal_upsert(
                                         db_path,
                                         signal_id=sid,
                                         symbol=symbol,
                                         direction=res.direction or "LONG",
-                                        entry_low=float(card.get("entry") or price),
-                                        entry_high=float(card.get("entry") or price),
+                                        entry_low=float(e_lo),
+                                        entry_high=float(e_hi),
                                         sl=card.get("sl"),
                                         tp1=card.get("tp") or card.get("tp1"),
                                         tp2=card.get("tp2"),
                                         rr=card.get("rr"),
                                         status="ACTIVE",
-                                        analysis_note=(res.reason or "radar SIGNAL")[:2000],
+                                        analysis_note=(
+                                            f"{sc_bit} {res.reason or 'radar SIGNAL'}"
+                                        ).strip()[:2000],
                                     )
                                     journal_open_office_signal(
                                         db_path,
