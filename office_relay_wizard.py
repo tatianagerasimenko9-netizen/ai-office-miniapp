@@ -2264,6 +2264,22 @@ def _env_int_set(name: str) -> set[int]:
     return out
 
 
+def _env_int(name: str, default: int = 0) -> Optional[int]:
+    """Число з env. Назва гілки («Загальний») не валить процес."""
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return default or None
+    try:
+        v = int(raw)
+    except ValueError:
+        print(
+            f"[relay][WARN] {name}={raw!r} не число — потрібен message_thread_id, "
+            "не назва форуму. Ігнорую."
+        )
+        return default or None
+    return v or None
+
+
 async def pick_chats(client: TelegramClient) -> Tuple[int, int]:
     items: List[DialogItem] = []
     i = 1
@@ -2545,9 +2561,12 @@ async def run() -> None:
             f"{', '.join(sorted(agent_bot_usernames.keys()))}"
         )
 
-    general_thread_id = int(os.getenv("OFFICE_GENERAL_THREAD_ID", "0") or "0") or None
-    tasks_thread_id = int(os.getenv("OFFICE_TASKS_THREAD_ID", "0") or "0") or None
-    tech_thread_id = int(os.getenv("OFFICE_TECH_THREAD_ID", "0") or "0") or None
+    general_thread_id = _env_int("OFFICE_GENERAL_THREAD_ID")
+    tasks_thread_id = _env_int("OFFICE_TASKS_THREAD_ID")
+    tech_thread_id = _env_int("OFFICE_TECH_THREAD_ID")
+    print(
+        f"[relay] threads general={general_thread_id} tasks={tasks_thread_id} tech={tech_thread_id}"
+    )
 
     def _thread_for_stream(stream: str) -> Optional[int]:
         s = str(stream or "general").strip().lower()
