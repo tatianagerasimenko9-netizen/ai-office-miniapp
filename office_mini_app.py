@@ -1266,6 +1266,67 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path == "/v1" or u.path == "/mini":
+            from office_mini_v1 import html_v1
+
+            body = html_v1().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path.startswith("/api/v1/"):
+            from office_mini_v1 import (
+                home_payload,
+                positions_payload,
+                render_chart_png,
+                scanner_payload,
+                signals_payload,
+                stats_payload,
+            )
+            if u.path == "/api/v1/home":
+                data = home_payload()
+            elif u.path == "/api/v1/signals":
+                data = signals_payload()
+            elif u.path == "/api/v1/scanner":
+                data = scanner_payload()
+            elif u.path == "/api/v1/positions":
+                data = positions_payload()
+            elif u.path == "/api/v1/stats":
+                data = stats_payload()
+            elif u.path == "/api/v1/chart.png":
+                qs = parse_qs(u.query)
+                sym = (qs.get("symbol") or ["BTCUSDT"])[0]
+                drawn = render_chart_png(sym)
+                if drawn.get("ok") and drawn.get("path") and os.path.isfile(drawn["path"]):
+                    with open(drawn["path"], "rb") as fh:
+                        raw = fh.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
+                body = json.dumps(
+                    {"ok": False, "data_status": "DATA_UNAVAILABLE", "reason": drawn.get("reason")},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            else:
+                data = {"ok": False, "error": "unknown v1 endpoint"}
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == "/":
             body = html().encode("utf-8")
             self.send_response(200)
