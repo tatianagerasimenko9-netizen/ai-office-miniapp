@@ -2383,6 +2383,9 @@ async def run() -> None:
                 # Local interactive mode (user account login via phone/code).
                 await client.start()
             break
+        except asyncio.CancelledError:
+            print("[relay] shutdown during Telegram start")
+            return
         except FloodWaitError as exc:
             wait_sec = int(getattr(exc, "seconds", 0) or 0)
             if wait_sec <= 0:
@@ -2390,6 +2393,9 @@ async def run() -> None:
             wait_sec += 5
             print(f"[relay][WARN] FloodWait під час авторизації. Чекаю {wait_sec}с і пробую знову...")
             await asyncio.sleep(wait_sec)
+        except Exception as exc:
+            print(f"[relay][WARN] Telegram start failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(15)
     init_office_db(db_path)
     _db_ident = office_db_identity(db_path)
     print(
@@ -6101,7 +6107,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                 await client.run_until_disconnected()
                 print("[relay] telegram disconnected; retry in 15s (process stays up)")
             except asyncio.CancelledError:
-                raise
+                print("[relay] shutdown (SIGTERM/cancel) — exit 0, не status 1")
+                return
             except Exception as e:
                 now_ts = time.time()
                 print(f"[relay] session error {type(e).__name__}: {e}")
@@ -6120,5 +6127,12 @@ EV позитивне: {prob.get('ev_positive', '')}
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        print("[relay] KeyboardInterrupt — exit 0")
+        raise SystemExit(0)
+    except asyncio.CancelledError:
+        print("[relay] CancelledError — exit 0")
+        raise SystemExit(0)
 
