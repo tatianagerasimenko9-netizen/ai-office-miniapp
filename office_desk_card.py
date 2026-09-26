@@ -21,13 +21,16 @@ OPEN_STATUSES = ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "HIT_TP2")
 _NEAR_STOP_ONCE: Set[str] = set()
 BANNED_CARD_FRAGMENTS = (
     "Балі",
+    "Бали",
     "Модель рівнів",
     "Картка сетапу, не ордер",
+    "не ордер",
     "away",
     "resistance",
     "Entry:",
     "SL:",
     "forceOrder",
+    "RR 1:",
 )
 
 
@@ -293,6 +296,37 @@ def desk_entry_gate(
     }
 
 
+def _kind_line(setup_type: str, *, reentry: bool = False) -> str:
+    if reentry:
+        return "Повторний вхід"
+    raw = str(setup_type or "").strip()
+    ul = raw.upper()
+    if "ПОВТОРНИЙ" in ul:
+        return "Повторний вхід"
+    if "СИЛЬН" in raw or "HUNTER" in ul:
+        return "Відкат у сильну свічку"
+    if ul in ("DUMP", "PUMP"):
+        return ul
+    if "РАДАР" in ul or ul == "RADAR":
+        return "Радар"
+    if ul == "BOUNCE":
+        return "Відскік"
+    if raw:
+        return raw.replace("_", " ")[:40]
+    return "Сетап"
+
+
+def _pct_txt(pct: float) -> str:
+    sign = "−" if pct < 0 else "+"
+    return f"({sign}{abs(pct):.1f}%)"
+
+
+def _lvl(prefix: str, px: Any, pct: Optional[float] = None) -> str:
+    if pct is None:
+        return f"{prefix} · {_px(px)}"
+    return f"{prefix} · {_px(px)}  {_pct_txt(pct)}"
+
+
 def format_desk_card(
     *,
     symbol: str,
@@ -303,6 +337,7 @@ def format_desk_card(
     tp1: Any,
     tp2: Any = None,
     tp3: Any = None,
+    add_px: Any = None,
     setup_type: str = "",
     score: Any = None,
     min_score: Any = 10,
@@ -310,44 +345,47 @@ def format_desk_card(
     reversal: bool = False,
     prev: Optional[Dict[str, Any]] = None,
     rev_reason: str = "",
+    reentry: bool = False,
 ) -> str:
+    """Картка: кожне значення окремим рядком. Без RR, балів, моделей."""
     side = str(direction or "").upper()
     mark = "🟢" if side == "LONG" else "🔴"
     e, s, t1 = _f(entry), _f(sl), _f(tp1)
-    kind = str(setup_type or "").upper().strip() or "СЕТАП"
     tf = str(timeframe or "M15").upper()
-    st = style_ua(tf)
-    lines = []
+    kind = _kind_line(setup_type, reentry=reentry)
+    lines: List[str] = []
     if reversal and prev:
         pdir = str(prev.get("direction") or "").upper()
         pe = _px(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"))
-        lines.append(f"🔄 ПЕРЕВОРОТ · {str(symbol).upper()}")
-        lines.append(f"{pdir} від {pe or '—'} — скасовано")
-        if rev_reason:
-            lines.append(f"Причина: {rev_reason}")
-    lines.append(f"{mark} {side} · {str(symbol).upper()}")
-    lines.append(f"{kind} · {st} {tf}")
-    en = _px(e)
-    below = "нижче" if side == "SHORT" else "вище"
-    lines.append(f"Вхід: {en} — після закриття {tf} {below}")
-    if e and s:
-        lines.append(f"Стоп: {_px(s)} ({_pct_signed_risk(e, s):+.1f}%)")
+        why = str(rev_reason or "").strip()
+        if why.lower().startswith("причина:"):
+            why = why.split(":", 1)[-1].strip()
+        if why:
+            lines.append(f"🔄 {pdir} від {pe or '—'} скасовано — {why}")
+        else:
+            lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
+    lines.append(f"{mark} {side} · {str(symbol).upper()} · {tf}")
+    lines.append(kind)
+    lines.append("")
+    addv = _f(add_px)
+    if addv is not None and e is not None:
+        lines.append(_lvl("🎯 Вхід 60%", e))
+        lines.append(_lvl("➕ Добір 40%", addv))
     else:
-        lines.append(f"Стоп: {_px(s)}")
-    tp_bits = []
-    if e and t1:
-        tp_bits.append(f"TP1: {_px(t1)} ({_pct_signed_reward(e, t1):+.1f}%)")
-    elif t1:
-        tp_bits.append(f"TP1: {_px(t1)}")
+        lines.append(_lvl("🎯 Вхід", e))
+    if e is not None and s is not None:
+        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(e, s)))
+    else:
+        lines.append(_lvl("❌ Стоп", s))
+    if t1 is not None:
+        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(e, t1) if e else None))
     if tp2 is not None:
-        tp_bits.append(f"TP2: {_px(tp2)}")
+        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(e, _f(tp2)) if e and _f(tp2) else None))
     if tp3 is not None:
-        tp_bits.append(f"TP3: {_px(tp3)}")
-    if tp_bits:
-        lines.append(" · ".join(tp_bits))
-    if e and s and t1 and abs(e - s) > 0:
-        rr = abs(t1 - e) / abs(s - e)
-        lines.append(f"RR 1:{rr:.1f}")
+        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(e, _f(tp3)) if e and _f(tp3) else None))
+    lines.append("")
+    below = "нижче" if side == "SHORT" else "вище"
+    lines.append(f"Вхід після закриття {tf} {below} {_px(e)}")
     sz = size if isinstance(size, dict) else plan_position_size(
         entry=e, sl=s, score=score, min_score=min_score
     )
@@ -356,11 +394,10 @@ def format_desk_card(
     rp = _f(sz.get("risk_pct")) or 0.01
     if usdt is not None and dep is not None:
         risk_usd = dep * rp
-        lines.append(f"Позиція: {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " "))
-    elif usdt is not None:
-        lines.append(f"Позиція: {usdt:,.0f} USDT".replace(",", " "))
-    text = "\n".join(lines)
-    return text
+        lines.append(f"Позиція {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " "))
+    else:
+        lines.append(f"Ризик {rp * 100:.0f}% депо")
+    return "\n".join(lines)
 
 
 def card_has_banned(text: str) -> List[str]:
@@ -562,6 +599,7 @@ def prepare_desk_send(
     tp1: Any,
     tp2: Any = None,
     tp3: Any = None,
+    add_px: Any = None,
     atr_h1: Any,
     score: Any = None,
     min_score: Any = 10,
@@ -599,6 +637,7 @@ def prepare_desk_send(
         tp1=tp1,
         tp2=tp2,
         tp3=tp3,
+        add_px=add_px,
         setup_type=setup_type,
         score=score,
         min_score=min_score,

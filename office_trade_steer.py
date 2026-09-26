@@ -701,13 +701,19 @@ def format_signal_steer_card(
     size_line: str = "",
     ote_model: str = "",
     patterns: Any = None,
+    add_px: Any = None,
 ) -> str:
     from office_desk_card import format_desk_card
 
-    _ = trigger, sweep_note, sc_plan, score_max, size_line, ote_model, patterns
-    kind = str(setup_type or "").upper().strip()
+    _ = trigger, sweep_note, score_max, size_line, ote_model, patterns
+    kind = str(setup_type or "").strip()
+    add_v = add_px
+    if sc_plan and isinstance(sc_plan, dict):
+        kind = kind or "Відкат у сильну свічку"
+        if add_v is None:
+            add_v = sc_plan.get("add")
     if reentry:
-        kind = ("ПОВТОРНИЙ " + (kind or str(direction or "").upper())).strip()
+        kind = "Повторний вхід"
     return format_desk_card(
         symbol=symbol,
         direction=direction,
@@ -717,9 +723,11 @@ def format_signal_steer_card(
         tp1=tp1,
         tp2=tp2,
         tp3=tp3,
-        setup_type=kind or "СЕТАП",
+        add_px=add_v,
+        setup_type=kind or "Сетап",
         score=score,
-        min_score=min_score if min_score is not None else (10 if kind in ("PUMP", "DUMP") else 8),
+        min_score=min_score if min_score is not None else (10 if str(kind).upper() in ("PUMP", "DUMP") else 8),
+        reentry=reentry,
     )
 
 

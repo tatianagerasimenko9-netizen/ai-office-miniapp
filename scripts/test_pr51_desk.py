@@ -183,14 +183,14 @@ def main() -> int:
     if not rev.get("send") or not rev.get("reversal"):
         return _fail(f"reversal {rev}")
     txt = str(rev.get("text") or "")
-    if "🔄 ПЕРЕВОРОТ" not in txt or "LONG від 84 069" not in txt or "скасовано" not in txt:
+    if "🔄 LONG від 84 069 скасовано" not in txt:
         return _fail(f"reversal card {txt}")
-    if "Причина:" not in txt or "M15 закрилась нижче 84 000" not in txt:
+    if "M15 закрилась нижче 84 000" not in txt:
         return _fail(f"reversal reason {txt}")
     banned = card_has_banned(txt)
     if banned:
         return _fail(f"banned {banned} in {txt}")
-    if "Вхід:" not in txt or "Стоп:" not in txt:
+    if "🎯 Вхід" not in txt or "❌ Стоп" not in txt:
         return _fail("ukrainian labels")
     tid = office_signal_trade_id("pump-btc-1842")
     closed = _fetchone(
@@ -201,7 +201,7 @@ def main() -> int:
     if not closed or str(closed[0]) != "CLOSED" or str(closed[1]) != "переворот":
         return _fail(f"journal reversal {closed}")
 
-    # Картка DUMP як у ТЗ
+    # Картка DUMP як у ТЗ (Rich Bears)
     dump = format_desk_card(
         symbol="SNXXUSDT",
         direction="SHORT",
@@ -214,12 +214,22 @@ def main() -> int:
         setup_type="DUMP",
         size={"size_usdt": 1099, "depo": 1000, "risk_pct": 0.01},
     )
-    if "🔴 SHORT · SNXXUSDT" not in dump:
-        return _fail(dump)
-    if "DUMP · скальп M15" not in dump:
-        return _fail(dump)
-    if "Вхід: 17.46" not in dump or "Стоп: 17.62" not in dump:
-        return _fail(dump)
+    snxx_need = (
+        "🔴 SHORT · SNXXUSDT · M15",
+        "DUMP",
+        "🎯 Вхід · 17.46",
+        "❌ Стоп · 17.62  (−0.9%)",
+        "✅ TP1 · 17.22  (+1.4%)",
+        "✅ TP2 · 16.98  (+2.7%)",
+        "✅ TP3 · 16.67  (+4.5%)",
+        "Вхід після закриття M15 нижче 17.46",
+        "Позиція 1 099 USDT · ризик 10$",
+    )
+    for bit in snxx_need:
+        if bit not in dump:
+            return _fail(f"SNXX missing {bit!r} in {dump}")
+    if "RR 1:" in dump or "Балі" in dump or "Бали" in dump:
+        return _fail(f"SNXX extra {dump}")
     parsed = parse_signal_levels_from_text(dump)
     if abs(float(parsed.get("entry_low") or 0) - 17.46) > 1e-6:
         return _fail(f"parse вхід {parsed}")
@@ -227,6 +237,54 @@ def main() -> int:
         return _fail(f"parse стоп {parsed}")
     if parsed.get("direction") != "SHORT":
         return _fail(f"parse dir {parsed}")
+
+    ake = format_desk_card(
+        symbol="AKEUSDT",
+        direction="LONG",
+        timeframe="M15",
+        entry=0.03289,
+        sl=0.03215,
+        tp1=0.03475,
+        tp2=0.03529,
+        tp3=0.03780,
+        add_px=0.03250,
+        setup_type="Відкат у сильну свічку",
+        size={"size_usdt": 454, "depo": 1000, "risk_pct": 0.01},
+    )
+    if "🟢 LONG · AKEUSDT · M15" not in ake or "Відкат у сильну свічку" not in ake:
+        return _fail(ake)
+    if "🎯 Вхід 60% · 0.03289" not in ake or "➕ Добір 40% · 0.0325" not in ake:
+        return _fail(ake)
+
+    # Live: BTC стоп 0.20% → розмір > 3× депо
+    btc_slim = desk_entry_gate(
+        symbol="BTCUSDT",
+        direction="SHORT",
+        entry=84042.0,
+        sl=84210.0,  # 0.20%
+        tp1=86000.0,
+        atr_h1=168.0,
+        score=10,
+        min_score=10,
+    )
+    if btc_slim.get("send"):
+        return _fail(f"BTC 0.20% must not send {btc_slim}")
+    if "3×" not in str(btc_slim.get("reason") or "") and "депо" not in str(btc_slim.get("reason") or ""):
+        return _fail(f"BTC 0.20% reason {btc_slim}")
+
+    # Live: SNXX TP1 1.36% < 3% альти
+    snxx_gate = desk_entry_gate(
+        symbol="SNXXUSDT",
+        direction="SHORT",
+        entry=17.46,
+        sl=17.62,
+        tp1=17.22,
+        atr_h1=0.20,
+        score=12,
+        min_score=10,
+    )
+    if snxx_gate.get("send"):
+        return _fail(f"SNXX 1.36% must not send {snxx_gate}")
 
     # Near-stop: 5 разів — 1 раз і лише /position
     reset_near_stop_once()

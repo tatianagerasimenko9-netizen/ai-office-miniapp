@@ -252,7 +252,7 @@ def main() -> int:
         reentry=True,
         sweep_note="Стоп вибило свіпом до 0.1325 — ціна повернулась нижче 0.1310",
     )
-    if "ПОВТОРНИЙ SHORT" not in card or "перевірте" in card.lower():
+    if "Повторний вхід" not in card or "перевірте" in card.lower():
         return _fail("reentry card")
 
     m15 = _longxia_m15()
@@ -381,7 +381,7 @@ def main() -> int:
         trigger=trig,
         sc_plan=sc,
     )
-    if "Вхід:" not in txt_sc or "Стоп:" not in txt_sc or "SHORT" not in txt_sc:
+    if "🎯 Вхід" not in txt_sc or "❌ Стоп" not in txt_sc or "SHORT" not in txt_sc:
         return _fail(f"sc card {txt_sc}")
     if "Модель рівнів" in txt_sc or "OTE 62–79%" in txt_sc:
         return _fail(f"sc card banned {txt_sc}")
@@ -526,7 +526,7 @@ def main() -> int:
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"radar regression {ok.status} {ok.reason}")
     txt = format_radar_card(ok)
-    if "Вхід:" not in txt:
+    if "🎯 Вхід" not in txt:
         return _fail("radar card")
     if "Entry:" in txt or "forceOrder" in txt:
         return _fail("radar banned")

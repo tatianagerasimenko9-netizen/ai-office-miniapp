@@ -139,13 +139,11 @@ def main() -> int:
     )
     if any(b in alert for b in banned):
         return _fail(f"template leaked {alert}")
-    if "🟢 LONG · SOLUSDT" not in alert:
+    if "🟢 LONG · SOLUSDT · H1" not in alert:
         return _fail(f"type line {alert}")
-    if "BOUNCE" not in alert:
+    if "BOUNCE" not in alert and "Відскік" not in alert:
         return _fail(f"type line {alert}")
-    if "інтрадей H1" not in alert:
-        return _fail(f"type line {alert}")
-    if "Вхід: 100" not in alert or "Стоп: 98.8" not in alert:
+    if "🎯 Вхід · 100" not in alert or "❌ Стоп · 98.8" not in alert:
         return _fail(f"levels {alert}")
     if "Entry:" in alert or alert.splitlines()[0].startswith("SL:"):
         return _fail(f"english sl {alert}")

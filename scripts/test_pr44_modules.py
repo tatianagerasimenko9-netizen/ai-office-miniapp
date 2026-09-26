@@ -168,7 +168,7 @@ def main() -> int:
     if abs(float(ev["tps"]["add"]) - (float(ev["entry"]) - risk * 0.4)) > 1e-9:
         return _fail("add 40%")
     card = format_pump_card("AKEUSDT", "M15", ev)
-    if "PUMP" not in card or "Вхід:" not in card:
+    if "PUMP" not in card or "🎯 Вхід" not in card:
         return _fail(f"pump card {card}")
     if "Entry:" in card or "SL:" in card or "Балі" in card or "Модель рівнів" in card:
         return _fail(f"pump card banned {card}")
@@ -318,7 +318,7 @@ def main() -> int:
         min_score=8,
         score_max=20,
     )
-    if "Вхід:" not in txt or "HUNTER" not in txt:
+    if "🎯 Вхід" not in txt or "Відкат у сильну свічку" not in txt:
         return _fail(txt)
     if not exhaustion_candle(_c(1.0, 1.04, 0.99, 1.035), side="LONG"):
         return _fail("exhaust")

@@ -100,7 +100,7 @@ def main() -> int:
     if ok.card["rr"] < 1.5:
         return _fail("rr")
     txt = format_radar_card(ok)
-    if "Вхід:" not in txt:
+    if "🎯 Вхід" not in txt:
         return _fail("signal card text")
     if "Entry:" in txt or "away" in txt or "resistance" in txt:
         return _fail("radar card banned")

@@ -325,7 +325,7 @@ def main() -> int:
         ],
     )
     sig = level_book_to_alert(done_book)
-    if sig is None or "🔴 SHORT · DEMOUSDT" not in sig or "Вхід: 0.1306" not in sig:
+    if sig is None or "🔴 SHORT · DEMOUSDT · H1" not in sig or "🎯 Вхід · 0.1306" not in sig:
         return _fail(f"signal {sig}")
     if "Позиція: немає" in sig or "Entry:" in sig or "BSL знято" in sig:
         return _fail("signal extras")
@@ -372,7 +372,7 @@ def main() -> int:
         live_price=0.032889,
         sweep_line="SSL знято о 02:14 на рівні 0.032122",
     )
-    if "Вхід: 0.032889" not in same:
+    if "🎯 Вхід · 0.032889" not in same:
         return _fail(same)
     if "Entry:" in same:
         return _fail(same)

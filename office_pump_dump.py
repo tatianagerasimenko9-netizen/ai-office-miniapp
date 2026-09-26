@@ -235,6 +235,7 @@ def format_pump_card(symbol: str, timeframe: str, ev: Dict[str, Any]) -> str:
         tp1=tps.get("tp1"),
         tp2=tps.get("tp2"),
         tp3=tps.get("tp3"),
+        add_px=tps.get("add"),
         setup_type=str(ev.get("signal") or ""),
         score=sc,
         min_score=SIGNAL_MIN,

@@ -109,7 +109,7 @@ def apply_zone_sanity(
 def _extract_line_value(label: str, line_text: str, hint: Optional[float] = None) -> Optional[float]:
     patterns = [
         rf"{label}\s*:\s*([^\n\r]+)",
-        rf"{label}\s*[—–\-]\s*([^\n\r]+)",
+        rf"{label}\s*[·—–\-]\s*([^\n\r]+)",
         rf"{label}\s+({PRICE_NUM}[^\n\r]*)",
     ]
     chunk = ""
@@ -170,12 +170,12 @@ def parse_signal_levels_from_text(text: str) -> Dict[str, Any]:
         return True
 
     m_entry = re.search(
-        rf"(?:Entry|Вхід)[^:\n]{{0,24}}:\s*{range_pat}",
+        rf"(?:Entry|Вхід)(?:\s+\d+%)?[^:\n]{{0,24}}:\s*{range_pat}",
         src,
         flags=re.IGNORECASE,
     )
     if not m_entry:
-        m_entry = re.search(rf"(?:Entry|Вхід):\s*{range_pat}", src, flags=re.IGNORECASE)
+        m_entry = re.search(rf"(?:Entry|Вхід)(?:\s+\d+%)?\s*[·:]\s*{range_pat}", src, flags=re.IGNORECASE)
     if _range_from(m_entry):
         pass
     else:
@@ -185,7 +185,7 @@ def parse_signal_levels_from_text(text: str) -> Dict[str, Any]:
             flags=re.IGNORECASE,
         )
         if not m_one:
-            m_one = re.search(rf"(?:Entry|Вхід):\s*({PRICE_NUM})", src, flags=re.IGNORECASE)
+            m_one = re.search(rf"(?:Entry|Вхід)(?:\s+\d+%)?\s*[·:]\s*({PRICE_NUM})", src, flags=re.IGNORECASE)
         if m_one:
             v = parse_price_token(m_one.group(1))
             if v is not None:
