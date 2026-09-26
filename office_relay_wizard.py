@@ -652,6 +652,44 @@ async def send_via_bot_api(
         return False, f"exception: {exc}", None
 
 
+async def send_via_bot_photo(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    photo_path: str,
+    caption: str = "",
+    reply_to_message_id: Optional[int] = None,
+    message_thread_id: Optional[int] = None,
+) -> tuple[bool, str, Optional[int]]:
+    """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    cap = str(caption or "")[:1024]
+    data = aiohttp.FormData()
+    data.add_field("chat_id", str(chat_id))
+    if cap:
+        data.add_field("caption", cap)
+    if reply_to_message_id:
+        data.add_field("reply_to_message_id", str(int(reply_to_message_id)))
+    if message_thread_id:
+        data.add_field("message_thread_id", str(int(message_thread_id)))
+    try:
+        with open(photo_path, "rb") as fh:
+            data.add_field("photo", fh, filename=os.path.basename(photo_path), content_type="image/png")
+            async with session.post(url, data=data) as resp:
+                body = await resp.json()
+                if resp.status != 200 or not bool(body.get("ok")):
+                    desc = str((body or {}).get("description") or body)
+                    return False, f"telegram photo: {desc}", None
+                msg_id = None
+                try:
+                    msg_id = int(((body or {}).get("result") or {}).get("message_id"))
+                except Exception:
+                    msg_id = None
+                return True, "ok", msg_id
+    except Exception as exc:
+        return False, f"exception: {exc}", None
+
+
 async def send_via_bot_streaming(
     session: aiohttp.ClientSession,
     token: str,
@@ -2645,6 +2683,95 @@ async def run() -> None:
                 await asyncio.sleep(0.5)
         return first_id
 
+    async def send_office_photo(
+        photo_path: str,
+        caption: str,
+        stream: str = "general",
+    ) -> Optional[int]:
+        thread_id = _thread_for_stream(stream)
+        cap = _strip_agent_tag(caption)[:1024]
+        token = agent_bot_tokens.get("lev") or tg_bot_token
+        if token:
+            ok, reason, msg_id = await send_via_bot_photo(
+                bot_http,
+                token,
+                office_chat_id,
+                photo_path,
+                caption=cap,
+                message_thread_id=thread_id,
+            )
+            if ok:
+                return msg_id
+            print(f"[relay][WARN] photo send failed: {reason}")
+        try:
+            sent = await client.send_file(
+                office_entity,
+                photo_path,
+                caption=cap,
+                reply_to=thread_id,
+            )
+            return int(getattr(sent, "id", 0) or 0) or None
+        except Exception as exc:
+            print(f"[relay][WARN] photo telethon failed: {exc}")
+            return await send_office(caption, stream=stream)
+
+    def _render_entry_chart(sym: str, direction: str, message: str) -> Dict[str, Any]:
+        from office_chart_png import chart_levels, render_signal_chart
+        from office_market_data import fetch_candles
+        from office_topdown import asian_session_range
+        from office_trade_steer import midnight_open_price, plan_strong_candle_ote, parse_sc_zone_note
+
+        m15 = fetch_candles(sym, "15m", 96)
+        h1 = fetch_candles(sym, "1h", 48)
+        if not isinstance(m15, list):
+            m15 = []
+        if not isinstance(h1, list):
+            h1 = []
+        parsed = parse_signal_levels_from_text(message) or {}
+        sc = plan_strong_candle_ote(
+            direction=direction or str(parsed.get("direction") or ""),
+            candles=m15 if m15 else h1,
+            price=parsed.get("entry") or parsed.get("entry_low"),
+        )
+        asia = asian_session_range(m15 if m15 else h1)
+        mo = midnight_open_price(m15 if m15 else h1)
+        sc_lo = sc_hi = None
+        if sc.get("data_status") == "DATA_OK":
+            sc_lo, sc_hi = sc.get("low"), sc.get("high")
+        else:
+            z = parse_sc_zone_note(message)
+            if z:
+                sc_lo, sc_hi = z
+        b60 = b40 = None
+        for b in sc.get("buckets") or []:
+            if int(b.get("pct") or 0) == 60:
+                b60 = b.get("price")
+            if int(b.get("pct") or 0) == 40:
+                b40 = b.get("price")
+        lv = chart_levels(
+            sl=parsed.get("sl") or sc.get("sl"),
+            tp1=parsed.get("tp1") or parsed.get("tp"),
+            tp2=parsed.get("tp2"),
+            tp3=parsed.get("tp3"),
+            entry_low=parsed.get("entry_low") or parsed.get("entry") or sc.get("ote_lo"),
+            entry_high=parsed.get("entry_high") or parsed.get("entry") or sc.get("ote_hi"),
+            sc_low=sc_lo,
+            sc_high=sc_hi,
+            sweep=parsed.get("sweep"),
+            asian_high=(asia or {}).get("high"),
+            asian_low=(asia or {}).get("low"),
+            mo=mo,
+            bucket_60=b60,
+            bucket_40=b40,
+        )
+        return render_signal_chart(
+            symbol=sym,
+            candles_m15=m15,
+            candles_h1=h1,
+            levels=lv,
+            direction=direction or str(parsed.get("direction") or ""),
+        )
+
     async def send_proactive(
         event_type: str,
         message: str,
@@ -2654,6 +2781,7 @@ async def run() -> None:
         kind: str = "",
         symbol: str = "",
         sl: Any = None,
+        direction: str = "",
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
@@ -2674,6 +2802,21 @@ async def run() -> None:
             if not gate.get("send"):
                 print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
                 return None
+        if ev == EVENT_SIGNAL_ENTRY:
+            sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
+            try:
+                drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
+            except Exception as exc_ch:
+                print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
+                drawn = {}
+            if drawn.get("ok") and drawn.get("path"):
+                msg_id = await send_office_photo(str(drawn["path"]), message, stream=st)
+                if msg_id:
+                    print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
+                    return msg_id
+                print(f"[chart] photo failed {sym}, fallback text")
+            else:
+                print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
         return await send_office(
             message,
             reply_to_message_id=reply_to_message_id,
@@ -2825,11 +2968,28 @@ async def run() -> None:
                     print(f"[relay] T1 {kind} office opens_position={card.get('opens_position')}")
                     return
                 if low.startswith("/chart") or low.startswith("!chart") or low.startswith("графік"):
-                    sym = _extract_first_usdt_symbol(text) or "BTCUSDT"
-                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
-                    mini_url = f"{mini_base}/?symbol={sym}&filterSymbol={sym}"
-                    tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{sym}"
-                    await send_office(f"Графік {sym}:\nMini App: {mini_url}\nTV: {tv_url}")
+                    parts = (text or "").split()
+                    raw_sym = parts[1] if len(parts) > 1 else ""
+                    sym = _extract_first_usdt_symbol(raw_sym or text) or "BTCUSDT"
+                    if not str(raw_sym).strip() and " " not in (text or "").strip():
+                        await send_office(fmt_agent_line("lev", "Формат: /chart SYMBOL"))
+                        return
+                    try:
+                        drawn = _render_entry_chart(sym, "", f"{sym}")
+                    except Exception as exc_c:
+                        drawn = {"ok": False, "reason": str(exc_c)}
+                    if drawn.get("ok") and drawn.get("path"):
+                        cap = f"📍 {sym} · графік на запит\nКартка сетапу, не ордер."
+                        sent = await send_office_photo(str(drawn["path"]), cap, stream="general")
+                        if sent:
+                            return
+                        print(f"[chart] /chart photo failed {sym}: {drawn.get('reason')}")
+                    await send_office(
+                        fmt_agent_line(
+                            "lev",
+                            f"{sym}: графік DATA_UNAVAILABLE ({drawn.get('reason') or 'немає свічок'}).",
+                        )
+                    )
                     return
                 scenario_key = _parse_scenario_command(text)
                 if scenario_key is not None:
