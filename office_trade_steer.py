@@ -694,16 +694,40 @@ def format_signal_steer_card(
     reentry: bool = False,
     sweep_note: str = "",
     sc_plan: Optional[Dict[str, Any]] = None,
+    setup_type: str = "",
+    score: Any = None,
+    min_score: Any = None,
+    score_max: Any = None,
+    size_line: str = "",
+    ote_model: str = "",
+    patterns: Any = None,
 ) -> str:
     from office_telegram_filter import format_px
+    from office_position_size import plan_position_size
 
     side = str(direction or "").upper()
     tf = str(timeframe or "H1").upper()
+    kind = str(setup_type or "").upper().strip()
     title = f"🔁 ПОВТОРНИЙ {side} · {symbol} · {tf}" if reentry else f"{side} · {symbol} · {tf}"
     lines = [title]
+    if kind in ("PUMP", "DUMP"):
+        lines.append(f"Тип: {kind}")
+    elif kind:
+        lines.append(f"Тип: {kind}")
+    if score is not None:
+        mx = score_max if score_max is not None else (18 if kind in ("PUMP", "DUMP") else 20)
+        extra = f" (поріг {min_score})" if min_score is not None else ""
+        lines.append(f"Бали: {int(float(score))}/{int(float(mx))}{extra}")
+    if patterns:
+        names = [str(x) for x in patterns if x]
+        if names:
+            lines.append("Патерни: " + ", ".join(names))
     if sweep_note:
         lines.append(sweep_note)
-    lines.extend(format_sc_plan_lines(sc_plan, direction=side))
+    if kind not in ("PUMP", "DUMP"):
+        lines.extend(format_sc_plan_lines(sc_plan, direction=side))
+    elif ote_model:
+        lines.append(f"Модель рівнів: {ote_model}")
     if trigger:
         lines.append(trigger)
     else:
@@ -713,6 +737,12 @@ def format_signal_steer_card(
         + (f" · TP2: {format_px(tp2)}" if tp2 is not None else "")
         + (f" · TP3: {format_px(tp3)}" if tp3 is not None else "")
     )
+    sized = str(size_line or "").strip()
+    if not sized:
+        mn = min_score if min_score is not None else (10 if kind in ("PUMP", "DUMP") else 8)
+        sized = str(plan_position_size(entry=entry, sl=sl, score=score, min_score=mn).get("line") or "")
+    if sized:
+        lines.append(sized)
     lines.append("Картка сетапу, не ордер. Угода лише через /position.")
     return "\n".join(lines)
 
@@ -972,6 +1002,9 @@ def next_manage_event(
     high: Any = None,
     low: Any = None,
     ignore_sl: bool = False,
+    rsi_h1: Any = None,
+    rsi_h4: Any = None,
+    exhaustion: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Одне повідомлення лише при зміні стану. Не ордер."""
     px = _f(price)
@@ -1098,6 +1131,61 @@ def next_manage_event(
             "message": f"{book.symbol} закрито по TP3 {book.tp3}.",
             "state": book.state,
         }
+
+    # RSI-перегрів і PUMP continuation/добір — лише зміна стану, без спаму.
+    try:
+        from office_rsi_heat import rsi_heat
+
+        heat = rsi_heat(
+            direction=side,
+            rsi_h1=rsi_h1,
+            rsi_h4=rsi_h4,
+            in_position=True,
+            exhaustion=bool(exhaustion),
+        )
+        if heat.get("fix_partial") and book.last_event != "RSI_EXTREME":
+            book.last_event = "RSI_EXTREME"
+            book.extras["rsi_peak"] = heat.get("peak")
+            book.extras["rsi_floor"] = heat.get("floor")
+            return {
+                "event": "TRADE_UPDATE",
+                "kind": "RSI_EXTREME",
+                "message": str(heat.get("message") or "фіксуй частину, підтягни стоп"),
+                "state": book.state,
+            }
+    except Exception:
+        pass
+    setup = str(book.extras.get("setup_type") or "").upper()
+    rows = _bars(candles_m15)
+    last_c = rows[-1] if rows else None
+    hist_n = int(book.extras.get("manage_bars") or 0)
+    book.extras["manage_bars"] = hist_n + 1
+    if setup in ("PUMP", "DUMP") and last_c is not None and hist_n >= 1:
+        try:
+            from office_pump_dump import pump_add_retest, pump_continuation
+
+            if book.state in ("TP1", "TP2", "TRAIL") and pump_continuation(
+                direction=side, entry=book.entry, candle=last_c, candles=rows
+            ):
+                if book.last_event != "CONT":
+                    book.last_event = "CONT"
+                    return {
+                        "event": "TRADE_UPDATE",
+                        "kind": "CONT",
+                        "message": f"{book.symbol} продовження руху на об'ємі — тримай, SL {sl_now}",
+                        "state": book.state,
+                    }
+            if pump_add_retest(direction=side, entry=book.entry, candle=last_c, candles=rows):
+                if book.last_event != "ADD":
+                    book.last_event = "ADD"
+                    return {
+                        "event": "TRADE_UPDATE",
+                        "kind": "ADD",
+                        "message": f"{book.symbol} ретест входу на об'ємі — добір дозволений",
+                        "state": book.state,
+                    }
+        except Exception:
+            pass
     return None
 
 

@@ -180,10 +180,17 @@ def format_radar_card(result: "RadarResult") -> str:
             lines.append(trig)
         for extra in format_sc_plan_lines(c.get("sc_plan") if isinstance(c, dict) else None, direction=str(result.direction or "")):
             lines.append(extra)
+        if c.get("setup_type"):
+            lines.append(f"Тип: {c.get('setup_type')}")
+        if c.get("score") is not None:
+            mx = c.get("score_max") or 20
+            lines.append(f"Бали: {int(c['score'])}/{int(mx)}")
         lines.append(
             f"Entry: {c['entry']:.6g} | SL: {c['sl']:.6g} (за зоною маніпуляції) | "
             f"TP: {c['tp']:.6g} | RR: {c['rr']:.1f}"
         )
+        if c.get("size_line"):
+            lines.append(str(c["size_line"]))
         lines.append("Це картка сетапу, не відкрита позиція. Угода лише через /position.")
         return "\n".join(lines)
     return (
@@ -364,6 +371,27 @@ def evaluate_radar(
             if float(card.get("rr") or 0) < MIN_RR:
                 base.reason = f"RR {card.get('rr')} < {MIN_RR} — не сигнал"
                 return base
+    except Exception:
+        pass
+
+    try:
+        from office_position_size import plan_position_size
+        from office_ict_hunter import evaluate_ict_hunter
+
+        sized = plan_position_size(entry=px, sl=card.get("sl"), score=None, min_score=8)
+        if sized.get("line"):
+            card = dict(card)
+            card["size_line"] = sized["line"]
+            card["stop_pct"] = sized.get("stop_pct")
+        hunt = evaluate_ict_hunter(candles=m15_candles, timeframe="M15", daily=daily_candles)
+        if hunt.get("ok"):
+            card = dict(card)
+            card["hunter_score"] = hunt.get("score")
+            card["hunter_patterns"] = hunt.get("patterns")
+            card["ote_model"] = hunt.get("ote_model")
+            card["eq_model"] = hunt.get("eq_model")
+            base.extras["hunter"] = hunt
+        base.card = card
     except Exception:
         pass
 

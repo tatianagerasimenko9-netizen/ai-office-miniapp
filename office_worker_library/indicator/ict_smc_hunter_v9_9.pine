@@ -2,7 +2,8 @@
 indicator("ICT SMC HUNTER v9.9 SYNC", overlay=true, max_labels_count=500, max_lines_count=250, max_boxes_count=120)
 // Еталон правил Тетяни для цифр картки Лева (PR42 pine-align).
 // Повний скрипт з TradingView: SC / OTE / SL / сесії / TP.
-// SMS, 3 Drives, 3 Tap, iFVG, AMD, Turtle Soup, score — не рахуються в цьому PR.
+// PR44: патерни і score 0–20 (LTF≥8, H1≥7, H4≥6). Денний EQ=0.786, OTE=0.5.
+// SMS / 3 Drives / 3 Tap / iFVG / AMD(3) / Turtle Soup / Judas / MO-фільтр.
 
 // ══════════════════════════════════════════════════════════════
 // НАЛАШТУВАННЯ (фрагмент, що впливає на картку)
@@ -133,3 +134,9 @@ tp2_l := math.max(tp2_l, tp1_l)
 tp3_l := math.max(tp3_l, tp2_l)
 tp2_s := math.min(tp2_s, tp1_s)
 tp3_s := math.min(tp3_s, tp2_s)
+
+// Денний EQ/OTE Hunter (навпаки від PUMP & DUMP v2): EQ=0.786, OTE=0.5
+// eq_h  = bull ? pdh - rng*0.786 : pdl + rng*0.786
+// ote_h = bull ? pdh - rng*0.5   : pdl + rng*0.5
+// Score 0–20: SMS4 + 3Drives3 + 3Tap2 + iFVG3 + AMD3 + Turtle3 + Judas2 − штраф EMA200/55
+// Поріг: LTF 8, H1 7, H4 6. MO: LONG нижче mo_price, SHORT вище.

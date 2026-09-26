@@ -1437,6 +1437,10 @@ def journal_open_office_signal(
     tp3: Optional[float] = None,
     timeframe: str = "",
     setup_note: str = "",
+    rsi_h1: Optional[float] = None,
+    rsi_h4: Optional[float] = None,
+    rsi_peak: Optional[float] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Картка SIGNAL_ENTRY в журнал. Це не /position і не ордер."""
     tid = office_signal_trade_id(signal_id)
@@ -1445,6 +1449,20 @@ def journal_open_office_signal(
     side = str(direction or "LONG").upper()
     if side not in ("LONG", "SHORT"):
         side = "LONG"
+    ctx: Dict[str, Any] = {
+        "kind": "office_signal",
+        "signal_id": str(signal_id),
+        "tp2": tp2,
+        "tp3": tp3,
+        "setup": setup_note or OFFICE_SIGNAL_SETUP,
+        "result": "OPEN",
+        "rsi_h1": rsi_h1,
+        "rsi_h4": rsi_h4,
+        "rsi_at_signal": rsi_h1,
+        "rsi_peak": rsi_peak if rsi_peak is not None else rsi_h1,
+    }
+    if extra:
+        ctx.update(extra)
     journal_open_trade(
         db_path,
         trade_id=tid,
@@ -1456,14 +1474,7 @@ def journal_open_office_signal(
         setup_name=OFFICE_SIGNAL_SETUP,
         timeframe=timeframe,
         entry_reason=OFFICE_SIGNAL_REASON,
-        context={
-            "kind": "office_signal",
-            "signal_id": str(signal_id),
-            "tp2": tp2,
-            "tp3": tp3,
-            "setup": setup_note or OFFICE_SIGNAL_SETUP,
-            "result": "OPEN",
-        },
+        context=ctx,
     )
     return tid
 
@@ -1495,8 +1506,18 @@ def journal_update_excursions(
             ctx = {}
     ctx["mfe_pct"] = float(mfe_pct)
     ctx["mae_pct"] = float(mae_pct)
+    old_peak = ctx.get("rsi_peak")
     if extra:
         ctx.update(extra)
+        peaks = []
+        for v in (old_peak, extra.get("rsi_peak"), extra.get("rsi_h1"), extra.get("rsi_h4")):
+            try:
+                if v is not None:
+                    peaks.append(float(v))
+            except (TypeError, ValueError):
+                pass
+        if peaks:
+            ctx["rsi_peak"] = max(peaks)
     _db_write(
         db_path,
         "UPDATE trade_journal SET context_json = ? WHERE trade_id = ?",
