@@ -2956,6 +2956,12 @@ async def run() -> None:
                         return
                     await send_office("📘 OFFICE MASTER PROMPT (скорочено):\n" + full, stream="tasks")
                     return
+                if low.startswith("/stats") or low.startswith("!stats") or low.startswith("статистика"):
+                    from office_signal_stats import build_stats_report
+
+                    rep = build_stats_report(db_path)
+                    await send_office(fmt_agent_line("olesya", str(rep.get("message") or "DATA_UNAVAILABLE")))
+                    return
                 t1 = parse_t1_command(text)
                 if t1 is not None:
                     kind, _body = t1
