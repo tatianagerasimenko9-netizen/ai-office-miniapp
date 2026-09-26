@@ -116,7 +116,10 @@ def main() -> int:
     if asia_empty["data_status"] != DATA_UNAVAILABLE or asia_empty["high"] is not None:
         return _fail("asia without ts must not invent")
 
-    asia = asian_session_range(_asia_m15())
+    asia = asian_session_range(
+        _asia_m15(),
+        asof=datetime(2026, 9, 25, 8, 0, tzinfo=timezone.utc),
+    )
     if asia["data_status"] != "DATA_OK" or abs(float(asia["high"]) - 0.1315) > 1e-9:
         return _fail(f"asia high {asia}")
     if abs(float(asia["low"]) - 0.1298) > 1e-9:

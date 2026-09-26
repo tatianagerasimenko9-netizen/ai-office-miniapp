@@ -1417,6 +1417,93 @@ def journal_open_trade(
     )
 
 
+def office_signal_trade_id(signal_id: str) -> str:
+    sid = str(signal_id or "").strip()
+    if not sid:
+        return ""
+    return sid if sid.startswith("osig-") else f"osig-{sid}"
+
+
+def journal_open_office_signal(
+    db_path: str,
+    *,
+    signal_id: str,
+    symbol: str,
+    direction: str,
+    entry_price: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
+    tp2: Optional[float] = None,
+    tp3: Optional[float] = None,
+    timeframe: str = "",
+    setup_note: str = "",
+) -> str:
+    """Картка SIGNAL_ENTRY в журнал. Це не /position і не ордер."""
+    tid = office_signal_trade_id(signal_id)
+    if not tid:
+        return ""
+    side = str(direction or "LONG").upper()
+    if side not in ("LONG", "SHORT"):
+        side = "LONG"
+    journal_open_trade(
+        db_path,
+        trade_id=tid,
+        symbol=str(symbol or "").upper(),
+        direction=side,  # type: ignore[arg-type]
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        setup_name=OFFICE_SIGNAL_SETUP,
+        timeframe=timeframe,
+        entry_reason=OFFICE_SIGNAL_REASON,
+        context={
+            "kind": "office_signal",
+            "signal_id": str(signal_id),
+            "tp2": tp2,
+            "tp3": tp3,
+            "setup": setup_note or OFFICE_SIGNAL_SETUP,
+            "result": "OPEN",
+        },
+    )
+    return tid
+
+
+def journal_update_excursions(
+    db_path: str,
+    *,
+    trade_id: str,
+    mfe_pct: float,
+    mae_pct: float,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """MFE/MAE для сигналу офісу. Не змінює /position."""
+    tid = str(trade_id or "").strip()
+    if not tid:
+        return
+    row = None
+    try:
+        row = _fetchone(db_path, "SELECT context_json FROM trade_journal WHERE trade_id = ?", (tid,))
+    except Exception:
+        return
+    ctx: Dict[str, Any] = {}
+    if row and row[0]:
+        try:
+            raw = json.loads(str(row[0]))
+            if isinstance(raw, dict):
+                ctx = raw
+        except Exception:
+            ctx = {}
+    ctx["mfe_pct"] = float(mfe_pct)
+    ctx["mae_pct"] = float(mae_pct)
+    if extra:
+        ctx.update(extra)
+    _db_write(
+        db_path,
+        "UPDATE trade_journal SET context_json = ? WHERE trade_id = ?",
+        (json.dumps(ctx, ensure_ascii=False), tid),
+    )
+
+
 def journal_close_trade(
     db_path: str,
     *,
@@ -1575,6 +1662,8 @@ def journal_total_closed(db_path: str = "office_bridge.db") -> int:
 
 POSITION_CONFIRM_REASON = "explicit /position by owner"
 DESK_ENTER_REASON = "desk enter after agent chain"
+OFFICE_SIGNAL_REASON = "office signal card (not /position)"
+OFFICE_SIGNAL_SETUP = "OFFICE_SIGNAL"
 
 
 def _parse_journal_ts(raw: Any) -> Optional[datetime]:
@@ -1610,12 +1699,16 @@ def is_confirmed_position_row(entry_reason: Any = "", setup_name: Any = "", trad
     reason = str(entry_reason or "").strip().lower()
     setup = str(setup_name or "").strip().upper()
     tid = str(trade_id or "").strip().lower()
+    if setup == OFFICE_SIGNAL_SETUP or tid.startswith("osig-") or "office signal card" in reason:
+        return False
     if POSITION_CONFIRM_REASON in reason:
         return True
     if setup == "T1_MY_POSITION":
         return True
     if tid.startswith("pos-"):
         return True
+    if "office signal card" in reason:
+        return False
     return False
 
 
@@ -1883,7 +1976,7 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
         SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
-        WHERE status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+        WHERE status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1', 'HIT_TP2')
         ORDER BY ts_created DESC
         """,
         (),
@@ -2638,6 +2731,18 @@ LEV_RULE = """
 - Стоп ЗАВЖДИ за структурою рівня
   (не "на відстані індикатора"),
   з невеликим буфером під шум і проскальзування
+- Стоп за найдальшою зоною маніпуляції біля входу
+  (прокол коридору, тінь імпульсу, OB/HTF, зона сильної свічки), потім люфт Герчика.
+  Відкат у сильну свічку — зона OTE 62–79%, вхід частинами 70%/20%/10% як у старому сканері.
+  Закриття за краєм зони SC до входу — скасування, не вхід.
+  RR>6 до TP1 = стоп занадто тісний, перерахуй від зони.
+  Якщо після цього RR < 1.5 — не сигнал.
+- В картці завжди тригер: ТФ свічки + рівень + вище/нижче.
+- Після стопа свіпом — щонайбільше один повторний вхід на case_key,
+  якщо ціна закрилась назад у зоні і старший ТФ живий.
+- Після входу веди рух: TP1 (50–70% + SL в BE), TP2 (частково + трейл),
+  TP3 лише з реального HTF рівня, розворот M15 — фіксуй залишок.
+  Це картка/нагадування, не ордер.
 - RR мінімум 1:2, ідеал 1:3+
 - ATR >80% = ПРОПУСК конкретного входу по тренду (правило Герчика).
   Пошук нових сценаріїв на M15/M5 триває. Це не T0-блок 90% і не «ринок помер».
