@@ -39,6 +39,15 @@ def main() -> int:
         return _fail("numeric thread id")
     os.environ.pop("OFFICE_GENERAL_THREAD_ID", None)
     print("OK thread id name vs number")
+    if "except asyncio.CancelledError:\n                raise" in src:
+        return _fail("CancelledError must not re-raise (Render SIGTERM → status 1)")
+    if "exit 0, не status 1" not in src:
+        return _fail("need clean SIGTERM exit")
+    if "raise SystemExit(0)" not in src:
+        return _fail("need SystemExit 0 on KeyboardInterrupt")
+    boot = (ROOT / "office_multibot_bootstrap.py").read_text(encoding="utf-8")
+    if "TG_BOT_TOKEN" not in boot or "EOFError" not in boot:
+        return _fail("bootstrap must skip input in cloud")
 
     os.environ["OFFICE_DEPO_USDT"] = "=1000"
     if depo_usdt() != 1000.0:
@@ -49,7 +58,7 @@ def main() -> int:
     print(f"OK size {sized.get('line')}")
     os.environ.pop("OFFICE_DEPO_USDT", None)
 
-    old_in, old_tty = sys.stdin, getattr(sys.stdin, "isatty", lambda: True)
+    old_in = sys.stdin
     try:
         sys.stdin = io.StringIO("")
         sys.stdin.isatty = lambda: False  # type: ignore[method-assign]
