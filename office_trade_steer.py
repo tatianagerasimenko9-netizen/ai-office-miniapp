@@ -588,17 +588,61 @@ def plan_sweep_reentry(
     }
 
 
-def last_m15_structure_stop(*, direction: str, candles_m15: Any, fallback: Any) -> Optional[float]:
+def last_swing_hl_lh(*, direction: str, candles_m15: Any) -> Optional[float]:
+    """Останній підтверджений HL (LONG) / LH (SHORT) на M15: екстремум нижчий/вищий за сусідів."""
     rows = _bars(candles_m15)
-    fb = _f(fallback)
     if len(rows) < 3:
+        return None
+    side = str(direction or "").upper()
+    swings: List[float] = []
+    # Останній бар ще не підтверджує свінг — потрібен сусід справа.
+    for i in range(1, len(rows) - 1):
+        if side == "LONG":
+            if rows[i]["low"] <= rows[i - 1]["low"] and rows[i]["low"] <= rows[i + 1]["low"]:
+                swings.append(float(rows[i]["low"]))
+        else:
+            if rows[i]["high"] >= rows[i - 1]["high"] and rows[i]["high"] >= rows[i + 1]["high"]:
+                swings.append(float(rows[i]["high"]))
+    if not swings:
+        return None
+    return swings[-1]
+
+
+def last_m15_structure_stop(*, direction: str, candles_m15: Any, fallback: Any) -> Optional[float]:
+    """Трейл за останнім HL/LH, лише в бік прибутку (не послаблюємо попередній стоп)."""
+    fb = _f(fallback)
+    swing = last_swing_hl_lh(direction=direction, candles_m15=candles_m15)
+    if swing is None:
         return fb
     side = str(direction or "").upper()
     if side == "LONG":
-        raw = min(r["low"] for r in rows[-5:])
-        return max(raw, fb) if fb is not None else raw
-    raw = max(r["high"] for r in rows[-5:])
-    return min(raw, fb) if fb is not None else raw
+        return max(swing, fb) if fb is not None else swing
+    return min(swing, fb) if fb is not None else swing
+
+
+def _impulse_m15_rows(book: "ManageBook", candles_m15: Any) -> List[Dict[str, Any]]:
+    """HL/LH лише після нового екстремуму відносно хая/лоя на момент TP2 — інакше відкат до TP1 зріже імпульс."""
+    rows = _bars(candles_m15)
+    if not rows:
+        return []
+    side = str(book.direction).upper()
+    arm = _f(book.extras.get("arm_extreme"))
+    if arm is None:
+        return rows
+    idx = book.extras.get("arm_idx")
+    if idx is None:
+        for i, r in enumerate(rows):
+            if side == "LONG" and r["high"] > arm:
+                idx = i
+                break
+            if side == "SHORT" and r["low"] < arm:
+                idx = i
+                break
+        if idx is None:
+            return []
+        book.extras["arm_idx"] = int(idx)
+        book.extras["armed"] = True
+    return rows[int(idx) :]
 
 
 def tp3_from_liquidity(
@@ -632,12 +676,13 @@ def m15_structure_broken(*, direction: str, candles_m15: Any) -> bool:
     if len(rows) < 4:
         return False
     side = str(direction or "").upper()
+    swing = last_swing_hl_lh(direction=side, candles_m15=candles_m15)
+    if swing is None:
+        return False
     last_cl = rows[-1]["close"]
     if side == "LONG":
-        hl = min(r["low"] for r in rows[-6:-1])
-        return last_cl < hl
-    lh = max(r["high"] for r in rows[-6:-1])
-    return last_cl > lh
+        return last_cl < swing
+    return last_cl > swing
 
 
 def m15_continuation(*, direction: str, candles_m15: Any) -> bool:
@@ -717,6 +762,7 @@ def next_manage_event(
     candles_m15: Any = None,
     high: Any = None,
     low: Any = None,
+    ignore_sl: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Одне повідомлення лише при зміні стану. Не ордер."""
     px = _f(price)
@@ -730,7 +776,7 @@ def next_manage_event(
     sl_px = (lo if side == "LONG" else hi) or px
     tp_px = (hi if side == "LONG" else lo) or px
 
-    if _hit_sl(side, float(sl_px), sl_now) and book.state != "CLOSED":
+    if (not ignore_sl) and _hit_sl(side, float(sl_px), sl_now) and book.state != "CLOSED":
         if book.last_event == "SL":
             return None
         book.state = "CLOSED"
@@ -764,8 +810,14 @@ def next_manage_event(
             return None
         book.state = "TP2"
         book.last_event = "TP2"
-        struct = last_m15_structure_stop(direction=side, candles_m15=candles_m15, fallback=book.tp1)
-        book.trail_sl = float(struct if struct is not None else book.tp1)
+        # Після TP2 стоп у BE, поки не з’явиться новий хай/лоу імпульсу і підтверджений HL/LH.
+        book.trail_sl = float(book.entry)
+        rows = _bars(candles_m15)
+        if rows:
+            if side == "LONG":
+                book.extras["arm_extreme"] = max(r["high"] for r in rows)
+            else:
+                book.extras["arm_extreme"] = min(r["low"] for r in rows)
         extra = f"\nTP3: {book.tp3}" if book.tp3 is not None else ""
         return {
             "event": "TRADE_UPDATE",
@@ -773,25 +825,15 @@ def next_manage_event(
             "message": (
                 f"✅ TP2 · {book.symbol} {side}\n"
                 "Закрий ще частину\n"
-                f"SL на {book.trail_sl}{extra}"
+                f"SL в BE {book.trail_sl}, далі трейл за M15 HL/LH після нового екстремуму"
+                f"{extra}"
             ),
             "state": book.state,
         }
 
-    if book.state in ("TP2", "TRAIL") and book.tp3 is not None and _hit_tp(side, float(tp_px), book.tp3):
-        if book.last_event == "TP3":
-            return None
-        book.state = "CLOSED"
-        book.last_event = "TP3"
-        return {
-            "event": "TRADE_CLOSED",
-            "kind": "TP3",
-            "message": f"{book.symbol} закрито по TP3 {book.tp3}.",
-            "state": book.state,
-        }
-
     if book.state in ("TP2", "TRAIL"):
-        if m15_structure_broken(direction=side, candles_m15=candles_m15):
+        impulse = _impulse_m15_rows(book, candles_m15)
+        if impulse and m15_structure_broken(direction=side, candles_m15=impulse):
             if book.last_event == "REVERSAL":
                 return None
             book.state = "CLOSED"
@@ -802,7 +844,11 @@ def next_manage_event(
                 "message": f"Ознаки розвороту. Фіксуй залишок по ринку {px}",
                 "state": book.state,
             }
-        new_trail = last_m15_structure_stop(direction=side, candles_m15=candles_m15, fallback=book.trail_sl)
+        new_trail = last_m15_structure_stop(
+            direction=side,
+            candles_m15=impulse,
+            fallback=book.trail_sl,
+        )
         if new_trail is not None and book.trail_sl is not None:
             moved = (side == "LONG" and new_trail > book.trail_sl) or (
                 side == "SHORT" and new_trail < book.trail_sl
@@ -817,8 +863,9 @@ def next_manage_event(
                 return {
                     "event": "TRADE_UPDATE",
                     "kind": "TRAIL",
-                    "message": f"Трейлінг: SL переставлено на {new_trail}",
+                    "message": f"Трейлінг: SL переставлено на {new_trail} (M15 HL/LH)",
                     "state": book.state,
+                    "trail_sl": float(new_trail),
                 }
         if m15_continuation(direction=side, candles_m15=candles_m15):
             if book.last_event == "HOLD":
@@ -830,26 +877,43 @@ def next_manage_event(
                 "message": f"Відкат відпрацьовано, рух продовжується. Тримай, SL {sl_now}",
                 "state": book.state,
             }
+
+    if book.state in ("TP2", "TRAIL") and book.tp3 is not None and _hit_tp(side, float(tp_px), book.tp3):
+        if book.last_event == "TP3":
+            return None
+        book.state = "CLOSED"
+        book.last_event = "TP3"
+        return {
+            "event": "TRADE_CLOSED",
+            "kind": "TP3",
+            "message": f"{book.symbol} закрито по TP3 {book.tp3}.",
+            "state": book.state,
+        }
     return None
 
 
 def replay_manage(book: ManageBook, candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Прогін свічок. Події лише при зміні стану."""
+    """Прогін свічок. На одному барі можна TP1 потім TP2 / TRAIL потім TP3."""
     events: List[Dict[str, Any]] = []
     hist: List[Dict[str, Any]] = []
     for c in candles:
         hist.append(c)
         px = _f(c.get("close"))
-        ev = next_manage_event(
-            book,
-            price=px,
-            candles_m15=hist,
-            high=_f(c.get("high")),
-            low=_f(c.get("low")),
-        )
-        if ev:
+        saw_event = False
+        for _ in range(6):
+            ev = next_manage_event(
+                book,
+                price=px,
+                candles_m15=hist,
+                high=_f(c.get("high")),
+                low=_f(c.get("low")),
+                ignore_sl=saw_event,
+            )
+            if not ev:
+                break
+            saw_event = True
             ev["ts"] = c.get("ts") or ""
             events.append(ev)
-        if book.state == "CLOSED":
-            break
+            if book.state == "CLOSED":
+                return events
     return events

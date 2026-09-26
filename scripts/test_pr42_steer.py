@@ -2,11 +2,15 @@
 """PR42: стоп за маніпуляцією, тригер, один re-entry, ведення, журнал ≠ /position."""
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sys
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -89,14 +93,105 @@ def _ake_path() -> list:
         rows.append(_c(0.0327, 0.0332, 0.0326, 0.0331, f"up{i}"))
     rows.append(_c(0.0331, 0.0348, 0.0330, 0.03475, "tp1"))
     rows.append(_c(0.0348, 0.0354, 0.0347, 0.03530, "tp2"))
-    rows.append(_c(0.0353, 0.0360, 0.0351, 0.0358, "trail1"))
-    rows.append(_c(0.0358, 0.0375, 0.0357, 0.0374, "peak"))
+    # Нові HL під час росту до ~0.0374 — трейл має крокувати.
+    rows.append(_c(0.0353, 0.0362, 0.03520, 0.0360, "hl1-run"))
+    rows.append(_c(0.0360, 0.0361, 0.03520, 0.03545, "hl1"))
+    rows.append(_c(0.0355, 0.0368, 0.03535, 0.0366, "hl1-ok"))
+    rows.append(_c(0.0366, 0.0371, 0.03585, 0.0369, "hl2-run"))
+    rows.append(_c(0.0369, 0.0372, 0.03585, 0.0365, "hl2"))
+    rows.append(_c(0.0365, 0.0375, 0.03610, 0.0374, "peak"))
     rows.append(_c(0.0374, 0.0375, 0.0350, 0.0351, "break"))
     rows.append(_c(0.0351, 0.0352, 0.0322, 0.0323, "giveback"))
     return rows
 
 
+VISION_KLINE = (
+    "https://data.binance.vision/data/futures/um/daily/klines/"
+    "{symbol}/{interval}/{symbol}-{interval}-{day}.zip"
+)
+
+
+def _parse_kline_rows(raw_rows: list) -> list:
+    out = []
+    for row in raw_rows:
+        if not row or str(row[0]).lower().startswith("open"):
+            continue
+        if len(row) < 5:
+            continue
+        try:
+            ts_raw = int(float(row[0]))
+            if ts_raw > 10**12:
+                ts_raw = ts_raw // 1000
+            ts = datetime.fromtimestamp(ts_raw, tz=timezone.utc).isoformat()
+            out.append(
+                {
+                    "open": float(row[1]),
+                    "high": float(row[2]),
+                    "low": float(row[3]),
+                    "close": float(row[4]),
+                    "ts": ts,
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def fetch_vision_day(symbol: str, interval: str, day: str) -> dict:
+    """Денний zip USDT-M з data.binance.vision. 404 = файл ще не опублікований."""
+    url = VISION_KLINE.format(symbol=symbol, interval=interval, day=day)
+    try:
+        req = Request(url, headers={"User-Agent": "ai-office-pr42", "Accept": "*/*"})
+        with urlopen(req, timeout=30) as resp:
+            blob = resp.read()
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            names = [n for n in zf.namelist() if n.endswith(".csv")]
+            if not names:
+                return {"ok": False, "reason": "zip without csv", "url": url, "bars": []}
+            text = zf.read(names[0]).decode("utf-8", errors="replace")
+        bars = _parse_kline_rows(list(csv.reader(io.StringIO(text))))
+        return {"ok": True, "reason": "OK", "url": url, "bars": bars, "n": len(bars)}
+    except HTTPError as exc:
+        return {
+            "ok": False,
+            "reason": f"HTTP {exc.code}",
+            "url": url,
+            "bars": [],
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "url": url,
+            "bars": [],
+        }
+
+
 def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> list:
+    """Спочатку Vision (архів), потім fapi — у VM fapi дає 451."""
+    start = datetime.fromtimestamp(start_ms / 1000.0, tz=timezone.utc)
+    end = datetime.fromtimestamp(end_ms / 1000.0, tz=timezone.utc)
+    days = []
+    cur = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+    last = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
+    while cur <= last:
+        days.append(cur.date().isoformat())
+        cur = datetime.fromtimestamp(cur.timestamp() + 86400, tz=timezone.utc)
+    merged = []
+    for day in days:
+        pack = fetch_vision_day(symbol, interval, day)
+        if not pack.get("ok"):
+            print(f"DATA_UNAVAILABLE vision {symbol} {interval} {day}: {pack.get('reason')} {pack.get('url')}")
+            continue
+        merged.extend(pack["bars"])
+    if merged:
+        lo, hi = start_ms / 1000.0, end_ms / 1000.0
+        clipped = []
+        for b in merged:
+            t = datetime.fromisoformat(b["ts"]).timestamp()
+            if lo <= t <= hi:
+                clipped.append(b)
+        return clipped or merged
     try:
         qs = urlencode(
             {
@@ -113,25 +208,11 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> lis
         )
         with urlopen(req, timeout=12) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        out = []
         if not isinstance(data, list):
             return []
-        for row in data:
-            if not isinstance(row, list) or len(row) < 6:
-                continue
-            ts = datetime.fromtimestamp(int(row[0]) / 1000.0, tz=timezone.utc).isoformat()
-            out.append(
-                {
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "ts": ts,
-                }
-            )
-        return out
+        return _parse_kline_rows(data)
     except Exception as exc:
-        print(f"DATA_UNAVAILABLE {symbol} {interval}: {type(exc).__name__}: {exc}")
+        print(f"DATA_UNAVAILABLE fapi {symbol} {interval}: {type(exc).__name__}: {exc}")
         return []
 
 
@@ -325,8 +406,13 @@ def main() -> int:
     kinds_ake = [e["kind"] for e in ev_ake]
     if kinds_ake[0] != "TP1" or "TP2" not in kinds_ake:
         return _fail(f"ake kinds {kinds_ake}")
-    if not any(k in kinds_ake for k in ("TRAIL", "TP3", "REVERSAL", "SL", "HOLD")):
-        return _fail(f"ake no trail/fix {kinds_ake}")
+    trails = [e for e in ev_ake if e.get("kind") == "TRAIL"]
+    if not trails:
+        return _fail(f"ake no TRAIL {kinds_ake}")
+    if any(float(e.get("trail_sl") or 0) <= 0.034746 + 1e-12 for e in trails):
+        return _fail(f"trail stuck at TP1 {trails}")
+    if max(float(e["trail_sl"]) for e in trails) < 0.0352:
+        return _fail(f"trail must step with HL {trails}")
     if "SL" not in kinds_ake and "REVERSAL" not in kinds_ake and "TP3" not in kinds_ake:
         return _fail(f"ake must close before giveback {kinds_ake}")
     if book_ake.mfe < 10.0:
@@ -411,41 +497,69 @@ def main() -> int:
     if "Entry:" not in txt:
         return _fail("radar card")
 
-    start_ms = int(datetime(2026, 9, 25, 18, 0, tzinfo=timezone.utc).timestamp() * 1000)
-    end_ms = int(datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    vision_notes = []
+    for sym in ("AKEUSDT", "LONGXIAUSDT"):
+        for iv in ("1m", "5m", "15m", "1d"):
+            for day in ("2026-09-24", "2026-09-25", "2026-09-26"):
+                pack = fetch_vision_day(sym, iv, day)
+                vision_notes.append(
+                    f"{sym} {iv} {day}: {pack.get('reason')} n={pack.get('n', 0)}"
+                )
+
+    ake_d1 = fetch_vision_day("AKEUSDT", "1d", "2026-09-24")
+    ake_m15 = fetch_vision_day("AKEUSDT", "15m", "2026-09-25")
+    ake26 = fetch_vision_day("AKEUSDT", "15m", "2026-09-26")
+    lx25 = fetch_vision_day("LONGXIAUSDT", "15m", "2026-09-25")
     live_rows = []
-    for sym, side, entry, sl0, tp1, tp2 in (
-        ("LONGXIAUSDT", "SHORT", 0.13063, 0.130986, 0.12345, 0.098),
-        ("AKEUSDT", "LONG", 0.032889, 0.032151, 0.034746, 0.035287),
-    ):
-        bars = _fetch_klines(sym, "15m", start_ms, end_ms)
-        if not bars:
-            live_rows.append((sym, "DATA_UNAVAILABLE", [], None))
-            continue
-        pl = plan_stop_behind_manipulation(
-            entry=entry,
-            tp1=tp1,
-            direction=side,
-            candles_m15=bars[: max(8, min(len(bars), 24))],
-            current_sl=sl0,
+    if not ake_m15.get("ok") or not ake_m15.get("bars"):
+        live_rows.append(("AKEUSDT", "DATA_UNAVAILABLE", [], None, ake_m15.get("reason")))
+    else:
+        bars = ake_m15["bars"]
+        daily = (ake_d1.get("bars") or []) + bars[-1:]
+        t3v = tp3_from_liquidity(direction="LONG", daily_candles=daily)
+        b = ManageBook(
+            symbol="AKEUSDT",
+            direction="LONG",
+            entry=0.032889,
+            sl=0.032151,
+            tp1=0.034746,
+            tp2=0.035287,
+            tp3=t3v,
         )
-        sl_use = float(pl["sl"]) if pl.get("send") and pl.get("sl") is not None else sl0
-        t3v = tp3_from_liquidity(direction=side, daily_candles=_fetch_klines(sym, "1d", start_ms, end_ms))
-        b = ManageBook(symbol=sym, direction=side, entry=entry, sl=sl_use, tp1=tp1, tp2=tp2, tp3=t3v)
         evs = replay_manage(b, bars)
-        live_rows.append((sym, "OK", evs, sl_use))
+        trails_live = [e for e in evs if e.get("kind") == "TRAIL"]
+        if not trails_live:
+            return _fail(f"vision AKE no TRAIL {[e.get('kind') for e in evs]}")
+        if all(float(e.get("trail_sl") or 0) <= 0.034746 + 1e-12 for e in trails_live):
+            return _fail(f"vision AKE trail stuck at TP1 {trails_live}")
+        max_tr = max(float(e["trail_sl"]) for e in trails_live)
+        if max_tr < 0.0365:
+            return _fail(f"vision AKE trail did not follow HL toward 0.0374: {max_tr} {trails_live}")
+        live_rows.append(
+            ("AKEUSDT", "OK", evs, b.trail_sl, f"bars={len(bars)} tp3={t3v} mfe={b.mfe:.2f} max_trail={max_tr}")
+        )
+    if not lx25.get("ok"):
+        live_rows.append(("LONGXIAUSDT", "DATA_UNAVAILABLE", [], None, lx25.get("reason")))
+    if not ake26.get("ok"):
+        live_rows.append(("AKEUSDT-2026-09-26", "DATA_UNAVAILABLE", [], None, ake26.get("reason")))
 
     ART.mkdir(parents=True, exist_ok=True)
     lines = ["# PR42 replay", ""]
+    lines.append("Джерело: data.binance.vision futures um daily klines (не fapi).")
+    lines.append("")
+    lines.append("## Vision probe")
+    for n in vision_notes:
+        lines.append(f"- {n}")
+    lines.append("")
     lines.append("| час | монета | подія | текст |")
     lines.append("|---|---|---|---|")
     lines.append(f"| synth | LONGXIAUSDT | SL | {planned['sl']:.6f} за зоною (якір {planned.get('anchor')}) |")
     for e in ev_lx:
         lines.append(f"| {e.get('ts')} | LONGXIAUSDT | {e.get('kind')} | {e.get('message')} |")
     for e in ev_ake:
-        lines.append(f"| {e.get('ts')} | AKEUSDT | {e.get('kind')} | {e.get('message')} |")
-    for sym, st, evs, sl_use in live_rows:
-        lines.append(f"| live | {sym} | {st} | sl={sl_use} events={len(evs)} |")
+        lines.append(f"| {e.get('ts')} | AKEUSDT synth | {e.get('kind')} | {e.get('message')} |")
+    for sym, st, evs, sl_use, note in live_rows:
+        lines.append(f"| vision | {sym} | {st} | sl={sl_use} {note} |")
         for e in evs:
             lines.append(f"| {e.get('ts')} | {sym} | {e.get('kind')} | {e.get('message')} |")
     (ART / "pr42_replay.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
