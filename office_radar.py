@@ -257,6 +257,8 @@ def evaluate_radar(
 
     structure_sl = float(sweep_lv)
     card = card_levels(direction=direction, entry=px, structure_sl=structure_sl, rr=DEFAULT_RR)
+    card = dict(card)
+    card["cancel"] = structure_sl
     try:
         from office_trade_steer import (
             encode_sc_zone_note,

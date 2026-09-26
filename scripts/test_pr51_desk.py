@@ -15,9 +15,11 @@ os.environ["OFFICE_DEPO_USDT"] = "1000"
 
 from office_bridge import (  # noqa: E402
     POSITION_CONFIRM_REASON,
+    _fetchone,
     init_office_db,
     journal_open_office_signal,
     journal_open_trade,
+    office_signal_trade_id,
     signal_upsert,
 )
 from office_desk_card import (  # noqa: E402
@@ -105,7 +107,7 @@ def main() -> int:
         tp2=85000.0,
         rr=2.0,
         status="ACTIVE",
-        analysis_note="PUMP",
+        analysis_note="PUMP cancel=84000",
     )
     journal_open_office_signal(
         db.name,
@@ -141,8 +143,28 @@ def main() -> int:
     if conflict.get("send") or conflict.get("reason") != "конфлікт модулів":
         return _fail(f"conflict {conflict}")
 
-    prev_c = dict(prev)
-    prev_c["cancel_level"] = 84000.0
+    # Сильніший протилежний сетап (бал ≥ поріг+1) — переворот без закриття M15.
+    strong = desk_entry_gate(
+        symbol="BTCUSDT",
+        direction="SHORT",
+        entry=84042.0,
+        sl=84942.0,
+        tp1=86000.0,
+        atr_h1=900.0,
+        score=11,
+        min_score=10,
+        m15_close=84050.0,
+        prev=prev,
+    )
+    if not strong.get("send") or not strong.get("reversal"):
+        return _fail(f"rev_min_score {strong}")
+
+    prev_from_db = latest_open_desk_signal(db.name, "BTCUSDT")
+    stored_cancel = (prev_from_db or {}).get("cancel_level")
+    if stored_cancel is None or abs(float(stored_cancel) - 84000.0) > 1e-6:
+        return _fail(f"cancel_level from note {prev_from_db}")
+
+    prev_c = dict(prev_from_db or prev)
     rev = prepare_desk_send(
         db_path=db.name,
         symbol="BTCUSDT",
@@ -161,15 +183,23 @@ def main() -> int:
     if not rev.get("send") or not rev.get("reversal"):
         return _fail(f"reversal {rev}")
     txt = str(rev.get("text") or "")
-    if "🔄 ПЕРЕВОРОТ" not in txt or "LONG від" not in txt or "скасовано" not in txt:
+    if "🔄 ПЕРЕВОРОТ" not in txt or "LONG від 84 069" not in txt or "скасовано" not in txt:
         return _fail(f"reversal card {txt}")
-    if "Причина:" not in txt or "M15 закрилась нижче" not in txt:
+    if "Причина:" not in txt or "M15 закрилась нижче 84 000" not in txt:
         return _fail(f"reversal reason {txt}")
     banned = card_has_banned(txt)
     if banned:
         return _fail(f"banned {banned} in {txt}")
     if "Вхід:" not in txt or "Стоп:" not in txt:
         return _fail("ukrainian labels")
+    tid = office_signal_trade_id("pump-btc-1842")
+    closed = _fetchone(
+        db.name,
+        "SELECT status, exit_reason FROM trade_journal WHERE trade_id = ?",
+        (tid,),
+    )
+    if not closed or str(closed[0]) != "CLOSED" or str(closed[1]) != "переворот":
+        return _fail(f"journal reversal {closed}")
 
     # Картка DUMP як у ТЗ
     dump = format_desk_card(

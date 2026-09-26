@@ -5355,6 +5355,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                 setup_type: str = "",
                 m15_close: Any = None,
                 candle: Any = None,
+                cancel_level: Any = None,
             ) -> bool:
                 from office_desk_card import prepare_desk_send
                 from office_trade_steer import atr_from_candles
@@ -5420,7 +5421,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp2=tp2,
                         rr=None,
                         status="ACTIVE",
-                        analysis_note=str(setup_type or tag)[:2000],
+                        analysis_note=(
+                            f"{setup_type or tag}"
+                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
+                        )[:2000],
                     )
                     journal_open_office_signal(
                         db_path,
@@ -5456,6 +5460,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     setup_type=str(extra.get("setup_type") or tag),
                     m15_close=extra.get("m15_close"),
                     candle=extra.get("candle"),
+                    cancel_level=extra.get("cancel_level"),
                 )
 
             try:
@@ -5582,6 +5587,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     setup_type=str(card.get("setup_type") or "РАДАР"),
                                     m15_close=m15_cl,
                                     candle=(m15[-1] if isinstance(m15, list) and m15 else None),
+                                    cancel_level=card.get("cancel") or res.level_price,
                                 )
                                 if sent:
                                     _last_notified[nkey] = now_ts
@@ -5686,6 +5692,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     setup_type=str(pd.get("signal") or "PUMP"),
                                     m15_close=m15_cl,
                                     candle=(bars[-1] if bars else None),
+                                    cancel_level=pd.get("cancel"),
                                 ):
                                     print(f"[pump] {rsym} {pd.get('signal')} {tf_name}")
                                     break

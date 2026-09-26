@@ -42,9 +42,35 @@ def _f(v: Any) -> Optional[float]:
 
 
 def _px(v: Any) -> str:
+    """Ціна як у картці: 84 069, без Entry/SL англійською."""
     from office_telegram_filter import format_px
 
-    return format_px(v)
+    s = format_px(v)
+    if not s:
+        return s
+    if "." in s:
+        whole, frac = s.split(".", 1)
+    else:
+        whole, frac = s, ""
+    try:
+        n = int(whole)
+    except ValueError:
+        return s
+    if abs(n) >= 1000:
+        grouped = f"{n:,}".replace(",", " ")
+        return f"{grouped}.{frac}" if frac else grouped
+    return s
+
+
+def parse_cancel_level(note: Any) -> Optional[float]:
+    """Рівень скасування з analysis_note (`cancel=84000`)."""
+    import re
+
+    m = re.search(r"cancel\s*=\s*([0-9]+(?:[.,][0-9]+)?)", str(note or ""), flags=re.I)
+    if not m:
+        return None
+    raw = str(m.group(1) or "").replace(",", ".")
+    return _f(raw)
 
 
 def is_major_symbol(symbol: str) -> bool:
@@ -388,6 +414,9 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
         if str(r.get("status") or "").upper() in OPEN_STATUSES:
             out = dict(r)
             out["entry"] = _row_entry(out)
+            clv = parse_cancel_level(out.get("analysis_note"))
+            if clv is not None and out.get("cancel_level") is None:
+                out["cancel_level"] = clv
             return out
     try:
         jrows = _fetchall(
