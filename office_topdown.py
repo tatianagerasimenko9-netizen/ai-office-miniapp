@@ -15,7 +15,7 @@ from office_radar import MIN_RR, detect_sweep_from_candles
 KIND_TOPDOWN = "topdown"
 DATA_UNAVAILABLE = "DATA_UNAVAILABLE"
 DATA_OK = "DATA_OK"
-ASIA_UTC = (0, 8)
+ASIA_KYIV = (3, 7)
 ASIA_MIN_BARS = 4
 ASIA_RANGE_MAX_PCT = 0.15
 SWEEP_NEAR_PCT = 0.004
@@ -206,21 +206,28 @@ def asian_session_range(
     asof: Any = None,
     current_price: Any = None,
 ) -> Dict[str, Any]:
-    """Asian High/Low лише з UTC 00–08 ПОТОЧНОЇ доби. Вчорашню сесію не мішаємо."""
+    """Asian High/Low: 03:00–07:00 Київ поточної київської доби (Pine ICT)."""
     rows = _bars(candles)
     now = _parse_ts(asof) if asof is not None else datetime.now(timezone.utc)
     if now is None:
         now = datetime.now(timezone.utc)
-    today = now.astimezone(timezone.utc).date()
-    session_start = datetime.combine(today, time(ASIA_UTC[0], 0), tzinfo=timezone.utc)
-    session_end = datetime.combine(today, time(ASIA_UTC[1], 0), tzinfo=timezone.utc)
+    try:
+        local = now.astimezone(ZoneInfo("Europe/Kyiv"))
+    except Exception:
+        local = now.astimezone(timezone.utc)
+    today = local.date()
+    session_start = datetime.combine(today, time(ASIA_KYIV[0], 0), tzinfo=ZoneInfo("Europe/Kyiv"))
+    session_end = datetime.combine(today, time(ASIA_KYIV[1], 0), tzinfo=ZoneInfo("Europe/Kyiv"))
     asian: List[Dict[str, Any]] = []
     for c in rows:
         dt = _parse_ts(c.get("ts"))
         if dt is None:
             continue
-        dt = dt.astimezone(timezone.utc)
-        if session_start <= dt < session_end:
+        try:
+            loc = dt.astimezone(ZoneInfo("Europe/Kyiv"))
+        except Exception:
+            loc = dt
+        if session_start <= loc < session_end:
             asian.append(c)
     if len(asian) < ASIA_MIN_BARS:
         return {

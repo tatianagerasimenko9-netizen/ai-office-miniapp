@@ -42,14 +42,19 @@ from office_telegram_policy import (  # noqa: E402
 )
 from office_trade_steer import (  # noqa: E402
     RR_TIGHT_FLAG,
-    SL_ATR_MULT,
-    SCALE_ADD2_PCT,
     SCALE_ADD_PCT,
     SCALE_ENTRY_PCT,
+    SL_ATR_HUNTER,
+    SL_ATR_MULT,
     ManageBook,
+    atr_from_candles,
     encode_sc_zone_note,
     format_entry_trigger,
     format_signal_steer_card,
+    hunter_stop_price,
+    is_manip_window_kyiv,
+    last_strong_candle,
+    plan_pine_targets,
     plan_stop_behind_manipulation,
     plan_strong_candle_ote,
     plan_sweep_reentry,
@@ -69,19 +74,18 @@ def _fail(msg: str) -> int:
     return 1
 
 
-def _c(o, h, l, cl, ts="") -> dict:
-    return {"open": o, "high": h, "low": l, "close": cl, "ts": ts}
+def _c(o, h, l, cl, ts="", vol=10.0) -> dict:
+    return {"open": o, "high": h, "low": l, "close": cl, "ts": ts, "volume": vol}
 
 
 def _longxia_m15() -> list:
     rows = []
-    for i in range(10):
-        rows.append(_c(0.1306, 0.1310, 0.1305, 0.1307, f"c{i}"))
-    rows.append(_c(0.1307, 0.1325, 0.1306, 0.1308, "sweep"))
+    for i in range(22):
+        rows.append(_c(0.1306, 0.1310, 0.1305, 0.1307, f"c{i}", vol=10))
+    rows.append(_c(0.1307, 0.1325, 0.1306, 0.1308, "sweep", vol=12))
     for i in range(4):
-        rows.append(_c(0.1307, 0.1310, 0.1304, 0.1306, f"a{i}"))
-    # Сильна червона свічка ~0.130–0.133 (як на індикаторі Тетяни).
-    rows.append(_c(0.1330, 0.1330, 0.1300, 0.13005, "sc"))
+        rows.append(_c(0.1307, 0.1310, 0.1304, 0.1306, f"a{i}", vol=10))
+    rows.append(_c(0.1330, 0.1330, 0.1300, 0.13005, "sc", vol=80))
     return rows
 
 
@@ -129,6 +133,7 @@ def _parse_kline_rows(raw_rows: list) -> list:
                     "high": float(row[2]),
                     "low": float(row[3]),
                     "close": float(row[4]),
+                    "volume": float(row[5]) if len(row) > 5 else None,
                     "ts": ts,
                 }
             )
@@ -217,15 +222,10 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> lis
 
 
 def main() -> int:
-    print(
-        "KNOWLEDGE: OFFICE_AGENT_SYSTEM_PROMPTS_UA.md (відкат до сильної свічки); "
-        "office_worker_library/shared/SMC_ANALIZ_SNAPSHOT.md OTE 0.62-0.79; "
-        "SMART_MANY_KONSEPT_SNAPSHOT.md §0.13.1; "
-        "STATISTYKA_SNAPSHOT.txt вхід 70%/добір 20%; "
-        "office_topdown.last_impulse_candle; fetch_ote_levels 0.618/0.705/0.786; "
-        "ARKHITEKTURA ENTRY_CONFIRMATION_MODE=SC_OR_ENTRY; "
-        "Pine ICT SMC HUNTER v9.9 — немає в репо"
-    )
+    pine = ROOT / "office_worker_library/indicator/ict_smc_hunter_v9_9.pine"
+    txtp = pine.read_text(encoding="utf-8") if pine.exists() else ""
+    if "sc_vol_x" not in txtp or "sl_long_p" not in txtp or "0300-0700" not in txtp:
+        return _fail("pine etalon missing")
     if ATR_DAY_USED_ENTRY_BLOCK_PCT != 90.0 or GERCHIK_TREND_ENTRY_BLOCK_PCT != 80.0:
         return _fail("atr frozen")
     if SIGNAL_THRESHOLD != 85 or MIN_ALERT_MOVE_PCT != 3.0 or MIN_RR < 1.5:
@@ -274,6 +274,17 @@ def main() -> int:
         return _fail("fixture rr")
     if float(planned["rr"]) + 1e-12 < MIN_RR:
         return _fail("rr after widen")
+    if not last_strong_candle(m15, direction="SHORT"):
+        return _fail("longxia SC pine")
+    hs = hunter_stop_price(direction="SHORT", candles=m15)
+    atr_h = atr_from_candles(m15)
+    if hs is None or atr_h is None:
+        return _fail("hunter sl")
+    expect = max(float(r["high"]) for r in m15[-7:]) + SL_ATR_HUNTER * atr_h
+    if abs(float(hs) - expect) > 1e-12:
+        return _fail(f"hunter formula {hs} vs {expect}")
+    if float(planned["sl"]) + 1e-12 < float(hs):
+        return _fail("card sl tighter than hunter")
 
     tiny = [_c(1.0, 1.001, 0.999, 1.0, str(i)) for i in range(8)]
     atr_plan = plan_stop_behind_manipulation(
@@ -338,7 +349,7 @@ def main() -> int:
     if float(sc["high"]) < 0.1329 or float(sc["low"]) > 0.1301:
         return _fail(f"sc zone {sc['low']}-{sc['high']}")
     pcts = [int(b["pct"]) for b in sc["buckets"]]
-    if pcts != [SCALE_ENTRY_PCT, SCALE_ADD_PCT, SCALE_ADD2_PCT]:
+    if pcts != [SCALE_ENTRY_PCT, SCALE_ADD_PCT] or pcts != [60, 40]:
         return _fail(f"buckets {pcts}")
     if sc_setup_cancelled(direction="SHORT", close=0.1325, sc_low=sc["low"], sc_high=sc["high"]):
         return _fail("0.1325 inside SC is not cancel")
@@ -350,7 +361,8 @@ def main() -> int:
         return _fail("parse sc note")
 
     # Екран ICT SMC HUNTER: H4 HIGH 0.10952, Відкат SC (OTE) 0.10156–0.10328.
-    hunter = [_c(0.0994, 0.10952, 0.0994, 0.10952, "bull-sc")]
+    hunter = [_c(0.1040, 0.1042, 0.1038, 0.1040, f"q{i}", vol=10) for i in range(20)]
+    hunter.append(_c(0.0994, 0.10952, 0.0994, 0.10952, "bull-sc", vol=80))
     long_sc = plan_strong_candle_ote(direction="LONG", candles=hunter, price=0.104)
     if long_sc.get("data_status") != "DATA_OK":
         return _fail("hunter sc")
@@ -369,8 +381,26 @@ def main() -> int:
         trigger=trig,
         sc_plan=sc,
     )
-    if "OTE 62–79%" not in txt_sc or "70%" not in txt_sc or "Скасовано" not in txt_sc:
+    if "OTE 62–79%" not in txt_sc or "60%" not in txt_sc or "40%" not in txt_sc or "Скасовано" not in txt_sc:
         return _fail(f"sc card {txt_sc}")
+    if not is_manip_window_kyiv(datetime(2026, 9, 25, 6, 0, tzinfo=timezone.utc)):
+        return _fail("manip 09:00 Kyiv")
+    if is_manip_window_kyiv(datetime(2026, 9, 25, 8, 0, tzinfo=timezone.utc)):
+        return _fail("08:00 UTC is not manip")
+    tps = plan_pine_targets(
+        direction="LONG",
+        entry=0.032889,
+        sl=0.0310,
+        atr=0.0004,
+        mo=0.0335,
+        asian_high=0.0340,
+        pdh=0.0378,
+        week_high=0.0400,
+    )
+    if not (tps["tp1"] < tps["tp2"] < tps["tp3"]):
+        return _fail(f"tp order {tps}")
+    if abs(float(tps["tp1"]) - 0.0335) > 1e-12:
+        return _fail(f"tp1 mo {tps}")
 
     # Широкий стоп не вибивається свіпом 0.1325.
     book_lx = ManageBook(

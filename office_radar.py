@@ -2,7 +2,8 @@
 
 Без підтвердження на малому ТФ — WATCHING, не сигнал.
 SIGNAL лише картка розбору (T1: не відкриває позицію).
-Ризик-фільтри чинні: RR, ATR T0, Kill Zone, bot_action BLOCKED (T5).
+Ризик-фільтри чинні: RR, ATR T0, bot_action BLOCKED (T5).
+Скан 24/7; у хвилини маніпуляції 09:00/15:00 Київ SIGNAL не надсилаємо.
 """
 from __future__ import annotations
 
@@ -10,7 +11,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from office_bridge import is_kill_zone
 from office_market_state import scanner_signal_blocked
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT
 
@@ -326,12 +326,46 @@ def evaluate_radar(
     if scanner_signal_blocked(bot_action):
         base.reason = "bot_action=BLOCKED — T5, не сигнал"
         return base
-    kz = in_kill_zone
-    if kz is None:
-        kz = is_kill_zone(utc_now or datetime.now(timezone.utc))
-    if not kz:
-        base.reason = "поза Kill Zone — WATCHING, не сигнал"
+    from office_trade_steer import is_manip_window_kyiv, plan_pine_targets
+
+    now = utc_now or datetime.now(timezone.utc)
+    if is_manip_window_kyiv(now):
+        base.reason = "хвилина маніпуляції 09:00/15:00 Київ — сигнал не надсилаємо"
         return base
+    # Офіс сканує 24/7; Kill Zone не блокує SIGNAL (на відміну від Pine good_sess).
+
+    try:
+        daily_rows = daily_candles if isinstance(daily_candles, list) else []
+        pdh = pdl = None
+        if len(daily_rows) >= 2:
+            prev = daily_rows[-2]
+            pdh, pdl = _f(prev.get("high")), _f(prev.get("low"))
+        tps = plan_pine_targets(
+            direction=direction,
+            entry=px,
+            sl=card.get("sl"),
+            mo=None,
+            asian_high=None,
+            asian_low=None,
+            pdh=pdh,
+            pdl=pdl,
+        )
+        if tps.get("data_status") == "DATA_OK":
+            card = dict(card)
+            card["tp1"] = tps.get("tp1")
+            card["tp2"] = tps.get("tp2")
+            card["tp3"] = tps.get("tp3")
+            if tps.get("tp1") is not None:
+                card["tp"] = tps.get("tp1")
+                risk = abs(px - float(card["sl"]))
+                if risk > 0:
+                    card["rr"] = abs(float(card["tp"]) - px) / risk
+            base.card = card
+            if float(card.get("rr") or 0) < MIN_RR:
+                base.reason = f"RR {card.get('rr')} < {MIN_RR} — не сигнал"
+                return base
+    except Exception:
+        pass
 
     base.status = "SIGNAL"
     base.reason = "sweep + M15 + ризик ок"

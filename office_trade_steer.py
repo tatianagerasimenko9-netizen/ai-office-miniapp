@@ -6,29 +6,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, time, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from office_radar import MIN_RR
-from office_topdown import DATA_OK, DATA_UNAVAILABLE, calc_sl_with_buffer, last_impulse_candle
+from office_topdown import DATA_OK, DATA_UNAVAILABLE, calc_sl_with_buffer
 
 KIND_STEER = "trade_steer"
-SL_ATR_MULT = 1.0
+# Еталон: office_worker_library/indicator/ict_smc_hunter_v9_9.pine
+SL_ATR_MULT = 1.0  # запасний підлог, не замінює hunter 2×ATR
+SL_ATR_HUNTER = 2.0
+SL_LOOKBACK = 7
+SC_VOL_X = 2.0
+SC_ATR_X = 1.2
+SC_VOL_SMA = 20
 RR_TIGHT_FLAG = 6.0
 OFFICE_SIGNAL_REASON = "office signal card (not /position)"
 OFFICE_SIGNAL_SETUP = "OFFICE_SIGNAL"
 ATR_PERIOD = 14
-# Свічок M15 у зоні входу, інакше стоп не вигадуємо.
 MIN_MANIP_BARS = 5
-# Хай/лой далеко від входу — не «зона маніпуляції входу».
 MANIP_NEAR_PCT = 0.04
-# Бібліотека: OTE 0.62–0.79 (SMC_ANALIZ / SMART_MANY 0.13.1). 0.618/0.786 — pd_array.
-OTE_062 = 0.62
-OTE_705 = 0.705
-OTE_079 = 0.79
-# Старий сканер (STATISTYKA_SNAPSHOT): вхід 70% / добір 20%. Залишок 10% — друге відро глибше.
-SCALE_ENTRY_PCT = 70
-SCALE_ADD_PCT = 20
-SCALE_ADD2_PCT = 10
+# Pine SC OTE: 0.618 і 0.786 (підпис на графіку «62–79%»).
+OTE_618 = 0.618
+OTE_786 = 0.786
+# Тетяна: 2 відра всередині зони, не добір біля стопа.
+SCALE_ENTRY_PCT = 60
+SCALE_ADD_PCT = 40
+SCALE_ADD2_PCT = 0
+KYIV_TZ = "Europe/Kyiv"
 
 
 def _f(v: Any) -> Optional[float]:
@@ -51,7 +57,16 @@ def _bars(candles: Any) -> List[Dict[str, Any]]:
         o, h, l, cl = _f(c.get("open")), _f(c.get("high")), _f(c.get("low")), _f(c.get("close"))
         if None in (o, h, l, cl):
             continue
-        out.append({"open": o, "high": h, "low": l, "close": cl, "ts": str(c.get("ts") or "")})
+        out.append(
+            {
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": cl,
+                "volume": _f(c.get("volume")),
+                "ts": str(c.get("ts") or ""),
+            }
+        )
     return out
 
 
@@ -60,16 +75,202 @@ def true_range(prev_close: float, high: float, low: float) -> float:
 
 
 def atr_from_candles(candles: Any, period: int = ATR_PERIOD) -> Optional[float]:
+    """Wilder ATR як ta.atr у Pine. Немає рядка — None."""
     rows = _bars(candles)
-    if len(rows) < 2:
+    return atr_wilder(rows, period=period)
+
+
+def atr_wilder(rows: List[Dict[str, Any]], *, period: int = ATR_PERIOD, end: Optional[int] = None) -> Optional[float]:
+    n = len(rows) if end is None else min(int(end) + 1, len(rows))
+    if n < period + 1:
         return None
     trs: List[float] = []
-    for i in range(1, len(rows)):
+    for i in range(1, n):
         trs.append(true_range(rows[i - 1]["close"], rows[i]["high"], rows[i]["low"]))
-    if not trs:
+    if len(trs) < period:
         return None
-    take = trs[-max(1, int(period)) :]
-    return sum(take) / float(len(take))
+    atr = sum(trs[:period]) / float(period)
+    for tr in trs[period:]:
+        atr = (atr * (period - 1) + tr) / float(period)
+    return atr
+
+
+def _kyiv(dt: Any) -> Optional[datetime]:
+    parsed = dt if isinstance(dt, datetime) else None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        return parsed.astimezone(ZoneInfo(KYIV_TZ))
+    except Exception:
+        return parsed
+
+
+def parse_bar_ts(ts: Any) -> Optional[datetime]:
+    from office_telegram_filter import parse_quote_dt
+
+    return parse_quote_dt(ts)
+
+
+def is_manip_window_kyiv(asof: Any) -> bool:
+    """09:00–09:15 і 15:00–15:15 Київ — сигнал не надсилати. Скан 24/7 лишається."""
+    dt = asof if isinstance(asof, datetime) else parse_bar_ts(asof)
+    kyiv = _kyiv(dt) if dt is not None else None
+    if kyiv is None:
+        return False
+    hm = kyiv.hour * 60 + kyiv.minute
+    return (9 * 60 <= hm < 9 * 60 + 15) or (15 * 60 <= hm < 15 * 60 + 15)
+
+
+def midnight_open_price(candles: Any, *, asof: Any = None) -> Optional[float]:
+    """Open першого бара 07:00–07:05 Київ (MO у Pine)."""
+    rows = _bars(candles)
+    ref = asof if isinstance(asof, datetime) else parse_bar_ts(asof)
+    if ref is None and rows:
+        ref = parse_bar_ts(rows[-1].get("ts"))
+    kyiv_ref = _kyiv(ref) if ref is not None else None
+    if kyiv_ref is None:
+        return None
+    day = kyiv_ref.date()
+    for r in rows:
+        dt = parse_bar_ts(r.get("ts"))
+        local = _kyiv(dt) if dt is not None else None
+        if local is None or local.date() != day:
+            continue
+        hm = local.hour * 60 + local.minute
+        if 7 * 60 <= hm < 7 * 60 + 5:
+            return float(r["open"])
+    return None
+
+
+def last_strong_candle(candles: Any, *, direction: str) -> Optional[Dict[str, Any]]:
+    """Pine: volume > SMA(vol,20)×2 і (high−low) > ATR14×1.2, тіло в бік сетапу."""
+    rows = _bars(candles)
+    side = str(direction or "").upper()
+    if side not in ("LONG", "SHORT") or len(rows) < max(SC_VOL_SMA, ATR_PERIOD + 1):
+        return None
+    found: Optional[Dict[str, Any]] = None
+    for i in range(SC_VOL_SMA - 1, len(rows)):
+        atr = atr_wilder(rows, end=i)
+        if atr is None or atr <= 0:
+            continue
+        window = rows[i - SC_VOL_SMA + 1 : i + 1]
+        vols = [float(r["volume"]) for r in window if r.get("volume") is not None]
+        if len(vols) < SC_VOL_SMA:
+            continue
+        vol_sma = sum(vols) / float(SC_VOL_SMA)
+        r = rows[i]
+        vol = r.get("volume")
+        if vol is None or vol_sma <= 0 or float(vol) <= vol_sma * SC_VOL_X:
+            continue
+        rng = float(r["high"]) - float(r["low"])
+        if rng <= atr * SC_ATR_X:
+            continue
+        if side == "LONG" and float(r["close"]) <= float(r["open"]):
+            continue
+        if side == "SHORT" and float(r["close"]) >= float(r["open"]):
+            continue
+        found = dict(r)
+        found["atr"] = atr
+    return found
+
+
+def hunter_stop_price(*, direction: str, candles: Any) -> Optional[float]:
+    """LONG: lowest(low,7) − ATR×2; SHORT: highest(high,7) + ATR×2."""
+    rows = _bars(candles)
+    side = str(direction or "").upper()
+    if len(rows) < SL_LOOKBACK:
+        return None
+    atr = atr_wilder(rows)
+    if atr is None or atr <= 0:
+        return None
+    last = rows[-SL_LOOKBACK:]
+    if side == "LONG":
+        return min(float(r["low"]) for r in last) - atr * SL_ATR_HUNTER
+    if side == "SHORT":
+        return max(float(r["high"]) for r in last) + atr * SL_ATR_HUNTER
+    return None
+
+
+def _wider_stop(side: str, a: Optional[float], b: Optional[float]) -> Optional[float]:
+    xs = [x for x in (a, b) if x is not None]
+    if not xs:
+        return None
+    if side == "LONG":
+        return min(xs)
+    return max(xs)
+
+
+def plan_pine_targets(
+    *,
+    direction: str,
+    entry: Any,
+    sl: Any,
+    atr: Any = None,
+    mo: Any = None,
+    asian_high: Any = None,
+    asian_low: Any = None,
+    pdh: Any = None,
+    pdl: Any = None,
+    week_high: Any = None,
+    week_low: Any = None,
+) -> Dict[str, Any]:
+    """Драбина Pine: MO → Asian → PDH/PDL → W High/Low, запасні 1.5R/3R/5R."""
+    side = str(direction or "").upper()
+    e, s = _f(entry), _f(sl)
+    empty = {"tp1": None, "tp2": None, "tp3": None, "data_status": DATA_UNAVAILABLE}
+    if e is None or s is None or side not in ("LONG", "SHORT"):
+        return empty
+    risk = abs(e - s)
+    atr_v = _f(atr)
+    risk_pts = (atr_v * SL_ATR_HUNTER) if atr_v and atr_v > 0 else risk
+    mo_v, ah, al = _f(mo), _f(asian_high), _f(asian_low)
+    pdh_v, pdl_v = _f(pdh), _f(pdl)
+    wh, wl = _f(week_high), _f(week_low)
+    if side == "LONG":
+        if mo_v is not None and mo_v > e + risk_pts * 0.3:
+            tp1 = mo_v
+        elif ah is not None and ah > e + risk_pts * 0.5:
+            tp1 = ah
+        else:
+            tp1 = e + risk_pts * 1.5
+        if ah is not None and ah > tp1:
+            tp2 = ah
+        elif pdh_v is not None and pdh_v > tp1:
+            tp2 = pdh_v
+        else:
+            tp2 = e + risk_pts * 3.0
+        if pdh_v is not None and pdh_v > tp2:
+            tp3 = pdh_v
+        elif wh is not None and wh > tp2:
+            tp3 = wh
+        else:
+            tp3 = e + risk_pts * 5.0
+        tp2 = max(tp2, tp1)
+        tp3 = max(tp3, tp2)
+    else:
+        if mo_v is not None and mo_v < e - risk_pts * 0.3:
+            tp1 = mo_v
+        elif al is not None and al < e - risk_pts * 0.5:
+            tp1 = al
+        else:
+            tp1 = e - risk_pts * 1.5
+        if al is not None and al < tp1:
+            tp2 = al
+        elif pdl_v is not None and pdl_v < tp1:
+            tp2 = pdl_v
+        else:
+            tp2 = e - risk_pts * 3.0
+        if pdl_v is not None and pdl_v < tp2:
+            tp3 = pdl_v
+        elif wl is not None and wl < tp2:
+            tp3 = wl
+        else:
+            tp3 = e - risk_pts * 5.0
+        tp2 = min(tp2, tp1)
+        tp3 = min(tp3, tp2)
+    return {"tp1": tp1, "tp2": tp2, "tp3": tp3, "data_status": DATA_OK, "risk_pts": risk_pts}
 
 
 def impulse_wick(candles: Any, *, direction: str) -> Optional[float]:
@@ -117,7 +318,7 @@ def plan_strong_candle_ote(
     tick_size: Any = None,
     price: Any = None,
 ) -> Dict[str, Any]:
-    """Зона сильної свічки + OTE-відкат + відра 70/20/10. Без свічки — DATA_UNAVAILABLE."""
+    """Зона SC з Pine + OTE 0.618/0.786 + відра 60/40. Без свічки — DATA_UNAVAILABLE."""
     side = str(direction or "").upper()
     empty = {
         "data_status": DATA_UNAVAILABLE,
@@ -131,11 +332,11 @@ def plan_strong_candle_ote(
         "sl": None,
         "cancel_level": None,
         "trigger_level": None,
-        "source": "last_impulse_candle",
+        "source": "ict_smc_hunter_v9_9",
     }
     if side not in ("LONG", "SHORT"):
         return empty
-    sc = last_impulse_candle(candles, direction=side)
+    sc = last_strong_candle(candles, direction=side)
     if not sc:
         return empty
     hi, lo = float(sc["high"]), float(sc["low"])
@@ -144,26 +345,25 @@ def plan_strong_candle_ote(
     span = hi - lo
     eq = (hi + lo) / 2.0
     if side == "LONG":
-        ote_062 = hi - span * OTE_062
-        ote_705 = hi - span * OTE_705
-        ote_079 = hi - span * OTE_079
-        ote_lo, ote_hi = ote_079, ote_062
+        ote_618 = hi - span * OTE_618
+        ote_786 = hi - span * OTE_786
+        ote_lo, ote_hi = ote_786, ote_618
         sl_anchor = lo
         trigger_level = ote_hi
         cancel_level = lo
     else:
-        ote_062 = lo + span * OTE_062
-        ote_705 = lo + span * OTE_705
-        ote_079 = lo + span * OTE_079
-        ote_lo, ote_hi = ote_062, ote_079
+        ote_618 = lo + span * OTE_618
+        ote_786 = lo + span * OTE_786
+        ote_lo, ote_hi = ote_618, ote_786
         sl_anchor = hi
         trigger_level = ote_lo
         cancel_level = hi
-    packed = calc_sl_with_buffer(sl_anchor, side, tick_size=tick_size, price=price or eq)
+    hunter = hunter_stop_price(direction=side, candles=candles)
+    gerchik = calc_sl_with_buffer(sl_anchor, side, tick_size=tick_size, price=price or eq)
+    sl = _wider_stop(side, hunter, gerchik.get("sl") if isinstance(gerchik, dict) else None)
     buckets = [
-        {"label": "Вхід 1", "price": ote_062, "pct": SCALE_ENTRY_PCT},
-        {"label": "Добір", "price": ote_705, "pct": SCALE_ADD_PCT},
-        {"label": "Добір 2", "price": ote_079, "pct": SCALE_ADD2_PCT},
+        {"label": "Вхід", "price": ote_618, "pct": SCALE_ENTRY_PCT},
+        {"label": "Добір", "price": ote_786, "pct": SCALE_ADD_PCT},
     ]
     return {
         "data_status": DATA_OK,
@@ -174,11 +374,12 @@ def plan_strong_candle_ote(
         "ote_hi": ote_hi,
         "buckets": buckets,
         "sl_anchor": sl_anchor,
-        "sl": packed.get("sl"),
+        "sl": sl,
         "cancel_level": cancel_level,
         "trigger_level": trigger_level,
-        "source": "last_impulse_candle",
-        "explain": packed.get("explain"),
+        "source": "ict_smc_hunter_v9_9",
+        "explain": gerchik.get("explain") if isinstance(gerchik, dict) else None,
+        "hunter_sl": hunter,
     }
 
 
@@ -322,7 +523,7 @@ def plan_stop_behind_manipulation(
     tick_size: Any = None,
     current_sl: Any = None,
 ) -> Dict[str, Any]:
-    """Стоп за зоною маніпуляції + люфт Герчика. RR>6 — червоний прапор (стоп занадто тісний)."""
+    """Стоп Pine: 7 свічок ± 2×ATR. Люфт Герчика / зона SC — лише якщо ширше."""
     e = _f(entry)
     t1 = _f(tp1)
     side = str(direction or "").upper()
@@ -337,6 +538,12 @@ def plan_stop_behind_manipulation(
     }
     if e is None or e <= 0 or t1 is None or side not in ("LONG", "SHORT"):
         return empty
+    hunter = hunter_stop_price(direction=side, candles=candles_m15)
+    sl = hunter
+    packed: Dict[str, Any] = {}
+    notes: List[str] = []
+    if hunter is not None:
+        notes.append("стоп Hunter: 7 свічок ± 2×ATR(14)")
     sc_plan = plan_strong_candle_ote(
         direction=side, candles=candles_m15, tick_size=tick_size, price=e
     )
@@ -354,9 +561,11 @@ def plan_stop_behind_manipulation(
         ob_bound=ob_bound,
         atr=atr,
     )
-    packed = calc_sl_with_buffer(anchor.get("level"), side, tick_size=tick_size, price=e)
-    sl = packed.get("sl")
-    notes: List[str] = []
+    packed_m = calc_sl_with_buffer(anchor.get("level"), side, tick_size=tick_size, price=e)
+    # Люфт Герчика лише якщо стоп стає ширшим за Hunter.
+    sl = _wider_stop(side, sl, packed_m.get("sl"))
+    if packed_m.get("sl") is not None:
+        packed = packed_m
     if sl is None and sc_plan.get("sl") is not None:
         sl = sc_plan.get("sl")
         packed = {"sl": sl, "buffer": sc_plan.get("explain"), "explain": sc_plan.get("explain")}

@@ -138,8 +138,21 @@ def main() -> int:
         in_kill_zone=False,
         utc_now=datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc),
     )
-    if offkz.status != "WATCHING":
-        return _fail("outside kz watching")
+    if offkz.status != "SIGNAL":
+        return _fail(f"24/7 scan outside kz {offkz.status} {offkz.reason}")
+
+    manip = evaluate_radar(
+        symbol="BTCUSDT",
+        price=10.0,
+        daily_candles=daily,
+        sweep_candles=sweep_ssl,
+        m15_candles=[_c(9.9, 10.2, 9.9, 10.2)],
+        day_used_pct=40.0,
+        in_kill_zone=True,
+        utc_now=datetime(2026, 9, 25, 6, 5, tzinfo=timezone.utc),
+    )
+    if manip.status != "WATCHING" or "маніпуляції" not in manip.reason:
+        return _fail(f"manip window {manip.status} {manip.reason}")
 
     print("OK: test_trade_radar")
     return 0

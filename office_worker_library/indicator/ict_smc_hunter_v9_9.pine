@@ -1,0 +1,135 @@
+//@version=6
+indicator("ICT SMC HUNTER v9.9 SYNC", overlay=true, max_labels_count=500, max_lines_count=250, max_boxes_count=120)
+// Еталон правил Тетяни для цифр картки Лева (PR42 pine-align).
+// Повний скрипт з TradingView: SC / OTE / SL / сесії / TP.
+// SMS, 3 Drives, 3 Tap, iFVG, AMD, Turtle Soup, score — не рахуються в цьому PR.
+
+// ══════════════════════════════════════════════════════════════
+// НАЛАШТУВАННЯ (фрагмент, що впливає на картку)
+// ══════════════════════════════════════════════════════════════
+sl_atr_m      = input.float(2.0, "Стоп (x ATR)", minval=0.5, step=0.1)
+sc_vol_x      = input.float(2.0, "Сильна свічка: об'єм × VSMA(20)", minval=1.2, step=0.1)
+sc_atr_x      = input.float(1.2, "Сильна свічка: діапазон × ATR(14)", minval=0.5, step=0.1)
+
+atr14   = ta.atr(14)
+vol_sma = ta.sma(volume, 20)
+
+// ══════════════════════════════════════════════════════════════
+// Сильна свічка → зона відкату OTE 0.618–0.786 (high–low імпульсу)
+// ══════════════════════════════════════════════════════════════
+sc_rng  = high - low
+sc_bull = volume > vol_sma * sc_vol_x and close > open and sc_rng > atr14 * sc_atr_x
+sc_bear = volume > vol_sma * sc_vol_x and close < open and sc_rng > atr14 * sc_atr_x
+var float sync_sc_lo = na
+var float sync_sc_hi = na
+var int   last_sc_dir = 0
+if sc_bull
+    last_sc_dir := 1
+    sync_sc_lo := low
+    sync_sc_hi := high
+if sc_bear
+    last_sc_dir := -1
+    sync_sc_lo := low
+    sync_sc_hi := high
+sc_R = not na(sync_sc_hi) and not na(sync_sc_lo) ? sync_sc_hi - sync_sc_lo : na
+sc_ote_top = last_sc_dir == 1 and not na(sc_R) ? sync_sc_hi - sc_R * 0.618 : last_sc_dir == -1 and not na(sc_R) ? sync_sc_lo + sc_R * 0.786 : na
+sc_ote_bot = last_sc_dir == 1 and not na(sc_R) ? sync_sc_hi - sc_R * 0.786 : last_sc_dir == -1 and not na(sc_R) ? sync_sc_lo + sc_R * 0.618 : na
+
+// ══════════════════════════════════════════════════════════════
+// ICT СЕСІЇ (Europe/Kiev)
+// ══════════════════════════════════════════════════════════════
+asia_sess = time(timeframe.period, "0300-0700:1234567", "Europe/Kiev")
+london    = time(timeframe.period, "0830-1000:1234567", "Europe/Kiev")
+ny        = time(timeframe.period, "1400-1700:1234567", "Europe/Kiev")
+manip_l   = time(timeframe.period, "0900-0915:1234567", "Europe/Kiev")
+manip_n   = time(timeframe.period, "1500-1515:1234567", "Europe/Kiev")
+mo_time   = time(timeframe.period, "0700-0705:1234567", "Europe/Kiev")
+in_asia   = not na(asia_sess)
+in_lon    = not na(london)
+in_ny     = not na(ny)
+in_kz     = in_lon or in_ny
+manip_now = not na(manip_l) or not na(manip_n)
+good_sess = in_kz and not manip_now
+// Офіс: скан 24/7, але manip_now → сигнал не надсилати (good_sess.KZ не вимагаємо).
+
+var float mo_price = na
+mo_started = not na(mo_time) and na(mo_time)[1]
+if mo_started
+    mo_price := open
+
+var float asian_high = na
+var float asian_low  = na
+asia_started = in_asia and not in_asia[1]
+if asia_started
+    asian_high := high
+    asian_low  := low
+if in_asia and not asia_started
+    asian_high := math.max(asian_high, high)
+    asian_low  := math.min(asian_low, low)
+
+pdh = request.security(syminfo.tickerid, "D", high[2], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[2],  lookahead=barmerge.lookahead_off)
+w_h = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+w_l = request.security(syminfo.tickerid, "W", low[1],  lookahead=barmerge.lookahead_off)
+
+// ══════════════════════════════════════════════════════════════
+// TP/SL (цифри картки)
+// ══════════════════════════════════════════════════════════════
+risk_pts   = atr14 * sl_atr_m
+sl_long_p  = ta.lowest(low, 7) - risk_pts
+sl_short_p = ta.highest(high, 7) + risk_pts
+// Добір в індикаторі був 40% до стопа; в офісі — 60% на 0.618 і 40% на 0.786 всередині OTE.
+
+var float tp1_l = 0.0
+var float tp2_l = 0.0
+var float tp3_l = 0.0
+var float tp1_s = 0.0
+var float tp2_s = 0.0
+var float tp3_s = 0.0
+
+if not na(mo_price) and mo_price > close + risk_pts * 0.3
+    tp1_l := mo_price
+else if not na(asian_high) and asian_high > close + risk_pts * 0.5
+    tp1_l := asian_high
+else
+    tp1_l := close + risk_pts * 1.5
+
+if not na(asian_high) and asian_high > tp1_l
+    tp2_l := asian_high
+else if not na(pdh) and pdh > tp1_l
+    tp2_l := pdh
+else
+    tp2_l := close + risk_pts * 3.0
+
+if not na(pdh) and pdh > tp2_l
+    tp3_l := pdh
+else if w_h > tp2_l
+    tp3_l := w_h
+else
+    tp3_l := close + risk_pts * 5.0
+
+if not na(mo_price) and mo_price < close - risk_pts * 0.3
+    tp1_s := mo_price
+else if not na(asian_low) and asian_low < close - risk_pts * 0.5
+    tp1_s := asian_low
+else
+    tp1_s := close - risk_pts * 1.5
+
+if not na(asian_low) and asian_low < tp1_s
+    tp2_s := asian_low
+else if not na(pdl) and pdl < tp1_s
+    tp2_s := pdl
+else
+    tp2_s := close - risk_pts * 3.0
+
+if not na(pdl) and pdl < tp2_s
+    tp3_s := pdl
+else if w_l < tp2_s
+    tp3_s := w_l
+else
+    tp3_s := close - risk_pts * 5.0
+
+tp2_l := math.max(tp2_l, tp1_l)
+tp3_l := math.max(tp3_l, tp2_l)
+tp2_s := math.min(tp2_s, tp1_s)
+tp3_s := math.min(tp3_s, tp2_s)
