@@ -5,7 +5,9 @@ OFFICE_RULES_UA.md §2/§8. WATCHING / ZONE_REACHED без входу / SKIP / �
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Set
+import hashlib
+import time as time_mod
+from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 TELEGRAM_COOLDOWN_SEC = 60.0
 KIND_SIGNAL = "signal"
@@ -135,3 +137,56 @@ def mark_cycle_sent(sent_symbols: Set[str], symbol: str) -> None:
     s = str(symbol or "").strip().upper()
     if s:
         sent_symbols.add(s)
+
+
+# Одна гілка desk: «Загальний» (OFFICE_GENERAL_THREAD_ID). Не слати ще раз у корінь форуму «General».
+TRADE_UPDATE_STREAM = "general"
+TRADE_TG_DEDUP_SEC = 900.0
+_TRADE_TG_LAST: Dict[str, float] = {}
+
+
+def trade_update_streams() -> Tuple[str, ...]:
+    """Куди йде TRADE_UPDATE. Завжди рівно одна гілка."""
+    return (TRADE_UPDATE_STREAM,)
+
+
+def reset_trade_telegram_dedup() -> None:
+    _TRADE_TG_LAST.clear()
+
+
+def _trade_fp_key(*, kind: str, symbol: str, sl: Any, text: str, stream: str) -> str:
+    from office_telegram_filter import format_px
+
+    k = str(kind or "").strip().upper()
+    sym = str(symbol or "").strip().upper()
+    st = str(stream or TRADE_UPDATE_STREAM).strip().lower() or TRADE_UPDATE_STREAM
+    sls = format_px(sl)
+    if k == "TRAIL" and sym and sls:
+        return f"TRAIL|{sym}|{sls}|{st}"
+    raw = " ".join(str(text or "").split())
+    digest = hashlib.sha256(f"{st}|{k}|{sym}|{raw}".encode("utf-8")).hexdigest()[:20]
+    return f"{k or 'MSG'}|{sym}|{digest}|{st}"
+
+
+def should_send_trade_telegram(
+    *,
+    text: str,
+    kind: str = "",
+    symbol: str = "",
+    sl: Any = None,
+    stream: str = TRADE_UPDATE_STREAM,
+    now_ts: float = 0.0,
+) -> Dict[str, Any]:
+    """Другий той самий SL / той самий текст — тільки лог. Форсує одну гілку general."""
+    st = TRADE_UPDATE_STREAM
+    key = _trade_fp_key(kind=kind, symbol=symbol, sl=sl, text=text, stream=st)
+    try:
+        now = float(now_ts or time_mod.time())
+    except (TypeError, ValueError):
+        now = time_mod.time()
+    last = _TRADE_TG_LAST.get(key)
+    if last is not None and now - last < TRADE_TG_DEDUP_SEC:
+        return {"send": False, "reason": "duplicate telegram", "key": key, "stream": st}
+    _TRADE_TG_LAST[key] = now
+    _ = stream  # ігноруємо другий stream — гілка одна
+    return {"send": True, "reason": "ok", "key": key, "stream": st}

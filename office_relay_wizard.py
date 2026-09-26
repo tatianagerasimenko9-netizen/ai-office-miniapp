@@ -156,6 +156,9 @@ from office_trade_steer import (
     signal_case_key,
     tp3_from_liquidity,
 )
+from office_pump_dump import evaluate_pump_dump, format_pump_card
+from office_rsi_heat import exhaustion_candle, rsi_from_candles, rsi_heat
+from office_ict_hunter import evaluate_ict_hunter
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -165,10 +168,13 @@ from office_telegram_policy import (
     KIND_SIGNAL,
     KIND_SWEEP_NEAR,
     KIND_WATCHING,
+    TRADE_UPDATE_STREAM,
     allow_proactive_telegram,
     mark_cycle_sent,
     may_send_proactive,
     preferred_scan_mode,
+    should_send_trade_telegram,
+    trade_update_streams,
 )
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
@@ -220,8 +226,22 @@ def _ensure_steer_book(
             tp1=float(tp1),
             tp2=tp2,
             state=st,
-            trail_sl=float(entry) if st in ("TP1", "TP2", "TRAIL") else None,
+            trail_sl=None,
         )
+        if st in ("TP1", "TP2", "TRAIL"):
+            side = str(book.direction).upper()
+            ts = float(entry)
+            try:
+                slv = float(sl)
+            except (TypeError, ValueError):
+                slv = ts
+            if st in ("TP2", "TRAIL"):
+                if side == "LONG":
+                    ts = max(ts, slv)
+                else:
+                    ts = min(ts, slv)
+            book.trail_sl = ts
+            book.extras["last_sent_sl"] = slv if slv != float(entry) else None
         _steer_books[signal_id] = book
     return book
 
@@ -2520,6 +2540,7 @@ async def run() -> None:
         message: str,
         reply_to_message_id: Optional[int] = None,
         stream: str = "general",
+        allow_draft: bool = False,
     ) -> Optional[int]:
         async def _send_single(
             text_part: str,
@@ -2537,16 +2558,20 @@ async def run() -> None:
                     mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
                     btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
             token = agent_bot_tokens.get(agent_key or "")
+            # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
+            # для desk лише sendMessage + thread_id «Загальний».
             if token:
                 try:
-                    ok, reason, msg_id = await send_via_bot_streaming(
-                        bot_http,
-                        token,
-                        office_chat_id,
-                        text_part,
-                        thread_id=thread_id,
-                        reply_to=reply_to,
-                    )
+                    ok, reason, msg_id = False, "", None
+                    if allow_draft:
+                        ok, reason, msg_id = await send_via_bot_streaming(
+                            bot_http,
+                            token,
+                            office_chat_id,
+                            text_part,
+                            thread_id=thread_id,
+                            reply_to=reply_to,
+                        )
                     if not ok:
                         ok, reason, msg_id = await send_via_bot_api(
                             bot_http,
@@ -2597,7 +2622,8 @@ async def run() -> None:
                 if ok:
                     return msg_id
                 print(f"[relay][WARN] fallback bot-send failed: {reason} (trying Telethon client)")
-            sent = await client.send_message(office_entity, text_part[:3900], reply_to=reply_to)
+            telethon_reply = reply_to if reply_to is not None else thread_id
+            sent = await client.send_message(office_entity, text_part[:3900], reply_to=telethon_reply)
             try:
                 return int(getattr(sent, "id", 0) or 0) or None
             except Exception:
@@ -2624,11 +2650,36 @@ async def run() -> None:
         message: str,
         reply_to_message_id: Optional[int] = None,
         stream: str = "general",
+        *,
+        kind: str = "",
+        symbol: str = "",
+        sl: Any = None,
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
             return None
-        return await send_office(message, reply_to_message_id=reply_to_message_id, stream=stream)
+        ev = str(event_type or "").strip().upper()
+        st = str(stream or "general").strip().lower() or "general"
+        if ev in (EVENT_TRADE_UPDATE, EVENT_TRADE_CLOSED, EVENT_SIGNAL_ENTRY):
+            st = TRADE_UPDATE_STREAM
+            if len(trade_update_streams()) != 1:
+                print("[relay] WARN: more than one trade stream configured")
+            gate = should_send_trade_telegram(
+                text=message,
+                kind=kind or ev,
+                symbol=symbol,
+                sl=sl,
+                stream=st,
+            )
+            if not gate.get("send"):
+                print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
+                return None
+        return await send_office(
+            message,
+            reply_to_message_id=reply_to_message_id,
+            stream=st,
+            allow_draft=False,
+        )
 
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
@@ -4580,7 +4631,12 @@ EV позитивне: {prob.get('ev_positive', '')}
             key = f"{str(sym or '').upper()}::{event}"
             now_ts = time.time()
             last_ts = float(_last_notified.get(key, 0.0) or 0.0)
-            window = ZONE_REACHED_COOLDOWN_SEC if event in ("WATCHING_REANALYZE", "ZONE_REACHED") else 1800
+            ev_u = str(event or "").upper()
+            # Трейл/HOLD дедупляться по значенню SL / стану, не 30-хв вікном.
+            if ev_u in ("TRAIL", "HOLD", "CONT", "ADD", "RSI_EXTREME"):
+                window = 2.0
+            else:
+                window = ZONE_REACHED_COOLDOWN_SEC if event in ("WATCHING_REANALYZE", "ZONE_REACHED") else 1800
             if (now_ts - last_ts) < window:
                 return False
             _last_notified[key] = now_ts
@@ -5095,6 +5151,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                             hi = last_m.get("high") if isinstance(last_m, dict) else None
                             lo = last_m.get("low") if isinstance(last_m, dict) else None
                             try:
+                                h1_rsi_bars = fetch_candles(symbol, "1h", 40)
+                            except Exception:
+                                h1_rsi_bars = []
+                            try:
+                                h4_rsi_bars = fetch_candles(symbol, "4h", 40)
+                            except Exception:
+                                h4_rsi_bars = []
+                            rsi1 = rsi_from_candles(h1_rsi_bars if isinstance(h1_rsi_bars, list) else [])
+                            rsi4 = rsi_from_candles(h4_rsi_bars if isinstance(h4_rsi_bars, list) else [])
+                            exh = exhaustion_candle(last_m, side=direction)
+                            try:
                                 ent = float(e_low or e_high or current_price)
                                 book = _ensure_steer_book(
                                     signal_id=signal_id,
@@ -5117,13 +5184,32 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     candles_m15=m15_now,
                                     high=hi,
                                     low=lo,
+                                    rsi_h1=rsi1,
+                                    rsi_h4=rsi4,
+                                    exhaustion=exh,
                                 )
-                                _journal_signal_excursions(db_path, signal_id, book)
+                                peak = None
+                                if rsi1 is not None or rsi4 is not None:
+                                    vals = [x for x in (rsi1, rsi4) if x is not None]
+                                    peak = max(vals) if vals else None
+                                _journal_signal_excursions(
+                                    db_path,
+                                    signal_id,
+                                    book,
+                                    extra={
+                                        "rsi_h1": rsi1,
+                                        "rsi_h4": rsi4,
+                                        "rsi_peak": peak,
+                                    },
+                                )
                                 if ev and _allow_notify(symbol, str(ev.get("kind") or ev.get("event"))):
                                     await send_proactive(
                                         str(ev.get("event") or EVENT_TRADE_UPDATE),
-                                        str(ev.get("message") or ""),
-                                        stream="general",
+                                        fmt_agent_line("lev", str(ev.get("message") or "")),
+                                        stream=TRADE_UPDATE_STREAM,
+                                        kind=str(ev.get("kind") or ""),
+                                        symbol=symbol,
+                                        sl=ev.get("trail_sl"),
                                     )
                                     if str(ev.get("event")) == EVENT_TRADE_CLOSED:
                                         signal_update(
@@ -5406,6 +5492,64 @@ EV позитивне: {prob.get('ev_positive', '')}
                             rprice = float((rh1[-1] or {}).get("close") or 0.0)
                         except Exception:
                             rprice = 0.0
+                        try:
+                            for tf_name, bars in (
+                                ("M5", rm5 if isinstance(rm5, list) else []),
+                                ("M15", rm15 if isinstance(rm15, list) else []),
+                            ):
+                                if len(bars) < 22:
+                                    continue
+                                pd = evaluate_pump_dump(
+                                    candles=bars,
+                                    daily=rd1 if isinstance(rd1, list) else None,
+                                )
+                                if not pd.get("signal"):
+                                    continue
+                                rsi1 = rsi_from_candles(rh1 if isinstance(rh1, list) else [])
+                                rsi4 = rsi_from_candles(rh4 if isinstance(rh4, list) else [])
+                                heat = rsi_heat(
+                                    direction=str(pd.get("direction") or ""),
+                                    rsi_h1=rsi1,
+                                    rsi_h4=rsi4,
+                                )
+                                if not heat.get("allow_market"):
+                                    print(
+                                        f"[pump] {rsym} {pd.get('signal')} blocked RSI "
+                                        f"{heat.get('kind')} {heat.get('message')}"
+                                    )
+                                    continue
+                                ptxt = format_pump_card(rsym, tf_name, pd)
+                                if await _try_signal_feed(rsym, ptxt, f"pump-{tf_name.lower()}"):
+                                    print(f"[pump] {rsym} {pd.get('signal')} {tf_name}")
+                                    break
+                            hunt = evaluate_ict_hunter(
+                                candles=rm15 if isinstance(rm15, list) else rh1,
+                                timeframe="M15",
+                                daily=rd1 if isinstance(rd1, list) else None,
+                            )
+                            if hunt.get("signal"):
+                                htxt = format_signal_steer_card(
+                                    symbol=rsym,
+                                    direction=str(hunt.get("direction") or ""),
+                                    timeframe="M15",
+                                    entry=hunt.get("close"),
+                                    sl=None,
+                                    tp1=None,
+                                    setup_type="HUNTER",
+                                    score=hunt.get("score"),
+                                    min_score=hunt.get("min_score"),
+                                    score_max=20,
+                                    ote_model="Hunter OTE 0.5 / EQ 0.786",
+                                    patterns=hunt.get("patterns"),
+                                )
+                                # Без стопа Hunter-картку не шлемо як вхід — лише якщо є патерни в pump/radar.
+                                if hunt.get("patterns"):
+                                    print(
+                                        f"[hunter] {rsym} score {hunt.get('score')}/{hunt.get('min_score')} "
+                                        f"{hunt.get('patterns')}"
+                                    )
+                        except Exception as exc_pd:
+                            print(f"[pump] {rsym}: {type(exc_pd).__name__}: {exc_pd}")
                         r_used = None
                         try:
                             r_atr = fetch_atr_context(rsym) or {}

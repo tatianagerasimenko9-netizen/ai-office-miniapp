@@ -694,16 +694,40 @@ def format_signal_steer_card(
     reentry: bool = False,
     sweep_note: str = "",
     sc_plan: Optional[Dict[str, Any]] = None,
+    setup_type: str = "",
+    score: Any = None,
+    min_score: Any = None,
+    score_max: Any = None,
+    size_line: str = "",
+    ote_model: str = "",
+    patterns: Any = None,
 ) -> str:
     from office_telegram_filter import format_px
+    from office_position_size import plan_position_size
 
     side = str(direction or "").upper()
     tf = str(timeframe or "H1").upper()
+    kind = str(setup_type or "").upper().strip()
     title = f"🔁 ПОВТОРНИЙ {side} · {symbol} · {tf}" if reentry else f"{side} · {symbol} · {tf}"
     lines = [title]
+    if kind in ("PUMP", "DUMP"):
+        lines.append(f"Тип: {kind}")
+    elif kind:
+        lines.append(f"Тип: {kind}")
+    if score is not None:
+        mx = score_max if score_max is not None else (18 if kind in ("PUMP", "DUMP") else 20)
+        extra = f" (поріг {min_score})" if min_score is not None else ""
+        lines.append(f"Бали: {int(float(score))}/{int(float(mx))}{extra}")
+    if patterns:
+        names = [str(x) for x in patterns if x]
+        if names:
+            lines.append("Патерни: " + ", ".join(names))
     if sweep_note:
         lines.append(sweep_note)
-    lines.extend(format_sc_plan_lines(sc_plan, direction=side))
+    if kind not in ("PUMP", "DUMP"):
+        lines.extend(format_sc_plan_lines(sc_plan, direction=side))
+    elif ote_model:
+        lines.append(f"Модель рівнів: {ote_model}")
     if trigger:
         lines.append(trigger)
     else:
@@ -713,6 +737,12 @@ def format_signal_steer_card(
         + (f" · TP2: {format_px(tp2)}" if tp2 is not None else "")
         + (f" · TP3: {format_px(tp3)}" if tp3 is not None else "")
     )
+    sized = str(size_line or "").strip()
+    if not sized:
+        mn = min_score if min_score is not None else (10 if kind in ("PUMP", "DUMP") else 8)
+        sized = str(plan_position_size(entry=entry, sl=sl, score=score, min_score=mn).get("line") or "")
+    if sized:
+        lines.append(sized)
     lines.append("Картка сетапу, не ордер. Угода лише через /position.")
     return "\n".join(lines)
 
@@ -964,6 +994,77 @@ def _hit_sl(side: str, price: float, sl: float) -> bool:
     return price >= sl
 
 
+def protected_profit_pct(*, direction: str, entry: Any, sl: Any) -> Optional[float]:
+    """Скільки % від входу вже закрито стопом (BE/трейл)."""
+    e, s = _f(entry), _f(sl)
+    if e is None or s is None or e <= 0:
+        return None
+    side = str(direction or "").upper()
+    if side == "LONG":
+        return (s - e) / e * 100.0
+    if side == "SHORT":
+        return (e - s) / e * 100.0
+    return None
+
+
+def format_trade_update_card(
+    *,
+    symbol: str,
+    direction: str,
+    headline: str,
+    lines: Optional[List[str]] = None,
+) -> str:
+    """Кожен TRADE_UPDATE: символ і напрям першим рядком. Без жаргону M15 HL/LH."""
+    side = str(direction or "").upper()
+    head = f"📍 {str(symbol or '').upper()} {side} · {headline.strip()}"
+    body = [x for x in (lines or []) if str(x).strip()]
+    return "\n".join([head] + body)
+
+
+def format_trail_update(
+    *,
+    symbol: str,
+    direction: str,
+    new_sl: Any,
+    old_sl: Any,
+    entry: Any = None,
+) -> str:
+    from office_telegram_filter import format_px
+
+    side = str(direction or "").upper()
+    move_ua = "стоп вище" if side == "LONG" else "стоп нижче"
+    ns, os_ = format_px(new_sl), format_px(old_sl)
+    lines = [f"SL: {ns}" + (f" (було {os_})" if os_ and os_ != ns else "")]
+    prot = protected_profit_pct(direction=side, entry=entry, sl=new_sl)
+    if prot is not None:
+        sign = "+" if prot >= 0 else ""
+        lines.append(f"Прибуток захищено: {sign}{prot:.1f}%")
+    return format_trade_update_card(symbol=symbol, direction=side, headline=move_ua, lines=lines)
+
+
+def format_hold_update(*, symbol: str, direction: str, sl: Any) -> str:
+    from office_telegram_filter import format_px
+
+    return format_trade_update_card(
+        symbol=symbol,
+        direction=direction,
+        headline="рух продовжується",
+        lines=[f"Тримай, SL {format_px(sl)}"],
+    )
+
+
+def sl_price_changed(old_sl: Any, new_sl: Any) -> bool:
+    from office_telegram_filter import format_px
+
+    a, b = format_px(old_sl), format_px(new_sl)
+    if not a or not b:
+        o, n = _f(old_sl), _f(new_sl)
+        if o is None or n is None:
+            return n is not None
+        return abs(o - n) > 1e-12
+    return a != b
+
+
 def next_manage_event(
     book: ManageBook,
     *,
@@ -972,6 +1073,9 @@ def next_manage_event(
     high: Any = None,
     low: Any = None,
     ignore_sl: bool = False,
+    rsi_h1: Any = None,
+    rsi_h4: Any = None,
+    exhaustion: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Одне повідомлення лише при зміні стану. Не ордер."""
     px = _f(price)
@@ -1006,10 +1110,14 @@ def next_manage_event(
         return {
             "event": "TRADE_UPDATE",
             "kind": "TP1",
-            "message": (
-                f"✅ TP1 · {book.symbol} {side}\n"
-                "Закрий 50–70% позиції зараз\n"
-                f"Перестав SL в беззбиток: {book.entry}"
+            "message": format_trade_update_card(
+                symbol=book.symbol,
+                direction=side,
+                headline="TP1",
+                lines=[
+                    "Закрий 50–70% позиції зараз",
+                    f"Перестав SL в беззбиток: {book.entry}",
+                ],
             ),
             "state": book.state,
         }
@@ -1027,15 +1135,21 @@ def next_manage_event(
                 book.extras["arm_extreme"] = max(r["high"] for r in rows)
             else:
                 book.extras["arm_extreme"] = min(r["low"] for r in rows)
-        extra = f"\nTP3: {book.tp3}" if book.tp3 is not None else ""
+        extra = f"TP3: {book.tp3}" if book.tp3 is not None else ""
+        tp2_lines = [
+            "Закрий ще частину",
+            f"SL в беззбиток {book.trail_sl}, далі підтягую стоп за рухом",
+        ]
+        if extra:
+            tp2_lines.append(extra)
         return {
             "event": "TRADE_UPDATE",
             "kind": "TP2",
-            "message": (
-                f"✅ TP2 · {book.symbol} {side}\n"
-                "Закрий ще частину\n"
-                f"SL в BE {book.trail_sl}, далі трейл за M15 HL/LH після нового екстремуму"
-                f"{extra}"
+            "message": format_trade_update_card(
+                symbol=book.symbol,
+                direction=side,
+                headline="TP2",
+                lines=tp2_lines,
             ),
             "state": book.state,
         }
@@ -1059,23 +1173,38 @@ def next_manage_event(
             fallback=book.trail_sl,
         )
         if new_trail is not None and book.trail_sl is not None:
-            moved = (side == "LONG" and new_trail > book.trail_sl) or (
-                side == "SHORT" and new_trail < book.trail_sl
+            old_sl = float(book.trail_sl)
+            moved = (side == "LONG" and new_trail > old_sl) or (
+                side == "SHORT" and new_trail < old_sl
             )
-            if moved:
+            if moved and sl_price_changed(old_sl, new_trail):
+                last_sent = book.extras.get("last_sent_sl")
+                if last_sent is not None and not sl_price_changed(last_sent, new_trail):
+                    print(
+                        f"[steer] trail same SL {book.symbol} {new_trail} — тільки лог"
+                    )
+                    return None
                 book.trail_sl = float(new_trail)
                 book.state = "TRAIL"
-                if book.last_event == "TRAIL" and abs(new_trail - float(book.extras.get("last_trail") or 0)) < 1e-12:
-                    return None
                 book.extras["last_trail"] = new_trail
+                book.extras["last_sent_sl"] = new_trail
                 book.last_event = "TRAIL"
                 return {
                     "event": "TRADE_UPDATE",
                     "kind": "TRAIL",
-                    "message": f"Трейлінг: SL переставлено на {new_trail} (M15 HL/LH)",
+                    "message": format_trail_update(
+                        symbol=book.symbol,
+                        direction=side,
+                        new_sl=new_trail,
+                        old_sl=old_sl,
+                        entry=book.entry,
+                    ),
                     "state": book.state,
                     "trail_sl": float(new_trail),
+                    "old_sl": old_sl,
                 }
+            if moved and not sl_price_changed(old_sl, new_trail):
+                print(f"[steer] trail unchanged display {book.symbol} {new_trail}")
         if m15_continuation(direction=side, candles_m15=candles_m15):
             if book.last_event == "HOLD":
                 return None
@@ -1083,7 +1212,7 @@ def next_manage_event(
             return {
                 "event": "TRADE_UPDATE",
                 "kind": "HOLD",
-                "message": f"Відкат відпрацьовано, рух продовжується. Тримай, SL {sl_now}",
+                "message": format_hold_update(symbol=book.symbol, direction=side, sl=sl_now),
                 "state": book.state,
             }
 
@@ -1098,6 +1227,73 @@ def next_manage_event(
             "message": f"{book.symbol} закрито по TP3 {book.tp3}.",
             "state": book.state,
         }
+
+    # RSI-перегрів і PUMP continuation/добір — лише зміна стану, без спаму.
+    try:
+        from office_rsi_heat import rsi_heat
+
+        heat = rsi_heat(
+            direction=side,
+            rsi_h1=rsi_h1,
+            rsi_h4=rsi_h4,
+            in_position=True,
+            exhaustion=bool(exhaustion),
+        )
+        if heat.get("fix_partial") and book.last_event != "RSI_EXTREME":
+            book.last_event = "RSI_EXTREME"
+            book.extras["rsi_peak"] = heat.get("peak")
+            book.extras["rsi_floor"] = heat.get("floor")
+            return {
+                "event": "TRADE_UPDATE",
+                "kind": "RSI_EXTREME",
+                "message": format_trade_update_card(
+                    symbol=book.symbol,
+                    direction=side,
+                    headline="фіксуй частину",
+                    lines=[str(heat.get("message") or "підтягни стоп")],
+                ),
+                "state": book.state,
+            }
+    except Exception:
+        pass
+    setup = str(book.extras.get("setup_type") or "").upper()
+    rows = _bars(candles_m15)
+    last_c = rows[-1] if rows else None
+    hist_n = int(book.extras.get("manage_bars") or 0)
+    book.extras["manage_bars"] = hist_n + 1
+    if setup in ("PUMP", "DUMP") and last_c is not None and hist_n >= 1:
+        try:
+            from office_pump_dump import pump_add_retest, pump_continuation
+
+            if book.state in ("TP1", "TP2", "TRAIL") and pump_continuation(
+                direction=side, entry=book.entry, candle=last_c, candles=rows
+            ):
+                if book.last_event != "CONT":
+                    book.last_event = "CONT"
+                    return {
+                        "event": "TRADE_UPDATE",
+                        "kind": "CONT",
+                        "message": format_hold_update(
+                            symbol=book.symbol, direction=side, sl=sl_now
+                        ),
+                        "state": book.state,
+                    }
+            if pump_add_retest(direction=side, entry=book.entry, candle=last_c, candles=rows):
+                if book.last_event != "ADD":
+                    book.last_event = "ADD"
+                    return {
+                        "event": "TRADE_UPDATE",
+                        "kind": "ADD",
+                        "message": format_trade_update_card(
+                            symbol=book.symbol,
+                            direction=side,
+                            headline="добір",
+                            lines=["Ретест входу на об'ємі — добір дозволений"],
+                        ),
+                        "state": book.state,
+                    }
+        except Exception:
+            pass
     return None
 
 
