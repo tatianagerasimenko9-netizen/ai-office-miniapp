@@ -265,7 +265,10 @@ def run_t6_backtest(
     *,
     commission_pct: float = 0.0004,
     slippage_pct: float = 0.0005,
+    decision_stride: int = 1,
 ) -> BacktestReport:
+    if decision_stride < 1:
+        raise ValueError("decision_stride must be >= 1")
     data = load_ohlcv_file(path)
     symbol = str(data["symbol"])
     daily_all = data["timeframes"]["1d"]
@@ -318,6 +321,8 @@ def run_t6_backtest(
             continue
 
         if len(m15) < 1 or not daily or not h1:
+            continue
+        if i % decision_stride:
             continue
         price = float(bar["close"])
         day_used = day_used_pct_offline(daily)
