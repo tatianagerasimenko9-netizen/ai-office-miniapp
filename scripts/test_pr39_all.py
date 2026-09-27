@@ -329,7 +329,7 @@ def main() -> int:
         return _fail(f"signal {sig}")
     if "Позиція: немає" in sig or "Entry:" in sig or "BSL знято" in sig:
         return _fail("signal extras")
-    if "після закриття" not in sig:
+    if "чекаю відкат" not in sig.lower() or "RR 1:" in sig:
         return _fail(f"entry unexplained {sig}")
 
     impulse_up = [

@@ -84,6 +84,7 @@ def main() -> int:
     if format_radar_card(no_confirm).strip():
         return _fail("watching must not be a chat card")
 
+    _noon = datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc)  # 13:00 Київ, не 09/15
     ok = evaluate_radar(
         symbol="BTCUSDT",
         price=10.0,
@@ -92,6 +93,7 @@ def main() -> int:
         m15_candles=[_c(9.9, 10.2, 9.9, 10.2)],
         day_used_pct=40.0,
         in_kill_zone=True,
+        utc_now=_noon,
     )
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"confirmed signal {ok.status} {ok.reason}")
