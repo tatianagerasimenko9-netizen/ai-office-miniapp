@@ -53,3 +53,5 @@ jobs:
         run: |
           python scripts/test_review_position.py
           python scripts/test_bot_action_blocked.py
+      - name: Persistent delivery ledger (temporary SQLite, no Telegram)
+        run: python scripts/test_telegram_delivery_ledger.py
