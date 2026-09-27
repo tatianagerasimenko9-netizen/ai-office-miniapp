@@ -48,6 +48,10 @@ def download(symbol: str, interval: str, start_ms: int, end_ms: int):
             raise RuntimeError("non-progressing Binance kline pagination")
         cursor = next_cursor
         time.sleep(0.12)
+    if rows and int(datetime.fromisoformat(rows[0]["ts"]).timestamp() * 1000) != start_ms:
+        raise RuntimeError(f"missing first {symbol} {interval} candle")
+    if rows and int(datetime.fromisoformat(rows[-1]["ts"]).timestamp() * 1000) + INTERVAL_MS[interval] != end_ms:
+        raise RuntimeError(f"missing last {symbol} {interval} candle")
     if not rows:
         raise RuntimeError(f"no real {symbol} {interval} candles in requested range")
     if any(int(datetime.fromisoformat(b["ts"]).timestamp() * 1000) -
@@ -72,6 +76,8 @@ def main():
     if end_ms > int(time.time() * 1000):
         raise ValueError("end must be in the past: closed candles only")
     start_ms = int(start.timestamp() * 1000)
+    if any(start_ms % duration or end_ms % duration for duration in INTERVAL_MS.values()):
+        raise ValueError("start/end must align to UTC daily boundaries for complete D1/H1/M15")
     data = {
         "symbol": args.symbol,
         "source": f"Binance USD-M {API}; UTC [{start.isoformat()}, {end.isoformat()})",
