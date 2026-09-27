@@ -30,6 +30,7 @@ from office_alert_gate import (  # noqa: E402
 from office_bridge import (  # noqa: E402
     POSITION_CONFIRM_REASON,
     init_office_db,
+    is_confirmed_position_row,
     journal_close_trade,
     journal_open_trade,
     signal_upsert,
@@ -138,6 +139,29 @@ def main() -> int:
     if add.get("send"):
         return _fail(add)
     print("OK ZONE_REACHED/CONFIRMED без позиції не створюють entry/добір")
+
+    # Neither a pos- ID nor a legacy setup label proves an owner /position.
+    for reason, setup, tid in (
+        ("", "T1_MY_POSITION", "pos-forged"),
+        ("desk enter after agent chain", "T1_MY_POSITION", "pos-desk"),
+        ("", "", "pos-only"),
+        ("explicit /position by owner (unverified)", "T1_MY_POSITION", "pos-ambiguous"),
+    ):
+        if is_confirmed_position_row(reason, setup, tid):
+            return _fail(("unverified position accepted", reason, setup, tid))
+    journal_open_trade(
+        db,
+        trade_id="pos-forged",
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        entry_price=0.07111,
+        stop_loss=0.072504,
+        setup_name="T1_MY_POSITION",
+        entry_reason="desk enter after agent chain",
+    )
+    if get_explicit_open_position(db, "MANTAUSDT", "SHORT").get("ok"):
+        return _fail("forged pos- ID/setup granted verified position")
+    print("OK pos- ID and T1_MY_POSITION alone cannot authorize /position")
 
     journal_open_trade(
         db,
