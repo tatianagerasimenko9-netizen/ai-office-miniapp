@@ -189,7 +189,7 @@ from office_telegram_policy import (
     finish_trade_telegram,
     trade_update_streams,
 )
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, renew_delivery
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
@@ -3002,6 +3002,27 @@ async def run() -> None:
                 finish_trade_telegram(key=dedup_key, delivered=False)
                 print(f"[relay] silent persistent duplicate {ev} {kind}")
                 return None
+        ledger_heartbeat = None
+        ledger_heartbeat_stop = asyncio.Event()
+        if ledger_token:
+            async def _renew_telegram_lease() -> None:
+                while not ledger_heartbeat_stop.is_set():
+                    try:
+                        await asyncio.wait_for(ledger_heartbeat_stop.wait(), timeout=30.0)
+                        return
+                    except asyncio.TimeoutError:
+                        pass
+                    try:
+                        renewed = await asyncio.to_thread(
+                            renew_delivery, db_path, dedup_key, ledger_token,
+                        )
+                        if not renewed:
+                            print("[relay] ERROR Telegram lease lost during send")
+                            return
+                    except Exception as exc:
+                        print(f"[relay] ERROR Telegram lease renewal: {type(exc).__name__}: {exc}")
+                        return
+            ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
         delivered_id = None
         try:
             if ev == EVENT_SIGNAL_ENTRY:
@@ -3043,6 +3064,12 @@ async def run() -> None:
             return delivered_id
 
         finally:
+            ledger_heartbeat_stop.set()
+            if ledger_heartbeat is not None:
+                try:
+                    await ledger_heartbeat
+                except Exception as exc:
+                    print(f"[relay] ERROR Telegram heartbeat shutdown: {type(exc).__name__}: {exc}")
             ledger_committed = not ledger_enabled or not dedup_key
             if ledger_token:
                 try:
