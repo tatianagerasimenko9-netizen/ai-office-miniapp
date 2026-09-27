@@ -101,6 +101,7 @@ def chart_levels(
     bucket_40: Any = None,
     last_price: Any = None,
     status: str = "",
+    footer: str = "",
 ) -> Dict[str, Any]:
     return {
         "sl": _f(sl),
@@ -119,6 +120,7 @@ def chart_levels(
         "bucket_40": _f(bucket_40),
         "last_price": _f(last_price),
         "status": str(status or ""),
+        "footer": str(footer or ""),
     }
 
 
@@ -182,84 +184,97 @@ def render_signal_chart(
         f"office_chart_{str(symbol or 'SYM').upper()}_{os.getpid()}.png",
     )
     title = f"{str(symbol or '').upper()} {str(direction or '').upper()}".strip()
+    status = str(lv.get("status") or "WATCHING").strip() or "WATCHING"
     try:
-        panels: List[Tuple[str, Any]] = []
-        if len(h1) >= 8:
-            panels.append(("H1", _to_frame(h1[-48:])))
         if len(m15) >= 8:
-            panels.append(("M15", _to_frame(m15[-96:])))
-        if not panels:
-            return empty
-        n = len(panels)
-        fig = mpf.figure(figsize=(11.2, 4.2 * n + 0.6), style="nightclouds")
-        axes = [fig.add_subplot(n, 1, i + 1) for i in range(n)]
+            lab, df = "M15", _to_frame(m15[-96:])
+        else:
+            lab, df = "H1", _to_frame(h1[-48:])
+        fig = mpf.figure(figsize=(10.2, 7.2), style="nightclouds")
+        ax = fig.add_subplot(1, 1, 1)
         ys, cols, styles = _hlines(lv)
         hline_kw: Dict[str, Any] = {}
         if ys:
             hline_kw = {
                 "hlines": dict(hlines=ys, colors=cols, linestyle=styles, linewidths=1.1),
             }
-        fill_kw = None
         sc_lo, sc_hi = _f(lv.get("sc_low")), _f(lv.get("sc_high"))
         en_lo, en_hi = _f(lv.get("entry_low")), _f(lv.get("entry_high"))
         fills = []
-        if sc_lo is not None and sc_hi is not None and sc_hi > sc_lo:
-            fills.append(dict(y1=sc_lo, y2=sc_hi, alpha=0.18, color="#7c4dff"))
         if en_lo is not None and en_hi is not None and abs(en_hi - en_lo) > 0:
             lo, hi = (en_lo, en_hi) if en_lo <= en_hi else (en_hi, en_lo)
-            fills.append(dict(y1=lo, y2=hi, alpha=0.28, color="#00e5a0"))
-        for i, (lab, df) in enumerate(panels):
-            kw = dict(type="candle", ax=axes[i], axtitle=f"{title} · {lab}", xrotation=20, datetime_format="%m-%d %H:%M")
-            if i == n - 1 and hline_kw:
-                kw.update(hline_kw)
-            if i == n - 1 and fills:
-                kw["fill_between"] = fills if len(fills) > 1 else fills[0]
-            mpf.plot(df, **kw)
-        ax = axes[-1]
+            fills.append(dict(y1=lo, y2=hi, alpha=0.28, color="#c9a227"))
+        kw = dict(
+            type="candle",
+            ax=ax,
+            axtitle="",
+            xrotation=18,
+            datetime_format="%m-%d %H:%M",
+            ylabel="",
+        )
+        if hline_kw:
+            kw.update(hline_kw)
+        if fills:
+            kw["fill_between"] = fills if len(fills) > 1 else fills[0]
+        mpf.plot(df, **kw)
         last_px = _f(lv.get("last_price"))
         en_mid = None
         if en_lo is not None and en_hi is not None:
             en_mid = (float(en_lo) + float(en_hi)) / 2.0
+        x_end = max(len(df.index) - 1, 0)
+        def _lab(y, name, col):
+            if y is None:
+                return
+            ax.text(
+                x_end + 0.4,
+                y,
+                name,
+                color=col,
+                fontsize=9,
+                va="center",
+                clip_on=False,
+            )
+        _lab(_f(lv.get("sl")), "SL", "#ff3b6b")
+        _lab(_f(lv.get("tp1")), "TP1", "#00c853")
+        _lab(_f(lv.get("tp2")), "TP2", "#00e5a0")
+        ax.set_title(
+            f"{title} · {lab} · {status}",
+            color="#e8eaed",
+            fontsize=13,
+            fontweight="bold",
+            pad=10,
+        )
         if last_px is not None:
             ax.axhline(last_px, color="#ffd54f", linewidth=1.0, linestyle=":")
             try:
-                x_end = len(panels[-1][1].index) - 1
                 ax.annotate(
                     "ціна",
                     xy=(x_end, last_px),
-                    xytext=(max(0, x_end - 8), last_px),
+                    xytext=(max(0, x_end - 10), last_px),
                     color="#ffd54f",
                     fontsize=8,
-                    arrowprops=dict(arrowstyle="->", color="#ffd54f") if en_mid is None else None,
                 )
                 if en_mid is not None:
                     lo_z = min(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
                     hi_z = max(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
                     outside = last_px > hi_z or last_px < lo_z
-                    ax.annotate(
-                        "очікуваний відкат до зони" if outside else "зона",
-                        xy=(x_end, en_mid),
-                        xytext=(max(0, x_end - 6), last_px),
-                        color="#00e5a0",
-                        fontsize=8,
-                        arrowprops=dict(arrowstyle="->", color="#00e5a0"),
-                    )
+                    if outside:
+                        ax.annotate(
+                            "очікуваний відкат до зони",
+                            xy=(x_end, en_mid),
+                            xytext=(max(0, x_end - 18), last_px),
+                            color="#c9a227",
+                            fontsize=8,
+                            arrowprops=dict(arrowstyle="->", color="#c9a227"),
+                        )
             except Exception:
                 pass
-        badge = str(lv.get("status") or "").strip()
-        if badge:
-            ax.text(
-                0.01,
-                0.97,
-                badge,
-                transform=ax.transAxes,
-                color="#0d1117",
-                fontsize=9,
-                fontweight="bold",
-                va="top",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="#00e5a0", edgecolor="none"),
-            )
-        fig.savefig(path, dpi=110, bbox_inches="tight", facecolor="#0d1117")
+        footer = str(lv.get("footer") or "").strip() or (
+            f"Чому: структура {lab}. Чого чекаю: відкат у зону. "
+            f"Що скасує: закриття за SL. DEMO/OFFLINE, не Live."
+        )
+        fig.text(0.03, 0.02, footer[:420], color="#8b919c", fontsize=8, va="bottom", wrap=True)
+        fig.savefig(path, dpi=120, bbox_inches="tight", facecolor="#0d1117")
         import matplotlib.pyplot as plt
 
         plt.close(fig)

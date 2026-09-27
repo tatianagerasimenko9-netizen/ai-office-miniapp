@@ -939,7 +939,7 @@ def format_confirm_card(*, symbol: str, direction: str, price: Any, detail: str)
 
     side = str(direction or "").upper()
     return (
-        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {format_px(price, symbol)}\n"
+        f"✅ {str(symbol).upper()} {side} · сценарій підтверджено (не /position) · {format_px(price, symbol)}\n"
         f"Підтвердження: {detail}"
     )
 

@@ -160,6 +160,9 @@ def main() -> int:
         position_id=rec["trade_id"],
         position_open=True,
         event_type="TRADE_UPDATE",
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if not g_tp1.get("send"):
         return _fail(f"tp1 with /position {g_tp1}")
@@ -170,6 +173,9 @@ def main() -> int:
         position_id=rec["trade_id"],
         position_open=True,
         event_type="TRADE_CLOSED",
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if not g_sl.get("send"):
         return _fail(f"sl with /position {g_sl}")
@@ -180,6 +186,9 @@ def main() -> int:
         in_position=True,
         position_id=rec["trade_id"],
         position_open=True,
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if not g_tr.get("send"):
         return _fail(f"trail {g_tr}")
@@ -190,6 +199,9 @@ def main() -> int:
         in_position=True,
         position_id=rec["trade_id"],
         position_open=True,
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if not g_tp2.get("send"):
         return _fail(f"tp2 {g_tp2}")
@@ -210,6 +222,9 @@ def main() -> int:
         in_position=True,
         position_id="pos-manta-1",
         position_open=True,
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if g_fake.get("send"):
         return _fail("substring /position must not grant entry")
@@ -231,7 +246,10 @@ def main() -> int:
         text=tp1,
         in_position=True,
         position_id="pos-manta-1",
-        position_open=False,
+        position_open=True,
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if g_closed.get("send"):
         return _fail("closed position instructions")
@@ -241,8 +259,10 @@ def main() -> int:
         in_position=True,
         position_id="pos-unknown",
         position_open=True,
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
-    # id without live OPEN still send at gate if caller lies; caller must pass position_open from get_explicit
     rec_u = get_explicit_open_position(db, "MANTAUSDT", "SHORT")
     g_unk2 = gate_outbound_telegram(
         intent="POSITION_MANAGE",
@@ -250,6 +270,9 @@ def main() -> int:
         in_position=bool(rec_u.get("ok")),
         position_id=str(rec_u.get("trade_id") or ""),
         position_open=bool(rec_u.get("open")),
+        db_path=db,
+        symbol="MANTAUSDT",
+        direction="SHORT",
     )
     if g_unk2.get("send"):
         return _fail("unknown/closed via lookup")

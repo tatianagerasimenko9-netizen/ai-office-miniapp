@@ -255,6 +255,8 @@ def text_instructs_position_change(text: str) -> bool:
         return True
     if "sl в беззбиток" in low:
         return True
+    if "позиція закрита" in low or "позицію закрито" in low:
+        return True
     return False
 
 
@@ -283,6 +285,8 @@ def get_explicit_open_position(
             "trade_id": tid,
             "symbol": want,
             "direction": str(p.get("direction") or "").upper(),
+            "entry": p.get("entry"),
+            "sl": p.get("sl"),
             "reason": "OPEN /position",
         }
     return {**deny, "reason": "немає відкритої /position"}
@@ -305,21 +309,70 @@ def gate_outbound_telegram(
     position_id: str = "",
     position_open: bool = False,
     event_type: str = "",
+    db_path: str = "",
+    symbol: str = "",
+    direction: str = "",
 ) -> Dict[str, Any]:
-    """Право на Telegram: intent + verified /position, не слова в тексті.
+    """Право на Telegram: typed intent + актуальна /position з БД.
 
+    Caller-прапорці in_position/is_open не є джерелом істини.
     ENTRY/ADD_ON/ZONE ніколи не стають дозволом на вхід.
-    POSITION_MANAGE лише при підтвердженій відкритій /position.
-    Невідомий тип/id/статус + наказ змінити позицію → fail-closed.
+    EVENT_SIGNAL_ENTRY без intent SIGNAL — fail-closed (і PNG теж).
     """
     intent_u = str(intent or "").strip().upper()
     ev = str(event_type or "").strip().upper()
     deny = {"send": False, "opens_position": False}
     entry_lang = text_grants_entry(text)
     pos_lang = text_instructs_position_change(text)
-    verified = position_verified(
+
+    live: Dict[str, Any] = {}
+    if db_path:
+        live = get_explicit_open_position(db_path, symbol, direction)
+        if live.get("ok"):
+            in_position = True
+            position_open = True
+            position_id = str(live.get("trade_id") or position_id or "")
+        else:
+            in_position = False
+            position_open = False
+    elif intent_u in (
+        INTENT_POSITION,
+        "TP",
+        "SL",
+        "TRAIL",
+        "BE",
+        "TP1",
+        "HIT_SL",
+        "HIT_TP1",
+        "POSITION_MANAGE",
+        "TRADE_CLOSED",
+    ) or pos_lang:
+        return {
+            **deny,
+            "reason": "POSITION_MANAGE без db_path — fail-closed, прапорці caller не діють",
+        }
+
+    verified = bool(live.get("ok")) if db_path else position_verified(
         in_position=in_position, position_id=position_id, position_open=position_open
     )
+
+    if ev in ("SIGNAL_ENTRY", "EVENT_SIGNAL_ENTRY") or intent_u in (
+        "SIGNAL",
+        "LEV_SIGNAL",
+        "SIGNAL_ENTRY",
+    ):
+        if intent_u not in ("SIGNAL", "LEV_SIGNAL"):
+            return {
+                **deny,
+                "reason": "EVENT_SIGNAL_ENTRY без typed intent SIGNAL — fail-closed",
+            }
+        if pos_lang or entry_lang:
+            return {**deny, "reason": "картка SIGNAL не може наказувати ордер або вхід"}
+        return {
+            "send": True,
+            "reason": "перевірений сценарій Лева (не /position)",
+            "opens_position": False,
+        }
 
     if intent_u in (INTENT_ZONE, "ZONE_REACHED", INTENT_HIT_ENTRY, "HIT_ENTRY"):
         return {**deny, "reason": "зона/HIT_ENTRY не шле дозвіл на вхід і не супроводить позицію"}

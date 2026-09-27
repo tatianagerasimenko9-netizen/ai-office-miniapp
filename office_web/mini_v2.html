@@ -62,24 +62,28 @@ const $=id=>document.getElementById(id);
 const app=$('app');
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
 const S={tf:localStorage.getItem('ao_tf')||'H1', ch:localStorage.getItem('ao_ch')==='1'};
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:-]/g,'');}
 function j(url){return fetch(url,{cache:'no-store'}).then(r=>r.json());}
 function dirC(d){return String(d||'').toUpperCase()==='SHORT'?'dir-s':'dir-l';}
-function money(x){if(x==null||x==='')return '—'; const n=Number(x); if(!isFinite(n))return String(x);
+function money(x){if(x==null||x==='')return '—'; const n=Number(x); if(!isFinite(n))return '—';
   if(Math.abs(n)>=1000) return n.toLocaleString('uk-UA',{maximumFractionDigits:1});
   if(Math.abs(n)<1) return n.toFixed(4); return String(Math.round(n*100)/100);}
 function scRow(s){
-  const life=(s.lifecycle&&s.lifecycle.ua)||s.status_raw||'';
-  const st=s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони';
-  return `<div class="card" data-id="${s.scenario_id||''}">
+  const life=esc((s.lifecycle&&s.lifecycle.ua)||s.status_raw||'');
+  const st=esc(s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони');
+  const id=sid(s.scenario_id);
+  const note=s.analysis_note?`<div class="mut">${esc(s.analysis_note)}</div>`:'';
+  return `<div class="card" data-id="${esc(id)}">
     <div class="sc">
       <div style="flex:1;min-width:0">
-        <b>${s.symbol||''}</b> <span class="${dirC(s.direction)}">${s.direction||''}</span>
+        <b>${esc(s.symbol||'')}</b> <span class="${dirC(s.direction)}">${esc(s.direction||'')}</span>
         <span class="pill">${life}</span>
-        ${s.grade?`<span class="pill on">збіги ${s.grade}</span>`:''}
-        <div class="mut">${st}</div>
-        <div class="mut">зона ${money(s.zone_lo)}–${money(s.zone_hi)} · SL ${money(s.sl)} · TP1 ${money(s.tp1)}
-          ${s.potential_pct!=null?` · +${s.potential_pct}%`:''}
-          ${s.rr!=null?` · ${s.rr}R`:''}</div>
+        ${s.grade?`<span class="pill on">збіги ${esc(s.grade)}</span>`:''}
+        <div class="mut">${st}</div>${note}
+        <div class="mut">зона ${esc(money(s.zone_lo))}–${esc(money(s.zone_hi))} · SL ${esc(money(s.sl))} · TP1 ${esc(money(s.tp1))}
+          ${s.potential_pct!=null?` · +${esc(s.potential_pct)}%`:''}
+          ${s.rr!=null?` · ${esc(s.rr)}R`:''}</div>
       </div>
     </div></div>`;
 }
@@ -88,13 +92,13 @@ async function home(){
   const [d,ov]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview')]);
   $('sub').textContent=`git ${una(d.git_sha)} · ${una(d.db_backend)} · ${d.card_note||''}`;
   const b=d.btc||{}; const sess=(d.sessions||{}).active;
-  const marks=(ov.marks||[]).map(m=>`<div class="card kpi"><div class="mut">${m.symbol}</div><b>${una(m.price)}</b>
-    <div class="mut">${m.data_status||''}</div></div>`).join('');
+  const marks=(ov.marks||[]).map(m=>`<div class="card kpi"><div class="mut">${esc(m.symbol)}</div><b>${esc(una(m.price))}</b>
+    <div class="mut">${esc(m.data_status||'')}</div></div>`).join('');
   const list=(d.scenarios||[]).map(scRow).join('') || `<div class="empty">Немає придатних сценаріїв Лева</div>`;
   app.innerHTML=`<div class="banner">Сценарій ≠ позиція. GEX/OI не live.</div>
     <div class="row">${marks||''}</div>
     <div class="row">
-      <div class="card kpi"><div class="mut">Сесія</div><b>${una(sess)}</b></div>
+      <div class="card kpi"><div class="mut">Сесія</div><b>${esc(una(sess))}</b></div>
       <div class="card kpi"><div class="mut">Придатні</div><b>${d.ready_count??0}</b></div>
       <div class="card kpi"><div class="mut">BTC 24h</div><b>${una(b.change_24h)}</b></div>
     </div>
@@ -104,15 +108,15 @@ async function home(){
 async function signals(){
   const d=await j('/api/v2/scenarios');
   const rows=(d.scenarios||[]).filter(s=>['ACTIVE','HIT_ENTRY','HIT_TP1','WATCHING'].includes(String(s.status_raw||'').toUpperCase()));
-  app.innerHTML=`<div class="banner">${d.empty_reason||'Картка сценарію. Тап — графік і деталі.'}</div>
+  app.innerHTML=`<div class="banner">${esc(d.empty_reason||'Картка сценарію. Тап — графік і деталі.')}</div>
     ${rows.map(scRow).join('')||'<div class="empty">Немає придатних сценаріїв</div>'}`;
   app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));
 }
 async function scan(){
   const d=await j('/api/v2/scanner');
   const rows=d.candidates||[];
-  const body=rows.map(c=>`<tr><td>${c.symbol}</td><td>${c.score==null?'—':c.score}</td><td>${c.rsi==null?'—':c.rsi}</td><td class="mut">${c.as_of||''}</td></tr>`).join('');
-  const empty=rows.length?'' : `<div class="empty">${d.empty_reason||'Немає фактів скану. Це не помилка мережі, якщо Worker ще не записав RSI.'}</div>`;
+  const body=rows.map(c=>`<tr><td>${esc(c.symbol)}</td><td>${c.score==null?'—':esc(c.score)}</td><td>${c.rsi==null?'—':esc(c.rsi)}</td><td class="mut">${esc(c.as_of||'')}</td></tr>`).join('');
+  const empty=rows.length?'' : `<div class="empty">${esc(d.empty_reason||'Немає фактів скану. Це не помилка мережі, якщо Worker ще не записав RSI.')}</div>`;
   app.innerHTML=`<div class="banner">Universe Worker. Без алертів. Score/RSI лише зі збережених фактів.</div>
     <div class="card"><div class="table-wrap"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>час</th></tr>${body}</table></div></div>${empty}`;
 }
@@ -125,8 +129,8 @@ async function journal(){
     <button data-k="stats">Статистика</button></div>`;
   let body='';
   if(kind==='stats'){
-    body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px">${d.message||d.note||'мало даних'}</pre>
-      <div class="mut">${d.wr_shown?'' : (d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
+    body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px">${esc(d.message||d.note||'мало даних')}</pre>
+      <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
   } else if(kind==='positions'){
     body=posHtml(d);
   } else {
@@ -139,9 +143,9 @@ async function journal(){
 }
 function posHtml(d){
   const rows=d.positions||[];
-  if(!rows.length) return `<div class="empty">${d.empty_reason||'Немає підтверджених позицій'}</div>`;
-  return rows.map(p=>`<div class="card"><b>${p.symbol}</b> ${p.direction} ${p.status}
-    <div class="mut">entry ${una(p.entry)} SL ${una(p.sl)} PnL ${p.pnl_pct==null?'немає перевіреного outcome':p.pnl_pct} · лише /position</div></div>`).join('');
+  if(!rows.length) return `<div class="empty">${esc(d.empty_reason||'Немає підтверджених позицій')}</div>`;
+  return rows.map(p=>`<div class="card"><b>${esc(p.symbol)}</b> ${esc(p.direction)} ${esc(p.status)}
+    <div class="mut">entry ${esc(una(p.entry))} SL ${esc(una(p.sl))} PnL ${p.pnl_pct==null?'немає перевіреного outcome':esc(p.pnl_pct)} · лише /position</div></div>`).join('');
 }
 async function more(){
   const [p,s]=await Promise.all([j('/api/v2/positions'), j('/api/v2/settings')]);
@@ -152,7 +156,7 @@ async function more(){
       <div>Пояс Europe/Kyiv</div>
       <div class="chips tf">${['M1','M5','M15','H1','H4','D1'].map(t=>`<button data-tf="${t}">${t}</button>`).join('')}</div>
       <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (не сигнал, MPL 2.0)</label>
-      <div class="mut" style="margin-top:8px">${s.risk_presets&&s.risk_presets.note}</div>
+      <div class="mut" style="margin-top:8px">${esc((s.risk_presets&&s.risk_presets.note)||'')}</div>
       <div class="mut">Сповіщення не підключені · auto-trading немає · ордерів немає</div>
       <div class="mut">Гейті: ATR ${JSON.stringify(s.gates||{})}</div>
     </div>`;
@@ -232,7 +236,7 @@ async function openSc(id){
   const d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));
   if(!d.ok){ app.innerHTML='<div class="empty">Сценарій недоступний</div>'; return; }
   const s=d.scenario||{};
-  const ev=(d.events||[]).map(e=>`<div class="mut">${e.ts} · ${e.type} · ${e.source}</div>`).join('') || '<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>';
+  const ev=(d.events||[]).map(e=>`<div class="mut">${esc(e.ts)} · ${esc(e.type)} · ${esc(e.source)}</div>`).join('') || '<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>';
   const hyp=d.hypothetical? '<div class="mut">Потенціал гіпотетичний. Це не PnL угоди.</div>':'';
   app.innerHTML=`<button class="pill" id="back">← назад</button>
     ${scRow(s)}
@@ -240,7 +244,7 @@ async function openSc(id){
     <div class="chips" id="tfs">${['M1','M5','M15','H1','H4','D1'].map(t=>`<button data-tf="${t}">${t}</button>`).join('')}
       <button id="fs">повний екран</button></div>
     <div id="chart" class="chart"></div>
-    <div class="card"><div class="mut">Журнал сценарію ${s.scenario_id}</div>${ev}</div>`;
+    <div class="card"><div class="mut">Журнал сценарію ${esc(s.scenario_id)}</div>${ev}</div>`;
   $('back').onclick=()=>{killPoll(); signals();};
   const el=$('chart');
   const levels={zone_lo:s.zone_lo, zone_hi:s.zone_hi, sl:s.sl, tp1:s.tp1};

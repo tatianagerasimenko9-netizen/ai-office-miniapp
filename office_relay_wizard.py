@@ -2636,7 +2636,28 @@ async def run() -> None:
         reply_to_message_id: Optional[int] = None,
         stream: str = "general",
         allow_draft: bool = False,
+        *,
+        intent: str = "",
+        event_type: str = "",
+        symbol: str = "",
+        direction: str = "",
+        skip_gate: bool = False,
     ) -> Optional[int]:
+        if not skip_gate:
+            tg = gate_outbound_telegram(
+                intent=intent or "ANALYTICAL",
+                text=message,
+                event_type=event_type or EVENT_TRADE_UPDATE,
+                db_path=db_path,
+                symbol=symbol or _extract_first_usdt_symbol(_strip_agent_tag(message)),
+                direction=direction,
+            )
+            if not tg.get("send"):
+                print(
+                    f"[relay] blocked send_office {intent or 'ANALYTICAL'}: "
+                    f"{tg.get('reason')} {str(message or '')[:160]}"
+                )
+                return None
         async def _send_single(
             text_part: str,
             *,
@@ -2744,7 +2765,28 @@ async def run() -> None:
         photo_path: str,
         caption: str,
         stream: str = "general",
+        *,
+        intent: str = "",
+        event_type: str = "",
+        symbol: str = "",
+        direction: str = "",
+        skip_gate: bool = False,
     ) -> Optional[int]:
+        if not skip_gate:
+            tg = gate_outbound_telegram(
+                intent=intent or "ANALYTICAL",
+                text=caption,
+                event_type=event_type or EVENT_TRADE_UPDATE,
+                db_path=db_path,
+                symbol=symbol or _extract_first_usdt_symbol(_strip_agent_tag(caption)),
+                direction=direction,
+            )
+            if not tg.get("send"):
+                print(
+                    f"[relay] blocked send_office_photo: {tg.get('reason')} "
+                    f"{str(caption or '')[:160]}"
+                )
+                return None
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
         token = agent_bot_tokens.get("lev") or tg_bot_token
@@ -2770,7 +2812,15 @@ async def run() -> None:
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
             print(f"[relay][WARN] photo telethon failed: {exc}")
-            return await send_office(caption, stream=stream)
+            return await send_office(
+                caption,
+                stream=stream,
+                intent=intent,
+                event_type=event_type,
+                symbol=symbol,
+                direction=direction,
+                skip_gate=skip_gate,
+            )
 
     def _render_entry_chart(sym: str, direction: str, message: str) -> Dict[str, Any]:
         from office_chart_png import chart_levels, render_signal_chart
@@ -2856,6 +2906,9 @@ async def run() -> None:
             position_id=position_id,
             position_open=position_open,
             event_type=event_type,
+            db_path=db_path,
+            symbol=symbol,
+            direction=direction,
         )
         if not tg.get("send"):
             print(f"[relay] blocked outbound {intent or event_type}: {tg.get('reason')} {str(message or '')[:160]}")
@@ -2884,7 +2937,16 @@ async def run() -> None:
                 print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
                 drawn = {}
             if drawn.get("ok") and drawn.get("path"):
-                msg_id = await send_office_photo(str(drawn["path"]), message, stream=st)
+                msg_id = await send_office_photo(
+                    str(drawn["path"]),
+                    message,
+                    stream=st,
+                    intent=intent,
+                    event_type=event_type,
+                    symbol=sym,
+                    direction=direction,
+                    skip_gate=True,
+                )
                 if msg_id:
                     print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
                     return msg_id
@@ -2896,6 +2958,11 @@ async def run() -> None:
             reply_to_message_id=reply_to_message_id,
             stream=st,
             allow_draft=False,
+            intent=intent,
+            event_type=event_type,
+            symbol=symbol,
+            direction=direction,
+            skip_gate=True,
         )
 
     try:
@@ -5252,15 +5319,35 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 direction == "SHORT" and current_price >= sl_v
                             )
                             if hit_sl:
+                                from office_confluence import format_cancel_card
+                                from office_lev_authority import (
+                                    had_confirmed_entry,
+                                    recommend_close_text,
+                                )
+
                                 analysis_note = f"HIT_SL {symbol} @ {current_price} sl={sl_v}"
-                                signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
+                                signal_update(
+                                    db_path,
+                                    signal_id=signal_id,
+                                    status="HIT_SL",
+                                    outcome="LOSS",
+                                    analysis_note=analysis_note,
+                                )
+                                pos_sl = None
+                                try:
+                                    pos_sl = float(pos_info.get("sl")) if pos_info.get("sl") is not None else None
+                                except (TypeError, ValueError):
+                                    pos_sl = None
+                                hit_pos_sl = False
+                                if in_pos_row and pos_sl is not None:
+                                    hit_pos_sl = (direction == "LONG" and current_price <= pos_sl) or (
+                                        direction == "SHORT" and current_price >= pos_sl
+                                    )
+                                entered = had_confirmed_entry(status) or bool(in_pos_row)
                                 if _allow_notify(symbol, "HIT_SL"):
-                                    if in_pos_row:
-                                        stop_note = _lev_msg(
-                                            symbol,
-                                            f"SL перебитий на {sl_v}, структура зламана",
-                                            "повний вихід з позиції зараз",
-                                            "позиція закрита",
+                                    if in_pos_row and hit_pos_sl and pos_tid:
+                                        stop_note = recommend_close_text(
+                                            symbol=symbol, price=current_price, sl=pos_sl
                                         )
                                         await send_proactive(
                                             EVENT_TRADE_CLOSED,
@@ -5271,14 +5358,46 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             position_id=pos_tid,
                                             position_open=True,
                                             symbol=symbol,
+                                            direction=direction,
                                             kind="SL",
                                         )
-                                    else:
+                                    elif in_pos_row and not hit_pos_sl:
                                         print(
-                                            f"[signals] {symbol} HIT_SL scenario (не /position) "
-                                            f"@ {current_price} sl={sl_v}"
+                                            f"[signals] {symbol} scenario SL {sl_v} ≠ position SL {pos_sl} "
+                                            "— сценарій скасовано, позицію не чіпаємо"
                                         )
-                                if in_pos_row and pos_tid:
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            format_cancel_card(
+                                                symbol=symbol,
+                                                direction=direction,
+                                                reason="ціна за стопом сценарію до/без удару SL позиції",
+                                            ),
+                                            stream="general",
+                                            intent="ANALYTICAL",
+                                            symbol=symbol,
+                                            direction=direction,
+                                            kind="CANCEL_SCENARIO",
+                                        )
+                                    else:
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            format_cancel_card(
+                                                symbol=symbol,
+                                                direction=direction,
+                                                reason="ціна за стопом до входу",
+                                            ),
+                                            stream="general",
+                                            intent="ANALYTICAL",
+                                            symbol=symbol,
+                                            direction=direction,
+                                            kind="CANCEL_BEFORE_ENTRY",
+                                        )
+                                        print(
+                                            f"[signals] {symbol} CANCELLED_BEFORE_ENTRY "
+                                            f"@ {current_price} sl={sl_v} (не /position)"
+                                        )
+                                if in_pos_row and hit_pos_sl and pos_tid:
                                     try:
                                         journal_close_trade(
                                             db_path,
@@ -5291,6 +5410,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         )
                                     except Exception as exc_js:
                                         print(f"[steer] journal SL failed: {exc_js}")
+                                if not entered:
+                                    print(
+                                        f"[steer] no reentry after CANCELLED_BEFORE_ENTRY {symbol} "
+                                        f"{signal_id} — потрібен новий цикл Лева"
+                                    )
+                                    continue
                                 try:
                                     m15_sl = fetch_candles(symbol, "15m", 16)
                                     h1_sl = fetch_candles(symbol, "1h", 12)
@@ -5363,28 +5488,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             tp1=tp1_v,
                                             tp2=tp2_v,
                                             rr=planned.get("rr"),
-                                            status="ACTIVE",
-                                            analysis_note=f"PR42 reentry {ck}",
+                                            status="WATCHING",
+                                            analysis_note=f"origin=desk tf=H1 new-after-stop {ck}",
                                         )
-                                        journal_open_office_signal(
-                                            db_path,
-                                            signal_id=new_id,
-                                            symbol=symbol,
-                                            direction=direction,
-                                            entry_price=float(current_price),
-                                            stop_loss=float(new_sl),
-                                            take_profit=tp1_v,
-                                            tp2=tp2_v,
-                                            timeframe="H1",
-                                            setup_note="SWEEP_REENTRY",
+                                        print(
+                                            f"[steer] новий WATCHING {new_id} після SL /position "
+                                            f"{symbol} — без автоматичного SIGNAL_ENTRY"
                                         )
-                                        if _allow_notify(symbol, "REENTRY"):
-                                            await send_proactive(
-                                                EVENT_SIGNAL_ENTRY,
-                                                fmt_agent_line("lev", card),
-                                                stream="general",
-                                            )
-                                        print(f"[steer] reentry SIGNAL_ENTRY {symbol} {ck}")
                                     else:
                                         print(f"[steer] reentry skip {symbol}: {planned.get('reason')}")
                                 else:
@@ -5697,6 +5807,30 @@ EV позитивне: {prob.get('ev_positive', '')}
                         last_px = float((src[-1] or {}).get("close") or entry or 0) or entry
                 except Exception:
                     last_px = entry
+                from office_lev_verdict import ACTION_SKIP, lev_cycle
+
+                cycle = lev_cycle(
+                    symbol=sym,
+                    price=last_px,
+                    timeframe=timeframe,
+                    candles_m5=m5_bars,
+                    candles_m15=m15_bars,
+                    candles_h1=h1_bars,
+                    candles_h4=h4_bars,
+                    candles_d1=d1_bars,
+                    candles_w=w_bars,
+                    candles_ltf=m5_bars,
+                    atr_h1=atr_v,
+                    now_ts=now_ts,
+                    market_context={"data_status": "DATA_UNAVAILABLE"},
+                )
+                if str(cycle.get("action") or "") == ACTION_SKIP:
+                    print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('reason')}")
+                    return False
+                if lev_note:
+                    lev_note = f"{lev_note} · {cycle.get('reason') or ''}".strip(" ·")
+                else:
+                    lev_note = str(cycle.get("reason") or cycle.get("note") or "")
                 prep = prepare_desk_send(
                     db_path=db_path,
                     symbol=sym,
@@ -5758,6 +5892,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     direction=str(direction or ""),
                     sl=prep.get("sl"),
                     kind=KIND_SIGNAL,
+                    intent="SIGNAL",
                 )
                 sid = f"desk-{tag}-{sym}-{int(now_ts)}"
                 e_px = prep.get("entry")

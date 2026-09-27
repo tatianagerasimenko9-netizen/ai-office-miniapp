@@ -254,7 +254,7 @@ def main() -> int:
         "Чекаю на M5: подвійна вершина або SFP у зоні",
         "Зараз: поза угодою, чекаю відкат",
         "При TP1 — частина + стоп у беззбиток",
-        "Позиція 625 USDT · ризик 10$",
+        "Плановий обсяг 625 USDT · ризик 10$",
     ):
         if bit not in br_txt:
             return _fail(f"BR missing {bit!r} in {br_txt}")
@@ -319,7 +319,7 @@ def main() -> int:
         price=0.924,
         detail="подвійна вершина M5 + закриття нижче 0.922",
     )
-    if conf_txt != "✅ BRUSDT SHORT · вхід підтверджено · 0.924\nПідтвердження: подвійна вершина M5 + закриття нижче 0.922":
+    if conf_txt != "✅ BRUSDT SHORT · сценарій підтверджено (не /position) · 0.924\nПідтвердження: подвійна вершина M5 + закриття нижче 0.922":
         return _fail(f"confirm {conf_txt!r}")
     canc = format_cancel_card(symbol="BRUSDT", direction="SHORT", reason="ціна за стопом до входу")
     if "❌ BRUSDT SHORT · скасовано — ціна за стопом до входу" not in canc:

@@ -79,10 +79,16 @@ def _parse_ts_close(s: object) -> datetime | None:
 
 
 def _tv_webhook_secret_ok(handler: BaseHTTPRequestHandler, u) -> bool:
-    """Якщо TRADINGVIEW_WEBHOOK_SECRET задано — перевір query (?secret= / ?token=) або X-TradingView-Secret."""
+    """Секрет обов'язковий для не-localhost. Не логуємо секрет."""
+    import hmac
+
     want = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "").strip()
-    if not want:
-        return True
+    host = ""
+    try:
+        host = str((handler.client_address or ("", 0))[0] or "")
+    except Exception:
+        host = ""
+    loopback = host in ("127.0.0.1", "::1", "localhost")
     qs = parse_qs(u.query)
     qtok = (qs.get("secret") or qs.get("token") or [""])[0].strip()
     hdr = (handler.headers.get("X-TradingView-Secret") or "").strip()
@@ -90,7 +96,12 @@ def _tv_webhook_secret_ok(handler: BaseHTTPRequestHandler, u) -> bool:
         auth = (handler.headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
             hdr = auth[7:].strip()
-    return qtok == want or hdr == want
+    provided = qtok or hdr
+    if not want:
+        return bool(loopback)
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, want)
 
 
 def _parse_json_body(raw: bytes) -> dict:

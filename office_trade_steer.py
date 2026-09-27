@@ -721,6 +721,7 @@ def format_signal_steer_card(
         entry=entry,
         sl=sl,
         tp1=tp1,
+        had_confirmed_entry=bool(reentry),
         tp2=tp2,
         tp3=tp3,
         add_px=add_v,

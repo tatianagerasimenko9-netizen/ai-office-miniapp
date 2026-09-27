@@ -333,11 +333,20 @@ def desk_entry_gate(
     }
 
 
-def _kind_line(setup_type: str, *, reentry: bool = False, direction: str = "", grade: str = "") -> str:
+def _kind_line(
+    setup_type: str,
+    *,
+    reentry: bool = False,
+    direction: str = "",
+    grade: str = "",
+    had_confirmed_entry: bool = False,
+) -> str:
     from office_confluence import kind_ua
 
-    if reentry:
+    if reentry and had_confirmed_entry:
         base = "Повторний вхід"
+    elif reentry:
+        base = "Новий сценарій"
     else:
         base = kind_ua(setup_type, direction)
     g = str(grade or "").strip().upper()
@@ -376,6 +385,8 @@ def format_desk_card(
     prev: Optional[Dict[str, Any]] = None,
     rev_reason: str = "",
     reentry: bool = False,
+    had_confirmed_entry: bool = False,
+    previous_link: str = "",
     entry_low: Any = None,
     entry_high: Any = None,
     grade: str = "",
@@ -411,8 +422,17 @@ def format_desk_card(
     if not geo.get("ok"):
         return ""
     tf = str(timeframe or "M15").upper()
-    kind = _kind_line(setup_type, reentry=reentry, direction=side, grade=grade)
+    kind = _kind_line(
+        setup_type,
+        reentry=reentry,
+        direction=side,
+        grade=grade,
+        had_confirmed_entry=had_confirmed_entry,
+    )
     lines: List[str] = []
+    plink = str(previous_link or "").strip()
+    if plink:
+        lines.append(plink)
     if reversal and prev:
         pdir = str(prev.get("direction") or "").upper()
         pe = _px(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"), symbol)
@@ -459,7 +479,9 @@ def format_desk_card(
         rp = _f(sz.get("risk_pct")) or 0.01
         if usdt is not None and dep is not None:
             risk_usd = dep * rp
-            lines.append(f"Позиція {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " "))
+            lines.append(
+                f"Плановий обсяг {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " ")
+            )
         else:
             lines.append(f"Ризик {rp * 100:.0f}% депо")
     text = "\n".join(lines)
@@ -680,6 +702,31 @@ def close_desk_reversal(
         pass
 
 
+def _previous_link_line(prev: Optional[Dict[str, Any]], *, timeframe: str, confirm_wait: str) -> str:
+    if not isinstance(prev, dict) or not prev:
+        return ""
+    from office_lev_authority import had_confirmed_entry, previous_to_new_link
+
+    st = str(prev.get("status") or "")
+    note = str(prev.get("analysis_note") or prev.get("outcome") or "")
+    why = ""
+    if "HIT_SL" in st or "стоп" in note.lower() or "до входу" in note.lower():
+        why = "ціна зайшла за стоп сценарію до підтвердженого входу"
+    elif st in ("EXPIRED", "INVALIDATED", "CANCELLED"):
+        why = st
+    else:
+        return ""
+    wait = confirm_wait or "відкат і LTF"
+    return previous_to_new_link(
+        prev_direction=str(prev.get("direction") or ""),
+        prev_status=st,
+        reason=why,
+        new_tf=timeframe,
+        wait_for=wait,
+        had_entry=had_confirmed_entry(st),
+    )
+
+
 def prepare_desk_send(
     *,
     db_path: str = "",
@@ -827,6 +874,9 @@ def prepare_desk_send(
         reversal=bool(gate.get("reversal")),
         prev=gate.get("prev") or prev,
         rev_reason=str(gate.get("rev_reason") or ""),
+        reentry=False,
+        had_confirmed_entry=False,
+        previous_link=_previous_link_line(prev, timeframe=timeframe, confirm_wait=str((conf or {}).get("confirm_wait") or "")),
         entry_low=zone_lo if zone_lo is not None else entry_use,
         entry_high=zone_hi if zone_hi is not None else (add_px if add_px is not None else entry_use),
         grade=str((conf or {}).get("grade") or ""),
