@@ -74,11 +74,13 @@ def reserve_delivery(
             return token
         if row and row[0] == "DELIVERED" and stable:
             return None
+        if row and row[0] == "UNCERTAIN":
+            return None
         # Conditional UPDATE serializes concurrent claimants across processes.
         cur = conn.execute(
             _sql(db_path, "UPDATE office_telegram_delivery "
                 "SET state='PENDING',token=?,expires_at=?,delivered_at=NULL "
-                "WHERE dedup_key=? AND expires_at<=?"),
+                "WHERE dedup_key=? AND state!=\'UNCERTAIN\' AND expires_at<=?"),
             (token, ts + lease_seconds, key, ts),
         )
         return token if cur.rowcount == 1 else None
@@ -124,4 +126,18 @@ def finish_delivery(
                     "WHERE dedup_key=? AND token=? AND state='PENDING'"),
                 (key, token),
             )
+        return cur.rowcount == 1
+
+
+def mark_delivery_uncertain(db_path: str, key: str, token: str) -> bool:
+    """Quarantine ambiguous delivery; requires manual reconciliation before retry."""
+    if not key or not token:
+        return False
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            _sql(db_path, "UPDATE office_telegram_delivery "
+                "SET state='UNCERTAIN',expires_at=NULL "
+                "WHERE dedup_key=? AND token=? AND state='PENDING'"),
+            (key, token),
+        )
         return cur.rowcount == 1
