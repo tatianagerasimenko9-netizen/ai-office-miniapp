@@ -231,22 +231,40 @@ def format_zone_wait_message(
 
 
 def text_grants_entry(text: str) -> bool:
+    """Мова дозволу на ВХІД/добір. Не супровід уже відкритої /position."""
     low = str(text or "").lower()
     if "можна входити" in low or "входь" in low:
         return True
     if "добір позиції" in low or "добір дозволений" in low:
         return True
-    if "збільшити позицію" in low or "перенести стоп позиції" in low:
-        return True
-    if "закрий 50" in low or "перестав sl" in low or "повний вихід з позиції" in low:
+    if "збільшити позицію" in low:
         return True
     return False
 
 
-def has_explicit_position(db_path: str, symbol: str, direction: str = "") -> bool:
-    """Лише явний /position. CONFIRMED / WATCHING / office OPEN ≠ позиція."""
+def text_instructs_position_change(text: str) -> bool:
+    """Наказ змінити ордер/розмір. Право дає лише verified /position, не ці слова."""
+    low = str(text or "").lower()
+    if "закрий 50" in low or "закрий ще" in low:
+        return True
+    if "готуйся закрити" in low or "фіксуй залишок" in low:
+        return True
+    if "перестав sl" in low or "перенести стоп позиції" in low:
+        return True
+    if "повний вихід з позиції" in low:
+        return True
+    if "sl в беззбиток" in low:
+        return True
+    return False
+
+
+def get_explicit_open_position(
+    db_path: str, symbol: str, direction: str = ""
+) -> Dict[str, Any]:
+    """Відкрита /position з trade_id. Інакше fail-closed."""
+    deny = {"ok": False, "open": False, "trade_id": "", "symbol": str(symbol or "").upper()}
     if not db_path:
-        return False
+        return {**deny, "reason": "немає db_path"}
     from office_desk_card import list_confirmed_open_positions
 
     want = str(symbol or "").upper()
@@ -256,8 +274,111 @@ def has_explicit_position(db_path: str, symbol: str, direction: str = "") -> boo
             continue
         if side and str(p.get("direction") or "").upper() != side:
             continue
-        return True
-    return False
+        tid = str(p.get("trade_id") or "").strip()
+        if not tid:
+            continue
+        return {
+            "ok": True,
+            "open": True,
+            "trade_id": tid,
+            "symbol": want,
+            "direction": str(p.get("direction") or "").upper(),
+            "reason": "OPEN /position",
+        }
+    return {**deny, "reason": "немає відкритої /position"}
+
+
+def has_explicit_position(db_path: str, symbol: str, direction: str = "") -> bool:
+    """Лише явний /position. CONFIRMED / WATCHING / office OPEN ≠ позиція."""
+    return bool(get_explicit_open_position(db_path, symbol, direction).get("ok"))
+
+
+def position_verified(*, in_position: bool, position_id: str, position_open: bool) -> bool:
+    return bool(in_position) and bool(str(position_id or "").strip()) and bool(position_open)
+
+
+def gate_outbound_telegram(
+    *,
+    intent: str = "",
+    text: str = "",
+    in_position: bool = False,
+    position_id: str = "",
+    position_open: bool = False,
+    event_type: str = "",
+) -> Dict[str, Any]:
+    """Право на Telegram: intent + verified /position, не слова в тексті.
+
+    ENTRY/ADD_ON/ZONE ніколи не стають дозволом на вхід.
+    POSITION_MANAGE лише при підтвердженій відкритій /position.
+    Невідомий тип/id/статус + наказ змінити позицію → fail-closed.
+    """
+    intent_u = str(intent or "").strip().upper()
+    ev = str(event_type or "").strip().upper()
+    deny = {"send": False, "opens_position": False}
+    entry_lang = text_grants_entry(text)
+    pos_lang = text_instructs_position_change(text)
+    verified = position_verified(
+        in_position=in_position, position_id=position_id, position_open=position_open
+    )
+
+    if intent_u in (INTENT_ZONE, "ZONE_REACHED", INTENT_HIT_ENTRY, "HIT_ENTRY"):
+        return {**deny, "reason": "зона/HIT_ENTRY не шле дозвіл на вхід і не супроводить позицію"}
+    if intent_u in (INTENT_ENTRY, "SIGNAL_ENTRY", "MOZHNA"):
+        return {**deny, "reason": "ENTRY_PERMISSION не через вільний текст"}
+    if intent_u in (INTENT_ADD, "ADD", "ADD_ON", "SCALE_IN", "REVERSAL"):
+        return {**deny, "reason": "добір/переворот не автоматичний у Telegram"}
+    if intent_u in (INTENT_CONFIRM, "CONFIRM"):
+        if entry_lang or pos_lang:
+            return {**deny, "reason": "CONFIRMED-картка не може наказувати ордер"}
+        return {"send": True, "reason": "підтвердження сценарію", "opens_position": False}
+
+    manage = intent_u in (
+        INTENT_POSITION,
+        "TP",
+        "SL",
+        "TRAIL",
+        "BE",
+        "TP1",
+        "HIT_SL",
+        "HIT_TP1",
+        "POSITION_MANAGE",
+        "TRADE_CLOSED",
+    )
+
+    if pos_lang:
+        if not verified:
+            return {
+                **deny,
+                "reason": "наказ змінити позицію без verified OPEN /position — fail-closed",
+            }
+        if entry_lang:
+            return {**deny, "reason": "супровід /position не дає нового входу"}
+        if not manage:
+            return {
+                **deny,
+                "reason": "немає типу події POSITION_MANAGE — fail-closed",
+            }
+        return {
+            "send": True,
+            "reason": "супровід verified OPEN /position",
+            "opens_position": False,
+            "position_id": str(position_id),
+        }
+
+    if entry_lang:
+        return {**deny, "reason": "мова входу/добору заборонена"}
+
+    if intent_u in (INTENT_POSITION, "POSITION_MANAGE", "TP", "SL", "TRAIL", "BE", "TP1", "HIT_SL"):
+        if not verified:
+            return {**deny, "reason": "POSITION_MANAGE без verified OPEN /position"}
+        return {"send": True, "reason": "супровід verified OPEN /position", "opens_position": False}
+
+    if intent_u in ("ANALYTICAL", "CONFIRM", "") or not intent_u:
+        if pos_lang:
+            return {**deny, "reason": "аналітика без наказу змінити позицію"}
+        return {"send": True, "reason": "аналітичне/звичайне повідомлення", "opens_position": False}
+
+    return {**deny, "reason": f"невідомий intent {intent_u}"}
 
 
 def chase_blocks_entry(*, direction: str, price: Any, zone_lo: Any, zone_hi: Any) -> bool:

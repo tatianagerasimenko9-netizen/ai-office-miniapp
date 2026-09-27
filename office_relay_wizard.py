@@ -113,10 +113,12 @@ from office_zone_alert import (
 )
 from office_alert_gate import (
     apply_setup_event,
+    get_explicit_open_position,
     has_explicit_position,
     mark_confirm_sent,
     may_emit_telegram,
     origin_key,
+    gate_outbound_telegram,
     text_grants_entry,
 )
 from office_level_parse import apply_zone_sanity, parse_signal_levels_from_text
@@ -2839,12 +2841,24 @@ async def run() -> None:
         symbol: str = "",
         sl: Any = None,
         direction: str = "",
+        intent: str = "",
+        confirmed_position: bool = False,
+        position_id: str = "",
+        position_open: bool = False,
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
             return None
-        if text_grants_entry(message):
-            print(f"[relay] blocked entry-phrase: {str(message or '')[:160]}")
+        tg = gate_outbound_telegram(
+            intent=intent,
+            text=message,
+            in_position=confirmed_position,
+            position_id=position_id,
+            position_open=position_open,
+            event_type=event_type,
+        )
+        if not tg.get("send"):
+            print(f"[relay] blocked outbound {intent or event_type}: {tg.get('reason')} {str(message or '')[:160]}")
             return None
         ev = str(event_type or "").strip().upper()
         st = str(stream or "general").strip().lower() or "general"
@@ -4923,7 +4937,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                         current_price = float((liq_now or {}).get("current_price") or 0.0) if isinstance(liq_now, dict) else 0.0
                         if current_price <= 0:
                             continue
-                        in_pos_row = has_explicit_position(db_path, symbol, direction)
+                        pos_info = get_explicit_open_position(db_path, symbol, direction)
+                        in_pos_row = bool(pos_info.get("ok"))
+                        pos_tid = str(pos_info.get("trade_id") or "")
 
                         e_low = float(entry_low) if entry_low is not None else None
                         e_high = float(entry_high) if entry_high is not None else None
@@ -5119,7 +5135,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         tp1=tp1_v,
                                         tp2=tp2_v,
                                     )
-                                    await send_proactive(EVENT_TRADE_UPDATE, lev_note, stream="general")
+                                    await send_proactive(
+                                        EVENT_TRADE_UPDATE,
+                                        lev_note,
+                                        stream="general",
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
+                                        symbol=symbol,
+                                        kind="TP1",
+                                    )
                                 continue
 
                         if (
@@ -5171,7 +5197,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             "розглянь фіксацію ще 50% поки в плюсі",
                                             f"{sl_v}",
                                         )
-                                        await send_proactive(EVENT_TRADE_UPDATE, rev_note, stream="general")
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            rev_note,
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            kind="REVERSAL_WARN",
+                                        )
 
                         # ФІКС 3: попередження про наближення до SL / TP1 (до фактичного спрацювання).
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1"):
@@ -5203,6 +5239,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             sl=sl_v,
                                         ),
                                         stream="general",
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
+                                        symbol=symbol,
+                                        kind="TP1_NEAR",
                                     )
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
@@ -5220,17 +5262,27 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             "повний вихід з позиції зараз",
                                             "позиція закрита",
                                         )
-                                        await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
+                                        await send_proactive(
+                                            EVENT_TRADE_CLOSED,
+                                            stop_note,
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            kind="SL",
+                                        )
                                     else:
                                         print(
                                             f"[signals] {symbol} HIT_SL scenario (не /position) "
                                             f"@ {current_price} sl={sl_v}"
                                         )
-                                if in_pos_row:
+                                if in_pos_row and pos_tid:
                                     try:
                                         journal_close_trade(
                                             db_path,
-                                            trade_id=office_signal_trade_id(signal_id),
+                                            trade_id=pos_tid,
                                             outcome="LOSS",
                                             exit_price=float(current_price),
                                             pnl_pct=0.0,
@@ -5457,6 +5509,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         kind=str(ev.get("kind") or ""),
                                         symbol=symbol,
                                         sl=ev.get("trail_sl"),
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
                                     )
                                     if str(ev.get("event")) == EVENT_TRADE_CLOSED:
                                         signal_update(
@@ -5467,9 +5523,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             analysis_note=str(ev.get("kind") or ""),
                                         )
                                         try:
-                                            journal_close_trade(
-                                                db_path,
-                                                trade_id=office_signal_trade_id(signal_id),
+                                            if pos_tid:
+                                                journal_close_trade(
+                                                    db_path,
+                                                    trade_id=pos_tid,
                                                 outcome="LOSS" if str(ev.get("kind")) == "SL" else "WIN",
                                                 exit_price=float(current_price),
                                                 pnl_pct=float(book.mfe if str(ev.get("kind")) != "SL" else -book.mae),
@@ -5525,6 +5582,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                             EVENT_TRADE_UPDATE,
                             format_near_stop(symbol=psym, price=px, sl=slp),
                             stream="general",
+                            intent="POSITION_MANAGE",
+                            confirmed_position=True,
+                            position_id=str(pos.get("trade_id") or ""),
+                            position_open=True,
+                            symbol=psym,
+                            kind="NEAR_STOP",
                         )
             except Exception as exc:
                 print(f"[signals] monitor failed: {exc}")
@@ -6253,6 +6316,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             ),
                             symbol=sym_f,
                             kind="CONFIRM",
+                            intent="CONFIRM",
                         )
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
