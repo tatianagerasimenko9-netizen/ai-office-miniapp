@@ -48,15 +48,67 @@ def _f(v: Any) -> Optional[float]:
     return x
 
 
+def _complete_levels(row: Dict[str, Any]) -> bool:
+    """Картка без входу/стопа/TP або TP=1 при ціні монети — сміття, не показуємо."""
+    e = _f(row.get("entry_low") if row.get("entry_low") is not None else row.get("entry"))
+    if e is None:
+        e = _f(row.get("entry_high"))
+    s = _f(row.get("sl"))
+    t = _f(row.get("tp1") if row.get("tp1") is not None else row.get("tp"))
+    if e is None or s is None or t is None:
+        return False
+    if e <= 0 or s <= 0 or t <= 0:
+        return False
+    if t == 1.0 and e > 2:
+        return False
+    return True
+
+
+def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "symbol": row.get("symbol"),
+        "direction": row.get("direction"),
+        "status": _status_ua(row.get("status")),
+        "status_raw": str(row.get("status") or ""),
+        "entry_low": row.get("entry_low"),
+        "entry_high": row.get("entry_high"),
+        "sl": row.get("sl"),
+        "tp1": row.get("tp1"),
+        "rr": row.get("rr"),
+        "signal_id": row.get("signal_id"),
+        "note": str(row.get("analysis_note") or row.get("note") or "")[:240],
+    }
+
+
+def live_unique_cards(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Один сетап на монету+напрям. Без WATCHING, без HIT_TP2, без дірок у рівнях."""
+    ok_st = {"ACTIVE", "HIT_ENTRY", "HIT_TP1"}
+    seen: set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        st = str(r.get("status") or "").upper()
+        if st not in ok_st:
+            continue
+        if not _complete_levels(r):
+            continue
+        key = f"{str(r.get('symbol') or '').upper()}|{str(r.get('direction') or '').upper()}"
+        if not key.strip("|") or key in seen:
+            continue
+        seen.add(key)
+        out.append(_card_from_signal(r))
+    return out
+
+
 def key_levels(symbol: str = "BTCUSDT") -> Dict[str, Any]:
-    """Рівні з активних сигналів / журналу. Не вигадуємо."""
+    """Рівні з повної активної картки, не з watching без стопа."""
     out: Dict[str, Any] = {"symbol": symbol.upper(), "data_status": DATA_UNAVAILABLE, "levels": {}}
     try:
-        from office_bridge import signal_get_latest_by_symbol
-
-        row = signal_get_latest_by_symbol(_db(), symbol)
+        cards = live_unique_cards(signal_get_active(_db()))
     except Exception:
-        row = None
+        cards = []
+    row = next((c for c in cards if str(c.get("symbol") or "").upper() == symbol.upper()), None)
     if not row:
         return out
     lv = {
@@ -66,7 +118,7 @@ def key_levels(symbol: str = "BTCUSDT") -> Dict[str, Any]:
         "tp1": _f(row.get("tp1")),
         "tp2": _f(row.get("tp2")),
     }
-    if not any(v is not None for v in lv.values()):
+    if lv["entry_low"] is None or lv["sl"] is None or lv["tp1"] is None:
         return out
     out["data_status"] = "DATA_OK"
     out["levels"] = lv
@@ -86,23 +138,8 @@ def home_payload() -> Dict[str, Any]:
         regime = st.get("regime")
     except Exception:
         regime = None
-    active = []
     try:
-        for r in signal_get_active(_db()):
-            if str(r.get("status") or "").upper() == "WATCHING":
-                continue
-            active.append(
-                {
-                    "symbol": r.get("symbol"),
-                    "direction": r.get("direction"),
-                    "status": _status_ua(r.get("status")),
-                    "entry_low": r.get("entry_low"),
-                    "entry_high": r.get("entry_high"),
-                    "sl": r.get("sl"),
-                    "tp1": r.get("tp1"),
-                    "rr": r.get("rr"),
-                }
-            )
+        active = live_unique_cards(signal_get_active(_db()))
     except Exception:
         active = []
     lv = key_levels("BTCUSDT")
@@ -140,23 +177,30 @@ def signals_payload() -> Dict[str, Any]:
         )
     except Exception:
         rows = []
+    raw_rows: List[Dict[str, Any]] = []
     for r in rows:
-        cards.append(
+        raw_rows.append(
             {
                 "signal_id": r[0],
                 "symbol": r[1],
                 "direction": r[2],
-                "timeframe": "H1",
                 "entry_low": r[3],
                 "entry_high": r[4],
                 "sl": r[5],
-                "tp": r[6],
+                "tp1": r[6],
                 "tp2": r[7],
                 "rr": r[8],
-                "status": _status_ua(r[9]),
-                "status_raw": r[9],
-                "chart_url": f"/api/v1/chart.png?symbol={r[1]}",
-                "note": str(r[12] or "")[:240],
+                "status": r[9],
+                "analysis_note": r[12],
+            }
+        )
+    for c in live_unique_cards(raw_rows):
+        cards.append(
+            {
+                **c,
+                "timeframe": "H1",
+                "tp": c.get("tp1"),
+                "chart_url": f"/api/v1/chart.png?symbol={c.get('symbol')}",
             }
         )
     return {
@@ -206,6 +250,24 @@ def scanner_payload() -> Dict[str, Any]:
                 "quality": r[4],
             }
         )
+    if not cands:
+        # Worker часто не пише market_state — тоді список з живих карток, без вигаданого score.
+        try:
+            for card in live_unique_cards(signal_get_active(_db())):
+                cands.append(
+                    {
+                        "symbol": card.get("symbol"),
+                        "score": None,
+                        "rsi": None,
+                        "pump": None,
+                        "dump": None,
+                        "regime": None,
+                        "decision": card.get("status"),
+                        "quality": DATA_UNAVAILABLE,
+                    }
+                )
+        except Exception:
+            pass
     cands.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
     return {
         "ok": True,
