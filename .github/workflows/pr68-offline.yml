@@ -47,3 +47,5 @@ jobs:
         run: |
           python scripts/test_unified_release.py
           python scripts/test_watching_dedup.py
+      - name: T6 OHLCV fixture backtest (offline, no look-ahead)
+        run: python scripts/test_t6_backtest.py
