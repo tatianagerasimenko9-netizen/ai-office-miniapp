@@ -283,13 +283,18 @@ def run_t6_backtest(
     max_dd = 0.0
     r_closed: List[float] = []
 
+    daily_end = h1_end = 0
     for i, bar in enumerate(m15_all):
         if open_trade is None and i % decision_stride:
             continue
         asof = close_time(bar, "15m")
-        daily = closed_asof(daily_all, "1d", asof)
-        h1 = closed_asof(h1_all, "1h", asof)
-        m15 = closed_asof(m15_all, "15m", asof)
+        while daily_end < len(daily_all) and close_time(daily_all[daily_end], "1d") <= asof:
+            daily_end += 1
+        while h1_end < len(h1_all) and close_time(h1_all[h1_end], "1h") <= asof:
+            h1_end += 1
+        daily = daily_all[:daily_end]
+        h1 = h1_all[:h1_end]
+        m15 = m15_all[:i + 1]
         if open_trade is not None:
             outcome = simulate_exit_on_bar(
                 side=open_trade.direction,
