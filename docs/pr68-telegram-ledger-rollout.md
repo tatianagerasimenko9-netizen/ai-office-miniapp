@@ -138,3 +138,16 @@ and look-ahead audit before any use in a release decision. T6 runs the
 no full Lev MANTA replay or live Telegram delivery was performed.
 The same run passed BTC T6 and MANTA WATCHING gate; offline workflow at
 `ab8f551` succeeded. No production orders or Telegram sends occurred.
+
+## T6 fill/geometry audit follow-up (2026-09-27)
+
+The original MANTA 224.4202 R diagnostic must not be used: the prior
+simulator filled at the card's proposed midpoint without verifying an
+actual market fill at that price. The revised offline simulator uses the
+NEXT M15 candle OPEN plus adverse slippage, validates the resulting SL/TP
+geometry, applies TP1 minimum (3% MANTA, 1.2% BTC/ETH), RR >=1.5, and
+requires stop distance >= ATR(14) from fully closed H1 candles. A synthetic
+control fixture that previously forced a simulated trade is now required
+to show an explicit rejection when it violates those gates. A fresh real
+replay is required before reporting any revised trade counts or R values.
+This remains an illustrative radar-only backtest, not a Lev strategy audit.
