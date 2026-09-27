@@ -3008,7 +3008,7 @@ async def run() -> None:
                     if msg_id:
                         print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
                         delivered_id = msg_id
-                    return msg_id
+                        return msg_id
                     print(f"[chart] photo failed {sym}, fallback text")
                 else:
                     print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
