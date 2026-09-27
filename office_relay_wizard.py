@@ -3004,6 +3004,7 @@ async def run() -> None:
                 return None
         ledger_heartbeat = None
         ledger_heartbeat_stop = asyncio.Event()
+        ledger_sender_task = asyncio.current_task()
         if ledger_token:
             async def _renew_telegram_lease() -> None:
                 while not ledger_heartbeat_stop.is_set():
@@ -3018,9 +3019,13 @@ async def run() -> None:
                         )
                         if not renewed:
                             print("[relay] ERROR Telegram lease lost during send")
+                            if ledger_sender_task is not None:
+                                ledger_sender_task.cancel()
                             return
                     except Exception as exc:
                         print(f"[relay] ERROR Telegram lease renewal: {type(exc).__name__}: {exc}")
+                        if ledger_sender_task is not None:
+                            ledger_sender_task.cancel()
                         return
             ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
         delivered_id = None
