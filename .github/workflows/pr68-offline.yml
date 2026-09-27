@@ -30,7 +30,7 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
       - name: Syntax check
-        run: python -m compileall -q office_telegram_policy.py office_telegram_delivery_ledger.py office_relay_wizard.py office_bridge.py office_alert_gate.py scripts/test_pr68_canonical.py scripts/test_telegram_position_gate.py scripts/test_telegram_delivery_ledger.py
+        run: python -m compileall -q office_telegram_policy.py office_telegram_delivery_ledger.py office_relay_wizard.py office_bridge.py office_alert_gate.py scripts/test_pr68_canonical.py scripts/test_telegram_position_gate.py scripts/test_telegram_delivery_ledger.py scripts/test_telegram_ledger_integration.py
       - name: Canonical scenario and delivery dedup (offline)
         run: python scripts/test_pr68_canonical.py
       - name: Position authorization (temporary SQLite, no Telegram)
@@ -55,3 +55,5 @@ jobs:
           python scripts/test_bot_action_blocked.py
       - name: Persistent delivery ledger (temporary SQLite, no Telegram)
         run: python scripts/test_telegram_delivery_ledger.py
+      - name: Telegram ledger integration guards (offline)
+        run: python scripts/test_telegram_ledger_integration.py
