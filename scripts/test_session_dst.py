@@ -15,8 +15,8 @@ assert "london" not in at(7, 15, 6)["active"]
 assert "ny" not in at(1, 15, 12)["active"]
 assert "ny" in at(1, 15, 13)["active"]
 assert "ny" in at(7, 15, 12)["active"]
-assert at(3, 20, 12)["overlap"] is False  # US summer time, UK still winter
-assert at(3, 20, 13)["overlap"] is True
+assert at(3, 20, 11)["overlap"] is False  # US summer time, UK still winter
+assert at(3, 20, 12)["overlap"] is True
 assert at(7, 15, 12)["overlap"] is True
 assert at(1, 15, 12)["next"] == "ny"
 assert at(1, 15, 12)["next_in_min"] == 60
