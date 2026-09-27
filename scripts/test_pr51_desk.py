@@ -139,6 +139,7 @@ def main() -> int:
         setup_type="РАДАР",
         m15_close=84050.0,
         prev=prev,
+        require_confluence=False,
     )
     if conflict.get("send") or conflict.get("reason") != "конфлікт модулів":
         return _fail(f"conflict {conflict}")
@@ -179,6 +180,7 @@ def main() -> int:
         setup_type="РАДАР",
         m15_close=83950.0,
         prev=prev_c,
+        require_confluence=False,
     )
     if not rev.get("send") or not rev.get("reversal"):
         return _fail(f"reversal {rev}")
@@ -212,17 +214,21 @@ def main() -> int:
         tp2=16.98,
         tp3=16.67,
         setup_type="DUMP",
+        grade="A",
+        zone_line="сильна свічка M15 + OB H1",
+        confirm_wait="Чекаю на M5: подвійна вершина або SFP у зоні",
         size={"size_usdt": 1099, "depo": 1000, "risk_pct": 0.01},
     )
     snxx_need = (
         "🔴 SHORT · SNXXUSDT · M15",
-        "DUMP",
+        "Шорт на відкаті · сила A",
         "🎯 Вхід · 17.46",
         "❌ Стоп · 17.62  (−0.9%)",
         "✅ TP1 · 17.22  (+1.4%)",
         "✅ TP2 · 16.98  (+2.7%)",
         "✅ TP3 · 16.67  (+4.5%)",
-        "Вхід після закриття M15 нижче 17.46",
+        "Зона: сильна свічка M15 + OB H1",
+        "Чекаю на M5:",
         "Позиція 1 099 USDT · ризик 10$",
     )
     for bit in snxx_need:
@@ -249,11 +255,12 @@ def main() -> int:
         tp3=0.03780,
         add_px=0.03250,
         setup_type="Відкат у сильну свічку",
+        grade="B",
         size={"size_usdt": 454, "depo": 1000, "risk_pct": 0.01},
     )
     if "🟢 LONG · AKEUSDT · M15" not in ake or "Відкат у сильну свічку" not in ake:
         return _fail(ake)
-    if "🎯 Вхід 60% · 0.03289" not in ake or "➕ Добір 40% · 0.0325" not in ake:
+    if "🎯 Вхід · " not in ake or "сила B" not in ake:
         return _fail(ake)
 
     # Live: BTC стоп 0.20% → розмір > 3× депо

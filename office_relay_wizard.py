@@ -2809,6 +2809,8 @@ async def run() -> None:
             mo=mo,
             bucket_60=b60,
             bucket_40=b40,
+            last_price=(m15[-1] or {}).get("close") if m15 else ((h1[-1] or {}).get("close") if h1 else None),
+            status="сила A" if "сила A" in str(message or "") else ("сила B" if "сила B" in str(message or "") else "чекаю"),
         )
         return render_signal_chart(
             symbol=sym,
@@ -5540,12 +5542,42 @@ EV позитивне: {prob.get('ev_positive', '')}
                     print(f"[{tag}] {sym} hold: {gate.get('reason')}")
                     return False
                 atr_v = atr_h1
-                if atr_v is None:
-                    try:
-                        h1_bars = fetch_candles(sym, "1h", 22)
+                h1_bars = None
+                try:
+                    h1_bars = fetch_candles(sym, "1h", 48)
+                    if atr_v is None:
                         atr_v = atr_from_candles(h1_bars)
-                    except Exception:
-                        atr_v = None
+                except Exception:
+                    h1_bars = h1_bars
+                m15_bars = d1_bars = h4_bars = m5_bars = w_bars = None
+                try:
+                    m15_bars = fetch_candles(sym, "15m", 96)
+                except Exception:
+                    m15_bars = None
+                try:
+                    h4_bars = fetch_candles(sym, "4h", 48)
+                except Exception:
+                    h4_bars = None
+                try:
+                    d1_bars = fetch_candles(sym, "1d", 30)
+                except Exception:
+                    d1_bars = None
+                try:
+                    w_bars = fetch_candles(sym, "1w", 12)
+                except Exception:
+                    w_bars = None
+                wait_tf = "M15" if str(timeframe or "").upper() in ("H1", "H4", "D1") else "M5"
+                try:
+                    m5_bars = fetch_candles(sym, "5m" if wait_tf == "M5" else "15m", 48)
+                except Exception:
+                    m5_bars = m15_bars
+                last_px = entry
+                try:
+                    src = m15_bars or h1_bars or []
+                    if isinstance(src, list) and src:
+                        last_px = float((src[-1] or {}).get("close") or entry or 0) or entry
+                except Exception:
+                    last_px = entry
                 prep = prepare_desk_send(
                     db_path=db_path,
                     symbol=sym,
@@ -5563,8 +5595,37 @@ EV позитивне: {prob.get('ev_positive', '')}
                     setup_type=setup_type or tag,
                     m15_close=m15_close,
                     candle=candle,
+                    candles_m15=m15_bars,
+                    candles_h1=h1_bars,
+                    candles_h4=h4_bars,
+                    candles_d1=d1_bars,
+                    candles_w=w_bars,
+                    candles_ltf=m5_bars,
+                    price=last_px,
+                    now_ts=now_ts,
                 )
                 if not prep.get("send"):
+                    conf_hold = prep.get("confluence") if isinstance(prep.get("confluence"), dict) else {}
+                    if str(prep.get("reason") or "") == "менше 2 збігів":
+                        from office_confluence import note_db_only
+
+                        key_db = str(conf_hold.get("setup_key") or "")
+                        if note_db_only(key_db):
+                            try:
+                                log_event(
+                                    db_path,
+                                    "CONFLUENCE_DB",
+                                    {
+                                        "symbol": sym,
+                                        "direction": direction,
+                                        "tags": conf_hold.get("tags") or [],
+                                        "confirms": conf_hold.get("confirms") or [],
+                                        "n": conf_hold.get("n"),
+                                        "grade": conf_hold.get("grade") or "",
+                                    },
+                                )
+                            except Exception:
+                                pass
                     print(f"[{tag}] {sym} hold: {prep.get('reason')}")
                     return False
                 _last_notified["__FEED_COOLDOWN__"] = now_ts
@@ -5572,18 +5633,35 @@ EV позитивне: {prob.get('ev_positive', '')}
                 await send_proactive(
                     EVENT_SIGNAL_ENTRY,
                     fmt_agent_line("lev", str(prep.get("text") or "")),
+                    symbol=sym,
+                    direction=str(direction or ""),
+                    sl=prep.get("sl"),
+                    kind=KIND_SIGNAL,
                 )
                 sid = f"desk-{tag}-{sym}-{int(now_ts)}"
-                e_px = float(entry) if entry is not None else None
+                e_px = prep.get("entry")
+                try:
+                    e_px = float(e_px) if e_px is not None else (float(entry) if entry is not None else None)
+                except Exception:
+                    e_px = None
                 sl_px = prep.get("sl")
+                conf = prep.get("confluence") if isinstance(prep.get("confluence"), dict) else {}
+                extra_j = {
+                    "confluence_tags": conf.get("tags") or [],
+                    "confirm_tags": conf.get("confirms") or [],
+                    "grade": conf.get("grade") or "",
+                    "setup_key": prep.get("setup_key") or "",
+                    "zone_lo": conf.get("zone_lo"),
+                    "zone_hi": conf.get("zone_hi"),
+                }
                 try:
                     signal_upsert(
                         db_path,
                         signal_id=sid,
                         symbol=sym,
                         direction=str(direction or "LONG"),
-                        entry_low=e_px,
-                        entry_high=e_px,
+                        entry_low=conf.get("zone_lo") or e_px,
+                        entry_high=conf.get("zone_hi") or e_px,
                         sl=sl_px,
                         tp1=tp1,
                         tp2=tp2,
@@ -5592,6 +5670,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         analysis_note=(
                             f"{setup_type or tag}"
                             + (f" cancel={cancel_level}" if cancel_level is not None else "")
+                            + (f" ckey={prep.get('setup_key')}" if prep.get("setup_key") else "")
                         )[:2000],
                     )
                     journal_open_office_signal(
@@ -5605,6 +5684,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp2=tp2,
                         timeframe=str(timeframe or "H1"),
                         setup_note=str(setup_type or tag),
+                        extra=extra_j,
                     )
                 except Exception as exc_jf:
                     print(f"[steer] journal feed {sym} failed: {exc_jf}")
@@ -5746,7 +5826,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     "radar",
                                     direction=str(res.direction or "LONG"),
                                     timeframe="H1",
-                                    entry=card.get("entry") or price,
+                                    entry=card.get("entry_low") or card.get("entry") or price,
                                     sl=card.get("sl"),
                                     tp1=card.get("tp") or card.get("tp1"),
                                     tp2=card.get("tp2"),
@@ -6050,6 +6130,63 @@ EV позитивне: {prob.get('ev_positive', '')}
                     print(f"[liq] snapshot failed: {exc_liq}")
             except Exception as exc:
                 print(f"[radar] monitor failed: {exc}")
+            try:
+                from office_confluence import (
+                    follow_setup,
+                    format_cancel_card,
+                    format_confirm_card,
+                    live_drop,
+                    live_items,
+                )
+
+                for key, st in live_items():
+                    sym_f = str(st.get("symbol") or "")
+                    if not sym_f:
+                        continue
+                    tf_wait = "5m" if str(st.get("timeframe") or "M15").upper() in ("M15", "M5", "M1") else "15m"
+                    try:
+                        ltf = fetch_candles(sym_f, tf_wait, 40)
+                    except Exception:
+                        ltf = []
+                    px_f = None
+                    try:
+                        if isinstance(ltf, list) and ltf:
+                            px_f = float((ltf[-1] or {}).get("close") or 0) or None
+                    except Exception:
+                        px_f = None
+                    fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf)
+                    act = str(fu.get("action") or "")
+                    if act == "confirm":
+                        await send_proactive(
+                            EVENT_TRADE_UPDATE,
+                            fmt_agent_line(
+                                "lev",
+                                format_confirm_card(
+                                    symbol=sym_f,
+                                    direction=str(st.get("direction") or ""),
+                                    price=fu.get("price") or px_f,
+                                    detail=str(fu.get("detail") or fu.get("reason") or ""),
+                                ),
+                            ),
+                        )
+                        live_drop(key)
+                        print(f"[confluence] confirmed {key}")
+                    elif act == "cancel":
+                        await send_proactive(
+                            EVENT_TRADE_UPDATE,
+                            fmt_agent_line(
+                                "lev",
+                                format_cancel_card(
+                                    symbol=sym_f,
+                                    direction=str(st.get("direction") or ""),
+                                    reason=str(fu.get("reason") or ""),
+                                ),
+                            ),
+                        )
+                        live_drop(key)
+                        print(f"[confluence] cancelled {key}")
+            except Exception as exc_fu:
+                print(f"[confluence] follow failed: {exc_fu}")
             utc_now = datetime.now(timezone.utc)
             minute_of_day = utc_now.hour * 60 + utc_now.minute
             fast = (480 <= minute_of_day < 660) or (780 <= minute_of_day < 960)

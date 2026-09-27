@@ -138,6 +138,9 @@ def load_office_signal_rows(db_path: str) -> List[Dict[str, Any]]:
                 "rsi_entry": _f(ctx.get("rsi_at_signal") or ctx.get("rsi_h1")),
                 "rsi_peak": _f(ctx.get("rsi_peak")),
                 "sweep_then_tp": bool(ctx.get("sweep_then_tp")),
+                "confluence": ctx.get("confluence_tags") or ctx.get("confluence") or [],
+                "confirm": ctx.get("confirm_tags") or ctx.get("confirm") or [],
+                "grade": str(ctx.get("grade") or ""),
                 "entry": _f(entry_price),
                 "sl": _f(stop_loss),
                 "tp": _f(take_profit),
@@ -234,6 +237,32 @@ def rsi_threshold_line(rows: List[Dict[str, Any]]) -> str:
     )
 
 
+def _confluence_lines(rows: List[Dict[str, Any]]) -> List[str]:
+    groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        tags = r.get("confluence") or []
+        if isinstance(tags, str):
+            tags = [tags]
+        conf = r.get("confirm") or []
+        if isinstance(conf, str):
+            conf = [conf]
+        key = "+".join(str(t) for t in tags) if tags else ""
+        if r.get("grade"):
+            key = f"{r.get('grade')}: {key}" if key else str(r.get("grade"))
+        if conf:
+            key = f"{key}|{','.join(str(x) for x in conf)}" if key else ",".join(str(x) for x in conf)
+        if not key:
+            continue
+        groups[key].append(r)
+    if not groups:
+        return []
+    lines = ["Збіги:"]
+    for name in sorted(groups):
+        m = _group_metrics(groups[name])
+        lines.append(f"  {name}: {m['line']}")
+    return lines
+
+
 def sweep_calibration_line(rows: List[Dict[str, Any]]) -> str:
     closed = [r for r in rows if r.get("status") == "CLOSED"]
     if len(closed) < MIN_GROUP:
@@ -266,6 +295,7 @@ def build_stats_report(db_path: str) -> Dict[str, Any]:
         *("  " + x for x in _bucket(rows, "direction")),
         sweep_calibration_line(rows),
         rsi_threshold_line(rows),
+        *_confluence_lines(rows),
     ]
     one = f"Сигнали: {overall['line']}"
     return {

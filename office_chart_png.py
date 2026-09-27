@@ -99,6 +99,8 @@ def chart_levels(
     mo: Any = None,
     bucket_60: Any = None,
     bucket_40: Any = None,
+    last_price: Any = None,
+    status: str = "",
 ) -> Dict[str, Any]:
     return {
         "sl": _f(sl),
@@ -115,6 +117,8 @@ def chart_levels(
         "mo": _f(mo),
         "bucket_60": _f(bucket_60),
         "bucket_40": _f(bucket_40),
+        "last_price": _f(last_price),
+        "status": str(status or ""),
     }
 
 
@@ -211,6 +215,47 @@ def render_signal_chart(
             if i == n - 1 and fills:
                 kw["fill_between"] = fills if len(fills) > 1 else fills[0]
             mpf.plot(df, **kw)
+        ax = axes[-1]
+        last_px = _f(lv.get("last_price"))
+        en_mid = None
+        if en_lo is not None and en_hi is not None:
+            en_mid = (float(en_lo) + float(en_hi)) / 2.0
+        if last_px is not None:
+            ax.axhline(last_px, color="#ffd54f", linewidth=1.0, linestyle=":")
+            try:
+                x_end = len(panels[-1][1].index) - 1
+                ax.annotate(
+                    "ціна",
+                    xy=(x_end, last_px),
+                    xytext=(max(0, x_end - 8), last_px),
+                    color="#ffd54f",
+                    fontsize=8,
+                    arrowprops=dict(arrowstyle="->", color="#ffd54f") if en_mid is None else None,
+                )
+                if en_mid is not None:
+                    ax.annotate(
+                        "зона",
+                        xy=(x_end, en_mid),
+                        xytext=(max(0, x_end - 6), last_px),
+                        color="#00e5a0",
+                        fontsize=8,
+                        arrowprops=dict(arrowstyle="->", color="#00e5a0"),
+                    )
+            except Exception:
+                pass
+        badge = str(lv.get("status") or "").strip()
+        if badge:
+            ax.text(
+                0.01,
+                0.97,
+                badge,
+                transform=ax.transAxes,
+                color="#0d1117",
+                fontsize=9,
+                fontweight="bold",
+                va="top",
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#00e5a0", edgecolor="none"),
+            )
         fig.savefig(path, dpi=110, bbox_inches="tight", facecolor="#0d1117")
         import matplotlib.pyplot as plt
 
