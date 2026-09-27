@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> int:
     text = (ROOT / "OFFICE_CHECKLIST_STATUS_UA.md").read_text(encoding="utf-8")
-    for needle in ("#45", "#46", "#47", "4aefcf1", "/v1", "не мерджити"):
+    for needle in ("#45", "#46", "#47", "4aefcf1", "/v1", "не мерджити", "#60", "#59"):
         if needle not in text:
             print(f"FAIL missing {needle}")
             return 1
