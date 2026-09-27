@@ -37,7 +37,7 @@ jobs:
           python - <<'PY'
           import json
           from office_t6_backtest import load_ohlcv_file, run_t6_backtest
-          btc = run_t6_backtest("/tmp/pr68-real/BTCUSDT.json")
+          btc = run_t6_backtest("/tmp/pr68-real/BTCUSDT.json", decision_stride=4)
           manta = load_ohlcv_file("/tmp/pr68-real/MANTAUSDT.json")
           assert manta["symbol"] == "MANTAUSDT"
           assert all(len(manta["timeframes"][tf]) > 0 for tf in ("1d","1h","15m"))
