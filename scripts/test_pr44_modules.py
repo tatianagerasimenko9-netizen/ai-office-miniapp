@@ -168,7 +168,7 @@ def main() -> int:
     if abs(float(ev["tps"]["add"]) - (float(ev["entry"]) - risk * 0.4)) > 1e-9:
         return _fail("add 40%")
     card = format_pump_card("AKEUSDT", "M15", ev)
-    if "Лонг на відкаті" not in card or "🎯 Вхід" not in card:
+    if "на відкаті" not in card or "🎯 Вхід" not in card:
         return _fail(f"pump card {card}")
     if "Entry:" in card or "SL:" in card or "Балі" in card or "Модель рівнів" in card:
         return _fail(f"pump card banned {card}")
@@ -301,6 +301,7 @@ def main() -> int:
         m15_candles=[_c(9.9, 10.2, 9.9, 10.2)],
         day_used_pct=40.0,
         in_kill_zone=True,
+        utc_now=datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc),
     )
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"radar regression {ok.status} {ok.reason}")

@@ -4,7 +4,7 @@
 https://mozilla.org/MPL/2.0/
 © LonesomeTheBlue — study «Linear Regression Channel».
 
-Шар контексту, не сигнал і не бал збігів. Closed-candle: остання незакрита
+Шар контексту і overlay графіка, не сигнал і не бал збігів. Closed-candle: остання незакрита
 свічка не входить у розрахунок. Не змінює ATR/Edge/MIN_RR. Не ордер.
 """
 from __future__ import annotations
@@ -41,6 +41,7 @@ def linreg_value(src: Sequence[float], length: int, offset: int) -> Optional[flo
     window = list(src[-(n + offset) : len(src) - offset if offset else None])
     if len(window) != n:
         return None
+    # x = 0..n-1
     sum_x = (n - 1) * n / 2.0
     sum_x2 = (n - 1) * n * (2 * n - 1) / 6.0
     sum_y = sum(window)
@@ -50,6 +51,7 @@ def linreg_value(src: Sequence[float], length: int, offset: int) -> Optional[flo
         return None
     b = (n * sum_xy - sum_x * sum_y) / den
     a = (sum_y - b * sum_x) / n
+    # Pine linreg(..., offset) — значення регресії на останній точці зсунутого вікна.
     return a + b * (n - 1)
 
 
@@ -70,6 +72,7 @@ def get_channel(src: Sequence[float], length: int) -> Optional[Tuple[float, floa
     acc = 0.0
     for x in range(n):
         pred = slope * (n - 1 - x) + intercept
+        # Pine: src[x] від кінця (x=0 — last of window)
         acc += (window[n - 1 - x] - pred) ** 2
     dev = math.sqrt(acc / n)
     return intercept, endy, dev, slope
@@ -82,7 +85,7 @@ def regression_channel(
     deviation: float = 2.0,
     closed_only: bool = True,
 ) -> Dict[str, Any]:
-    """Канал для контексту. Дотик до межі НЕ дає бал збігів і НЕ створює картку."""
+    """Канал для контексту й overlay. Дотик до межі НЕ дає бал збігів і НЕ створює картку."""
     rows = [r for r in (candles or []) if isinstance(r, dict)]
     if closed_only and len(rows) >= 2:
         rows = rows[:-1]

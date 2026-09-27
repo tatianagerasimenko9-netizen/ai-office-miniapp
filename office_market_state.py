@@ -179,6 +179,53 @@ def market_state_upsert(
     return out
 
 
+def record_scan_facts(
+    db_path: str,
+    symbol: str,
+    *,
+    rsi_h1: Any = None,
+    rsi_h4: Any = None,
+    pump_score: Any = None,
+    dump_score: Any = None,
+    ict_score: Any = None,
+    regime: Any = None,
+    decision: Any = None,
+    data_quality: Any = None,
+) -> Optional[Dict[str, Any]]:
+    """Пише лише наявні факти зі скану. Порожні поля не вигадує."""
+    sig: Dict[str, Any] = {}
+    if rsi_h1 is not None:
+        sig["rsi"] = rsi_h1
+        sig["rsi_h1"] = rsi_h1
+    if rsi_h4 is not None:
+        sig["rsi_h4"] = rsi_h4
+    if pump_score is not None:
+        sig["pump_score"] = pump_score
+    if dump_score is not None:
+        sig["dump_score"] = dump_score
+    if ict_score is not None:
+        sig["ict_score"] = ict_score
+        sig["score"] = ict_score
+    elif pump_score is not None:
+        sig["score"] = pump_score
+    elif dump_score is not None:
+        sig["score"] = dump_score
+    q = data_quality
+    if q is None:
+        q = "OK" if sig else "UNAVAILABLE"
+    try:
+        return market_state_upsert(
+            db_path,
+            symbol,
+            regime=regime,
+            signal=sig or None,
+            office_decision=decision,
+            data_quality=q,
+        )
+    except Exception:
+        return None
+
+
 def market_state_list(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
     lim = max(1, min(int(limit or 50), 200))
     rows = _fetchall(

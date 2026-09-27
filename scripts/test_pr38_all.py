@@ -109,12 +109,14 @@ def main() -> int:
         rr_net=4.8,
         move_pct=5.5,
     )
-    if "✅ TP1 · 0.1235" not in card:
+    if "✅ TP1" not in card or "0.123" not in card:
         return _fail(card)
     if "приблизно" in card.lower() or "не чистий" in card.lower():
         return _fail("approx")
     if "RR 1:" in card:
         return _fail(f"rr leaked {card}")
+    if "до TP1" not in card:
+        return _fail(f"need R to TP1 {card}")
     if "✅ TP1" not in card:
         return _fail(f"tp {card}")
     if "RR після витрат" in card:

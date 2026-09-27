@@ -97,6 +97,9 @@ def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
         "note": str(row.get("analysis_note") or row.get("note") or "")[:240],
         "in_position": False,
         "confirmed_is_position": False,
+        "as_of": row.get("ts_created") or row.get("ts_updated") or row.get("as_of"),
+        "kind": "office_card",
+        "opens_position": False,
     }
     out = format_price_fields(raw, sym)
     if raw.get("rr") is not None:
@@ -109,11 +112,15 @@ def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def live_unique_cards(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Один сетап на монету+напрям. Без WATCHING, без HIT_TP2, без дірок у рівнях."""
+    from office_desk_card import is_legacy_desk_range
+
     ok_st = {"ACTIVE", "HIT_ENTRY", "HIT_TP1", "CONFIRMED"}
     seen: set[str] = set()
     out: List[Dict[str, Any]] = []
     for r in rows or []:
         if not isinstance(r, dict):
+            continue
+        if is_legacy_desk_range(r):
             continue
         st = str(r.get("status") or "").upper()
         if st not in ok_st:
@@ -188,7 +195,14 @@ def home_payload() -> Dict[str, Any]:
         "active_signals": active,
         "sessions": live.get("sessions"),
         "gex": None,
+        "gex_status": DATA_UNAVAILABLE,
+        "gex_reason": "шар GEX не в main",
         "orders": False,
+        "opens_position": False,
+        "git_sha": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "")[:40],
+        "db_backend": "postgresql" if str(_db()).lower().startswith("postgres") else "sqlite",
+        "as_of": live.get("now_utc") or None,
+        "card_note": "Активний = картка офісу, не ордер і не /position.",
     }
 
 
@@ -222,6 +236,7 @@ def signals_payload() -> Dict[str, Any]:
                 "tp2": r[7],
                 "rr": r[8],
                 "status": r[9],
+                "ts_created": r[10],
                 "analysis_note": r[12],
             }
         )
@@ -231,7 +246,7 @@ def signals_payload() -> Dict[str, Any]:
                 **c,
                 "timeframe": "H1",
                 "tp": c.get("tp1"),
-                "chart_url": f"/api/v1/chart.png?symbol={c.get('symbol')}",
+                "chart_url": f"/api/v1/chart.png?symbol={c.get('symbol')}&signal_id={c.get('signal_id') or ''}",
             }
         )
     return {
@@ -267,38 +282,25 @@ def scanner_payload() -> Dict[str, Any]:
         except Exception:
             sig = {}
         score = sig.get("score") or sig.get("pump_score") or sig.get("ict_score")
-        if score is None and not sig:
+        rsi = sig.get("rsi") if sig.get("rsi") is not None else sig.get("rsi_h1")
+        pump = sig.get("pump_score")
+        dump = sig.get("dump_score")
+        # Немає жодного факту зі скану — не підміняти карткою сигналу.
+        if score is None and rsi is None and pump is None and dump is None:
             continue
         cands.append(
             {
                 "symbol": r[0],
                 "score": score,
-                "rsi": sig.get("rsi") or sig.get("rsi_h1"),
-                "pump": sig.get("pump_score"),
-                "dump": sig.get("dump_score"),
+                "rsi": rsi,
+                "pump": pump,
+                "dump": dump,
                 "regime": r[1],
                 "decision": r[3],
                 "quality": r[4],
+                "as_of": r[5],
             }
         )
-    if not cands:
-        # Worker часто не пише market_state — тоді список з живих карток, без вигаданого score.
-        try:
-            for card in live_unique_cards(signal_get_active(_db())):
-                cands.append(
-                    {
-                        "symbol": card.get("symbol"),
-                        "score": None,
-                        "rsi": None,
-                        "pump": None,
-                        "dump": None,
-                        "regime": None,
-                        "decision": card.get("status"),
-                        "quality": DATA_UNAVAILABLE,
-                    }
-                )
-        except Exception:
-            pass
     cands.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
     return {
         "ok": True,
@@ -369,24 +371,37 @@ def stats_payload() -> Dict[str, Any]:
     }
 
 
-def render_chart_png(symbol: str) -> Dict[str, Any]:
+def render_chart_png(symbol: str, signal_id: str = "") -> Dict[str, Any]:
     from office_chart_png import render_signal_chart, chart_levels
     from office_market_data import fetch_candles
+    from office_desk_card import is_legacy_desk_range
 
     sym = str(symbol or "BTCUSDT").upper()
+    sid = str(signal_id or "").strip()
     m15 = fetch_candles(sym, "15m", 96) or []
     h1 = fetch_candles(sym, "1h", 48) or []
     lv = {}
     try:
-        from office_bridge import signal_get_latest_by_symbol
+        from office_bridge import signal_get_active, signal_get_latest_by_symbol
 
-        row = signal_get_latest_by_symbol(_db(), sym) or {}
+        row = None
+        if sid:
+            for r in signal_get_active(_db()) or []:
+                if str(r.get("signal_id") or "") == sid:
+                    row = r
+                    break
+        if row is None:
+            row = signal_get_latest_by_symbol(_db(), sym) or {}
+        if is_legacy_desk_range(row):
+            row = {}
         lv = chart_levels(
             sl=row.get("sl"),
             tp1=row.get("tp1"),
             tp2=row.get("tp2"),
             entry_low=row.get("entry_low"),
             entry_high=row.get("entry_high"),
+            last_price=None,
+            status=str(row.get("status") or ""),
         )
     except Exception:
         lv = {}
@@ -404,13 +419,14 @@ def html_v1() -> str:
 nav{display:flex;gap:6px;padding:10px 12px;background:#0c1220;border-bottom:1px solid var(--line);position:sticky;top:0}
 nav button{background:#1a2333;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 10px;font-size:13px}
 nav button.on{background:var(--acc);color:#081018;font-weight:700}
-.wrap{padding:12px;max-width:920px;margin:0 auto}
+.wrap{padding:12px;max-width:920px;margin:0 auto;overflow-x:auto}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 10px}
 .mut{color:var(--mut);font-size:12px}.row{display:flex;gap:8px;flex-wrap:wrap}
 .kpi{flex:1;min-width:120px}.ok{color:var(--ok)}.bad{color:var(--bad)}
 img.ch{width:100%;border-radius:8px;border:1px solid var(--line);background:#000}
 h2{font-size:16px;margin:0 0 8px}h1{font-size:18px;margin:0 0 8px}
-table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid var(--line);padding:6px;text-align:left}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid var(--line);padding:6px;text-align:left;white-space:nowrap}
 .banner{font-size:11px;color:var(--mut);margin-bottom:8px}
 </style></head><body>
 <nav>
@@ -433,8 +449,9 @@ async function home(){
   const d = await j('/api/v1/home');
   const b = d.btc||{};
   const lv = (d.levels&&d.levels.levels)||{};
-  const sig = (d.active_signals||[]).map(s=>`<div class="card">${s.symbol} ${s.direction} · ${s.status}<div class="mut">вхід ${una(s.entry_low)}–${una(s.entry_high)} SL ${una(s.sl)} TP ${una(s.tp1)} RR ${una(s.rr)}</div></div>`).join('') || '<div class="mut">DATA_UNAVAILABLE — активних сигналів немає</div>';
+  const sig = (d.active_signals||[]).map(s=>`<div class="card">${s.symbol} ${s.direction} · ${s.status}<div class="mut">картка офісу, не ордер і не /position</div><div class="mut">вхід ${una(s.entry_low)}–${una(s.entry_high)} SL ${una(s.sl)} TP ${una(s.tp1)} · ${una(s.as_of)}</div></div>`).join('') || '<div class="mut">DATA_UNAVAILABLE — немає живої картки збігів</div>';
   app.innerHTML = `<h1>Головна</h1>
+  <div class="mut">${d.card_note||''} · git ${una(d.git_sha)} · ${una(d.db_backend)}</div>
   <div class="row">
     <div class="card kpi"><div class="mut">BTC</div><b>${una(b.price)}</b><div class="mut">24h ${una(b.change_24h)}%</div></div>
     <div class="card kpi"><div class="mut">Режим</div><b>${una(d.market_mode)}</b></div>
@@ -442,7 +459,7 @@ async function home(){
   </div>
   <div class="card"><h2>Ключові рівні BTC</h2>
     <div class="mut">Entry ${una(lv.entry_low)}–${una(lv.entry_high)} · SL ${una(lv.sl)} · TP1 ${una(lv.tp1)}</div>
-    <div class="mut">GEX: ${una(d.gex)}</div>
+    <div class="mut">GEX: ${una(d.gex_reason||d.gex)}</div>
   </div>
   <h2>Активні сигнали</h2>${sig}`;
 }
@@ -450,7 +467,8 @@ async function signals(){
   const d = await j('/api/v1/signals');
   const cards = (d.cards||[]).map(c=>`<div class="card">
     <b>${c.symbol}</b> ${c.timeframe} ${c.direction} · ${c.status}
-    <div class="mut">зона ${una(c.entry_low)}–${una(c.entry_high)} · SL ${una(c.sl)} · TP ${una(c.tp)} · RR ${una(c.rr)}</div>
+    <div class="mut">зона ${una(c.entry_low)}–${una(c.entry_high)} · SL ${una(c.sl)} · TP ${una(c.tp)} · ${una(c.as_of)}</div>
+    <div class="mut">не ордер · ${una(c.signal_id)}</div>
     <img class="ch" alt="chart" src="${c.chart_url}"/>
   </div>`).join('') || `<div class="mut">${una(d.data_status)}</div>`;
   app.innerHTML = `<h1>Сигнали</h1>${cards}`;
@@ -459,7 +477,7 @@ async function scan(){
   const d = await j('/api/v1/scanner');
   const rows = (d.candidates||[]).map(c=>`<tr><td>${c.symbol}</td><td>${una(c.score)}</td><td>${una(c.rsi)}</td><td>${una(c.pump)}/${una(c.dump)}</td></tr>`).join('');
   app.innerHTML = `<h1>Сканер</h1><div class="mut">Без алертів. ${d.data_status||''}</div>
-  <div class="card"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>PUMP/DUMP</th></tr>${rows||'<tr><td colspan=4>DATA_UNAVAILABLE</td></tr>'}</table></div>`;
+  <div class="card"><div class="table-wrap"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>PUMP/DUMP</th></tr>${rows||'<tr><td colspan=4>DATA_UNAVAILABLE</td></tr>'}</table></div></div>`;
 }
 async function pos(){
   const d = await j('/api/v1/positions');

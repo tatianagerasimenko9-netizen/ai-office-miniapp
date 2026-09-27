@@ -522,6 +522,7 @@ def main() -> int:
         m15_candles=[_c(9.9, 10.2, 9.9, 10.2)],
         day_used_pct=40.0,
         in_kill_zone=True,
+        utc_now=datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc),
     )
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"radar regression {ok.status} {ok.reason}")

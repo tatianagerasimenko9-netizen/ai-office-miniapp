@@ -560,6 +560,7 @@ def get_data(
         "now_utc": datetime.now(timezone.utc).isoformat(),
         "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f, "chart": chart_symbol.strip().upper()},
         "db_identity": office_db_identity(_db_target_for_identity()),
+        "git_sha": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "")[:40],
         "kpi": {
             "total": total,
             "wins": wins,
@@ -1266,12 +1267,65 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if u.path == "/v1" or u.path == "/mini":
-            from office_mini_v1 import html_v1
+        if u.path in ("/v1", "/v2", "/mini"):
+            from office_mini_v2 import html_v2
 
-            body = html_v1().encode("utf-8")
+            body = html_v2().encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path.startswith("/api/v2/"):
+            from office_mini_v2 import (
+                candles_payload,
+                channel_payload,
+                home_v2,
+                journal_payload,
+                overview_payload,
+                positions_v2,
+                scanner_v2,
+                scenario_detail,
+                scenarios_payload,
+                settings_payload,
+            )
+
+            qs = parse_qs(u.query)
+            def _q(name: str, default: str = "") -> str:
+                v = qs.get(name)
+                return (v[0] if v else default).strip()
+
+            if u.path == "/api/v2/home":
+                data = home_v2()
+            elif u.path == "/api/v2/scenarios":
+                data = scenarios_payload(watching=_q("watching") in ("1", "true"))
+            elif u.path == "/api/v2/scenario":
+                data = scenario_detail(_q("id"))
+            elif u.path == "/api/v2/candles":
+                try:
+                    lim = int(_q("limit") or "180")
+                except ValueError:
+                    lim = 180
+                data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim)
+            elif u.path == "/api/v2/channel":
+                data = channel_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
+            elif u.path == "/api/v2/overview":
+                data = overview_payload()
+            elif u.path == "/api/v2/scanner":
+                data = scanner_v2()
+            elif u.path == "/api/v2/journal":
+                data = journal_payload(kind=_q("kind") or "scenarios")
+            elif u.path == "/api/v2/positions":
+                data = positions_v2()
+            elif u.path == "/api/v2/settings":
+                data = settings_payload()
+            else:
+                data = {"ok": False, "error": "unknown v2 endpoint"}
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1298,7 +1352,8 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v1/chart.png":
                 qs = parse_qs(u.query)
                 sym = (qs.get("symbol") or ["BTCUSDT"])[0]
-                drawn = render_chart_png(sym)
+                sid = (qs.get("signal_id") or [""])[0]
+                drawn = render_chart_png(sym, sid)
                 if drawn.get("ok") and drawn.get("path") and os.path.isfile(drawn["path"]):
                     with open(drawn["path"], "rb") as fh:
                         raw = fh.read()

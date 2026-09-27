@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Офлайн-перевірка балів Герчика (шар Б)."""
-from office_gerchik_kernel import gerchik_ops_from_facts, interpret_gerchik_ops
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from office_gerchik_kernel import gerchik_ops_from_facts, interpret_gerchik_ops  # noqa: E402
 
 
 def _ok(name: str, cond: bool) -> None:

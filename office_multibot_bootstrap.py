@@ -64,6 +64,8 @@ def prompt_if_missing(cfg: Dict[str, Any], key_env: str, cfg_key: str, label: st
 
 
 def main() -> int:
+    sha = (os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "").strip()[:40]
+    print(f"[boot] git_sha={sha or 'UNAVAILABLE'} python={sys.version.split()[0]}")
     cfg_path = Path(os.getenv("OFFICE_RELAY_CONFIG", str(DEFAULT_CFG))).expanduser()
     cfg = load_cfg(cfg_path)
 
