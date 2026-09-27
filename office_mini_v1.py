@@ -17,6 +17,11 @@ from office_bridge import (
 from office_signal_stats import DATA_UNAVAILABLE, build_stats_report
 
 def _db() -> str:
+    """Та сама БД, що Worker і /api/summary: Postgres, якщо є DATABASE_URL."""
+    url = (os.getenv("DATABASE_URL") or "").strip()
+    low = url.lower()
+    if low.startswith("postgres://") or low.startswith("postgresql://"):
+        return url
     return os.getenv("OFFICE_DB_PATH", "office_bridge.db")
 
 
