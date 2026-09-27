@@ -6349,6 +6349,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                 async with aiohttp.ClientSession(timeout=http_timeout) as http:
                     prem = await fetch_binance_premium_index(http, "BTCUSDT")
                     btc = await fetch_binance_futures_ticker(http, "BTCUSDT")
+                try:
+                    from office_horizons import fetch_btc_horizons, horizon_log_line
+
+                    print(horizon_log_line(fetch_btc_horizons()))
+                except Exception as exc_hz:
+                    print(f"[horizon] BTC DATA_UNAVAILABLE {type(exc_hz).__name__}")
                 now_m = time.monotonic()
                 fr = prem.get("funding_rate_pct") if prem else None
                 if fr is not None and abs(float(fr)) >= fund_thr and (now_m - last_fund_mono) >= cooldown:
