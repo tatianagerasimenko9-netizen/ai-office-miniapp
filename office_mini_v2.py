@@ -206,9 +206,12 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
 
 
 def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
+    from office_alert_gate import get_explicit_open_position
+
     rows = _signal_rows(80, all_status=True)
     out = []
     seen = set()
+    pos_cache: Dict[str, bool] = {}
     for r in rows:
         if is_legacy_desk_range(r):
             continue
@@ -227,7 +230,12 @@ def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
         if key in seen:
             continue
         seen.add(key)
-        out.append(scenario_card(r))
+        ck = f"{str(r.get('symbol') or '').upper()}|{str(r.get('direction') or '').upper()}"
+        if ck not in pos_cache:
+            pos_cache[ck] = bool(
+                get_explicit_open_position(_db(), r.get("symbol") or "", r.get("direction") or "").get("ok")
+            )
+        out.append(scenario_card(r, has_position=pos_cache[ck]))
     return out
 
 
