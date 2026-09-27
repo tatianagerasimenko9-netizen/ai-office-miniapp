@@ -44,25 +44,38 @@ def _f(v: Any) -> Optional[float]:
     return x
 
 
-def _px(v: Any) -> str:
-    """Ціна як у картці: 84 069; альти <1 — однакова точність (0.940, не 0.94)."""
-    from office_telegram_filter import format_px
+def _card_decimals(ref: Any) -> int:
+    """Одна точність для всіх цін картки — за масштабом ціни входу."""
+    import math
 
+    x = _f(ref)
+    if x is None or x <= 0:
+        return 4
+    if x >= 1000:
+        return 1
+    if x >= 10:
+        return 2
+    if x >= 1:
+        return 3
+    return 3 - int(math.floor(math.log10(x)))
+
+
+def _px_txt(v: Any) -> str:
+    """Ціна в реченні (переворот): без зайвих нулів — 84 069, 0.922."""
+    out = _px(v)
+    if "." in out:
+        out = out.rstrip("0").rstrip(".")
+    return out
+
+
+def _px(v: Any, dec: Optional[int] = None) -> str:
+    """Ціна як у картці: 84 069.5; усі ціни картки — однакова точність."""
     x = _f(v)
     if x is None:
         return ""
-    if x < 0.1:
-        s = f"{x:.6f}".rstrip("0").rstrip(".")
-        return s
-    if x < 1:
-        return f"{x:.3f}"
-    s = format_px(v)
-    if not s:
-        return s
-    if "." in s:
-        whole, frac = s.split(".", 1)
-    else:
-        whole, frac = s, ""
+    d = _card_decimals(x) if dec is None else int(dec)
+    s = f"{x:.{d}f}"
+    whole, _, frac = s.partition(".")
     try:
         n = int(whole)
     except ValueError:
@@ -179,10 +192,10 @@ def prev_cancelled(
     if cl is not None and px is not None:
         if side == "LONG" and cl < px:
             hit_cancel = True
-            reason = f"M15 закрилась нижче {_px(px)}, структура зламана"
+            reason = f"M15 закрилась нижче {_px_txt(px)}, структура зламана"
         if side == "SHORT" and cl > px:
             hit_cancel = True
-            reason = f"M15 закрилась вище {_px(px)}, структура зламана"
+            reason = f"M15 закрилась вище {_px_txt(px)}, структура зламана"
     if hit_sl:
         return {"ok": True, "how": "SL", "reason": f"стоп {_px(slv)} зачеплено"}
     if hit_cancel:
@@ -262,10 +275,22 @@ def desk_entry_gate(
     empty = {"send": False, "sl": s, "size": None, "reversal": False, "reason": "", "message": ""}
     if e is None or s is None or t is None:
         return {**empty, "reason": "немає entry/SL/TP1"}
+    side_u = str(direction or "").upper()
+    if side_u == "SHORT":
+        side_ok = s > e > t
+    else:
+        side_ok = s < e < t
+    if not side_ok:
+        return {**empty, "reason": "стоп/TP1 не з того боку від входу"}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)
     if not wide.get("ok"):
         return {**empty, "reason": str(wide.get("reason") or "стоп/ATR")}
     s2 = float(wide["sl"])
+    from office_radar import MIN_RR
+
+    rr = abs(t - e) / abs(e - s2) if abs(e - s2) > 1e-12 else 0.0
+    if rr + 1e-12 < float(MIN_RR):
+        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR}"}
     need = min_tp1_pct(symbol)
     move = move_pct_to_tp(entry=e, tp=t)
     if move is None or move + 1e-12 < need:
@@ -322,10 +347,10 @@ def _pct_txt(pct: float) -> str:
     return f"({sign}{abs(pct):.1f}%)"
 
 
-def _lvl(prefix: str, px: Any, pct: Optional[float] = None) -> str:
+def _lvl(prefix: str, px: Any, pct: Optional[float] = None, dec: Optional[int] = None) -> str:
     if pct is None:
-        return f"{prefix} · {_px(px)}"
-    return f"{prefix} · {_px(px)}  {_pct_txt(pct)}"
+        return f"{prefix} · {_px(px, dec)}"
+    return f"{prefix} · {_px(px, dec)}  {_pct_txt(pct)}"
 
 
 def format_desk_card(
@@ -373,7 +398,7 @@ def format_desk_card(
     lines: List[str] = []
     if reversal and prev:
         pdir = str(prev.get("direction") or "").upper()
-        pe = _px(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"))
+        pe = _px_txt(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"))
         why = str(rev_reason or "").strip()
         if why.lower().startswith("причина:"):
             why = why.split(":", 1)[-1].strip()
@@ -383,24 +408,51 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
     lines.append(f"{mark} {side} · {str(symbol).upper()} · {tf}")
     lines.append(kind)
-    span = format_level_span(elo, ehi) if elo is not None else _px(mid)
-    lines.append(f"🎯 Вхід · {span}")
-    if mid is not None and s is not None:
-        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(mid, s)))
+    lines.append("")
+    dec = _card_decimals(mid if mid is not None else elo)
+    # Прибрати спільні хвостові нулі: 0.9220/0.9400 → 0.922/0.940, але однаково для всіх.
+    _all = [x for x in (elo, ehi, s, t1, _f(tp2), _f(tp3)) if x is not None]
+    while dec > 0 and _all and all(round(abs(x) * 10 ** dec) % 10 == 0 for x in _all):
+        dec -= 1
+    if elo is not None and ehi is not None and abs(elo - ehi) > 1e-12:
+        a, b = sorted((elo, ehi))
+        span = f"{_px(a, dec)}–{_px(b, dec)}"
     else:
-        lines.append(_lvl("❌ Стоп", s))
+        span = _px(mid if mid is not None else elo, dec)
+    lines.append(f"🎯 Вхід · {span}")
+    s_show = s
+    if s is not None:
+        import math
+
+        q = 10 ** dec
+        s_show = (math.ceil(s * q - 1e-9) / q) if side == "SHORT" else (math.floor(s * q + 1e-9) / q)
+    if mid is not None and s_show is not None:
+        lines.append(_lvl("❌ Стоп", s_show, _pct_signed_risk(mid, s_show), dec))
+    else:
+        lines.append(_lvl("❌ Стоп", s_show, None, dec))
     if t1 is not None:
-        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None))
+        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None, dec))
     if tp2 is not None:
-        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None))
+        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None, dec))
     if tp3 is not None:
-        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(mid, _f(tp3)) if mid and _f(tp3) else None))
+        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(mid, _f(tp3)) if mid and _f(tp3) else None, dec))
+    lines.append("")
     z = str(zone_line or "").strip()
     if z:
         lines.append(f"Зона: {z}")
     w = str(confirm_wait or "").strip()
     if w:
         lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
+    trig_tf = str((confirm_wait and w.split(":")[0].replace("Чекаю на", "").strip()) or tf).upper() or tf
+    if elo is not None and ehi is not None:
+        z_lo, z_hi = sorted((elo, ehi))
+    else:
+        z_lo = z_hi = mid
+    if z_lo is not None:
+        if side == "SHORT":
+            lines.append(f"Вхід після закриття {trig_tf} нижче {_px(z_lo, dec)}")
+        else:
+            lines.append(f"Вхід після закриття {trig_tf} вище {_px(z_hi, dec)}")
     lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
     lines.append("При TP1 — частина + стоп у беззбиток")
     sz = size if isinstance(size, dict) else plan_position_size(
@@ -608,6 +660,30 @@ def close_desk_reversal(
         pass
 
 
+def anchor_sl_beyond_zone(
+    *,
+    direction: str,
+    sl: Any,
+    zone_lo: Any,
+    zone_hi: Any,
+    atr_h1: Any,
+    buffer_atr: float = 0.25,
+) -> Any:
+    """Стоп модуля рахувався під його вхід. Коли рушій переносить вхід у зону,
+    стоп має стояти за дальнім краєм зони + буфер, інакше вхід опиняється за стопом."""
+    s, lo, hi, atr = _f(sl), _f(zone_lo), _f(zone_hi), _f(atr_h1)
+    if s is None or lo is None or hi is None:
+        return sl
+    if lo > hi:
+        lo, hi = hi, lo
+    buf = float(atr) * buffer_atr if atr and atr > 0 else (hi - lo) * 0.5
+    if str(direction or "").upper() == "SHORT":
+        need = hi + buf
+        return max(s, need)
+    need = lo - buf
+    return min(s, need)
+
+
 def prepare_desk_send(
     *,
     db_path: str = "",
@@ -686,11 +762,14 @@ def prepare_desk_send(
     zone_lo = (conf or {}).get("zone_lo")
     zone_hi = (conf or {}).get("zone_hi")
     entry_use = (conf or {}).get("entry") if conf and conf.get("entry") is not None else entry
+    sl_use = anchor_sl_beyond_zone(
+        direction=direction, sl=sl, zone_lo=zone_lo, zone_hi=zone_hi, atr_h1=atr_h1
+    )
     gate = desk_entry_gate(
         symbol=symbol,
         direction=direction,
         entry=entry_use,
-        sl=sl,
+        sl=sl_use,
         tp1=tp1,
         atr_h1=atr_h1,
         score=score,

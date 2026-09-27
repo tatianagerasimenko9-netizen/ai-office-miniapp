@@ -83,8 +83,9 @@ def kind_ua(setup_type: str, direction: str) -> str:
     ul = raw.upper()
     if "СИЛЬН" in raw or "HUNTER" in ul or "SC-OTE" in ul or "SC_OTE" in ul:
         return "Відкат у сильну свічку"
-    if ul in ("DUMP", "PUMP") or "PUMP" in ul or "DUMP" in ul:
-        return f"{side} на відкаті"
+    if "PUMP" in ul or "DUMP" in ul:
+        tag = "PUMP" if "PUMP" in ul else "DUMP"
+        return f"{tag} · {side.lower()} на відкаті"
     if "РАДАР" in ul or ul == "RADAR":
         return "Рівень зі старшого ТФ"
     if "BOUNCE" in ul or "ВІДСКІК" in ul:
@@ -543,6 +544,16 @@ def evaluate_confluence(
         candles_w=candles_w,
     )
     clusters = cluster_zones(cands)
+    px_side = _f(price)
+    if px_side is not None and clusters:
+        # Відкат іде проти поточного руху: LONG — зона на/під ціною, SHORT — на/над ціною.
+        # Зона з іншого боку ціни — це не відкат, а погоня.
+        if side == "SHORT":
+            clusters = [c for c in clusters if float(c["hi"]) >= px_side]
+        else:
+            clusters = [c for c in clusters if float(c["lo"]) <= px_side]
+        if not clusters:
+            return {**empty, "reason": "зона збігів з іншого боку ціни — не відкат"}
     if not clusters:
         return {**empty, "reason": "немає збігів"}
     best = clusters[0]
@@ -696,7 +707,7 @@ def follow_setup(
 
 
 def format_confirm_card(*, symbol: str, direction: str, price: Any, detail: str) -> str:
-    from office_desk_card import _px
+    from office_desk_card import _px_txt as _px
 
     side = str(direction or "").upper()
     return (

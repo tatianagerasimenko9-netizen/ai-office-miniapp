@@ -372,7 +372,7 @@ def main() -> int:
         live_price=0.032889,
         sweep_line="SSL знято о 02:14 на рівні 0.032122",
     )
-    if "🎯 Вхід · 0.032889" not in same:
+    if "🎯 Вхід · 0.03289" not in same:
         return _fail(same)
     if "Entry:" in same:
         return _fail(same)

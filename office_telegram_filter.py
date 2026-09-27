@@ -270,7 +270,7 @@ def format_opportunity_alert(
         sl=sl,
         tp1=tp1,
         tp2=tp2,
-        setup_type=str(setup or "СЕТАП"),
+        setup_type=str(setup or ""),
     )
 
 

@@ -163,7 +163,7 @@ def main() -> int:
     for need in (
         "🔴 SHORT · DEMOUSDT · H1",
         "🎯 Вхід · 0.1306",
-        "❌ Стоп · " + format_px(packed["sl"]),
+        "❌ Стоп · 0.1322",
         "✅ TP1 · 0.1235",
     ):
         if need not in card:

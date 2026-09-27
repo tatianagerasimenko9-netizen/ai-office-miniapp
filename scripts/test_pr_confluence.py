@@ -127,7 +127,7 @@ def main() -> int:
         direction="SHORT",
         timeframe="M15",
         candidates=[_cand("sc_ote", 1.0, 1.01, "M15", "сильна свічка M15")],
-        price=1.04,
+        price=0.99,
     )
     if weak.get("send_card") or weak.get("reason") != "менше 2 збігів":
         return _fail(f"1 tag must db-only {weak}")
@@ -142,7 +142,7 @@ def main() -> int:
             _cand("sc_ote", 1.00, 1.01, "M15", "сильна свічка M15"),
             _cand("ob", 1.002, 1.012, "H1", "OB H1"),
         ],
-        price=1.03,
+        price=0.99,
     )
     if not grade_b.get("send_card") or grade_b.get("grade") != "B":
         return _fail(f"2 tags → B {grade_b}")
@@ -178,11 +178,11 @@ def main() -> int:
     for i in range(4):
         prep = prepare_desk_send(
             symbol="BTCUSDT",
-            direction="SHORT",
+            direction="LONG",
             timeframe="H1",
             entry=px_now,
-            sl=85900.0,
-            tp1=82000.0,
+            sl=82500.0,
+            tp1=86000.0,
             atr_h1=900.0,
             score=12,
             min_score=10,
@@ -245,7 +245,7 @@ def main() -> int:
     )
     for bit in (
         "🔴 SHORT · BRUSDT · M15",
-        "Шорт на відкаті · сила A",
+        "DUMP · шорт на відкаті · сила A",
         "🎯 Вхід · 0.922–0.928",
         "❌ Стоп · 0.940  (−1.6%)",
         "✅ TP1 · 0.901  (+2.6%)",
@@ -307,7 +307,7 @@ def main() -> int:
     if not lx.get("send"):
         return _fail(f"LONGXIA {lx.get('reason')}")
     lx_txt = str(lx.get("text") or "")
-    if "🟢 LONG · LONGXIAUSDT · M15" not in lx_txt or "Лонг на відкаті" not in lx_txt:
+    if "🟢 LONG · LONGXIAUSDT · M15" not in lx_txt or "лонг на відкаті" not in lx_txt:
         return _fail(lx_txt)
     if "range" in lx_txt.lower():
         return _fail(lx_txt)
