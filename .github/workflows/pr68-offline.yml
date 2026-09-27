@@ -1,0 +1,37 @@
+name: PR68 offline safety tests
+
+on:
+  push:
+    branches:
+      - cursor/office-unified-release-5134
+  pull_request:
+    paths:
+      - 'office_*.py'
+      - 'scripts/test_pr68_canonical.py'
+      - 'scripts/test_telegram_position_gate.py'
+      - '.github/workflows/pr68-offline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OFFICE_DEPO_USDT: '1000'
+      OFFICE_EXINFO_SEED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m compileall -q office_telegram_policy.py office_relay_wizard.py office_bridge.py office_alert_gate.py scripts/test_pr68_canonical.py scripts/test_telegram_position_gate.py
+      - name: Canonical scenario and delivery dedup (offline)
+        run: python scripts/test_pr68_canonical.py
+      - name: Position authorization (temporary SQLite, no Telegram)
+        run: python scripts/test_telegram_position_gate.py
