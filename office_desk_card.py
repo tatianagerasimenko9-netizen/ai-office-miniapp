@@ -404,7 +404,7 @@ def format_desk_card(
     w = str(confirm_wait or "").strip()
     if w:
         lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
-    lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
+    lines.append(str(now_line or (f"Зараз: зона {span}" if span else "Немає підтверджених меж зони")))
     lines.append("При TP1 — частина + стоп у беззбиток")
     sz = size if isinstance(size, dict) else plan_position_size(
         entry=mid, sl=s, score=score, min_score=min_score
