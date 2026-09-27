@@ -1,0 +1,63 @@
+name: PR68 real OHLCV replay (non-production)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/office-unified-release-5134
+    paths:
+      - '.github/workflows/pr68-real-replay.yml'
+      - 'scripts/fetch_real_ohlcv.py'
+      - 'office_t6_backtest.py'
+
+permissions:
+  contents: read
+
+jobs:
+  historical-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_DEPO_USDT: '1000'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Download real closed BTC and MANTA candles
+        run: |
+          python - <<'PY'
+          import datetime
+          import subprocess
+          end = datetime.datetime.now(datetime.timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
+          start = end - datetime.timedelta(days=21)
+          for symbol in ("BTCUSDT","MANTAUSDT"):
+              subprocess.run(["python","scripts/fetch_real_ohlcv.py","--symbol",symbol,
+                              "--start",start.isoformat(),"--end",end.isoformat(),
+                              "--output",f"/tmp/pr68-real/{symbol}.json"],check=True)
+          PY
+      - name: Real BTC T6 replay and MANTA data-integrity gate
+        run: |
+          python - <<'PY'
+          import json
+          from office_t6_backtest import load_ohlcv_file, run_t6_backtest
+          btc = run_t6_backtest("/tmp/pr68-real/BTCUSDT.json")
+          manta = load_ohlcv_file("/tmp/pr68-real/MANTAUSDT.json")
+          assert manta["symbol"] == "MANTAUSDT"
+          assert all(len(manta["timeframes"][tf]) > 0 for tf in ("1d","1h","15m"))
+          print("REAL_BTC_T6", json.dumps(btc.as_dict(), ensure_ascii=False))
+          print("REAL_MANTA_DATA_VALIDATED", {tf:len(v) for tf,v in manta["timeframes"].items()})
+          print("MANTA strategy replay is NOT covered by BTC-only T6; no trading claims.")
+          PY
+      - name: Upload non-sensitive replay inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr68-real-ohlcv
+          path: /tmp/pr68-real/*.json
+          if-no-files-found: ignore
+          retention-days: 7
