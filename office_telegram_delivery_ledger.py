@@ -84,7 +84,7 @@ def reserve_delivery(
         cur = conn.execute(
             _sql(db_path, "UPDATE office_telegram_delivery "
                 "SET state='PENDING',token=?,expires_at=?,delivered_at=NULL "
-                "WHERE dedup_key=? AND state!=\'UNCERTAIN\' AND expires_at<=?"),
+                "WHERE dedup_key=? AND state='DELIVERED' AND expires_at<=?"),
             (token, ts + lease_seconds, key, ts),
         )
         return token if cur.rowcount == 1 else None
