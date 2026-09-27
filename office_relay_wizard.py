@@ -95,7 +95,7 @@ from office_bridge import (
     ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
-from office_market_state import market_state_get, scanner_blocked_notice, scanner_signal_blocked
+from office_market_state import market_state_get, record_scan_facts, scanner_blocked_notice, scanner_signal_blocked
 from office_review_position import (
     handle_position_command,
     handle_review_command,
@@ -5500,6 +5500,13 @@ EV позитивне: {prob.get('ev_positive', '')}
     async def monitor_trade_radar() -> None:
         """T6: радар BTC. T8: боковик + всесвіт альтів/золота без копіювання BTC."""
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
+        from office_confluence import hydrate_live_from_db
+
+        try:
+            n_h = hydrate_live_from_db(db_path)
+            print(f"[confluence] hydrated live keys={n_h}")
+        except Exception as exc_h:
+            print(f"[confluence] hydrate failed: {type(exc_h).__name__}: {exc_h}")
 
         _range_fp: Dict[str, str] = {}
         _level_fp: Dict[str, str] = {}
@@ -5889,6 +5896,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             rprice = float((rh1[-1] or {}).get("close") or 0.0)
                         except Exception:
                             rprice = 0.0
+                        rsi1 = rsi_from_candles(rh1 if isinstance(rh1, list) else [])
+                        rsi4 = rsi_from_candles(rh4 if isinstance(rh4, list) else [])
+                        try:
+                            record_scan_facts(
+                                db_path,
+                                rsym,
+                                rsi_h1=rsi1,
+                                rsi_h4=rsi4,
+                                decision="WATCH",
+                                data_quality="OK" if rsi1 is not None else "UNAVAILABLE",
+                            )
+                        except Exception as exc_ms:
+                            print(f"[scout] market_state {rsym}: {type(exc_ms).__name__}")
                         try:
                             for tf_name, bars in (
                                 ("M5", rm5 if isinstance(rm5, list) else []),
@@ -6020,7 +6040,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             quote_stale=r_stale,
                         )
                         if rng_txt:
-                            if await _try_signal_feed(rsym, rng_txt, "range"):
+                            if await _try_signal_feed(rsym, rng_txt, "боковик"):
                                 print(f"[range] {rsym} ALERT {rres.status}")
                         elif rres.should_notify:
                             print(f"[range] {rsym} hold {rres.status} {rres.event} (not telegram)")
