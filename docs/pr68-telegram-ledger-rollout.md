@@ -35,8 +35,21 @@ the owner explicitly approves both the production DB migration and Worker deploy
 - Do not drop the ledger table during an incident; preserve it for diagnosis.
 - A Telegram-accepted message followed by a crash before the DB commit
   cannot be made exactly-once by this ledger; retries may duplicate it.
-- Leases are 120 seconds by default. A send lasting longer than the lease
-  can be claimed by another Worker; review timeout/lease settings before
-  enabling in multi-Worker production.
+- Leases are 120 seconds by default and the relay attempts renewal every 30 seconds.
+  If renewal fails or ownership is lost, the current relay logs the error but
+  does not yet abort the in-flight Telegram request. Treat this as a BLOCKER
+  for multi-Worker production until cancellation and recovery are tested.
 - Do not mark PR ready, merge, or deploy on the basis of fixture-only T6 tests.
   The separate real BTC/MANTA historical replay and final review remain gates.
+
+## Security/reliability review findings (current branch)
+
+- BLOCKER: the in-flight Telegram request is not cancelled if the renewal
+  heartbeat loses its DB lease. A second Worker could take the expired claim.
+- BLOCKER: a Telegram success followed by a failed ledger commit may still
+  return the message ID to the caller. Caller lifecycle transitions need an
+  explicit policy for uncertain delivery before enabling the flag.
+- LIMITATION: the ledger cannot atomically commit with the Telegram API.
+  An ambiguous timeout/crash can produce a duplicate on retry.
+- NOT VERIFIED: final same-SHA independent security review and real historical
+  BTC/MANTA OHLCV replay. The repository fixture test is not that replay.
