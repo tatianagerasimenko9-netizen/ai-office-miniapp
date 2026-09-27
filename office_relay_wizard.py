@@ -2406,6 +2406,12 @@ async def run() -> None:
             print(catalog_log_line())
         except Exception as exc_cmd:
             print(f"[commands] DATA_UNAVAILABLE {type(exc_cmd).__name__}")
+        try:
+            from office_token_audit import audit_log_line
+
+            print(audit_log_line())
+        except Exception as exc_tok:
+            print(f"[tokens] DATA_UNAVAILABLE {type(exc_tok).__name__}")
     has_saved = bool(cfg.get("tg_api_id") and cfg.get("tg_api_hash") and cfg.get("main_chat_id") and cfg.get("office_chat_id"))
     if has_saved and not force_setup and interactive:
         ans = _prompt("Знайдено збережені налаштування. Використати їх? (Y/n): ").lower()
