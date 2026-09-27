@@ -49,3 +49,7 @@ jobs:
           python scripts/test_watching_dedup.py
       - name: T6 OHLCV fixture backtest (offline, no look-ahead)
         run: python scripts/test_t6_backtest.py
+      - name: Position review and blocked bot actions (offline)
+        run: |
+          python scripts/test_review_position.py
+          python scripts/test_bot_action_blocked.py
