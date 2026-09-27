@@ -21,6 +21,13 @@ assert 'send_attempted = True' in source
 assert 'send_attempted and not delivered_id' in source
 assert 'photo outcome ambiguous' in source
 assert 'mark_delivery_uncertain(db_path, dedup_key, ledger_token)' in source
+# A return inside finally suppresses CancelledError and can falsely acknowledge sends.
+send_proactive = next(node for node in ast.walk(tree)
+                      if isinstance(node, ast.AsyncFunctionDef) and node.name == "send_proactive")
+assert not any(isinstance(n, ast.Return) for part in send_proactive.body
+               if isinstance(part, ast.Try) for final in part.finalbody
+               for n in ast.walk(final)), "finally must not return"
+assert 'return delivered_id if ledger_committed else None' in source
 assert any(isinstance(node, ast.AsyncFunctionDef) and node.name == "_renew_telegram_lease"
            for node in ast.walk(tree))
 print("OK Telegram opt-in integration source guards (offline)")
