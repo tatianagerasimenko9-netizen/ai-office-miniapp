@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline delivery ledger regression; temporary SQLite only, no Telegram."""
 import tempfile
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
@@ -20,6 +21,13 @@ def main():
         except Exception as exc:
             assert "office_telegram_delivery" in str(exc), str(exc)
         migrate_delivery_ledger(db)
+        # A missing/unavailable DB must not silently authorize a Telegram send.
+        bad_db = str(Path(tmp) / "missing-directory" / "delivery.sqlite")
+        try:
+            reserve_delivery(bad_db, "SCENARIO|FAIL_CLOSED", stable=True, now=999)
+            raise AssertionError("unavailable database must fail closed")
+        except (sqlite3.OperationalError, OSError):
+            pass
         first = reserve_delivery(db, key, stable=True, now=1000)
         assert first, "first reservation"
         assert reserve_delivery(db, key, stable=True, now=1001) is None, "concurrent duplicate"
