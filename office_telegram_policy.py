@@ -143,6 +143,7 @@ def mark_cycle_sent(sent_symbols: Set[str], symbol: str) -> None:
 TRADE_UPDATE_STREAM = "general"
 TRADE_TG_DEDUP_SEC = 900.0
 _TRADE_TG_LAST: Dict[str, float] = {}
+_TRADE_TG_PENDING: Set[str] = set()
 
 
 def trade_update_streams() -> Tuple[str, ...]:
@@ -152,6 +153,7 @@ def trade_update_streams() -> Tuple[str, ...]:
 
 def reset_trade_telegram_dedup() -> None:
     _TRADE_TG_LAST.clear()
+    _TRADE_TG_PENDING.clear()
 
 
 def _trade_fp_key(
@@ -209,8 +211,19 @@ def should_send_trade_telegram(
         now = time_mod.time()
     last = _TRADE_TG_LAST.get(key)
     stable_scenario_event = bool(str(canonical_id or "").strip() and str(event or kind or "").strip())
-    if last is not None and (stable_scenario_event or now - last < TRADE_TG_DEDUP_SEC):
+    if key in _TRADE_TG_PENDING or (last is not None and (stable_scenario_event or now - last < TRADE_TG_DEDUP_SEC)):
         return {"send": False, "reason": "duplicate telegram", "key": key, "stream": st}
-    _TRADE_TG_LAST[key] = now
+    # Reserve before async I/O; only a confirmed Telegram message commits dedup.
+    _TRADE_TG_PENDING.add(key)
     _ = stream  # ігноруємо другий stream — гілка одна
     return {"send": True, "reason": "ok", "key": key, "stream": st}
+
+
+def finish_trade_telegram(*, key: str, delivered: bool, now_ts: float = 0.0) -> None:
+    """Release reservation on failure; record dedup only after confirmed delivery."""
+    k = str(key or "").strip()
+    if not k:
+        return
+    _TRADE_TG_PENDING.discard(k)
+    if delivered:
+        _TRADE_TG_LAST[k] = float(now_ts or time_mod.time())
