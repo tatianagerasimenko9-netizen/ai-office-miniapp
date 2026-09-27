@@ -449,6 +449,57 @@ def lev_conclusion_text(draft: Dict[str, Any], stances: Dict[str, Any], action: 
     return ". ".join(p for p in parts if p).strip()
 
 
+_HTF_MARKS = ("H1", "H4", "D1", "1H", "4H", "1D", "W1", "HTF", "FIB_H4", "РІВЕНЬ D")
+
+
+def has_htf_grounds(confluence: Any) -> bool:
+    """HTF-підстави лише з тегів/зони збігів, не з порожнього макро."""
+    conf = confluence if isinstance(confluence, dict) else {}
+    parts = [str(conf.get("zone_line") or ""), " ".join(str(t) for t in (conf.get("tags") or []))]
+    cluster = conf.get("cluster") if isinstance(conf.get("cluster"), dict) else {}
+    for m in cluster.get("members") or conf.get("zones") or []:
+        if isinstance(m, dict):
+            parts.append(str(m.get("tf") or ""))
+            parts.append(str(m.get("tag") or m.get("label") or ""))
+    blob = " ".join(parts).upper()
+    return any(mark in blob for mark in _HTF_MARKS)
+
+
+def invalidation_defined(*, sl: Any = None, cancel_level: Any = None, invalidate_line: str = "") -> bool:
+    inv = str(invalidate_line or "").lower()
+    if "не визначено" in inv or "заблокован" in inv:
+        return False
+    return _f(sl) is not None or _f(cancel_level) is not None
+
+
+def scenario_ready_to_present(
+    *,
+    confluence: Any = None,
+    sl: Any = None,
+    cancel_level: Any = None,
+    invalidate_line: str = "",
+    lev_note: str = "",
+    why_line: str = "",
+) -> Dict[str, Any]:
+    """Готовий до виконання ≠ WATCHING з тестовими рівнями."""
+    note = f"{lev_note} {why_line}".upper()
+    demo = "DEMO" in note or "OFFLINE" in note
+    htf = has_htf_grounds(confluence)
+    inv = invalidation_defined(sl=sl, cancel_level=cancel_level, invalidate_line=invalidate_line)
+    why_una = "DATA_UNAVAILABLE" in note
+    if demo:
+        return {
+            "ready": False,
+            "demo": True,
+            "reason": "DEMO/OFFLINE — приклад розрахунку, не Live",
+        }
+    if why_una or not htf:
+        return {"ready": False, "demo": False, "reason": "немає HTF-підстав — не формую готову рекомендацію"}
+    if not inv:
+        return {"ready": False, "demo": False, "reason": "немає інвалідації — сценарій не готовий до виконання"}
+    return {"ready": True, "demo": False, "reason": "ok"}
+
+
 def finalize_lev(
     draft: Dict[str, Any],
     stances: Optional[Dict[str, Any]] = None,
@@ -500,8 +551,18 @@ def finalize_lev(
                 "повтор після підтвердження на LTF або зникнення розбіжності"
             )
         else:
-            action = ACTION_SEND
-            reason = "власний сетап Лева придатний; індикатори аргумент"
+            ready = scenario_ready_to_present(
+                confluence=draft.get("confluence"),
+                sl=sl,
+                cancel_level=draft.get("invalidation") if draft.get("invalidation") != sl else sl,
+                lev_note=str(draft.get("lev_note") or ""),
+            )
+            if not ready.get("ready"):
+                action = ACTION_WATCHING
+                reason = str(ready.get("reason") or "сценарій не готовий до виконання")
+            else:
+                action = ACTION_SEND
+                reason = "власний сетап Лева придатний; індикатори аргумент"
 
     note = lev_conclusion_text(draft, st, action)
     return {

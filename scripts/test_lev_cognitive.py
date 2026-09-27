@@ -177,6 +177,7 @@ def main() -> int:
         previous_link=link,
         now_line="Зараз: поза угодою, чекаю відкат",
         confirm_wait="Чекаю відкат",
+        zone_line="OB H1 + Фібо H4",
         size={"size_usdt": 1522, "depo": 1000, "risk_pct": 0.01},
     )
     if "Повторний вхід" in card:
@@ -359,6 +360,58 @@ def main() -> int:
     if n_g < 1 or again.get("send"):
         return _fail(f"hydrate confirm replay {n_g} {again} {k}")
     print("OK alert_gate hydrate: повторний CONFIRM після рестарту заборонено")
+
+    from office_lev_verdict import ACTION_WATCHING, has_htf_grounds, scenario_ready_to_present
+
+    no_htf = {
+        "send_card": True,
+        "entry": 0.07,
+        "sl": 0.072,
+        "tp1": 0.066,
+        "rr": 2.0,
+        "confluence": {"n": 3, "send_card": True, "tags": ["sc_ote"], "zone_line": "сильна свічка M15"},
+        "atr": {},
+        "liquidity": {},
+    }
+    blocked_htf = finalize_lev(no_htf, {})
+    if blocked_htf.get("send") or blocked_htf.get("action") != ACTION_WATCHING:
+        return _fail(f"HTF block {blocked_htf}")
+    if has_htf_grounds({"tags": ["sc_ote"], "zone_line": "M15"}):
+        return _fail("M15-only is not HTF")
+    if not has_htf_grounds({"tags": ["ob", "fib_h4"], "zone_line": "OB H1"}):
+        return _fail("H1/H4 must count as HTF")
+    demo_ready = scenario_ready_to_present(
+        confluence={"tags": ["ob"], "zone_line": "OB H1"},
+        sl=0.072,
+        lev_note="DEMO/OFFLINE",
+    )
+    if demo_ready.get("ready") or not demo_ready.get("demo"):
+        return _fail(f"demo as live {demo_ready}")
+    no_inv = scenario_ready_to_present(
+        confluence={"tags": ["ob"], "zone_line": "OB H1"},
+        sl=0.072,
+        invalidate_line="Умову інвалідації не визначено; торговий дозвіл заблокований.",
+    )
+    if no_inv.get("ready"):
+        return _fail(f"unknown invalidation presented {no_inv}")
+    manta_demo = format_desk_card(
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        timeframe="M15",
+        entry=0.070959,
+        sl=0.072504,
+        tp1=0.068619,
+        entry_low=0.070471,
+        entry_high=0.071447,
+        lev_note="DEMO/OFFLINE",
+        invalidate_line="Умову інвалідації не визначено; торговий дозвіл заблокований.",
+        size={"size_usdt": 676, "depo": 1000, "risk_pct": 0.01},
+    )
+    if "Приклад розрахунку, не валідований торговий план" not in manta_demo:
+        return _fail(manta_demo)
+    if "Плановий обсяг" in manta_demo:
+        return _fail("demo size as live plan")
+    print("OK HTF/інвалідація/DEMO не стають готовою рекомендацією")
 
     print("OK: test_lev_cognitive")
     return 0

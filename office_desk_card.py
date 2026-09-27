@@ -518,7 +518,10 @@ def format_desk_card(
         lines.append(yw if yw.lower().startswith("чому") else f"Чому сценарій: {yw}")
     inv = str(invalidate_line or "").strip()
     if not inv:
-        inv = "Умову інвалідації не визначено; торговий дозвіл заблокований."
+        if s is not None:
+            inv = f"закриття за рівнем інвалідації {_px(s, symbol)}"
+        else:
+            inv = "Умову інвалідації не визначено; торговий дозвіл заблокований."
     lines.append(inv if inv.lower().startswith("що скасує") else f"Що скасує: {inv}")
     now = str(now_line or "").strip()
     if now and "входу ще немає" not in "\n".join(lines).lower():
@@ -529,7 +532,19 @@ def format_desk_card(
     z = str(zone_line or "").strip()
     if z:
         lines.append(f"Структура: {z}")
-    lines.append("План після підтвердження")
+    from office_lev_verdict import scenario_ready_to_present
+
+    ready = scenario_ready_to_present(
+        confluence={"zone_line": z, "tags": []},
+        sl=s,
+        invalidate_line=inv,
+        lev_note=ln,
+        why_line=yw,
+    )
+    plan_title = "План після підтвердження"
+    if not ready.get("ready"):
+        plan_title = "Приклад розрахунку, не валідований торговий план"
+    lines.append(plan_title)
     if calc is not None:
         lines.append(f"Розрахунок від {_px(calc, symbol)}")
         if elo is not None and ehi is not None:
@@ -575,8 +590,9 @@ def format_desk_card(
         rp = _f(sz.get("risk_pct")) or 0.01
         if usdt is not None and dep is not None:
             risk_usd = dep * rp
+            prefix = "Приклад обсягу" if not ready.get("ready") else "Плановий обсяг"
             lines.append(
-                f"Плановий обсяг {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " ")
+                f"{prefix} {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " ")
             )
         else:
             lines.append(f"Ризик {rp * 100:.0f}% депо")
@@ -959,7 +975,15 @@ def prepare_desk_send(
     )
     if not gate.get("send"):
         return {**gate, "confluence": conf}
-    if gate.get("reversal") and db_path:
+    from office_lev_verdict import scenario_ready_to_present
+
+    ready = scenario_ready_to_present(
+        confluence=conf,
+        sl=gate.get("sl"),
+        lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
+        why_line=str((conf or {}).get("zone_line") or ""),
+    )
+    if gate.get("reversal") and db_path and (ready.get("ready") or not require_confluence):
         close_desk_reversal(db_path, gate.get("prev") or prev, exit_price=entry_use)
     text = format_desk_card(
         symbol=symbol,
@@ -991,7 +1015,7 @@ def prepare_desk_send(
         chart_tf="M15",
     )
     key = str((conf or {}).get("setup_key") or "")
-    if key:
+    if key and (ready.get("ready") or not require_confluence):
         mark_live(
             key,
             {
@@ -1017,7 +1041,7 @@ def prepare_desk_send(
             "reason": "порожня картка після gate геометрії",
             "chasing": chasing,
         }
-    return {
+    out = {
         **gate,
         "text": text,
         "confluence": conf,
@@ -1025,4 +1049,10 @@ def prepare_desk_send(
         "entry": entry_use,
         "chasing": chasing,
         "opens_position": False,
+        "execution_ready": bool(ready.get("ready")),
     }
+    if require_confluence and not ready.get("ready"):
+        out["send"] = False
+        out["reason"] = str(ready.get("reason") or "сценарій не готовий до виконання")
+        out["watching_only"] = True
+    return out
