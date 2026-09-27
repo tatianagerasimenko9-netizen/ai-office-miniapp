@@ -61,3 +61,5 @@ jobs:
         run: python scripts/test_telegram_relay_behavior.py
       - name: Independent risk officer veto (offline, no orders)
         run: python scripts/test_risk_officer.py
+      - name: Evidence-backed market thesis contract (offline, no orders)
+        run: python scripts/test_market_thesis.py
