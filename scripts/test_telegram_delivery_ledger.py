@@ -40,9 +40,8 @@ def main():
         transient = reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2000)
         assert transient
         assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2001) is None
-        assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2121), "expired lease"
-        assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2122) is None
-        assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=3000), "lease expiry retry"
+        assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2121) is None, "expired PENDING must not auto-retry"
+        assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=3000) is None, "possible crash-after-send blocks retry"
         concurrent_key = "SCENARIO|MANTAUSDT-H1-456|CONFIRM|general"
         with ThreadPoolExecutor(max_workers=8) as pool:
             claims = list(pool.map(
@@ -60,11 +59,10 @@ def main():
         assert reserve_delivery(db, lease_key, stable=True, now=5121) is None, "no lease theft"
         assert not renew_delivery(db, lease_key, "wrong-token", now=5122), "wrong owner blocked"
         assert not renew_delivery(db, lease_key, owner, now=5211), "expired lease cannot revive"
-        successor = reserve_delivery(db, lease_key, stable=True, now=5211)
-        assert successor and successor != owner
-        assert not renew_delivery(db, lease_key, owner, now=5212), "old owner cannot renew"
-        assert not finish_delivery(db, lease_key, owner, delivered=True, stable=True, now=5212), "old owner cannot commit"
-        assert finish_delivery(db, lease_key, successor, delivered=True, stable=True, now=5213)
+        assert reserve_delivery(db, lease_key, stable=True, now=5211) is None, "expired owner requires manual reconciliation"
+        assert not renew_delivery(db, lease_key, owner, now=5212), "expired owner cannot renew"
+        assert mark_delivery_uncertain(db, lease_key, owner), "quarantine crashed lease"
+        assert reserve_delivery(db, lease_key, stable=True, now=999999) is None
         uncertain_key = "SCENARIO|BTCUSDT-H1-999|SIGNAL_ENTRY|general"
         uncertain_owner = reserve_delivery(db, uncertain_key, stable=True, now=6000)
         assert uncertain_owner
