@@ -759,7 +759,15 @@ def _previous_link_line(prev: Optional[Dict[str, Any]], *, timeframe: str, confi
         why = st
     else:
         return ""
-    wait = confirm_wait or "відкат і LTF"
+    import re
+
+    wait = str(confirm_wait or "").strip()
+    m = re.search(r"чекаю[:\s]+(.+)", wait, flags=re.I)
+    if m:
+        wait = m.group(1).strip()
+    wait = wait.split(".")[0].strip()
+    if not wait or len(wait) > 72:
+        wait = "відкат і LTF-підтвердження"
     return previous_to_new_link(
         prev_direction=str(prev.get("direction") or ""),
         prev_status=st,

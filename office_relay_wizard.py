@@ -2834,23 +2834,30 @@ async def run() -> None:
             m = re.search(r"сценарій\s+(M\d+|H\d+|D1)", str(text or ""), flags=re.I)
             return str(m.group(1)).upper() if m else ""
 
-        def _wait_line_from_text(text: str, side: str) -> str:
-            for line in str(text or "").splitlines():
-                if "чекаю" in line.lower():
-                    return line.strip()
-            return (
+        def _line_roles(text: str, side: str) -> Dict[str, str]:
+            wait = (
                 "Чекаю відкату в зону. Входу ще немає."
                 if "LONG" in str(side or "").upper()
                 else "Чекаю реакції M5 у зоні. Входу ще немає."
             )
-
-        def _first_prefixed(text: str, prefixes: tuple) -> str:
-            blob = str(text or "")
-            for line in blob.splitlines():
-                low = line.lower()
-                if any(p.lower() in low for p in prefixes):
-                    return line.strip()
-            return ""
+            why = cancel = prev = ""
+            for line in str(text or "").splitlines():
+                raw = line.strip()
+                low = raw.lower()
+                if not raw:
+                    continue
+                if low.startswith("попередній") and "скасовано" in low:
+                    prev = raw
+                    continue
+                if "чекаю" in low:
+                    wait = raw
+                    continue
+                if low.startswith("що скасує") or low.startswith("конкретну умову m5"):
+                    cancel = raw
+                    continue
+                if low.startswith("це зона") or "місце спостереження" in low or "окрема зона" in low:
+                    why = raw
+            return {"wait": wait, "why": why, "cancel": cancel, "prev": prev}
 
         m15 = fetch_candles(sym, "15m", 96)
         h1 = fetch_candles(sym, "1h", 48)
@@ -2879,13 +2886,21 @@ async def run() -> None:
                 b60 = b.get("price")
             if int(b.get("pct") or 0) == 40:
                 b40 = b.get("price")
+        from office_chart_png import _f as _pxf
+        from office_desk_card import _calc_entry_px
+
+        roles = _line_roles(message, direction)
+        elo = parsed.get("entry_low") or parsed.get("entry") or sc.get("ote_lo")
+        ehi = parsed.get("entry_high") or parsed.get("entry") or sc.get("ote_hi")
+        side = str(direction or parsed.get("direction") or "").upper()
+        calc = _calc_entry_px(direction=side, elo=_pxf(elo), ehi=_pxf(ehi), entry=_pxf(parsed.get("entry")))
         lv = chart_levels(
             sl=parsed.get("sl") or sc.get("sl"),
             tp1=parsed.get("tp1") or parsed.get("tp"),
             tp2=parsed.get("tp2"),
             tp3=parsed.get("tp3"),
-            entry_low=parsed.get("entry_low") or parsed.get("entry") or sc.get("ote_lo"),
-            entry_high=parsed.get("entry_high") or parsed.get("entry") or sc.get("ote_hi"),
+            entry_low=elo,
+            entry_high=ehi,
             sc_low=sc_lo,
             sc_high=sc_hi,
             sweep=parsed.get("sweep"),
@@ -2898,11 +2913,11 @@ async def run() -> None:
             status="WATCHING" if "чекаю" in str(message or "").lower() or "входу немає" in str(message or "").lower() else "",
             scenario_tf=_scenario_tf_from_text(message),
             chart_tf="M15",
-            wait_line=_wait_line_from_text(message, direction),
-            why_line=_first_prefixed(message, ("Чому", "Новий сценарій")),
-            cancel_line=_first_prefixed(message, ("Що скасує", "скасує")),
-            prev_line=_first_prefixed(message, ("Попередній", "скасовано до входу")),
-            calc_entry=parsed.get("entry"),
+            wait_line=roles["wait"],
+            why_line=roles["why"],
+            cancel_line=roles["cancel"],
+            prev_line=roles["prev"],
+            calc_entry=calc,
             demo="DEMO" in str(message or "").upper() or "OFFLINE" in str(message or "").upper(),
         )
         return render_signal_chart(
@@ -2910,7 +2925,7 @@ async def run() -> None:
             candles_m15=m15,
             candles_h1=h1,
             levels=lv,
-            direction=direction or str(parsed.get("direction") or ""),
+            direction=side,
         )
 
     async def send_proactive(
