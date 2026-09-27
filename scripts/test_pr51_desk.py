@@ -221,14 +221,14 @@ def main() -> int:
         size={"size_usdt": 1099, "depo": 1000, "risk_pct": 0.01},
     )
     snxx_need = (
-        "🔴 SHORT · SNXXUSDT · M15",
+        "🔴 SHORT · SNXXUSDT · сценарій M15",
         "Шорт на відкаті · сила A",
         "🎯 Вхід · 17.46",
         "❌ Стоп · 17.62  (−0.9%)",
         "✅ TP1 · 17.22  (+1.4%)",
         "✅ TP2 · 16.98  (+2.7%)",
         "✅ TP3 · 16.67  (+4.5%)",
-        "Зона: сильна свічка M15 + OB H1",
+        "Структура: сильна свічка M15 + OB H1",
         "Чекаю на M5:",
         "Плановий обсяг 1 099 USDT · ризик 10$",
     )
@@ -259,7 +259,7 @@ def main() -> int:
         grade="B",
         size={"size_usdt": 454, "depo": 1000, "risk_pct": 0.01},
     )
-    if "🟢 LONG · AKEUSDT · M15" not in ake or "Відкат у сильну свічку" not in ake:
+    if "🟢 LONG · AKEUSDT · сценарій M15" not in ake or "Відкат у сильну свічку" not in ake:
         return _fail(ake)
     if "🎯 Вхід · " not in ake or "сила B" not in ake:
         return _fail(ake)

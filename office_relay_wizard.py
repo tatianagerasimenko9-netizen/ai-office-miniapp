@@ -2823,10 +2823,34 @@ async def run() -> None:
             )
 
     def _render_entry_chart(sym: str, direction: str, message: str) -> Dict[str, Any]:
+        import re
+
         from office_chart_png import chart_levels, render_signal_chart
         from office_market_data import fetch_candles
         from office_topdown import asian_session_range
         from office_trade_steer import midnight_open_price, plan_strong_candle_ote, parse_sc_zone_note
+
+        def _scenario_tf_from_text(text: str) -> str:
+            m = re.search(r"сценарій\s+(M\d+|H\d+|D1)", str(text or ""), flags=re.I)
+            return str(m.group(1)).upper() if m else ""
+
+        def _wait_line_from_text(text: str, side: str) -> str:
+            for line in str(text or "").splitlines():
+                if "чекаю" in line.lower():
+                    return line.strip()
+            return (
+                "Чекаю відкату в зону. Входу ще немає."
+                if "LONG" in str(side or "").upper()
+                else "Чекаю реакції M5 у зоні. Входу ще немає."
+            )
+
+        def _first_prefixed(text: str, prefixes: tuple) -> str:
+            blob = str(text or "")
+            for line in blob.splitlines():
+                low = line.lower()
+                if any(p.lower() in low for p in prefixes):
+                    return line.strip()
+            return ""
 
         m15 = fetch_candles(sym, "15m", 96)
         h1 = fetch_candles(sym, "1h", 48)
@@ -2871,7 +2895,15 @@ async def run() -> None:
             bucket_60=b60,
             bucket_40=b40,
             last_price=(m15[-1] or {}).get("close") if m15 else ((h1[-1] or {}).get("close") if h1 else None),
-            status="сила A" if "сила A" in str(message or "") else ("сила B" if "сила B" in str(message or "") else "чекаю"),
+            status="WATCHING" if "чекаю" in str(message or "").lower() or "входу немає" in str(message or "").lower() else "",
+            scenario_tf=_scenario_tf_from_text(message),
+            chart_tf="M15",
+            wait_line=_wait_line_from_text(message, direction),
+            why_line=_first_prefixed(message, ("Чому", "Новий сценарій")),
+            cancel_line=_first_prefixed(message, ("Що скасує", "скасує")),
+            prev_line=_first_prefixed(message, ("Попередній", "скасовано до входу")),
+            calc_entry=parsed.get("entry"),
+            demo="DEMO" in str(message or "").upper() or "OFFLINE" in str(message or "").upper(),
         )
         return render_signal_chart(
             symbol=sym,

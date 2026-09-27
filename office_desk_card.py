@@ -363,6 +363,22 @@ def _pct_txt(pct: float) -> str:
     return f"({sign}{abs(pct):.1f}%)"
 
 
+def _calc_entry_px(*, direction: str, elo: Optional[float], ehi: Optional[float], entry: Optional[float]) -> Optional[float]:
+    """Для широкої зони — найгірший край. Інакше заявлений entry."""
+    side = str(direction or "").upper()
+    if elo is None or ehi is None:
+        return entry
+    lo, hi = (elo, ehi) if elo <= ehi else (ehi, elo)
+    span = hi - lo
+    ref = abs(entry or ((lo + hi) / 2.0) or 0.0) or 1.0
+    wide = span / ref >= 0.008
+    if wide and side == "LONG":
+        return lo
+    if wide and side == "SHORT":
+        return hi
+    return entry if entry is not None else (lo + hi) / 2.0
+
+
 def _lvl(prefix: str, px: Any, pct: Optional[float] = None, symbol: str = "") -> str:
     if pct is None:
         return f"{prefix} · {_px(px, symbol)}"
@@ -397,6 +413,7 @@ def format_desk_card(
     confirm_wait: str = "",
     now_line: str = "",
     lev_note: str = "",
+    chart_tf: str = "",
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
     from office_alert_gate import validate_trade_geometry
@@ -413,11 +430,12 @@ def format_desk_card(
     mid = e
     if mid is None and elo is not None and ehi is not None:
         mid = (elo + ehi) / 2.0
+    calc = _calc_entry_px(direction=side, elo=elo, ehi=ehi, entry=mid)
     geo = validate_trade_geometry(
         direction=side,
         sl=s,
         tp1=t1,
-        entry=mid,
+        entry=calc,
         entry_low=elo,
         entry_high=ehi,
         tp2=tp2,
@@ -446,35 +464,57 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано — {why}")
         else:
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
-    lines.append(f"{mark} {side} · {str(symbol).upper()} · {tf}")
+    ctf = str(chart_tf or "").upper()
+    head = f"{mark} {side} · {str(symbol).upper()} · сценарій {tf}"
+    if ctf and ctf != tf:
+        head += f" · графік {ctf}"
+    lines.append(head)
     lines.append(kind)
-    span = format_level_span(elo, ehi, symbol) if elo is not None else _px(mid, symbol)
+    lines.append("WATCHING · ВХОДУ НЕМАЄ")
+    span = format_level_span(elo, ehi, symbol) if elo is not None else _px(calc, symbol)
     lines.append(f"🎯 Вхід · {span}")
-    if mid is not None and s is not None:
-        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(mid, s), symbol))
-    else:
-        lines.append(_lvl("❌ Стоп", s, None, symbol))
-    if t1 is not None:
-        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None, symbol))
-    if tp2 is not None:
-        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None, symbol))
-    if tp3 is not None:
-        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(mid, _f(tp3)) if mid and _f(tp3) else None, symbol))
-    z = str(zone_line or "").strip()
-    if z:
-        lines.append(f"Зона: {z}")
+    lines.append("Це зона спостереження, не дозвіл на вхід.")
     w = str(confirm_wait or "").strip()
     if w:
-        lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
-    lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
+        lines.append(w if w.lower().startswith("чекаю") else f"Чекаю: {w}")
+    else:
+        wait_default = "Чекаю відкату в зону. Входу ще немає." if side == "LONG" else "Чекаю реакції M5 у зоні. Входу ще немає."
+        lines.append(wait_default)
+    now = str(now_line or "").strip()
+    if now and "входу ще немає" not in "\n".join(lines).lower():
+        lines.append(now)
     ln = str(lev_note or "").strip()
     if ln:
         lines.append(ln)
+    z = str(zone_line or "").strip()
+    if z:
+        lines.append(f"Структура: {z}")
+    lines.append("План після підтвердження")
+    if calc is not None:
+        lines.append(f"Розрахунок від {_px(calc, symbol)}")
+        if elo is not None and ehi is not None:
+            zlo, zhi = (elo, ehi) if elo <= ehi else (ehi, elo)
+            ref = abs(calc) or 1.0
+            if (zhi - zlo) / ref >= 0.008:
+                other = zlo if side == "SHORT" else zhi
+                lines.append(
+                    f"На протилежному краї зони {_px(other, symbol)} стоп% і обсяг інші — не одна цифра на всю зону."
+                )
+    if calc is not None and s is not None:
+        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(calc, s), symbol))
+    else:
+        lines.append(_lvl("❌ Стоп", s, None, symbol))
+    if t1 is not None:
+        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(calc, t1) if calc else None, symbol))
+    if tp2 is not None:
+        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(calc, _f(tp2)) if calc and _f(tp2) else None, symbol))
+    if tp3 is not None:
+        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(calc, _f(tp3)) if calc and _f(tp3) else None, symbol))
     lines.append("При TP1 — частина + стоп у беззбиток")
     sz = None
     if geo.get("size_allowed"):
         sz = size if isinstance(size, dict) else plan_position_size(
-            entry=mid, sl=s, score=score, min_score=min_score, direction=side
+            entry=calc, sl=s, score=score, min_score=min_score, direction=side
         )
     if isinstance(sz, dict):
         usdt = _f(sz.get("size_usdt"))
@@ -887,6 +927,7 @@ def prepare_desk_send(
         confirm_wait=str((conf or {}).get("confirm_wait") or ""),
         now_line=str((conf or {}).get("now_line") or ""),
         lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
+        chart_tf="M15",
     )
     key = str((conf or {}).get("setup_key") or "")
     if key:

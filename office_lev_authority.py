@@ -114,7 +114,7 @@ def previous_to_new_link(
     wait_for: str = "відкат і LTF-підтвердження",
     had_entry: bool = False,
 ) -> str:
-    why = str(reason or "").strip() or "DATA_UNAVAILABLE"
+    why = str(reason or "").strip()
     side = str(prev_direction or "LONG").upper()
     tf = str(new_tf or "H1").upper()
     wait = str(wait_for or "відкат").strip()
@@ -123,8 +123,13 @@ def previous_to_new_link(
             f"Попередній {side} мав підтверджений вхід (статус {prev_status or '—'}). "
             f"Новий сценарій {tf} очікує {wait}."
         )
+    if not why or why.upper() == "DATA_UNAVAILABLE":
+        return (
+            f"Попередній {side} скасовано до входу. Причину Live не підтверджено (DATA_UNAVAILABLE). "
+            f"Новий сценарій {tf} очікує {wait}."
+        )
     return (
-        f"Попередній {side} скасовано до входу через {why}. "
+        f"Попередній {side} скасовано до входу: {why}. "
         f"Новий сценарій {tf} очікує {wait}."
     )
 

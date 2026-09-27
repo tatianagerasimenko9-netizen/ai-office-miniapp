@@ -102,6 +102,15 @@ def chart_levels(
     last_price: Any = None,
     status: str = "",
     footer: str = "",
+    scenario_tf: str = "",
+    chart_tf: str = "",
+    headline: str = "",
+    wait_line: str = "",
+    why_line: str = "",
+    cancel_line: str = "",
+    prev_line: str = "",
+    demo: bool = False,
+    calc_entry: Any = None,
 ) -> Dict[str, Any]:
     return {
         "sl": _f(sl),
@@ -121,38 +130,81 @@ def chart_levels(
         "last_price": _f(last_price),
         "status": str(status or ""),
         "footer": str(footer or ""),
+        "scenario_tf": str(scenario_tf or ""),
+        "chart_tf": str(chart_tf or ""),
+        "headline": str(headline or ""),
+        "wait_line": str(wait_line or ""),
+        "why_line": str(why_line or ""),
+        "cancel_line": str(cancel_line or ""),
+        "prev_line": str(prev_line or ""),
+        "demo": bool(demo),
+        "calc_entry": _f(calc_entry),
     }
 
 
-def _hlines(levels: Dict[str, Any]) -> Tuple[List[float], List[str], List[str]]:
-    order = [
-        ("sl", "#ff3b6b", "-"),
-        ("tp1", "#00c853", "--"),
-        ("tp2", "#00e5a0", "--"),
-        ("tp3", "#f0b429", ":"),
-        ("sweep", "#c084fc", "-."),
-        ("mo", "#29b6f6", ":"),
-        ("asian_high", "#f0b429", ":"),
-        ("asian_low", "#f0b429", ":"),
-        ("bucket_60", "#ffffff", "-"),
-        ("bucket_40", "#f0b429", "--"),
-    ]
+def _visible_hlines(levels: Dict[str, Any], y0: float, y1: float) -> Tuple[List[float], List[str], List[str]]:
+    """Лише підписані SL/TP у видимому вікні — без безіменних ліній."""
+    order = [("sl", "#ef6b7b", "-"), ("tp1", "#3dcf8a", "--")]
     ys: List[float] = []
     colors: List[str] = []
     styles: List[str] = []
-    seen = set()
+    pad = (y1 - y0) * 0.02
     for key, col, st in order:
         v = levels.get(key)
         if v is None:
             continue
-        mark = round(float(v), 8)
-        if mark in seen:
+        fv = float(v)
+        if fv < y0 - pad or fv > y1 + pad:
             continue
-        seen.add(mark)
-        ys.append(float(v))
+        ys.append(fv)
         colors.append(col)
         styles.append(st)
     return ys, colors, styles
+
+
+def _view_window(
+    *,
+    candle_lo: float,
+    candle_hi: float,
+    zone_lo: Optional[float],
+    zone_hi: Optional[float],
+    sl: Optional[float] = None,
+    last: Optional[float] = None,
+) -> Tuple[float, float]:
+    """Масштаб лише свічки + зона. SL/TP не розтягують вісь Y."""
+    del sl, last
+    lo = candle_lo
+    hi = candle_hi
+    if zone_lo is not None:
+        lo = min(lo, zone_lo)
+        hi = max(hi, zone_lo)
+    if zone_hi is not None:
+        lo = min(lo, zone_hi)
+        hi = max(hi, zone_hi)
+    span = max(hi - lo, abs(candle_hi - candle_lo), 1e-12)
+    pad = span * 0.16
+    return lo - pad, hi + pad
+
+
+def _zone_band(en_lo: Optional[float], en_hi: Optional[float], y0: float, y1: float) -> Optional[Tuple[float, float]]:
+    """Напівпрозора смуга зони. Точковий рівень — вузька, але видима смуга."""
+    if en_lo is None and en_hi is None:
+        return None
+    lo = en_lo if en_lo is not None else en_hi
+    hi = en_hi if en_hi is not None else en_lo
+    if lo is None or hi is None:
+        return None
+    a, b = (lo, hi) if lo <= hi else (hi, lo)
+    if abs(b - a) <= 1e-12:
+        vis = max((y1 - y0) * 0.045, abs(a) * 0.0008, 1e-12)
+        return a - vis, a + vis
+    return a, b
+
+
+def _fmt_px(v: Any, symbol: str) -> str:
+    from office_price_format import format_px
+
+    return format_px(v, symbol) or ""
 
 
 def render_signal_chart(
@@ -183,100 +235,211 @@ def render_signal_chart(
         tempfile.gettempdir(),
         f"office_chart_{str(symbol or 'SYM').upper()}_{os.getpid()}.png",
     )
-    title = f"{str(symbol or '').upper()} {str(direction or '').upper()}".strip()
-    status = str(lv.get("status") or "WATCHING").strip() or "WATCHING"
     try:
+        import textwrap
+
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        from matplotlib.patches import FancyBboxPatch
+        from matplotlib.transforms import blended_transform_factory
+
+        from office_price_format import format_level_span
+
+        title_sym = str(symbol or "").upper()
+        side = str(direction or "").upper()
+        status = str(lv.get("status") or "WATCHING").strip() or "WATCHING"
         if len(m15) >= 8:
-            lab, df = "M15", _to_frame(m15[-96:])
+            chart_tf, rows, df = "M15", m15[-64:], _to_frame(m15[-64:])
         else:
-            lab, df = "H1", _to_frame(h1[-48:])
-        fig = mpf.figure(figsize=(10.2, 7.2), style="nightclouds")
-        ax = fig.add_subplot(1, 1, 1)
-        ys, cols, styles = _hlines(lv)
-        hline_kw: Dict[str, Any] = {}
-        if ys:
-            hline_kw = {
-                "hlines": dict(hlines=ys, colors=cols, linestyle=styles, linewidths=1.1),
-            }
-        sc_lo, sc_hi = _f(lv.get("sc_low")), _f(lv.get("sc_high"))
+            chart_tf, rows, df = "H1", h1[-48:], _to_frame(h1[-48:])
+        scenario_tf = str(lv.get("scenario_tf") or "").upper() or chart_tf
+        chart_tf = str(lv.get("chart_tf") or chart_tf).upper()
         en_lo, en_hi = _f(lv.get("entry_low")), _f(lv.get("entry_high"))
-        fills = []
-        if en_lo is not None and en_hi is not None and abs(en_hi - en_lo) > 0:
-            lo, hi = (en_lo, en_hi) if en_lo <= en_hi else (en_hi, en_lo)
-            fills.append(dict(y1=lo, y2=hi, alpha=0.28, color="#c9a227"))
-        kw = dict(
-            type="candle",
-            ax=ax,
-            axtitle="",
-            xrotation=18,
-            datetime_format="%m-%d %H:%M",
-            ylabel="",
-        )
-        if hline_kw:
-            kw.update(hline_kw)
-        if fills:
-            kw["fill_between"] = fills if len(fills) > 1 else fills[0]
-        mpf.plot(df, **kw)
+        if en_lo is not None and en_hi is not None and en_lo > en_hi:
+            en_lo, en_hi = en_hi, en_lo
         last_px = _f(lv.get("last_price"))
-        en_mid = None
-        if en_lo is not None and en_hi is not None:
-            en_mid = (float(en_lo) + float(en_hi)) / 2.0
-        x_end = max(len(df.index) - 1, 0)
-        def _lab(y, name, col):
-            if y is None:
-                return
-            ax.text(
-                x_end + 0.4,
-                y,
-                name,
-                color=col,
+        if last_px is None:
+            last_px = rows[-1]["close"]
+        sl_v = _f(lv.get("sl"))
+        tp1_v = _f(lv.get("tp1"))
+        calc_v = _f(lv.get("calc_entry"))
+        c_lo = min(r["low"] for r in rows)
+        c_hi = max(r["high"] for r in rows)
+        y0, y1 = _view_window(candle_lo=c_lo, candle_hi=c_hi, zone_lo=en_lo, zone_hi=en_hi)
+        accent = "#3dcf8a" if side == "LONG" else "#ef6b7b"
+        panel_bg = "#152018" if side == "LONG" else "#201518"
+        fig = plt.figure(figsize=(9.0, 14.4), facecolor="#101218")
+        gs = GridSpec(2, 1, height_ratios=[1.55, 1.25], hspace=0.08, left=0.10, right=0.97, top=0.985, bottom=0.045)
+        ax_t = fig.add_subplot(gs[0])
+        ax = fig.add_subplot(gs[1])
+        ax_t.set_facecolor(panel_bg)
+        ax_t.axis("off")
+        ax_t.add_patch(
+            plt.Rectangle((0, 0.90), 1, 0.10, transform=ax_t.transAxes, color=accent, alpha=0.90, clip_on=False)
+        )
+        head = str(lv.get("headline") or "").strip() or f"{title_sym} · {side}"
+        tf_line = f"сценарій {scenario_tf}  ·  графік {chart_tf}"
+        wait = str(lv.get("wait_line") or "").strip() or (
+            "Чекаю відкату в зону. Входу ще немає."
+            if side == "LONG"
+            else "Чекаю реакції M5 у зоні. Входу ще немає."
+        )
+        why = str(lv.get("why_line") or "").strip()
+        prev = str(lv.get("prev_line") or "").strip()
+        cancel = str(lv.get("cancel_line") or "").strip()
+        for pref in ("Що скасує:", "що скасує:"):
+            if cancel.lower().startswith(pref.lower()):
+                cancel = cancel[len(pref) :].strip()
+        demo = bool(lv.get("demo")) or "DEMO" in status.upper()
+        zone_txt = format_level_span(en_lo, en_hi, title_sym) if en_lo is not None else ""
+        ax_t.text(0.03, 0.95, head, color="#101218", fontsize=16, fontweight="bold", va="center")
+        ax_t.text(0.97, 0.95, "WATCHING", color="#101218", fontsize=13, fontweight="bold", va="center", ha="right")
+        ax_t.text(0.03, 0.84, tf_line, color="#d7dbe2", fontsize=12, va="center")
+        ax_t.text(0.03, 0.75, "ВХОДУ НЕМАЄ", color=accent, fontsize=18, fontweight="bold", va="center")
+        for y_slot, title, body in (
+            (0.67, "Чого чекаю", wait),
+            (0.54, "Чому сценарій", why),
+            (0.41, "Що скасує", cancel),
+            (0.32, "Що з попереднім", prev),
+        ):
+            if not body:
+                continue
+            ax_t.text(0.03, y_slot, title, color=accent, fontsize=10, fontweight="bold", va="center")
+            ax_t.text(
+                0.03,
+                y_slot - 0.048,
+                "\n".join(textwrap.wrap(body, width=70)[: (2 if title == "Що з попереднім" else 1)]),
+                color="#e8eaed",
+                fontsize=11,
+                va="top",
+                linespacing=1.25,
+            )
+        plan_lines = ["План після підтвердження — не /position"]
+        if zone_txt:
+            plan_lines.append(f"Зона {zone_txt}")
+        if calc_v is not None:
+            plan_lines.append(f"розрахунок від {_fmt_px(calc_v, title_sym)}")
+        if sl_v is not None:
+            extra = " поза шкалою" if not (y0 <= sl_v <= y1) else ""
+            plan_lines.append(f"SL {_fmt_px(sl_v, title_sym)}{extra}")
+        if tp1_v is not None:
+            extra = " поза шкалою, лише після підтвердження" if not (y0 <= tp1_v <= y1) else ""
+            plan_lines.append(f"TP1 {_fmt_px(tp1_v, title_sym)}{extra}")
+        ax_t.text(0.03, 0.155, plan_lines[0], color="#b7bec8", fontsize=10, va="center")
+        if len(plan_lines) > 1:
+            ax_t.text(0.03, 0.11, " · ".join(plan_lines[1:3]), color="#b7bec8", fontsize=10, va="center")
+        if len(plan_lines) > 3:
+            ax_t.text(0.03, 0.065, " · ".join(plan_lines[3:]), color="#b7bec8", fontsize=10, va="center")
+        if demo:
+            ax_t.text(
+                0.03,
+                0.025,
+                "DEMO/OFFLINE: синтетичні свічки лише для масштабу, не доказ патерну.",
+                color="#8b919c",
                 fontsize=9,
                 va="center",
-                clip_on=False,
             )
-        _lab(_f(lv.get("sl")), "SL", "#ff3b6b")
-        _lab(_f(lv.get("tp1")), "TP1", "#00c853")
-        _lab(_f(lv.get("tp2")), "TP2", "#00e5a0")
-        ax.set_title(
-            f"{title} · {lab} · {status}",
-            color="#e8eaed",
-            fontsize=13,
-            fontweight="bold",
-            pad=10,
+        mc = mpf.make_marketcolors(up="#3dcf8a", down="#ef6b7b", inherit=True)
+        st = mpf.make_mpf_style(
+            base_mpf_style="nightclouds",
+            marketcolors=mc,
+            gridstyle="",
+            facecolor="#0e1014",
+            figcolor="#101218",
+            y_on_right=False,
         )
+        ys, cols, styles = _visible_hlines(lv, y0, y1)
+        kw: Dict[str, Any] = dict(
+            type="candle",
+            ax=ax,
+            style=st,
+            axtitle="",
+            xrotation=14,
+            datetime_format="%H:%M",
+            ylabel="",
+            ylim=(y0, y1),
+        )
+        if ys:
+            kw["hlines"] = dict(hlines=ys, colors=cols, linestyle=styles, linewidths=1.15)
+        mpf.plot(df, **kw)
+        band = _zone_band(en_lo, en_hi, y0, y1)
+        if band is not None:
+            span_frac = (band[1] - band[0]) / max(y1 - y0, 1e-12)
+            fill_a = 0.14 if span_frac > 0.55 else 0.32
+            ax.axhspan(band[0], band[1], color="#c9a227", alpha=fill_a, zorder=0)
+            ax.axhline(band[0], color="#c9a227", linewidth=1.6, zorder=3)
+            ax.axhline(band[1], color="#c9a227", linewidth=1.6, zorder=3)
+            ztrans = blended_transform_factory(ax.transAxes, ax.transData)
+            label_y = band[0] + (y1 - y0) * 0.03 if span_frac > 0.55 else band[1] - (y1 - y0) * 0.02
+            ax.text(
+                0.02,
+                label_y,
+                "зона спостереження",
+                color="#f3e3a6",
+                fontsize=9,
+                fontweight="bold",
+                va="bottom" if span_frac > 0.55 else "top",
+                transform=ztrans,
+                zorder=5,
+            )
+        ax.set_facecolor("#0e1014")
+        ax.tick_params(colors="#8b919c", labelsize=9)
+        for spine_name, spine in ax.spines.items():
+            spine.set_color(accent if spine_name == "left" else "#2a2e36")
+            if spine_name == "left":
+                spine.set_linewidth(3.2)
+        ax.grid(False)
         if last_px is not None:
-            ax.axhline(last_px, color="#ffd54f", linewidth=1.0, linestyle=":")
-            try:
-                ax.annotate(
-                    "ціна",
-                    xy=(x_end, last_px),
-                    xytext=(max(0, x_end - 10), last_px),
-                    color="#ffd54f",
-                    fontsize=8,
-                )
-                if en_mid is not None:
-                    lo_z = min(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
-                    hi_z = max(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
-                    outside = last_px > hi_z or last_px < lo_z
-                    if outside:
-                        ax.annotate(
-                            "очікуваний відкат до зони",
-                            xy=(x_end, en_mid),
-                            xytext=(max(0, x_end - 18), last_px),
-                            color="#c9a227",
-                            fontsize=8,
-                            arrowprops=dict(arrowstyle="->", color="#c9a227"),
-                        )
-            except Exception:
-                pass
-        footer = str(lv.get("footer") or "").strip() or (
-            f"Чому: структура {lab}. Чого чекаю: відкат у зону. "
-            f"Що скасує: закриття за SL. DEMO/OFFLINE, не Live."
+            ax.axhline(last_px, color="#d7dbe2", linewidth=0.7, linestyle=":")
+            ax.text(
+                0.02,
+                0.97,
+                f"зараз {_fmt_px(last_px, title_sym)}",
+                color="#d7dbe2",
+                fontsize=9,
+                ha="left",
+                va="top",
+                transform=ax.transAxes,
+                zorder=8,
+            )
+        box_x, box_y = 0.48, 0.68
+        if side == "LONG":
+            box_txt = (
+                "1) очікую відкат ДО зони — ще не вхід\n"
+                "2) LONG лише після підтвердження M15/M5"
+            )
+        else:
+            box_txt = (
+                "1) зона спостереження — не продаж\n"
+                "2) чекаю реакції M5 (умова лише з даних)\n"
+                "3) після підтвердження — можливий SHORT до TP"
+            )
+        ax.add_patch(
+            FancyBboxPatch(
+                (box_x, box_y),
+                0.46,
+                0.22 if side == "LONG" else 0.28,
+                boxstyle="round,pad=0.012,rounding_size=0.02",
+                transform=ax.transAxes,
+                facecolor="#161920",
+                edgecolor=accent,
+                linewidth=1.2,
+                alpha=0.92,
+                zorder=6,
+            )
         )
-        fig.text(0.03, 0.02, footer[:420], color="#8b919c", fontsize=8, va="bottom", wrap=True)
-        fig.savefig(path, dpi=120, bbox_inches="tight", facecolor="#0d1117")
-        import matplotlib.pyplot as plt
-
+        ax.text(
+            box_x + 0.02,
+            box_y + (0.11 if side == "LONG" else 0.14),
+            box_txt,
+            color="#e8eaed",
+            fontsize=9,
+            va="center",
+            transform=ax.transAxes,
+            zorder=7,
+            linespacing=1.35,
+        )
+        fig.savefig(path, dpi=140, facecolor=fig.get_facecolor())
         plt.close(fig)
     except Exception as exc:
         return {**empty, "reason": f"{type(exc).__name__}: {exc}"}
