@@ -44,11 +44,12 @@ the owner explicitly approves both the production DB migration and Worker deploy
 
 ## Security/reliability review findings (current branch)
 
-- BLOCKER: the in-flight Telegram request is not cancelled if the renewal
-  heartbeat loses its DB lease. A second Worker could take the expired claim.
-- BLOCKER: a Telegram success followed by a failed ledger commit may still
-  return the message ID to the caller. Caller lifecycle transitions need an
-  explicit policy for uncertain delivery before enabling the flag.
+- MITIGATED IN CODE: the heartbeat cancels the in-flight send task if the
+  renewal fails or the lease is lost. A Telegram request already accepted
+  before cancellation remains an ambiguous delivery; live verification pending.
+- MITIGATED IN CODE: a Telegram success followed by a failed ledger commit
+  returns no successful delivery ID to the caller. Ambiguous delivery may
+  still have reached Telegram; investigate before retrying.
 - LIMITATION: the ledger cannot atomically commit with the Telegram API.
   An ambiguous timeout/crash can produce a duplicate on retry.
 - NOT VERIFIED: final same-SHA independent security review and real historical
