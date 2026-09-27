@@ -3092,6 +3092,15 @@ async def run() -> None:
                 except Exception as exc:
                     ledger_committed = False
                     print(f"[relay] ERROR ledger commit: {type(exc).__name__}: {exc}")
+                    if delivered_id:
+                        try:
+                            quarantined = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                            print(f"[relay] ambiguous delivery quarantined={quarantined}")
+                        except Exception as quarantine_exc:
+                            print(
+                                "[relay] CRITICAL ambiguous Telegram delivery: "
+                                f"ledger and quarantine unavailable: {type(quarantine_exc).__name__}: {quarantine_exc}"
+                            )
             if dedup_key:
                 finish_trade_telegram(
                     key=dedup_key,
