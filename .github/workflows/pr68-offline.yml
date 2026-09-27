@@ -57,3 +57,5 @@ jobs:
         run: python scripts/test_telegram_delivery_ledger.py
       - name: Telegram ledger integration guards (offline)
         run: python scripts/test_telegram_ledger_integration.py
+      - name: Real relay behavior with fake Telegram and isolated SQLite
+        run: python scripts/test_telegram_relay_behavior.py
