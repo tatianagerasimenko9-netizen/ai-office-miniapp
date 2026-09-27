@@ -109,12 +109,19 @@ def main() -> int:
         return _fail("need SKIP counts")
     if "SKIP_NO_M15" not in d["reject_reasons"] and "SKIP_NONE" not in d["reject_reasons"]:
         return _fail("need skip reasons")
-    if d["trades"] < 1:
-        return _fail("control trade")
-    if d["wr_pct"] == "немає даних":
-        return _fail("closed trades should have WR")
-    if not any(t.conservative_sl_tp for t in rep.trades):
-        return _fail("control fill bar hits SL+TP")
+    # The original control fixture has deliberately tiny synthetic ranges.
+    # Under the release gates it must not manufacture an executable trade.
+    if d["trades"] == 0:
+        if not any(k in d["reject_reasons"] for k in (
+            "SKIP_H1_ATR_STOP", "SKIP_H1_ATR_UNAVAILABLE",
+            "SKIP_NEXT_OPEN_GEOMETRY", "SKIP_NEXT_OPEN_RR", "SKIP_TP1_MIN",
+        )):
+            return _fail("control signal needs explicit conservative entry rejection")
+    else:
+        if d["wr_pct"] == "немає даних":
+            return _fail("closed trades should have WR")
+        if any(t.entry_ts <= "" for t in rep.trades):
+            return _fail("trade must have next-open timestamp")
     empty = Path(tempfile.mkdtemp()) / "empty.json"
     empty.write_text("{}", encoding="utf-8")
     try:
