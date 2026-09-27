@@ -65,3 +65,5 @@ jobs:
         run: python scripts/test_market_thesis.py
       - name: Market feed freshness and provenance veto (offline)
         run: python scripts/test_feed_quality.py
+      - name: Lev independent risk veto integration (offline)
+        run: python scripts/test_lev_risk_integration.py
