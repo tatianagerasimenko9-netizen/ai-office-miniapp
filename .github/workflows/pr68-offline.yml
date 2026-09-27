@@ -67,3 +67,5 @@ jobs:
         run: python scripts/test_feed_quality.py
       - name: Lev independent risk veto integration (offline)
         run: python scripts/test_lev_risk_integration.py
+      - name: London and NY DST desk clock (offline)
+        run: python scripts/test_session_dst.py
