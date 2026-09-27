@@ -54,3 +54,14 @@ the owner explicitly approves both the production DB migration and Worker deploy
   An ambiguous timeout/crash can produce a duplicate on retry.
 - NOT VERIFIED: final same-SHA independent security review and real historical
   BTC/MANTA OHLCV replay. The repository fixture test is not that replay.
+
+## Historical replay evidence, 2026-09-27
+
+- Offline PR68 safety workflow on commit `700dc558`: SUCCESS.
+- Real historical OHLCV workflow run `36346568741`: FAILED before any replay.
+  Binance USD-M `fapi.binance.com/fapi/v1/klines` returned HTTP 451 from
+  GitHub-hosted runner. No BTC/MANTA candles were downloaded, and no real-data
+  backtest result exists. Do not substitute the fixture replay or fabricate data.
+- Next step requires an authorized data source reachable from the runner or
+  owner-supplied verified historical BTC/MANTA OHLCV files. MANTA strategy
+  replay needs its own harness: existing T6 evaluates the BTC-only radar.
