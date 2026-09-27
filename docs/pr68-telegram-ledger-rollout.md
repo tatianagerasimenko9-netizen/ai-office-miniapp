@@ -151,3 +151,16 @@ control fixture that previously forced a simulated trade is now required
 to show an explicit rejection when it violates those gates. A fresh real
 replay is required before reporting any revised trade counts or R values.
 This remains an illustrative radar-only backtest, not a Lev strategy audit.
+
+## Verified conservative re-run (2026-09-27)
+
+GitHub Actions `36349771803` SUCCESS at `b99cf334` with real July
+2026 candles after next-open fill, 3% MANTA/1.2% BTC TP1, RR and H1 ATR
+stop checks. MANTA: 714 decisions, 75 radar SIGNAL cards, only ONE closed
+simulated trade, 1 win, 1.4644 simulated R; 67 candidates rejected by TP1
+minimum, 7 by next-open RR. BTC: 720 decisions, 66 SIGNAL cards, ZERO
+simulated trades, 61 rejected by TP1 minimum and 5 by next-open RR.
+The single MANTA win is statistically insufficient for any WR or return
+inference; previous 224.4202 R was invalidated. The conservative T6 engine
+is not full Lev cognition or a fill-verified exchange execution model.
+Offline tests for the revised fixture succeeded in `36349828028`.
