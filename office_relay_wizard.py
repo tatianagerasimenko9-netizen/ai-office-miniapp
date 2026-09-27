@@ -5952,9 +5952,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 pass
                     print(f"[{tag}] {sym} hold: {prep.get('reason')}")
                     return False
-                _last_notified["__FEED_COOLDOWN__"] = now_ts
-                mark_cycle_sent(sent_this_cycle, sym)
-                await send_proactive(
+                sent_signal_id = await send_proactive(
                     EVENT_SIGNAL_ENTRY,
                     fmt_agent_line("lev", str(prep.get("text") or "")),
                     symbol=sym,
@@ -5965,6 +5963,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                     canonical_id=str(prep.get("scenario_id") or prep.get("setup_key") or ""),
                     scenario_event=EVENT_SIGNAL_ENTRY,
                 )
+                if not sent_signal_id:
+                    print(f"[{tag}] {sym} SIGNAL_ENTRY delivery not verified: no ACTIVE journal")
+                    return False
+                _last_notified["__FEED_COOLDOWN__"] = now_ts
+                mark_cycle_sent(sent_this_cycle, sym)
                 sid = str(prep.get("scenario_id") or prep.get("setup_key") or f"desk-{tag}-{sym}-{int(now_ts)}")
                 e_px = prep.get("entry")
                 try:
@@ -6526,7 +6529,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         if not cg.get("send"):
                             print(f"[confluence] confirm hold {key}: {cg.get('reason')}")
                             continue
-                        await send_proactive(
+                        confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             fmt_agent_line(
                                 "lev",
@@ -6543,6 +6546,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                             canonical_id=okey,
                             scenario_event="CONFIRM",
                         )
+                        if not confirm_msg_id:
+                            print(f"[confluence] CONFIRM delivery not verified {okey}: keep pending for retry")
+                            continue
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
                         try:
