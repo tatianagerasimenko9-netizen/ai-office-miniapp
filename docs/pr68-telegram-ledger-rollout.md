@@ -123,3 +123,18 @@ approved procedure. This trades automatic recovery for duplicate prevention.
 The offline SQLite regression explicitly tests expired PENDING, lease loss,
 UNCERTAIN, and stable DELIVERED behavior. Production migration and enablement
 remain OFF and require separate owner approval.
+
+## MANTA T6 radar historical replay (2026-09-27)
+
+Run `36349201584` SUCCESS at `dfc0ec6` on actual Binance Vision
+July 2026 MANTAUSDT monthly candles: 561 hourly-spaced decisions, 188
+WATCHING, 56 SIGNAL cards, 55 closed simulated trades (20 wins, 35 losses),
+36.36% simulated WR. The engine reported 224.4202 total simulated R,
+4.08 average R and 9.8556 R maximum drawdown. **These unusually large R
+figures are UNVALIDATED diagnostics**, not an expected return or evidence of
+strategy profitability. They require independent fill/SL/TP/fee/position-size
+and look-ahead audit before any use in a release decision. T6 runs the
+`evaluate_radar` historical engine, NOT the full Lev cognition pipeline;
+no full Lev MANTA replay or live Telegram delivery was performed.
+The same run passed BTC T6 and MANTA WATCHING gate; offline workflow at
+`ab8f551` succeeded. No production orders or Telegram sends occurred.
