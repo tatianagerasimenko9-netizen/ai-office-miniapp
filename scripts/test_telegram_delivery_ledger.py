@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, migrate_delivery_ledger, renew_delivery
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, migrate_delivery_ledger, renew_delivery, mark_delivery_uncertain
 
 
 def main():
@@ -65,6 +65,19 @@ def main():
         assert not renew_delivery(db, lease_key, owner, now=5212), "old owner cannot renew"
         assert not finish_delivery(db, lease_key, owner, delivered=True, stable=True, now=5212), "old owner cannot commit"
         assert finish_delivery(db, lease_key, successor, delivered=True, stable=True, now=5213)
+        uncertain_key = "SCENARIO|BTCUSDT-H1-999|SIGNAL_ENTRY|general"
+        uncertain_owner = reserve_delivery(db, uncertain_key, stable=True, now=6000)
+        assert uncertain_owner
+        assert mark_delivery_uncertain(db, uncertain_key, uncertain_owner)
+        assert reserve_delivery(db, uncertain_key, stable=True, now=99999999) is None
+        assert not finish_delivery(db, uncertain_key, uncertain_owner, delivered=True, stable=True)
+        assert not mark_delivery_uncertain(db, uncertain_key, "stale-owner")
+        with sqlite3.connect(db) as conn:
+            state = conn.execute(
+                "SELECT state FROM office_telegram_delivery WHERE dedup_key=?",
+                (uncertain_key,),
+            ).fetchone()
+        assert state == ("UNCERTAIN",), state
     print("OK persistent delivery ledger offline")
 
 
