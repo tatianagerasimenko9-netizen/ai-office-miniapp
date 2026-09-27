@@ -33,7 +33,7 @@ from office_confluence import (  # noqa: E402
 from office_desk_card import desk_entry_gate, prepare_desk_send  # noqa: E402
 from office_exchange_info import get_symbol_filters, reset_exchange_info  # noqa: E402
 from office_scenario_memory import stamp_scenario_note  # noqa: E402
-from office_telegram_policy import reset_trade_telegram_dedup, should_send_trade_telegram  # noqa: E402
+from office_telegram_policy import finish_trade_telegram, reset_trade_telegram_dedup, should_send_trade_telegram  # noqa: E402
 
 
 def _fail(msg: object) -> int:
@@ -188,6 +188,21 @@ def main() -> int:
         event="SIGNAL_ENTRY",
         now_ts=1.0,
     )
+    if not d1.get("send"):
+        return _fail(("first reservation", d1))
+    # A failed Telegram send must release the reservation and allow retry.
+    finish_trade_telegram(key=str(d1["key"]), delivered=False)
+    retry = should_send_trade_telegram(
+        text="Entry 75 610",
+        kind="signal",
+        symbol="BTCUSDT",
+        canonical_id=str(first["scenario_id"]),
+        event="SIGNAL_ENTRY",
+        now_ts=1000.0,
+    )
+    if not retry.get("send"):
+        return _fail(("failed delivery blocked retry", retry))
+    finish_trade_telegram(key=str(retry["key"]), delivered=True, now_ts=1000.0)
     d2 = should_send_trade_telegram(
         text="Entry 75 610",
         kind="signal",
