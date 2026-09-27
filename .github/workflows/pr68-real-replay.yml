@@ -45,7 +45,7 @@ jobs:
           assert all(len(manta["timeframes"][tf]) > 0 for tf in ("1d","1h","15m"))
           print("REAL_BTC_T6", json.dumps(btc.as_dict(), ensure_ascii=False))
           print("REAL_MANTA_DATA_VALIDATED", {tf:len(v) for tf,v in manta["timeframes"].items()})
-          print("MANTA strategy replay is NOT covered by BTC-only T6; no trading claims.")
+          print("MANTA archive validated; separate radar-only MANTA replay below, not full Lev cognition.")
           PY
       - name: Real MANTA T6 radar replay (historical, no orders)
         run: |
