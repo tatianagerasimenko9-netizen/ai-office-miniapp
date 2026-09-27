@@ -45,7 +45,7 @@ jobs:
           print("REAL_MANTA_DATA_VALIDATED", {tf:len(v) for tf,v in manta["timeframes"].items()})
           print("MANTA strategy replay is NOT covered by BTC-only T6; no trading claims.")
           PY
-      - name: Upload non-sensitive replay inputs
+      - name: Replay real MANTA WATCHING safety gates (no strategy PnL)\n        run: python scripts/replay_real_manta_gate.py /tmp/pr68-real/MANTAUSDT.json\n      - name: Upload non-sensitive replay inputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
