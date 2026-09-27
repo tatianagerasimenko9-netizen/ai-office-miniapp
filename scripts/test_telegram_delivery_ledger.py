@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline delivery ledger regression; temporary SQLite only, no Telegram."""
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 
@@ -34,6 +35,16 @@ def main():
         assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2121), "expired lease"
         assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=2122) is None
         assert reserve_delivery(db, "TRAIL|BTCUSDT|100|general", now=3000), "lease expiry retry"
+        concurrent_key = "SCENARIO|MANTAUSDT-H1-456|CONFIRM|general"
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            claims = list(pool.map(
+                lambda _: reserve_delivery(db, concurrent_key, stable=True, now=4000),
+                range(8),
+            ))
+        assert len([claim for claim in claims if claim]) == 1, "exactly one concurrent owner"
+        winner = next(claim for claim in claims if claim)
+        assert finish_delivery(db, concurrent_key, winner, delivered=True, stable=True, now=4001)
+        assert reserve_delivery(db, concurrent_key, stable=True, now=100000) is None, "stable event survives restart"
     print("OK persistent delivery ledger offline")
 
 
