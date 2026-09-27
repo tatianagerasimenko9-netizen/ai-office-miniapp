@@ -165,7 +165,7 @@ def main() -> int:
         "🎯 Вхід · 0.1306",
         "❌ Стоп",
         "✅ TP1",
-        "до TP1",
+        "При TP1",
     ):
         if need not in card:
             return _fail(f"card missing {need!r} in {card}")

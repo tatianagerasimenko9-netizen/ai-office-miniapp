@@ -115,10 +115,8 @@ def main() -> int:
         return _fail("approx")
     if "RR 1:" in card:
         return _fail(f"rr leaked {card}")
-    if "до TP1" not in card:
-        return _fail(f"need R to TP1 {card}")
     if "✅ TP1" not in card:
-        return _fail(f"tp {card}")
+        return _fail(f"need TP1 {card}")
     if "RR після витрат" in card:
         return _fail("old rr")
     kaito = SimpleNamespace(

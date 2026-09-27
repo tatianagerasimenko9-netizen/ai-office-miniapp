@@ -65,11 +65,11 @@ def main() -> int:
         return _fail(f"banned {banned} in {txt}")
     if "RR 1:" in txt:
         return _fail(txt)
-    if "до TP1" not in txt or "R" not in txt:
-        return _fail(f"need R line {txt}")
+    if "✅ TP1" not in txt or "При TP1" not in txt:
+        return _fail(f"need TP1 lines {txt}")
     if "None" in txt:
         return _fail(txt)
-    print("OK card R-line")
+    print("OK card TP1")
 
     plan = plan_dict()
     if plan.get("apply") is not False:
