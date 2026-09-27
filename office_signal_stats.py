@@ -42,6 +42,11 @@ def classify_setup(setup_note: Any, extra: Optional[Dict[str, Any]] = None) -> s
         return "REENTRY"
     if "SC-OTE" in blob or "SC_OTE" in blob or "OTE" in blob:
         return "SC-OTE"
+    # «range» як окреме слово, не шматок orange.
+    if "РЕНДЖ" in blob or "БОКОВ" in blob or (
+        "RANGE" in blob and "ORANGE" not in blob
+    ):
+        return "БОКОВИК"
     if extra and extra.get("pattern"):
         return str(extra.get("pattern") or "PATTERN")[:24]
     if extra and extra.get("patterns"):

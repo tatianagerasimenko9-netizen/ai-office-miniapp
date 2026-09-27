@@ -124,7 +124,65 @@ def main() -> int:
             return _fail("home must declare no orders")
         if not hm.get("active_signals"):
             return _fail(f"home active {hm}")
-        print("OK payloads")
+
+        for i, px in enumerate((84870.5, 84940.2, 84713.0, 84755.0)):
+            signal_upsert(
+                db,
+                signal_id=f"desk-range-BTCUSDT-{i}",
+                symbol="BTCUSDT",
+                direction="LONG",
+                entry_low=px,
+                entry_high=px,
+                sl=83676.0,
+                tp1=px * 1.03,
+                tp2=None,
+                rr=None,
+                status="ACTIVE",
+                analysis_note="range",
+            )
+        signal_upsert(
+            db,
+            signal_id="junk-btc-tp1",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry_low=None,
+            entry_high=None,
+            sl=None,
+            tp1=1.0,
+            tp2=None,
+            rr=None,
+            status="HIT_TP2",
+            analysis_note="tv",
+        )
+        # watching без стопа не стає «ключовими рівнями»
+        signal_upsert(
+            db,
+            signal_id="watch-btc-px",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry_low=84860.8,
+            entry_high=84860.8,
+            sl=None,
+            tp1=None,
+            tp2=None,
+            rr=None,
+            status="WATCHING",
+            analysis_note="NEAR",
+        )
+        hm2 = home_payload()
+        btc = [x for x in (hm2.get("active_signals") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
+        if len(btc) != 1:
+            return _fail(f"BTC dupes must collapse to 1, got {btc}")
+        lv = (hm2.get("levels") or {}).get("levels") or {}
+        if lv.get("sl") is None or lv.get("tp1") in (None, 1, 1.0):
+            return _fail(f"btc key levels {hm2.get('levels')}")
+        if abs(float(lv.get("entry_low") or 0) - 84860.8) < 1e-6:
+            return _fail("watching price must not be key levels")
+        sigs = signals_payload()
+        btc_s = [x for x in (sigs.get("cards") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
+        if len(btc_s) != 1:
+            return _fail(f"signals tab dupes {btc_s}")
+        print("OK BTC 4→1, junk hidden")
         return 0
     finally:
         try:

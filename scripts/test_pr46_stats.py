@@ -38,6 +38,10 @@ def main() -> int:
         return _fail("classify REENTRY")
     if classify_setup("SC-OTE hunter") != "SC-OTE":
         return _fail("classify SC-OTE")
+    if classify_setup("desk-range") != "БОКОВИК":
+        return _fail("classify range → боковик")
+    if classify_setup("orange") == "БОКОВИК":
+        return _fail("orange must not become боковик")
     if kyiv_session("2026-09-26T06:00:00+03:00") != "ASIA":
         return _fail("asia session")
     if not may_send_proactive(EVENT_SIGNAL_ENTRY):
