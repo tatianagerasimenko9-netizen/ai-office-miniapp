@@ -112,3 +112,14 @@ Lev's independent market-selected zones. It is NOT a full Lev MANTA strategy
 replay, performance validation, or a live Telegram delivery test.
 BTC T6 historical replay also succeeded in the same run. Offline safety
 workflow `36348088818` succeeded at the same SHA.
+
+## Crash-after-send reservation safety (2026-09-27)
+
+An expired PENDING reservation is now fail-closed, even if its lease elapsed:
+Telegram may have accepted the message before the process crashed. No worker
+may automatically reclaim that key. An operator must compare the event with
+actual Telegram history and reconcile the database under a separately
+approved procedure. This trades automatic recovery for duplicate prevention.
+The offline SQLite regression explicitly tests expired PENDING, lease loss,
+UNCERTAIN, and stable DELIVERED behavior. Production migration and enablement
+remain OFF and require separate owner approval.
