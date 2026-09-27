@@ -455,6 +455,74 @@ def main() -> int:
             return _fail(f"float tail {blob}")
     print("OK ціни без float-хвостів на маршрутах")
 
+    fd2, db2 = tempfile.mkstemp(suffix=".db")
+    os.close(fd2)
+    init_office_db(db2)
+    signal_upsert(
+        db2,
+        signal_id="manta-long-h1",
+        symbol="MANTAUSDT",
+        direction="LONG",
+        entry_low=0.068,
+        entry_high=0.069,
+        sl=0.066,
+        tp1=0.072,
+        tp2=None,
+        rr=None,
+        status="ACTIVE",
+        analysis_note="origin=desk tf=H1",
+    )
+    signal_upsert(
+        db2,
+        signal_id="manta-short-m15",
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        entry_low=ZONE_LO,
+        entry_high=ZONE_HI,
+        sl=SL,
+        tp1=TP1,
+        tp2=None,
+        rr=None,
+        status="ACTIVE",
+        analysis_note="origin=desk tf=M15",
+    )
+    from office_scenario_memory import apply_confirmed_status, gate_entry_vs_memory
+
+    upd = apply_confirmed_status(
+        db2,
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        timeframe="M15",
+        origin="desk",
+        zone_lo=ZONE_LO,
+        zone_hi=ZONE_HI,
+        price=PX_CONFIRM,
+    )
+    if upd != ["manta-short-m15"]:
+        return _fail(f"scoped confirm {upd}")
+    rows2 = {r["signal_id"]: r for r in signal_get_active(db2)}
+    if rows2["manta-short-m15"]["status"] != "CONFIRMED":
+        return _fail("short not confirmed")
+    if rows2["manta-long-h1"]["status"] != "ACTIVE":
+        return _fail("long H1 must stay ACTIVE")
+    memg = gate_entry_vs_memory(
+        list(rows2.values()),
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        timeframe="M15",
+    )
+    if not memg.get("allow_entry") or not memg.get("coexist"):
+        return _fail(f"SHORT M15 має співіснувати з LONG H1 {memg}")
+    mem_same = gate_entry_vs_memory(
+        list(rows2.values()),
+        symbol="MANTAUSDT",
+        direction="LONG",
+        timeframe="M15",
+    )
+    if mem_same.get("allow_entry"):
+        return _fail(f"same-horizon opposite must block {mem_same}")
+    print("OK MANTA LONG H1 + SHORT M15: CONFIRMED лише SHORT M15, різні горизонти співіснують")
+
     ART.mkdir(parents=True, exist_ok=True)
     (ART / "manta_alert_audit.md").write_text(
         "\n".join(

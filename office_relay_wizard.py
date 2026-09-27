@@ -4923,6 +4923,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         current_price = float((liq_now or {}).get("current_price") or 0.0) if isinstance(liq_now, dict) else 0.0
                         if current_price <= 0:
                             continue
+                        in_pos_row = has_explicit_position(db_path, symbol, direction)
 
                         e_low = float(entry_low) if entry_low is not None else None
                         e_high = float(entry_high) if entry_high is not None else None
@@ -5107,7 +5108,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 be_level = None
                                 if e_high is not None:
                                     be_level = e_high * (1.001 if direction == "LONG" else 0.999)
-                                if _allow_notify(symbol, "HIT_TP1"):
+                                if in_pos_row and _allow_notify(symbol, "HIT_TP1"):
                                     entry_px = e_high if e_high is not None else e_low
                                     if direction == "SHORT" and e_low is not None:
                                         entry_px = e_low
@@ -5163,7 +5164,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     change_pct = (last_close - prev_close) / prev_close * 100.0
                                     rev_long = direction == "LONG" and change_pct <= -0.5 and current_price < tp2_v
                                     rev_short = direction == "SHORT" and change_pct >= 0.5 and current_price > tp2_v
-                                    if (rev_long or rev_short) and _allow_notify(symbol, "REVERSAL_WARN"):
+                                    if (rev_long or rev_short) and in_pos_row and _allow_notify(symbol, "REVERSAL_WARN"):
                                         rev_note = _lev_msg(
                                             symbol,
                                             f"4H свічка дала розворот {change_pct:+.2f}% після TP1",
@@ -5191,7 +5192,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     near_tp1 = current_price < tp1_v and (tp1_v - current_price) / tp1_v * 100.0 < near_pct
                                 else:
                                     near_tp1 = current_price > tp1_v and (current_price - tp1_v) / tp1_v * 100.0 < near_pct
-                                if near_tp1 and _allow_notify(symbol, "TP1_NEAR"):
+                                if near_tp1 and in_pos_row and _allow_notify(symbol, "TP1_NEAR"):
                                     await send_proactive(
                                         EVENT_TRADE_UPDATE,
                                         format_manage_update(
@@ -5212,25 +5213,32 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 analysis_note = f"HIT_SL {symbol} @ {current_price} sl={sl_v}"
                                 signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
                                 if _allow_notify(symbol, "HIT_SL"):
-                                    stop_note = _lev_msg(
-                                        symbol,
-                                        f"SL перебитий на {sl_v}, структура зламана",
-                                        "повний вихід з позиції зараз",
-                                        "позиція закрита",
-                                    )
-                                    await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
-                                try:
-                                    journal_close_trade(
-                                        db_path,
-                                        trade_id=office_signal_trade_id(signal_id),
-                                        outcome="LOSS",
-                                        exit_price=float(current_price),
-                                        pnl_pct=0.0,
-                                        exit_reason="SL",
-                                        context_patch={"result": "SL"},
-                                    )
-                                except Exception as exc_js:
-                                    print(f"[steer] journal SL failed: {exc_js}")
+                                    if in_pos_row:
+                                        stop_note = _lev_msg(
+                                            symbol,
+                                            f"SL перебитий на {sl_v}, структура зламана",
+                                            "повний вихід з позиції зараз",
+                                            "позиція закрита",
+                                        )
+                                        await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
+                                    else:
+                                        print(
+                                            f"[signals] {symbol} HIT_SL scenario (не /position) "
+                                            f"@ {current_price} sl={sl_v}"
+                                        )
+                                if in_pos_row:
+                                    try:
+                                        journal_close_trade(
+                                            db_path,
+                                            trade_id=office_signal_trade_id(signal_id),
+                                            outcome="LOSS",
+                                            exit_price=float(current_price),
+                                            pnl_pct=0.0,
+                                            exit_reason="SL",
+                                            context_patch={"result": "SL"},
+                                        )
+                                    except Exception as exc_js:
+                                        print(f"[steer] journal SL failed: {exc_js}")
                                 try:
                                     m15_sl = fetch_candles(symbol, "15m", 16)
                                     h1_sl = fetch_candles(symbol, "1h", 12)
@@ -5425,6 +5433,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     rsi_h1=rsi1,
                                     rsi_h4=rsi4,
                                     exhaustion=exh,
+                                    confirmed_position=in_pos_row,
                                 )
                                 peak = None
                                 if rsi1 is not None or rsi4 is not None:
@@ -5955,6 +5964,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
                             except Exception:
                                 m15_cl = None
+                            from office_scenario_memory import btc_context_usable
+
+                            btc_ctx = btc_context_only(screen)
+                            mctx = (
+                                btc_ctx
+                                if btc_context_usable(btc_ctx)
+                                else {
+                                    "data_status": "DATA_UNAVAILABLE",
+                                    "note": "BTC-контекст не підтверджений даними — не вигадую",
+                                }
+                            )
                             cycle = lev_cycle(
                                 symbol=rsym,
                                 price=rprice,
@@ -5967,6 +5987,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 candles_ltf=rm5 if isinstance(rm5, list) else rm15,
                                 atr_h1=_atr_h1(rh1),
                                 day_used_pct=r_used,
+                                market_context=mctx,
                             )
                             print(
                                 f"[lev] {rsym} {cycle.get('action')} {cycle.get('direction')} "
@@ -6207,7 +6228,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                             direction=str(st.get("direction") or ""),
                             zone_lo=st.get("zone_lo"),
                             zone_hi=st.get("zone_hi"),
-                            origin="desk",
+                            origin=str(st.get("origin") or "desk"),
+                            timeframe=str(st.get("timeframe") or ""),
                         )
                         cg = may_emit_telegram(
                             key=okey,
@@ -6235,20 +6257,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
                         try:
-                            for row_c in signal_get_active(db_path) or []:
-                                if str(row_c.get("symbol") or "").upper() != str(sym_f).upper():
-                                    continue
-                                sid_c = str(row_c.get("signal_id") or "")
-                                if sid_c:
-                                    signal_update(
-                                        db_path,
-                                        signal_id=sid_c,
-                                        status="CONFIRMED",
-                                        analysis_note=(
-                                            str(row_c.get("analysis_note") or "")
-                                            + f" confirmed_px={fu.get('price')}"
-                                        )[:2000],
-                                    )
+                            from office_scenario_memory import apply_confirmed_status
+
+                            apply_confirmed_status(
+                                db_path,
+                                symbol=sym_f,
+                                direction=str(st.get("direction") or ""),
+                                timeframe=str(st.get("timeframe") or ""),
+                                origin=str(st.get("origin") or "desk"),
+                                zone_lo=st.get("zone_lo"),
+                                zone_hi=st.get("zone_hi"),
+                                signal_id=str(st.get("signal_id") or ""),
+                                price=fu.get("price"),
+                            )
                         except Exception as exc_cu:
                             print(f"[confluence] status CONFIRMED {sym_f}: {exc_cu}")
                         live_drop(key)

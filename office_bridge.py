@@ -2034,18 +2034,23 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
 
 def check_portfolio_correlation(db_path: str) -> Dict[str, Any]:
     """
-    Спрощений «кореляційний» фільтр: частка LONG/SHORT серед відкритих позицій.
-    WATCHING не враховується — це зони очікування, не позиції.
+    Кореляція лише явних /position у журналі.
+    WATCHING / ACTIVE / HIT_ENTRY / CONFIRMED — сценарії, не позиції.
     """
     try:
-        active = _fetchall(
+        rows = _fetchall(
             db_path,
-            """SELECT direction FROM office_signals
-               WHERE status IN (
-                   'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+            """
+            SELECT trade_id, direction, entry_reason, setup_name
+            FROM trade_journal
+            WHERE status = 'OPEN'
             """,
             (),
         )
+        active = []
+        for tid, direction, reason, setup in rows or []:
+            if is_confirmed_position_row(reason, setup, tid):
+                active.append((direction,))
         if not active:
             return {
                 "safe": True,

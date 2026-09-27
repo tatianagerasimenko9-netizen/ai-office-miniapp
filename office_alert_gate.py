@@ -49,16 +49,21 @@ def origin_key(
     zone_lo: Any,
     zone_hi: Any,
     origin: str = "desk",
+    timeframe: str = "",
 ) -> str:
     lo, hi = _f(zone_lo), _f(zone_hi)
     if lo is not None and hi is not None and lo > hi:
         lo, hi = hi, lo
     a = f"{lo:.8f}" if lo is not None else ""
     b = f"{hi:.8f}" if hi is not None else a
-    return (
+    base = (
         f"{str(symbol or '').upper()}|{str(direction or '').upper()}|{a}|{b}|"
         f"{str(origin or 'desk').strip().lower() or 'desk'}"
     )
+    from office_scenario_memory import normalize_tf
+
+    tf = normalize_tf(timeframe)
+    return f"{base}|{tf}" if tf else base
 
 
 def reset_alert_gate() -> None:
@@ -232,6 +237,8 @@ def text_grants_entry(text: str) -> bool:
     if "добір позиції" in low or "добір дозволений" in low:
         return True
     if "збільшити позицію" in low or "перенести стоп позиції" in low:
+        return True
+    if "закрий 50" in low or "перестав sl" in low or "повний вихід з позиції" in low:
         return True
     return False
 

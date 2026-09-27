@@ -25,6 +25,7 @@ from office_mini_v1 import (
     scanner_payload as v1_scanner,
     stats_payload as v1_stats,
 )
+from office_price_format import format_price_fields
 from office_radar import MIN_RR
 from office_signal_stats import MIN_GROUP, build_stats_report
 
@@ -214,7 +215,7 @@ def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
         st = str(r.get("status") or "").upper()
         if st == "WATCHING" and not include_watching:
             continue
-        if st in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") or include_watching:
+        if st in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "CONFIRMED") or include_watching:
             if not _complete_levels(r) and st != "WATCHING":
                 continue
         elif st in ("EXPIRED", "CANCELLED", "HIT_SL", "HIT_TP2"):
@@ -249,13 +250,15 @@ def home_v2() -> Dict[str, Any]:
         "ready_count": len(ready),
         "scenarios": ready[:8],
         "card_note": "Сценарій Лева ≠ позиція. Угода лише через /position.",
+        "fixture_mode": _fixture_on(),
+        "live_verified": False if _fixture_on() else None,
         "atr_note": f"гейті заморожені: ATR 80/90 · Edge 85 · MIN_RR {MIN_RR} · стоп ≥{MIN_SL_ATR_H1}×ATR H1",
     }
 
 
 def scenarios_payload(*, watching: bool = False) -> Dict[str, Any]:
     cards = list_scenarios(include_watching=watching)
-    live = [c for c in cards if str(c.get("status_raw") or "").upper() in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "WATCHING")]
+    live = [c for c in cards if str(c.get("status_raw") or "").upper() in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "CONFIRMED", "WATCHING")]
     return {
         "ok": True,
         "readonly": True,
@@ -428,9 +431,11 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
         "ok": bool(bars),
         "readonly": True,
         "data_status": status,
-        "live": live_stream,
+        "live": False if _fixture_on() else live_stream,
+        "is_live": False if _fixture_on() else live_stream,
         "quote_mode": quote_mode,
         "source": source,
+        "fixture": bool(_fixture_on()),
         "symbol": str(symbol or "").upper(),
         "tf": interval,
         "as_of": last.get("ts") if last else None,
@@ -522,18 +527,21 @@ def positions_v2() -> Dict[str, Any]:
         if not is_confirmed_position_row(r[8], r[9], r[0]):
             continue
         live.append(
-            {
-                "trade_id": r[0],
-                "symbol": r[1],
-                "direction": r[2],
-                "status": r[3],
-                "entry": r[4],
-                "sl": r[5],
-                "tp": r[6],
-                "pnl_pct": r[7],
-                "source": "/position",
-                "as_of": r[10],
-            }
+            format_price_fields(
+                {
+                    "trade_id": r[0],
+                    "symbol": r[1],
+                    "direction": r[2],
+                    "status": r[3],
+                    "entry": r[4],
+                    "sl": r[5],
+                    "tp": r[6],
+                    "pnl_pct": r[7],
+                    "source": "/position",
+                    "as_of": r[10],
+                },
+                str(r[1] or ""),
+            )
         )
     return {
         "ok": True,

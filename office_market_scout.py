@@ -262,11 +262,15 @@ def promote_for_deep_scan(
 
 def btc_context_only(screen: MarketScreen) -> Dict[str, Any]:
     btc = screen.btc or {}
+    have = btc.get("change_pct") is not None or btc.get("price") is not None
     return {
         "symbol": "BTCUSDT",
         "change_pct": btc.get("change_pct"),
+        "price": btc.get("price"),
         "not_a_signal_for_alts": True,
         "copies_direction": False,
+        "data_status": "DATA_OK" if have else "DATA_UNAVAILABLE",
+        "use_in_narrative": bool(have),
     }
 
 

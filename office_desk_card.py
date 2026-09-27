@@ -129,9 +129,10 @@ def size_over_leverage(
     score: Any = None,
     min_score: Any = 10,
     direction: str = "",
+    symbol: str = "",
 ) -> Dict[str, Any]:
     sized = plan_position_size(
-        entry=entry, sl=sl, score=score, min_score=min_score, direction=direction
+        entry=entry, sl=sl, score=score, min_score=min_score, direction=direction, symbol=symbol
     )
     dep = _f(sized.get("depo")) or depo_usdt()
     sz = _f(sized.get("size_usdt"))
@@ -248,10 +249,15 @@ def desk_entry_gate(
     entry_low: Any = None,
     entry_high: Any = None,
     tp2: Any = None,
+    db_path: str = "",
+    timeframe: str = "",
 ) -> Dict[str, Any]:
     """Фільтр стрічки. Не вигадує TP, щоб натягнути %. Стоп з неправильного боку — стоп."""
     from office_alert_gate import validate_trade_geometry
     from office_telegram_filter import move_pct_to_tp
+    from office_exchange_info import get_symbol_filters
+    from office_bridge import signal_get_active
+    from office_scenario_memory import gate_entry_vs_memory
 
     e, s, t = _f(entry), _f(sl), _f(tp1)
     empty = {"send": False, "sl": s, "size": None, "reversal": False, "reason": "", "message": ""}
@@ -268,6 +274,21 @@ def desk_entry_gate(
     )
     if not geo.get("ok"):
         return {**empty, "reason": str(geo.get("reason") or "геометрія"), "geometry": geo}
+    flt = get_symbol_filters(symbol)
+    if not flt.get("ok"):
+        return {**empty, "reason": "EXCHANGE_INFO_UNAVAILABLE", "filters": flt}
+    if db_path:
+        try:
+            mem = gate_entry_vs_memory(
+                signal_get_active(db_path) or [],
+                symbol=symbol,
+                direction=str(direction or ""),
+                timeframe=timeframe,
+            )
+        except Exception:
+            mem = {"allow_entry": True}
+        if not mem.get("allow_entry"):
+            return {**empty, "reason": str(mem.get("reason") or "пам'ять сценарію"), "memory": mem}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)
     if not wide.get("ok"):
         return {**empty, "reason": str(wide.get("reason") or "стоп/ATR")}
@@ -281,7 +302,7 @@ def desk_entry_gate(
             "reason": f"TP1 {move if move is not None else 'н/д'}% < {need:g}%",
         }
     sized = size_over_leverage(
-        entry=e, sl=s2, score=score, min_score=min_score, direction=direction
+        entry=e, sl=s2, score=score, min_score=min_score, direction=direction, symbol=symbol
     )
     if sized.get("over_lev"):
         return {
@@ -616,7 +637,12 @@ def close_desk_reversal(
     exit_price: Any = None,
 ) -> None:
     """Попередній сигнал у журналі — «переворот»."""
-    from office_bridge import journal_close_trade, office_signal_trade_id, signal_update
+    from office_bridge import (
+        is_confirmed_position_row,
+        journal_close_trade,
+        office_signal_trade_id,
+        signal_update,
+    )
 
     if not prev:
         return
@@ -629,13 +655,15 @@ def close_desk_reversal(
                 signal_id=sid,
                 status="CANCELLED",
                 outcome="REVERSAL",
-                analysis_note="переворот",
+                analysis_note="переворот сценарію",
             )
         except Exception:
             pass
         if not tid:
             tid = office_signal_trade_id(sid)
     if not tid:
+        return
+    if not is_confirmed_position_row(prev.get("entry_reason"), prev.get("setup_name"), tid):
         return
     px = _f(exit_price) or _f(_row_entry(prev))
     try:
@@ -775,6 +803,8 @@ def prepare_desk_send(
         entry_low=elo,
         entry_high=ehi,
         tp2=tp2,
+        db_path=db_path,
+        timeframe=timeframe,
     )
     if not gate.get("send"):
         return {**gate, "confluence": conf}
@@ -813,6 +843,7 @@ def prepare_desk_send(
                 "symbol": symbol,
                 "direction": direction,
                 "timeframe": timeframe,
+                "origin": "desk",
                 "sl": gate.get("sl"),
                 "zone_lo": zone_lo,
                 "zone_hi": zone_hi,

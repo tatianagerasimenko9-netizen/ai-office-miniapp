@@ -45,6 +45,7 @@ def plan_position_size(
     min_score: Any = 8,
     depo: Any = None,
     direction: str = "",
+    symbol: str = "",
 ) -> Dict[str, Any]:
     """Кількість USDT = ризик$ ÷ (відстань до стопа в частках ціни).
 
@@ -73,6 +74,12 @@ def plan_position_size(
         stop_frac = abs(e - s) / e
     if stop_frac <= 0:
         return {**empty, "reason": "дистанція ризику не додатна"}
+    if symbol:
+        from office_exchange_info import get_symbol_filters
+
+        flt = get_symbol_filters(symbol)
+        if not flt.get("ok"):
+            return {**empty, "reason": "EXCHANGE_INFO_UNAVAILABLE", "filters": flt}
     stop_pct = stop_frac * 100.0
     rp = risk_pct_for_score(score, min_score)
     dep = _f(depo) if depo is not None else depo_usdt()

@@ -634,6 +634,8 @@ def lifecycle_from_status(
         return {"key": "cancelled", "ua": "Скасовано"}
     if st in ("WATCHING", "WAIT"):
         return {"key": "waiting_zone", "ua": "Чекаємо зону"}
+    if st in ("CONFIRMED", "CONFIRMATION_PENDING"):
+        return {"key": "confirmed", "ua": "Підтверджено (не позиція)"}
     if st in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "HIT_TP2"):
         if confirms:
             return {"key": "confirmed", "ua": "Підтверджено (не позиція)"}
@@ -804,6 +806,7 @@ def hydrate_live_from_db(db_path: str) -> int:
 
     from office_bridge import signal_get_active
     from office_desk_card import is_legacy_desk_range
+    from office_scenario_memory import parse_note_meta
 
     n = 0
     try:
@@ -833,7 +836,9 @@ def hydrate_live_from_db(db_path: str) -> int:
             {
                 "symbol": r.get("symbol"),
                 "direction": r.get("direction"),
-                "timeframe": "H1",
+                "timeframe": parse_note_meta(note).get("timeframe") or "H1",
+                "origin": parse_note_meta(note).get("origin") or "desk",
+                "signal_id": r.get("signal_id"),
                 "sl": r.get("sl"),
                 "zone_lo": r.get("entry_low"),
                 "zone_hi": r.get("entry_high"),

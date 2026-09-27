@@ -25,8 +25,16 @@ def to_decimal(value: Any) -> Optional[Decimal]:
 
 
 def tick_size_for(symbol: str = "", price: Any = None) -> Decimal:
-    """Біржовий крок для відображення. Немає live-фільтра — типові кроки USDT-перпів."""
+    """Біржовий крок: спочатку exchangeInfo, інакше евристика лише для тексту."""
     s = str(symbol or "").upper()
+    try:
+        from office_exchange_info import get_symbol_filters
+
+        flt = get_symbol_filters(s)
+        if flt.get("ok") and flt.get("tickSize") is not None:
+            return flt["tickSize"]
+    except Exception:
+        pass
     p = to_decimal(price)
     if "BTC" in s:
         return Decimal("0.1")
@@ -48,19 +56,44 @@ def tick_size_for(symbol: str = "", price: Any = None) -> Decimal:
     return Decimal("0.000001")
 
 
-def quantize_display(value: Any, *, symbol: str = "", tick: Any = None) -> Optional[Decimal]:
+def quantize_display(
+    value: Any,
+    *,
+    symbol: str = "",
+    tick: Any = None,
+    side: str = "",
+    kind: str = "",
+) -> Optional[Decimal]:
+    """Текст. SL/TP не підкручуємо в бік гіршого ризику (LONG SL вниз, SHORT SL вгору)."""
+    from decimal import ROUND_DOWN, ROUND_UP
+
     d = to_decimal(value)
     if d is None:
         return None
     t = to_decimal(tick) if tick is not None else tick_size_for(symbol, d)
     if t is None or t <= 0:
         t = Decimal("0.000001")
-    return d.quantize(t, rounding=ROUND_HALF_UP)
+    k = str(kind or "").upper()
+    sd = str(side or "").upper()
+    rounding = ROUND_HALF_UP
+    if k in ("SL", "STOP"):
+        rounding = ROUND_DOWN if sd == "LONG" else (ROUND_UP if sd == "SHORT" else ROUND_HALF_UP)
+    elif k in ("TP", "TP1", "TP2", "TP3"):
+        rounding = ROUND_DOWN if sd == "LONG" else (ROUND_UP if sd == "SHORT" else ROUND_HALF_UP)
+    return d.quantize(t, rounding=rounding)
 
 
-def format_px(value: Any, symbol: str = "", *, tick: Any = None, group_thousands: bool = True) -> str:
+def format_px(
+    value: Any,
+    symbol: str = "",
+    *,
+    tick: Any = None,
+    group_thousands: bool = True,
+    side: str = "",
+    kind: str = "",
+) -> str:
     """Текст ціни для всіх маршрутів офісу."""
-    q = quantize_display(value, symbol=symbol, tick=tick)
+    q = quantize_display(value, symbol=symbol, tick=tick, side=side, kind=kind)
     if q is None:
         return ""
     s = format(q, "f")

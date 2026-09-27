@@ -200,8 +200,9 @@ def main() -> int:
         "SELECT status, exit_reason FROM trade_journal WHERE trade_id = ?",
         (tid,),
     )
-    if not closed or str(closed[0]) != "CLOSED" or str(closed[1]) != "переворот":
-        return _fail(f"journal reversal {closed}")
+    # Офісний сигнал ≠ /position: журнал не закриваємо як реальну позицію.
+    if closed and str(closed[0]).upper() == "CLOSED":
+        return _fail(f"office signal closed as position {closed}")
 
     # Картка DUMP як у ТЗ (Rich Bears)
     dump = format_desk_card(

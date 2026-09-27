@@ -1060,8 +1060,14 @@ def next_manage_event(
     rsi_h1: Any = None,
     rsi_h4: Any = None,
     exhaustion: bool = False,
+    confirmed_position: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    """Одне повідомлення лише при зміні стану. Не ордер."""
+    """Одне повідомлення лише при зміні стану. Не ордер.
+
+    Без явного /position — не trail/BE і не інструкції змінити ордер.
+    """
+    if not confirmed_position:
+        return None
     px = _f(price)
     if px is None or book.state == "CLOSED":
         return None
