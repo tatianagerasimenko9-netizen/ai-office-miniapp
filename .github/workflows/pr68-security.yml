@@ -1,0 +1,33 @@
+name: PR68 dependency and security audit
+
+on:
+  push:
+    branches:
+      - cursor/office-unified-release-5134
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - 'office_*.py'
+      - 'scripts/test_telegram_relay_behavior.py'
+      - '.github/workflows/pr68-security.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Audit resolved runtime dependencies for known vulnerabilities
+        run: |
+          python -m pip install -r requirements.txt pip-audit
+          python -m pip_audit --disable-pip --no-deps
+      - name: Static security scan of Telegram delivery and historical simulation
+        run: |
+          python -m pip install bandit
+          python -m bandit -ll -ii office_telegram_delivery_ledger.py office_telegram_policy.py office_t6_backtest.py
