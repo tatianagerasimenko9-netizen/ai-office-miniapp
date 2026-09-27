@@ -89,6 +89,14 @@ def main() -> int:
     if res.opens_position:
         return _fail("radar still must not open position")
 
+    try:
+        run_t6_backtest(ctrl, decision_stride=0)
+        return _fail("zero decision stride must fail")
+    except ValueError:
+        pass
+    hourly = run_t6_backtest(ctrl, decision_stride=4)
+    if hourly.n_decisions > 0 and hourly.n_decisions > len(data["timeframes"]["15m"]):
+        return _fail("stride decision count")
     rep = run_t6_backtest(ctrl)
     d = rep.as_dict()
     if "не прогноз" not in d["disclaimer"]:
