@@ -354,7 +354,7 @@ def format_desk_card(
     confirm_wait: str = "",
     now_line: str = "",
 ) -> str:
-    """Універсальна картка LONG/SHORT. Без RR, range, балів."""
+    """Універсальна картка LONG/SHORT. Без англ. RR 1:, range, балів. R до TP1 — з рівнів картки."""
     from office_telegram_filter import format_level_span
 
     side = str(direction or "").upper()
@@ -391,6 +391,9 @@ def format_desk_card(
         lines.append(_lvl("❌ Стоп", s))
     if t1 is not None:
         lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None))
+        if mid is not None and s is not None and abs(mid - s) > 1e-12:
+            r_mult = abs(t1 - mid) / abs(mid - s)
+            lines.append(f"до TP1 · {r_mult:.1f}R")
     if tp2 is not None:
         lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None))
     if tp3 is not None:
@@ -455,6 +458,19 @@ def _row_entry(row: Dict[str, Any]) -> Any:
     return row.get("entry") or row.get("entry_price") or row.get("entry_low") or row.get("entry_high")
 
 
+def is_legacy_desk_range(row: Any, note: Any = "") -> bool:
+    """Старі chase-картки `desk-range` до рушія збігів — не живий сетап."""
+    sid = ""
+    blob_note = str(note or "")
+    if isinstance(row, dict):
+        sid = str(row.get("signal_id") or row.get("trade_id") or "")
+        blob_note = str(row.get("analysis_note") or row.get("note") or blob_note)
+    else:
+        sid = str(row or "")
+    blob = f"{sid} {blob_note}".lower()
+    return "desk-range-" in blob or "osig-desk-range-" in blob
+
+
 def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
     from office_bridge import _fetchall, is_confirmed_position_row, signal_get_active
 
@@ -467,6 +483,8 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
         if not isinstance(r, dict):
             continue
         if str(r.get("symbol") or "").upper() != sym:
+            continue
+        if is_legacy_desk_range(r):
             continue
         if str(r.get("status") or "").upper() in OPEN_STATUSES:
             out = dict(r)
@@ -491,6 +509,8 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
         jrows = []
     for tid, jsym, direction, status, entry, sl, tp, reason, setup in jrows:
         if str(jsym or "").upper() != sym:
+            continue
+        if is_legacy_desk_range(tid, reason or setup):
             continue
         # І офісний сигнал, і /position — попередній напрямок для перевороту.
         _ = is_confirmed_position_row(reason, setup, tid)
