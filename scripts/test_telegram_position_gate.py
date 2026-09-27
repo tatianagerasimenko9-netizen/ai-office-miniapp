@@ -183,6 +183,19 @@ def main() -> int:
     )
     if not g_tr.get("send"):
         return _fail(f"trail {g_tr}")
+    tp2_txt = "✅ TP2 · MANTAUSDT SHORT\nЗакрий ще частину\nSL на 0.068619"
+    g_tp2 = gate_outbound_telegram(
+        intent="POSITION_MANAGE",
+        text=tp2_txt,
+        in_position=True,
+        position_id=rec["trade_id"],
+        position_open=True,
+    )
+    if not g_tp2.get("send"):
+        return _fail(f"tp2 {g_tp2}")
+    g_tp2_no = gate_outbound_telegram(intent="", text=tp2_txt)
+    if g_tp2_no.get("send"):
+        return _fail("tp2 empty intent")
     g_tr_no = gate_outbound_telegram(intent="POSITION_MANAGE", text=trail)
     if g_tr_no.get("send"):
         return _fail("trail without position")

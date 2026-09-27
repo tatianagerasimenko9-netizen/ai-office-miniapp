@@ -5402,15 +5402,27 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     trail_lv = e_high if direction == "LONG" else e_low
                                     if direction == "LONG" and e_low is not None:
                                         trail_lv = e_low
-                                    await send_proactive(
-                                        EVENT_TRADE_UPDATE,
-                                        (
-                                            f"✅ TP2 · {symbol} {direction}\n"
-                                            "Закрий ще частину\n"
-                                            f"SL на {tp1_v if tp1_v is not None else trail_lv}"
-                                        ),
-                                        stream="general",
-                                    )
+                                    if in_pos_row and pos_tid:
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            (
+                                                f"✅ TP2 · {symbol} {direction}\n"
+                                                "Закрий ще частину\n"
+                                                f"SL на {tp1_v if tp1_v is not None else trail_lv}"
+                                            ),
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            kind="TP2",
+                                        )
+                                    else:
+                                        print(
+                                            f"[t0] HIT_TP2 scenario (не /position) {symbol} "
+                                            "без інструкції змінити ордер"
+                                        )
                                 try:
                                     ent = float(e_low or e_high or current_price)
                                     sl_b = float(sl_v or ent)
