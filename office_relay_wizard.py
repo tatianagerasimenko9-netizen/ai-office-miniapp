@@ -3032,6 +3032,7 @@ async def run() -> None:
                         return
             ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
         delivered_id = None
+        send_attempted = False
         try:
             if ev == EVENT_SIGNAL_ENTRY:
                 sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
@@ -3041,6 +3042,7 @@ async def run() -> None:
                     print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
                     drawn = {}
                 if drawn.get("ok") and drawn.get("path"):
+                    send_attempted = True
                     msg_id = await send_office_photo(
                         str(drawn["path"]),
                         message,
@@ -3055,9 +3057,13 @@ async def run() -> None:
                         print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
                         delivered_id = msg_id
                         return msg_id
+                    if ledger_token:
+                        print(f"[chart] photo outcome ambiguous {sym}; no fallback text")
+                        return None
                     print(f"[chart] photo failed {sym}, fallback text")
                 else:
                     print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
+            send_attempted = True
             delivered_id = await send_office(
                 message,
                 reply_to_message_id=reply_to_message_id,
@@ -3081,8 +3087,9 @@ async def run() -> None:
             ledger_committed = not ledger_enabled or not dedup_key
             if ledger_token:
                 try:
-                    if ledger_lease_lost.is_set():
-                        ledger_committed = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                    if ledger_lease_lost.is_set() or (send_attempted and not delivered_id):
+                        quarantined = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                        print(f"[relay] ambiguous Telegram send quarantined={quarantined}")
                         ledger_committed = False
                     else:
                         ledger_committed = finish_delivery(
@@ -3092,7 +3099,7 @@ async def run() -> None:
                 except Exception as exc:
                     ledger_committed = False
                     print(f"[relay] ERROR ledger commit: {type(exc).__name__}: {exc}")
-                    if delivered_id:
+                    if send_attempted:
                         try:
                             quarantined = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
                             print(f"[relay] ambiguous delivery quarantined={quarantined}")
