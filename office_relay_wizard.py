@@ -186,6 +186,7 @@ from office_telegram_policy import (
     may_send_proactive,
     preferred_scan_mode,
     should_send_trade_telegram,
+    finish_trade_telegram,
     trade_update_streams,
 )
 from office_lifecycle import db_status_for
@@ -2966,6 +2967,7 @@ async def run() -> None:
             return None
         ev = str(event_type or "").strip().upper()
         st = str(stream or "general").strip().lower() or "general"
+        dedup_key = ""
         if ev in (EVENT_TRADE_UPDATE, EVENT_TRADE_CLOSED, EVENT_SIGNAL_ENTRY):
             st = TRADE_UPDATE_STREAM
             if len(trade_update_streams()) != 1:
@@ -2982,42 +2984,50 @@ async def run() -> None:
             if not gate.get("send"):
                 print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
                 return None
-        if ev == EVENT_SIGNAL_ENTRY:
-            sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
-            try:
-                drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
-            except Exception as exc_ch:
-                print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
-                drawn = {}
-            if drawn.get("ok") and drawn.get("path"):
-                msg_id = await send_office_photo(
-                    str(drawn["path"]),
-                    message,
-                    stream=st,
-                    intent=intent,
-                    event_type=event_type,
-                    symbol=sym,
-                    direction=direction,
-                    skip_gate=True,
-                )
-                if msg_id:
-                    print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
+            dedup_key = str(gate.get("key") or "")
+        delivered_id = None
+        try:
+            if ev == EVENT_SIGNAL_ENTRY:
+                sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
+                try:
+                    drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
+                except Exception as exc_ch:
+                    print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
+                    drawn = {}
+                if drawn.get("ok") and drawn.get("path"):
+                    msg_id = await send_office_photo(
+                        str(drawn["path"]),
+                        message,
+                        stream=st,
+                        intent=intent,
+                        event_type=event_type,
+                        symbol=sym,
+                        direction=direction,
+                        skip_gate=True,
+                    )
+                    if msg_id:
+                        print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
+                        delivered_id = msg_id
                     return msg_id
-                print(f"[chart] photo failed {sym}, fallback text")
-            else:
-                print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
-        return await send_office(
-            message,
-            reply_to_message_id=reply_to_message_id,
-            stream=st,
-            allow_draft=False,
-            intent=intent,
-            event_type=event_type,
-            symbol=symbol,
-            direction=direction,
-            skip_gate=True,
-        )
+                    print(f"[chart] photo failed {sym}, fallback text")
+                else:
+                    print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
+            delivered_id = await send_office(
+                message,
+                reply_to_message_id=reply_to_message_id,
+                stream=st,
+                allow_draft=False,
+                intent=intent,
+                event_type=event_type,
+                symbol=symbol,
+                direction=direction,
+                skip_gate=True,
+            )
+            return delivered_id
 
+        finally:
+            if dedup_key:
+                finish_trade_telegram(key=dedup_key, delivered=bool(delivered_id))
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             _RELAY_OFFICE_STARTUP_PING_SENT = True
