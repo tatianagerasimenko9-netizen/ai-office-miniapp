@@ -1,7 +1,7 @@
 """Persistent, transactional Telegram delivery reservations (SQLite/PostgreSQL).
 
-This module is deliberately not wired into the live relay until its migration and
-failure/restart tests have been reviewed. Deploying it requires owner approval.
+The relay uses this only with explicit opt-in after an owner-approved migration.
+No request path creates or migrates the production table.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _sql(db_path: str, query: str) -> str:
 def migrate_delivery_ledger(db_path: str) -> None:
     """Additive migration only; never deletes existing data."""
     with _connect(db_path) as conn:
-        conn.execute(DDL) if not _is_pg(db_path) else conn.execute(DDL)
+        conn.execute(DDL)
 
 
 def reserve_delivery(
@@ -60,7 +60,6 @@ def reserve_delivery(
     ts = float(time.time() if now is None else now)
     token = uuid.uuid4().hex
     with _connect(db_path) as conn:
-        conn.execute(DDL)
         conn.execute(
             _sql(db_path, "INSERT INTO office_telegram_delivery "
                 "(dedup_key,state,token,expires_at,delivered_at) "
