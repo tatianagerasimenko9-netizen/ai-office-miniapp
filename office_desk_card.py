@@ -353,6 +353,7 @@ def format_desk_card(
     zone_line: str = "",
     confirm_wait: str = "",
     now_line: str = "",
+    lev_note: str = "",
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR, range, балів."""
     from office_telegram_filter import format_level_span
@@ -402,6 +403,9 @@ def format_desk_card(
     if w:
         lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
     lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
+    ln = str(lev_note or "").strip()
+    if ln:
+        lines.append(ln)
     lines.append("При TP1 — частина + стоп у беззбиток")
     sz = size if isinstance(size, dict) else plan_position_size(
         entry=mid, sl=s, score=score, min_score=min_score
@@ -638,6 +642,7 @@ def prepare_desk_send(
     confluence: Optional[Dict[str, Any]] = None,
     candidates: Optional[List[Dict[str, Any]]] = None,
     now_ts: Any = None,
+    lev_note: str = "",
 ) -> Dict[str, Any]:
     """Gate + збіги + текст картки. Закриває попередній сигнал лише якщо send і reversal."""
     from office_confluence import evaluate_confluence, mark_live
@@ -726,6 +731,7 @@ def prepare_desk_send(
         zone_line=str((conf or {}).get("zone_line") or ""),
         confirm_wait=str((conf or {}).get("confirm_wait") or ""),
         now_line=str((conf or {}).get("now_line") or ""),
+        lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
     )
     key = str((conf or {}).get("setup_key") or "")
     if key:

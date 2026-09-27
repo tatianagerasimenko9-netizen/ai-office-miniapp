@@ -157,9 +157,8 @@ from office_trade_steer import (
     signal_case_key,
     tp3_from_liquidity,
 )
-from office_pump_dump import evaluate_pump_dump, format_pump_card
-from office_rsi_heat import exhaustion_candle, rsi_from_candles, rsi_heat
-from office_ict_hunter import evaluate_ict_hunter
+from office_rsi_heat import exhaustion_candle, rsi_from_candles
+from office_lev_verdict import lev_cycle
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -5525,6 +5524,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                 m15_close: Any = None,
                 candle: Any = None,
                 cancel_level: Any = None,
+                confluence: Any = None,
+                lev_note: str = "",
             ) -> bool:
                 from office_desk_card import prepare_desk_send
                 from office_trade_steer import atr_from_candles
@@ -5603,6 +5604,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     candles_ltf=m5_bars,
                     price=last_px,
                     now_ts=now_ts,
+                    confluence=confluence,
+                    lev_note=lev_note,
                 )
                 if not prep.get("send"):
                     conf_hold = prep.get("confluence") if isinstance(prep.get("confluence"), dict) else {}
@@ -5889,91 +5892,6 @@ EV позитивне: {prob.get('ev_positive', '')}
                             rprice = float((rh1[-1] or {}).get("close") or 0.0)
                         except Exception:
                             rprice = 0.0
-                        try:
-                            for tf_name, bars in (
-                                ("M5", rm5 if isinstance(rm5, list) else []),
-                                ("M15", rm15 if isinstance(rm15, list) else []),
-                            ):
-                                if len(bars) < 22:
-                                    continue
-                                pd = evaluate_pump_dump(
-                                    candles=bars,
-                                    daily=rd1 if isinstance(rd1, list) else None,
-                                )
-                                if not pd.get("signal"):
-                                    continue
-                                rsi1 = rsi_from_candles(rh1 if isinstance(rh1, list) else [])
-                                rsi4 = rsi_from_candles(rh4 if isinstance(rh4, list) else [])
-                                heat = rsi_heat(
-                                    direction=str(pd.get("direction") or ""),
-                                    rsi_h1=rsi1,
-                                    rsi_h4=rsi4,
-                                )
-                                if not heat.get("allow_market"):
-                                    print(
-                                        f"[pump] {rsym} {pd.get('signal')} blocked RSI "
-                                        f"{heat.get('kind')} {heat.get('message')}"
-                                    )
-                                    continue
-                                from office_trade_steer import atr_from_candles as _atr_h1
-
-                                tps = pd.get("tps") or {}
-                                sc = pd.get("total_l") if pd.get("signal") == "PUMP" else pd.get("total_s")
-                                m15_cl = None
-                                try:
-                                    if isinstance(rm15, list) and rm15:
-                                        m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
-                                except Exception:
-                                    m15_cl = None
-                                if await _desk_send(
-                                    rsym,
-                                    f"pump-{tf_name.lower()}",
-                                    direction=str(pd.get("direction") or ""),
-                                    timeframe=tf_name,
-                                    entry=pd.get("entry"),
-                                    sl=pd.get("sl"),
-                                    tp1=tps.get("tp1"),
-                                    tp2=tps.get("tp2"),
-                                    tp3=tps.get("tp3"),
-                                    add_px=tps.get("add"),
-                                    atr_h1=_atr_h1(rh1),
-                                    score=sc,
-                                    min_score=10,
-                                    setup_type=str(pd.get("signal") or "PUMP"),
-                                    m15_close=m15_cl,
-                                    candle=(bars[-1] if bars else None),
-                                    cancel_level=pd.get("cancel"),
-                                ):
-                                    print(f"[pump] {rsym} {pd.get('signal')} {tf_name}")
-                                    break
-                            hunt = evaluate_ict_hunter(
-                                candles=rm15 if isinstance(rm15, list) else rh1,
-                                timeframe="M15",
-                                daily=rd1 if isinstance(rd1, list) else None,
-                            )
-                            if hunt.get("signal"):
-                                htxt = format_signal_steer_card(
-                                    symbol=rsym,
-                                    direction=str(hunt.get("direction") or ""),
-                                    timeframe="M15",
-                                    entry=hunt.get("close"),
-                                    sl=None,
-                                    tp1=None,
-                                    setup_type="HUNTER",
-                                    score=hunt.get("score"),
-                                    min_score=hunt.get("min_score"),
-                                    score_max=20,
-                                    ote_model="Hunter OTE 0.5 / EQ 0.786",
-                                    patterns=hunt.get("patterns"),
-                                )
-                                # Без стопа Hunter-картку не шлемо як вхід — лише якщо є патерни в pump/radar.
-                                if hunt.get("patterns"):
-                                    print(
-                                        f"[hunter] {rsym} score {hunt.get('score')}/{hunt.get('min_score')} "
-                                        f"{hunt.get('patterns')}"
-                                    )
-                        except Exception as exc_pd:
-                            print(f"[pump] {rsym}: {type(exc_pd).__name__}: {exc_pd}")
                         r_used = None
                         try:
                             r_atr = fetch_atr_context(rsym) or {}
@@ -5981,6 +5899,86 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 r_used = float(r_atr.get("day_used_pct"))
                         except Exception:
                             r_used = None
+                        try:
+                            from office_trade_steer import atr_from_candles as _atr_h1
+
+                            m15_cl = None
+                            try:
+                                if isinstance(rm15, list) and rm15:
+                                    m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
+                            except Exception:
+                                m15_cl = None
+                            cycle = lev_cycle(
+                                symbol=rsym,
+                                price=rprice,
+                                timeframe="H1",
+                                candles_m5=rm5 if isinstance(rm5, list) else None,
+                                candles_m15=rm15 if isinstance(rm15, list) else None,
+                                candles_h1=rh1,
+                                candles_h4=rh4 if isinstance(rh4, list) else None,
+                                candles_d1=rd1 if isinstance(rd1, list) else None,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
+                                atr_h1=_atr_h1(rh1),
+                                day_used_pct=r_used,
+                            )
+                            print(
+                                f"[lev] {rsym} {cycle.get('action')} {cycle.get('direction')} "
+                                f"{cycle.get('reason')}"
+                            )
+                            if cycle.get("send"):
+                                if await _desk_send(
+                                    rsym,
+                                    "lev",
+                                    direction=str(cycle.get("direction") or ""),
+                                    timeframe="H1",
+                                    entry=cycle.get("entry"),
+                                    sl=cycle.get("sl"),
+                                    tp1=cycle.get("tp1"),
+                                    atr_h1=_atr_h1(rh1),
+                                    score=12,
+                                    min_score=10,
+                                    setup_type="ЛЕВ",
+                                    m15_close=m15_cl,
+                                    candle=(rm15[-1] if isinstance(rm15, list) and rm15 else None),
+                                    cancel_level=cycle.get("sl"),
+                                    confluence=cycle.get("confluence"),
+                                    lev_note=str(cycle.get("lev_note") or ""),
+                                ):
+                                    print(f"[lev] {rsym} SEND {cycle.get('direction')}")
+                            elif str(cycle.get("action") or "") in ("WAIT", "WATCHING"):
+                                zlo = (cycle.get("confluence") or {}).get("zone_lo")
+                                zhi = (cycle.get("confluence") or {}).get("zone_hi")
+                                if zlo is not None and zhi is not None:
+                                    gate_w = apply_skip_watching_gate(
+                                        db_path,
+                                        symbol=rsym,
+                                        direction=str(cycle.get("direction") or "LONG"),
+                                        entry_low=float(zlo),
+                                        entry_high=float(zhi),
+                                        timeframe="1h",
+                                        now_ts=time.time(),
+                                        current_price=rprice,
+                                    )
+                                    if gate_w.get("create"):
+                                        signal_upsert(
+                                            db_path,
+                                            signal_id=f"lev-watch-{rsym}-{int(time.time())}",
+                                            symbol=rsym,
+                                            direction=str(cycle.get("direction") or "LONG"),
+                                            entry_low=float(zlo),
+                                            entry_high=float(zhi),
+                                            sl=cycle.get("sl"),
+                                            tp1=cycle.get("tp1"),
+                                            tp2=None,
+                                            rr=None,
+                                            status="WATCHING",
+                                            analysis_note=(
+                                                f"{cycle.get('action')} {cycle.get('reason') or ''} "
+                                                f"{cycle.get('recheck') or ''}"
+                                            )[:2000],
+                                        )
+                        except Exception as exc_pd:
+                            print(f"[lev] {rsym}: {type(exc_pd).__name__}: {exc_pd}")
                         rres = evaluate_range_radar(
                             symbol=rsym,
                             candles=rh1,

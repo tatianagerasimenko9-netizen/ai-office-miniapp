@@ -83,6 +83,8 @@ def kind_ua(setup_type: str, direction: str) -> str:
     ul = raw.upper()
     if "СИЛЬН" in raw or "HUNTER" in ul or "SC-OTE" in ul or "SC_OTE" in ul:
         return "Відкат у сильну свічку"
+    if ul in ("ЛЕВ", "LEV", "LEV_ANALYST"):
+        return f"{side} Лева"
     if ul in ("DUMP", "PUMP") or "PUMP" in ul or "DUMP" in ul:
         return f"{side} на відкаті"
     if "РАДАР" in ul or ul == "RADAR":
