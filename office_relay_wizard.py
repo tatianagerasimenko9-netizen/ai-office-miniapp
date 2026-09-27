@@ -3090,6 +3090,9 @@ async def run() -> None:
                     key=dedup_key,
                     delivered=bool(delivered_id) and bool(ledger_committed),
                 )
+            if ledger_token and delivered_id and not ledger_committed:
+                print("[relay] BLOCKED lifecycle: delivery not committed in ledger")
+                return None
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             _RELAY_OFFICE_STARTUP_PING_SENT = True
