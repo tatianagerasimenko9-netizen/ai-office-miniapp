@@ -8,6 +8,8 @@ on:
     paths:
       - '.github/workflows/pr68-real-replay.yml'
       - 'scripts/fetch_real_ohlcv.py'
+      - 'scripts/fetch_binance_archive.py'
+      - 'scripts/replay_real_manta_gate.py'
       - 'office_t6_backtest.py'
 
 permissions:
