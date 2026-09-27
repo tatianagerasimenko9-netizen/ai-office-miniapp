@@ -58,7 +58,7 @@ def quantize_display(value: Any, *, symbol: str = "", tick: Any = None) -> Optio
     return d.quantize(t, rounding=ROUND_HALF_UP)
 
 
-def format_px(value: Any, symbol: str = "", *, tick: Any = None) -> str:
+def format_px(value: Any, symbol: str = "", *, tick: Any = None, group_thousands: bool = True) -> str:
     """Текст ціни для всіх маршрутів офісу."""
     q = quantize_display(value, symbol=symbol, tick=tick)
     if q is None:
@@ -74,7 +74,7 @@ def format_px(value: Any, symbol: str = "", *, tick: Any = None) -> str:
         n = int(whole)
     except ValueError:
         return s
-    if abs(n) >= 1000:
+    if group_thousands and abs(n) >= 1000:
         grouped = f"{n:,}".replace(",", " ")
         return f"{grouped}.{frac}" if frac else grouped
     return s
@@ -121,7 +121,7 @@ def format_price_fields(data: dict, symbol: str = "") -> dict:
     for k in _PRICE_KEYS:
         if k not in out or out[k] is None or out[k] == "":
             continue
-        txt = format_px(out[k], sym)
+        txt = format_px(out[k], sym, group_thousands=False)
         if txt:
             out[k] = txt
     return out

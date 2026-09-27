@@ -141,11 +141,11 @@ def key_levels(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     from office_price_format import format_px
 
     lv = {
-        "entry_low": format_px(row.get("entry_low"), symbol) or row.get("entry_low"),
-        "entry_high": format_px(row.get("entry_high"), symbol) or row.get("entry_high"),
-        "sl": format_px(row.get("sl"), symbol) or row.get("sl"),
-        "tp1": format_px(row.get("tp1"), symbol) or row.get("tp1"),
-        "tp2": format_px(row.get("tp2"), symbol) or row.get("tp2"),
+        "entry_low": format_px(row.get("entry_low"), symbol, group_thousands=False) or row.get("entry_low"),
+        "entry_high": format_px(row.get("entry_high"), symbol, group_thousands=False) or row.get("entry_high"),
+        "sl": format_px(row.get("sl"), symbol, group_thousands=False) or row.get("sl"),
+        "tp1": format_px(row.get("tp1"), symbol, group_thousands=False) or row.get("tp1"),
+        "tp2": format_px(row.get("tp2"), symbol, group_thousands=False) or row.get("tp2"),
     }
     if not lv["entry_low"] or not lv["sl"] or not lv["tp1"]:
         return out
@@ -178,7 +178,7 @@ def home_payload() -> Dict[str, Any]:
         "ok": True,
         "readonly": True,
         "btc": {
-            "price": format_px(btc.get("price"), "BTCUSDT") or btc.get("price"),
+            "price": format_px(btc.get("price"), "BTCUSDT", group_thousands=False) or btc.get("price"),
             "change_24h": btc.get("change_24h"),
             "regime": regime,
             "data_status": "DATA_OK" if btc.get("price") is not None else DATA_UNAVAILABLE,

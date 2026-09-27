@@ -42,11 +42,11 @@ def resolve_trade_style(mode: Any = "", timeframe: Any = "") -> dict:
     return dict(TRADE_STYLE["intraday"])
 
 
-def format_px(value: Any, symbol: str = "", *, tick: Any = None) -> str:
+def format_px(value: Any, symbol: str = "", *, tick: Any = None, group_thousands: bool = True) -> str:
     """Читабельна ціна: tickSize + Decimal, без float-хвостів."""
     from office_price_format import format_px as _fmt
 
-    return _fmt(value, symbol, tick=tick)
+    return _fmt(value, symbol, tick=tick, group_thousands=group_thousands)
 
 
 def format_level_span(low: Any, high: Any, symbol: str = "", *, tick: Any = None) -> str:
