@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, migrate_delivery_ledger
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, migrate_delivery_ledger, renew_delivery
 
 
 def main():
@@ -53,6 +53,18 @@ def main():
         winner = next(claim for claim in claims if claim)
         assert finish_delivery(db, concurrent_key, winner, delivered=True, stable=True, now=4001)
         assert reserve_delivery(db, concurrent_key, stable=True, now=100000) is None, "stable event survives restart"
+        lease_key = "SCENARIO|BTCUSDT-H1-789|CONFIRM|general"
+        owner = reserve_delivery(db, lease_key, stable=True, now=5000)
+        assert owner
+        assert renew_delivery(db, lease_key, owner, now=5090), "owner renews before expiry"
+        assert reserve_delivery(db, lease_key, stable=True, now=5121) is None, "no lease theft"
+        assert not renew_delivery(db, lease_key, "wrong-token", now=5122), "wrong owner blocked"
+        assert not renew_delivery(db, lease_key, owner, now=5211), "expired lease cannot revive"
+        successor = reserve_delivery(db, lease_key, stable=True, now=5211)
+        assert successor and successor != owner
+        assert not renew_delivery(db, lease_key, owner, now=5212), "old owner cannot renew"
+        assert not finish_delivery(db, lease_key, owner, delivered=True, stable=True, now=5212), "old owner cannot commit"
+        assert finish_delivery(db, lease_key, successor, delivered=True, stable=True, now=5213)
     print("OK persistent delivery ledger offline")
 
 
