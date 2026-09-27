@@ -35,3 +35,15 @@ jobs:
         run: python scripts/test_pr68_canonical.py
       - name: Position authorization (temporary SQLite, no Telegram)
         run: python scripts/test_telegram_position_gate.py
+      - name: Lev cognitive and analyst-first rules (offline)
+        run: |
+          python scripts/test_lev_cognitive.py
+          python scripts/test_lev_analyst_first.py
+      - name: MANTA alert gates and desk regression (offline)
+        run: |
+          python scripts/test_manta_alert_gate.py
+          python scripts/test_pr51_desk.py
+      - name: Unified release and watching dedup (offline)
+        run: |
+          python scripts/test_unified_release.py
+          python scripts/test_watching_dedup.py
