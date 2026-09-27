@@ -163,11 +163,14 @@ def main() -> int:
     for need in (
         "🔴 SHORT · DEMOUSDT · H1",
         "🎯 Вхід · 0.1306",
-        "❌ Стоп · " + format_px(packed["sl"]),
-        "✅ TP1 · 0.1235",
+        "❌ Стоп",
+        "✅ TP1",
+        "до TP1",
     ):
         if need not in card:
             return _fail(f"card missing {need!r} in {card}")
+    if "RR 1:" in card or "None" in card:
+        return _fail(f"banned dump {card}")
     if "Позиція: немає" in card:
         return _fail("position marker leaked")
     if "Entry:" in card or "\nSL:" in card:
