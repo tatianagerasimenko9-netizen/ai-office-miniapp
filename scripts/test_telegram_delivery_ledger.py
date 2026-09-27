@@ -6,13 +6,19 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, migrate_delivery_ledger
 
 
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         db = str(Path(tmp) / "delivery.sqlite")
         key = "SCENARIO|BTCUSDT-H1-123|SIGNAL_ENTRY|general"
+        try:
+            reserve_delivery(db, key, stable=True, now=999)
+            raise AssertionError("missing migration must fail closed")
+        except Exception as exc:
+            assert "office_telegram_delivery" in str(exc), str(exc)
+        migrate_delivery_ledger(db)
         first = reserve_delivery(db, key, stable=True, now=1000)
         assert first, "first reservation"
         assert reserve_delivery(db, key, stable=True, now=1001) is None, "concurrent duplicate"
