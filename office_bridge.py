@@ -1723,21 +1723,17 @@ def _journal_row_kyiv_date(raw: Any) -> str:
 
 
 def is_confirmed_position_row(entry_reason: Any = "", setup_name: Any = "", trade_id: Any = "") -> bool:
-    """Підтверджена угода Тетяни — лише явний /position, не Desk ENTER."""
+    """Only the explicit owner /position marker grants real-position privileges.
+
+    Legacy setup names and pos- IDs are not proof of owner confirmation.
+    Ambiguous historical rows remain in the journal but are not actionable.
+    """
     reason = str(entry_reason or "").strip().lower()
     setup = str(setup_name or "").strip().upper()
     tid = str(trade_id or "").strip().lower()
     if setup == OFFICE_SIGNAL_SETUP or tid.startswith("osig-") or "office signal card" in reason:
         return False
-    if POSITION_CONFIRM_REASON in reason:
-        return True
-    if setup == "T1_MY_POSITION":
-        return True
-    if tid.startswith("pos-"):
-        return True
-    if "office signal card" in reason:
-        return False
-    return False
+    return reason == POSITION_CONFIRM_REASON.lower()
 
 
 def _fmt_closed_stats(rows: List[tuple]) -> str:
