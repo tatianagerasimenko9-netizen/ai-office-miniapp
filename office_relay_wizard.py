@@ -189,6 +189,7 @@ from office_telegram_policy import (
     finish_trade_telegram,
     trade_update_streams,
 )
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
@@ -2985,6 +2986,22 @@ async def run() -> None:
                 print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
                 return None
             dedup_key = str(gate.get("key") or "")
+        # Opt-in only after an explicit, owner-approved DB migration. A missing
+        # ledger table/error fails closed rather than sending an untracked event.
+        ledger_enabled = os.environ.get("OFFICE_TG_PERSISTENT_DEDUP", "").strip() == "1"
+        ledger_token = None
+        ledger_stable = bool(str(canonical_id or "").strip() and str(scenario_event or ev).strip())
+        if dedup_key and ledger_enabled:
+            try:
+                ledger_token = reserve_delivery(db_path, dedup_key, stable=ledger_stable)
+            except Exception as exc:
+                finish_trade_telegram(key=dedup_key, delivered=False)
+                print(f"[relay] BLOCKED ledger unavailable: {type(exc).__name__}: {exc}")
+                return None
+            if ledger_token is None:
+                finish_trade_telegram(key=dedup_key, delivered=False)
+                print(f"[relay] silent persistent duplicate {ev} {kind}")
+                return None
         delivered_id = None
         try:
             if ev == EVENT_SIGNAL_ENTRY:
@@ -3026,8 +3043,21 @@ async def run() -> None:
             return delivered_id
 
         finally:
+            ledger_committed = not ledger_enabled or not dedup_key
+            if ledger_token:
+                try:
+                    ledger_committed = finish_delivery(
+                        db_path, dedup_key, ledger_token,
+                        delivered=bool(delivered_id), stable=ledger_stable,
+                    )
+                except Exception as exc:
+                    ledger_committed = False
+                    print(f"[relay] ERROR ledger commit: {type(exc).__name__}: {exc}")
             if dedup_key:
-                finish_trade_telegram(key=dedup_key, delivered=bool(delivered_id))
+                finish_trade_telegram(
+                    key=dedup_key,
+                    delivered=bool(delivered_id) and bool(ledger_committed),
+                )
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             _RELAY_OFFICE_STARTUP_PING_SENT = True
