@@ -111,6 +111,8 @@ def chart_levels(
     prev_line: str = "",
     demo: bool = False,
     calc_entry: Any = None,
+    plan_low: Any = None,
+    plan_high: Any = None,
 ) -> Dict[str, Any]:
     return {
         "sl": _f(sl),
@@ -139,6 +141,8 @@ def chart_levels(
         "prev_line": str(prev_line or ""),
         "demo": bool(demo),
         "calc_entry": _f(calc_entry),
+        "plan_low": _f(plan_low),
+        "plan_high": _f(plan_high),
     }
 
 
@@ -240,7 +244,6 @@ def render_signal_chart(
 
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
-        from matplotlib.patches import FancyBboxPatch
         from matplotlib.transforms import blended_transform_factory
 
         from office_price_format import format_level_span
@@ -263,6 +266,7 @@ def render_signal_chart(
         sl_v = _f(lv.get("sl"))
         tp1_v = _f(lv.get("tp1"))
         calc_v = _f(lv.get("calc_entry"))
+        plan_lo, plan_hi = _f(lv.get("plan_low")), _f(lv.get("plan_high"))
         c_lo = min(r["low"] for r in rows)
         c_hi = max(r["high"] for r in rows)
         y0, y1 = _view_window(candle_lo=c_lo, candle_hi=c_hi, zone_lo=en_lo, zone_hi=en_hi)
@@ -299,8 +303,8 @@ def render_signal_chart(
         for y_slot, title, body in (
             (0.67, "Чого чекаю", wait),
             (0.54, "Чому сценарій", why),
-            (0.41, "Що скасує", cancel),
-            (0.32, "Що з попереднім", prev),
+            (0.38, "Що скасує", cancel),
+            (0.28, "Що з попереднім", prev),
         ):
             if not body:
                 continue
@@ -308,7 +312,7 @@ def render_signal_chart(
             ax_t.text(
                 0.03,
                 y_slot - 0.048,
-                "\n".join(textwrap.wrap(body, width=70)[: (2 if title == "Що з попереднім" else 1)]),
+                "\n".join(textwrap.wrap(body, width=70)[: (2 if title in ("Що з попереднім", "Чому сценарій") else 1)]),
                 color="#e8eaed",
                 fontsize=11,
                 va="top",
@@ -334,7 +338,7 @@ def render_signal_chart(
             ax_t.text(
                 0.03,
                 0.025,
-                "DEMO/OFFLINE: синтетичні свічки лише для масштабу, не доказ патерну.",
+                "DEMO/OFFLINE: синтетичний ритм свічок — лише масштаб, не структура і не підстава зони.",
                 color="#8b919c",
                 fontsize=9,
                 va="center",
@@ -363,22 +367,35 @@ def render_signal_chart(
             kw["hlines"] = dict(hlines=ys, colors=cols, linestyle=styles, linewidths=1.15)
         mpf.plot(df, **kw)
         band = _zone_band(en_lo, en_hi, y0, y1)
+        ztrans = blended_transform_factory(ax.transAxes, ax.transData)
         if band is not None:
             span_frac = (band[1] - band[0]) / max(y1 - y0, 1e-12)
-            fill_a = 0.14 if span_frac > 0.55 else 0.32
+            fill_a = 0.12 if span_frac > 0.55 else 0.28
             ax.axhspan(band[0], band[1], color="#c9a227", alpha=fill_a, zorder=0)
-            ax.axhline(band[0], color="#c9a227", linewidth=1.6, zorder=3)
-            ax.axhline(band[1], color="#c9a227", linewidth=1.6, zorder=3)
-            ztrans = blended_transform_factory(ax.transAxes, ax.transData)
-            label_y = band[0] + (y1 - y0) * 0.03 if span_frac > 0.55 else band[1] - (y1 - y0) * 0.02
+            ax.axhline(band[0], color="#c9a227", linewidth=1.4, zorder=3)
+            ax.axhline(band[1], color="#c9a227", linewidth=1.4, zorder=3)
             ax.text(
                 0.02,
-                label_y,
-                "зона спостереження",
+                band[0] + (y1 - y0) * 0.012,
+                "спостереження",
                 color="#f3e3a6",
-                fontsize=9,
+                fontsize=8,
                 fontweight="bold",
-                va="bottom" if span_frac > 0.55 else "top",
+                va="bottom",
+                transform=ztrans,
+                zorder=5,
+            )
+        if plan_lo is not None and plan_hi is not None and abs(plan_hi - plan_lo) > 0:
+            plo, phi = (plan_lo, plan_hi) if plan_lo <= plan_hi else (plan_hi, plan_lo)
+            ax.axhspan(plo, phi, color=accent, alpha=0.16, zorder=1)
+            ax.text(
+                0.02,
+                (plo + phi) / 2.0,
+                "план після M5",
+                color=accent,
+                fontsize=8,
+                fontweight="bold",
+                va="center",
                 transform=ztrans,
                 zorder=5,
             )
@@ -402,43 +419,6 @@ def render_signal_chart(
                 transform=ax.transAxes,
                 zorder=8,
             )
-        box_x, box_y = 0.48, 0.68
-        if side == "LONG":
-            box_txt = (
-                "1) очікую відкат ДО зони — ще не вхід\n"
-                "2) LONG лише після підтвердження M15/M5"
-            )
-        else:
-            box_txt = (
-                "1) зона спостереження — не продаж\n"
-                "2) чекаю реакції M5 (умова лише з даних)\n"
-                "3) після підтвердження — можливий SHORT до TP"
-            )
-        ax.add_patch(
-            FancyBboxPatch(
-                (box_x, box_y),
-                0.46,
-                0.22 if side == "LONG" else 0.28,
-                boxstyle="round,pad=0.012,rounding_size=0.02",
-                transform=ax.transAxes,
-                facecolor="#161920",
-                edgecolor=accent,
-                linewidth=1.2,
-                alpha=0.92,
-                zorder=6,
-            )
-        )
-        ax.text(
-            box_x + 0.02,
-            box_y + (0.11 if side == "LONG" else 0.14),
-            box_txt,
-            color="#e8eaed",
-            fontsize=9,
-            va="center",
-            transform=ax.transAxes,
-            zorder=7,
-            linespacing=1.35,
-        )
         fig.savefig(path, dpi=140, facecolor=fig.get_facecolor())
         plt.close(fig)
     except Exception as exc:

@@ -206,6 +206,49 @@ def mark_confirm_sent(key: str) -> None:
     _LIVE[key] = cur
 
 
+def hydrate_alert_gate_from_db(db_path: str) -> int:
+    """Після рестарту: CONFIRMED у БД = confirm_sent, без другого CONFIRM."""
+    from office_bridge import signal_get_active
+    from office_desk_card import is_legacy_desk_range
+    from office_scenario_memory import parse_note_meta
+
+    n = 0
+    try:
+        rows = signal_get_active(db_path) or []
+    except Exception:
+        return 0
+    for r in rows:
+        if not isinstance(r, dict) or is_legacy_desk_range(r):
+            continue
+        st = str(r.get("status") or "").upper()
+        note = str(r.get("analysis_note") or "")
+        meta = parse_note_meta(note)
+        key = str(meta.get("okey") or "").strip()
+        if not key:
+            key = origin_key(
+                symbol=str(r.get("symbol") or ""),
+                direction=str(r.get("direction") or ""),
+                zone_lo=r.get("entry_low"),
+                zone_hi=r.get("entry_high"),
+                origin=str(meta.get("origin") or "desk"),
+                timeframe=str(meta.get("timeframe") or ""),
+            )
+        if not key:
+            continue
+        confirmed = st in ("CONFIRMED", "HIT_ENTRY", "HIT_TP1", "HIT_TP2") or "confirm_sent=1" in note or "confirmed_px=" in note
+        prev = dict(_LIVE.get(key) or {})
+        _LIVE[key] = {
+            **prev,
+            "state": "CONFIRMED" if confirmed else str(prev.get("state") or "WATCHING"),
+            "confirm_sent": bool(confirmed or prev.get("confirm_sent")),
+            "entry_alert_sent": bool(confirmed or prev.get("entry_alert_sent")),
+            "in_position": bool(prev.get("in_position")),
+            "key": key,
+        }
+        n += 1
+    return n
+
+
 def format_zone_wait_message(
     *,
     symbol: str,

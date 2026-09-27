@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from office_chart_png import chart_levels, render_signal_chart  # noqa: E402
-from office_desk_card import _calc_entry_px, format_desk_card  # noqa: E402
+from office_desk_card import _calc_entry_px, format_desk_card, plan_ok_slice  # noqa: E402
 from office_lev_authority import previous_to_new_link  # noqa: E402
 from office_position_size import plan_position_size  # noqa: E402
 from office_price_format import format_px  # noqa: E402
@@ -85,12 +85,17 @@ def main() -> int:
         previous_link=btc_link,
         confirm_wait="Чекаю відкату в зону 84 556.4 і підтвердження на M15/M5. Входу ще немає.",
         lev_note="DEMO/OFFLINE. Не Live. Не /position.",
+        why_line="HTF-підстави зони не підтверджені даними (DATA_UNAVAILABLE). Це не завершений аналіз.",
+        invalidate_line="закриття M15 нижче 84 000.8.",
         size={"size_usdt": 1522, "depo": 1000, "risk_pct": 0.01},
     )
     manta_lo, manta_hi = 0.070471, 0.071447
     manta_sl, manta_tp1 = 0.072504, 0.068619
     manta_calc = _calc_entry_px(direction="SHORT", elo=manta_lo, ehi=manta_hi, entry=0.070959)
     manta_sz = plan_position_size(entry=manta_calc, sl=manta_sl, direction="SHORT", depo=1000)
+    manta_plan = plan_ok_slice(
+        direction="SHORT", zone_lo=manta_lo, zone_hi=manta_hi, tp1=manta_tp1, symbol="MANTAUSDT"
+    )
     manta_txt = format_desk_card(
         symbol="MANTAUSDT",
         direction="SHORT",
@@ -103,6 +108,8 @@ def main() -> int:
         entry_high=manta_hi,
         confirm_wait="Чекаю реакції M5 у зоні. Конкретну умову (SFP / BOS / закриття) Live не підтверджено — DATA_UNAVAILABLE. Входу ще немає.",
         lev_note="DEMO/OFFLINE. Desk SHORT. Не /position.",
+        why_line="Зона 0.070471–0.071447 — спостереження, не дозвіл продавати. Підстави зони з Live не підтверджені (DATA_UNAVAILABLE).",
+        invalidate_line="Умову інвалідації не визначено; торговий дозвіл заблокований.",
         grade="B",
         setup_type="DUMP",
         size=manta_sz if manta_sz.get("ok") else None,
@@ -135,12 +142,12 @@ def main() -> int:
             headline="BTCUSDT · LONG",
             wait_line="Чекаю відкату в зону. Входу ще немає.",
             prev_line="Попередній LONG скасовано до входу: ціна порушила рівень інвалідації сценарію.",
-            why_line="Новий сценарій — окрема зона, підтвердження на M15/M5.",
-            cancel_line="Що скасує: закриття за рівнем інвалідації.",
+            why_line="HTF-підстави зони не підтверджені даними (DATA_UNAVAILABLE). Це не завершений аналіз.",
+            cancel_line="закриття M15 нижче 84 000.8.",
             calc_entry=84556.4,
             demo=True,
         ),
-        out_path=str(ART / "lev_card_btc_h1_watching_v3b.png"),
+        out_path=str(ART / "lev_card_btc_h1_watching_v4.png"),
     )
     manta_png = render_signal_chart(
         symbol="MANTAUSDT",
@@ -158,16 +165,18 @@ def main() -> int:
             chart_tf="M15",
             headline="MANTAUSDT · SHORT",
             wait_line="Чекаю реакції M5 у зоні. Входу ще немає.",
-            why_line="Зона 0.070471–0.071447 — місце спостереження, не дозвіл продавати.",
-            cancel_line="Конкретну умову M5 Live не підтверджено (DATA_UNAVAILABLE).",
+            why_line="Зона — спостереження, не продаж. HTF/Live підстави DATA_UNAVAILABLE.",
+            cancel_line="Умову інвалідації не визначено; торговий дозвіл заблокований.",
             calc_entry=manta_calc,
+            plan_low=None if not manta_plan else manta_plan[0],
+            plan_high=None if not manta_plan else manta_plan[1],
             demo=True,
         ),
-        out_path=str(ART / "lev_card_manta_m15_watching_v3b.png"),
+        out_path=str(ART / "lev_card_manta_m15_watching_v4.png"),
     )
-    (ART / "lev_card_btc_telegram_v3b.txt").write_text(btc_txt, encoding="utf-8")
-    (ART / "lev_card_manta_telegram_v3b.txt").write_text(manta_txt, encoding="utf-8")
-    (ART / "lev_card_manta_zone_math_v3b.txt").write_text(math_txt, encoding="utf-8")
+    (ART / "lev_card_btc_telegram_v4.txt").write_text(btc_txt, encoding="utf-8")
+    (ART / "lev_card_manta_telegram_v4.txt").write_text(manta_txt, encoding="utf-8")
+    (ART / "lev_card_manta_zone_math_v4.txt").write_text(math_txt, encoding="utf-8")
     print("BTC_PNG", btc_png)
     print("MANTA_PNG", manta_png)
     print("BTC_TXT\n", btc_txt)

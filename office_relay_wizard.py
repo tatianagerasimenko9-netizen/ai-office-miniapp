@@ -2852,8 +2852,10 @@ async def run() -> None:
                 if "чекаю" in low:
                     wait = raw
                     continue
-                if low.startswith("що скасує") or low.startswith("конкретну умову m5"):
+                if low.startswith("що скасує") or "інвалідац" in low and "не визначено" in low:
                     cancel = raw
+                    continue
+                if low.startswith("конкретну умову m5"):
                     continue
                 if low.startswith("це зона") or "місце спостереження" in low or "окрема зона" in low:
                     why = raw
@@ -5768,10 +5770,12 @@ EV позитивне: {prob.get('ev_positive', '')}
         """T6: радар BTC. T8: боковик + всесвіт альтів/золота без копіювання BTC."""
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
         from office_confluence import hydrate_live_from_db
+        from office_alert_gate import hydrate_alert_gate_from_db
 
         try:
             n_h = hydrate_live_from_db(db_path)
-            print(f"[confluence] hydrated live keys={n_h}")
+            n_g = hydrate_alert_gate_from_db(db_path)
+            print(f"[confluence] hydrated live keys={n_h} alert_gate={n_g}")
         except Exception as exc_h:
             print(f"[confluence] hydrate failed: {type(exc_h).__name__}: {exc_h}")
 

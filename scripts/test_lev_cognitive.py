@@ -19,6 +19,10 @@ os.environ["OFFICE_DEPO_USDT"] = "1000"
 from office_alert_gate import (  # noqa: E402
     gate_outbound_telegram,
     get_explicit_open_position,
+    hydrate_alert_gate_from_db,
+    may_emit_telegram,
+    origin_key,
+    reset_alert_gate,
     validate_trade_geometry,
 )
 from office_bridge import (  # noqa: E402
@@ -323,6 +327,38 @@ def main() -> int:
         return _fail("valid secret rejected")
     os.environ.pop("TRADINGVIEW_WEBHOOK_SECRET", None)
     print("OK webhook auth")
+
+    reset_alert_gate()
+    fd2, db2 = tempfile.mkstemp(suffix=".db")
+    os.close(fd2)
+    init_office_db(db2)
+    signal_upsert(
+        db2,
+        signal_id="manta-short-confirmed",
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        entry_low=0.070471,
+        entry_high=0.071447,
+        sl=0.072504,
+        tp1=0.068619,
+        tp2=None,
+        rr=2.0,
+        status="CONFIRMED",
+        analysis_note="origin=desk tf=M15 confirm_sent=1",
+    )
+    n_g = hydrate_alert_gate_from_db(db2)
+    k = origin_key(
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        zone_lo=0.070471,
+        zone_hi=0.071447,
+        origin="desk",
+        timeframe="M15",
+    )
+    again = may_emit_telegram(key=k, intent="CONFIRM", ltf_confirmed=True)
+    if n_g < 1 or again.get("send"):
+        return _fail(f"hydrate confirm replay {n_g} {again} {k}")
+    print("OK alert_gate hydrate: повторний CONFIRM після рестарту заборонено")
 
     print("OK: test_lev_cognitive")
     return 0

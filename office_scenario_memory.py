@@ -272,7 +272,9 @@ def apply_confirmed_status(
         if not sid:
             continue
         note = stamp_scenario_note(
-            str(row.get("analysis_note") or "") + (f" confirmed_px={price}" if price is not None else ""),
+            str(row.get("analysis_note") or "")
+            + " confirm_sent=1"
+            + (f" confirmed_px={price}" if price is not None else ""),
             origin=origin,
             timeframe=timeframe,
         )

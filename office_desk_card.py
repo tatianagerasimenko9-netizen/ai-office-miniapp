@@ -7,7 +7,7 @@ TP1: альти ≥3%, BTC/ETH/XAU ≥1.2%.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from office_position_size import depo_usdt, plan_position_size
 
@@ -363,6 +363,37 @@ def _pct_txt(pct: float) -> str:
     return f"({sign}{abs(pct):.1f}%)"
 
 
+def plan_ok_slice(
+    *,
+    direction: str,
+    zone_lo: Any,
+    zone_hi: Any,
+    tp1: Any,
+    symbol: str,
+) -> Optional[Tuple[float, float]]:
+    """Частина зони, де TP1% ≥ поріг символу. Поріг не змінює — лише показує зріз."""
+    lo, hi, t = _f(zone_lo), _f(zone_hi), _f(tp1)
+    if lo is None or hi is None or t is None:
+        return None
+    if lo > hi:
+        lo, hi = hi, lo
+    need = min_tp1_pct(symbol) / 100.0
+    side = str(direction or "").upper()
+    if side == "SHORT":
+        if need >= 1:
+            return None
+        min_e = t / (1.0 - need)
+        vlo, vhi = max(lo, min_e), hi
+    elif side == "LONG":
+        max_e = t / (1.0 + need)
+        vlo, vhi = lo, min(hi, max_e)
+    else:
+        return None
+    if vlo > vhi + 1e-12:
+        return None
+    return vlo, vhi
+
+
 def _calc_entry_px(*, direction: str, elo: Optional[float], ehi: Optional[float], entry: Optional[float]) -> Optional[float]:
     """Для широкої зони — найгірший край. Інакше заявлений entry."""
     side = str(direction or "").upper()
@@ -414,6 +445,8 @@ def format_desk_card(
     now_line: str = "",
     lev_note: str = "",
     chart_tf: str = "",
+    why_line: str = "",
+    invalidate_line: str = "",
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
     from office_alert_gate import validate_trade_geometry
@@ -480,6 +513,13 @@ def format_desk_card(
     else:
         wait_default = "Чекаю відкату в зону. Входу ще немає." if side == "LONG" else "Чекаю реакції M5 у зоні. Входу ще немає."
         lines.append(wait_default)
+    yw = str(why_line or "").strip()
+    if yw:
+        lines.append(yw if yw.lower().startswith("чому") else f"Чому сценарій: {yw}")
+    inv = str(invalidate_line or "").strip()
+    if not inv:
+        inv = "Умову інвалідації не визначено; торговий дозвіл заблокований."
+    lines.append(inv if inv.lower().startswith("що скасує") else f"Що скасує: {inv}")
     now = str(now_line or "").strip()
     if now and "входу ще немає" not in "\n".join(lines).lower():
         lines.append(now)
@@ -500,6 +540,19 @@ def format_desk_card(
                 lines.append(
                     f"На протилежному краї зони {_px(other, symbol)} стоп% і обсяг інші — не одна цифра на всю зону."
                 )
+                slc = plan_ok_slice(direction=side, zone_lo=zlo, zone_hi=zhi, tp1=t1, symbol=symbol)
+                need = min_tp1_pct(symbol)
+                obs = format_level_span(zlo, zhi, symbol)
+                if slc is None:
+                    lines.append(
+                        f"Спостереження {obs}: жоден край не дає TP1 ≥ {need:g}%. Після M5 валідного плану немає."
+                    )
+                else:
+                    vlo, vhi = slc
+                    if abs(vlo - zlo) / ref > 1e-6 or abs(vhi - zhi) / ref > 1e-6:
+                        lines.append(
+                            f"Спостереження {obs}. Після M5 план лише з {format_level_span(vlo, vhi, symbol)} (TP1 ≥ {need:g}%)."
+                        )
     if calc is not None and s is not None:
         lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(calc, s), symbol))
     else:
