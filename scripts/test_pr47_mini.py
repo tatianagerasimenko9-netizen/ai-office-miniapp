@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from office_bridge import init_office_db, journal_open_trade, signal_upsert  # noqa: E402
 from office_market_state import market_state_upsert  # noqa: E402
 from office_mini_v1 import (  # noqa: E402
+    _db,
     html_v1,
     home_payload,
     positions_payload,
@@ -37,6 +38,26 @@ def main() -> int:
     if "readonly" not in html and "лише читання" not in html:
         return _fail("need read-only banner")
     print("OK html read-only")
+
+    old_url = os.environ.get("DATABASE_URL")
+    old_path = os.environ.get("OFFICE_DB_PATH")
+    os.environ["DATABASE_URL"] = "postgresql://u:p@host/ai_office_db"
+    os.environ["OFFICE_DB_PATH"] = "/tmp/should-not-win.db"
+    if not str(_db()).startswith("postgresql://"):
+        return _fail(f"v1 must use DATABASE_URL, got {_db()!r}")
+    os.environ.pop("DATABASE_URL", None)
+    os.environ["OFFICE_DB_PATH"] = "/tmp/local-office.db"
+    if _db() != "/tmp/local-office.db":
+        return _fail(f"sqlite fallback {_db()!r}")
+    if old_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = old_url
+    if old_path is None:
+        os.environ.pop("OFFICE_DB_PATH", None)
+    else:
+        os.environ["OFFICE_DB_PATH"] = old_path
+    print("OK v1 db = Worker DATABASE_URL")
 
     fd, db = tempfile.mkstemp(suffix=".db")
     os.close(fd)
