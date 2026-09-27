@@ -14,7 +14,7 @@ draft = {
 base = finalize_lev(draft)
 assert base["action"] == "SEND" and base["risk_review"] is None
 bad = finalize_lev(draft, risk_context={
-    "quantity": 1, "equity_usdt": 1000, "max_risk_pct": 1,
+    "quantity": 10, "equity_usdt": 1000, "max_risk_pct": 1,
     "data_quality": "UNAVAILABLE", "context_quality": "OK", "execution_quality": "OK",
 })
 assert bad["action"] == "WAIT" and not bad["send"]
