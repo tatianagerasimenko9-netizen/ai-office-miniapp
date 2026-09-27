@@ -50,6 +50,8 @@ def format_px(value: Any) -> str:
         return ""
     if x <= 0 or x != x:
         return ""
+    if x < 1:
+        x = round(x, 8)
     if x >= 100:
         s = f"{x:.2f}"
     elif x >= 1:

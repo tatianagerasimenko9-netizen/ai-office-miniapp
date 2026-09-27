@@ -136,7 +136,7 @@ def build_zone_reached_message(
         lines.append(f"Причина: {reason}")
         lines.append("Вхід не відкриваємо. Зону досягнуто — фіксую подію.")
     else:
-        lines.append("Це той відкат що чекали — входь!")
+        lines.append("У зоні — чекаю підтвердження. Це не дозвіл на вхід.")
     return "\n".join(lines)
 
 
@@ -191,15 +191,16 @@ def plan_watching_zone_hit(
         block_reason=block_reason,
         signal_ok=not entry_blocked,
         expire_after_alert=atr_block,
-        promote_active=not entry_blocked,
+        # Зона з SL/TP не робить ACTIVE і не дає Telegram-вхід.
+        promote_active=False,
         run_reanalyze=incomplete and not atr_block,
         message=message,
     )
 
 
 def zone_reached_to_telegram(plan: WatchingZonePlan) -> bool:
-    """PR41: SIGNAL=NO лише БД. Готовий вхід іде як SIGNAL_ENTRY, не текст ZONE_REACHED."""
-    return bool(plan.in_zone and plan.signal_ok)
+    """Ціна в зоні ніколи не йде в Telegram як дозвіл на вхід."""
+    return False
 
 
 def format_zone_signal_entry(
@@ -212,10 +213,13 @@ def format_zone_signal_entry(
     tp1: Any,
     tp2: Any = None,
 ) -> str:
-    """Картка входу після готової зони (не службовий ZONE_REACHED)."""
+    """Текст очікування. Не «можна входити». Ціни без float-сміття."""
+    from office_telegram_filter import format_level_span, format_px
+
+    _ = tp2
+    zone = format_level_span(entry_low, entry_high)
     return (
-        f"Тетяно, {symbol} підтвердив зону входу {entry_low}–{entry_high}.\n"
-        f"Ціна: {current_price}. SL: {sl} · TP1: {tp1}"
-        + (f" · TP2: {tp2}" if tp2 is not None else "")
-        + "\nМожна входити."
+        f"Тетяно, {symbol} досяг зони {zone}.\n"
+        f"Зараз {format_px(current_price)}. У зоні — чекаю підтвердження, не вхід."
+        f" SL {format_px(sl)} · TP1 {format_px(tp1)}"
     )

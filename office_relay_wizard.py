@@ -111,6 +111,13 @@ from office_zone_alert import (
     plan_watching_zone_hit,
     zone_reached_to_telegram,
 )
+from office_alert_gate import (
+    apply_setup_event,
+    mark_confirm_sent,
+    may_emit_telegram,
+    origin_key,
+    text_grants_entry,
+)
 from office_level_parse import apply_zone_sanity, parse_signal_levels_from_text
 from office_watching_dedup import (
     apply_skip_watching_gate,
@@ -138,6 +145,8 @@ from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
 from office_trader_plan import compose_trader_plan, format_trader_plan
 from office_telegram_filter import (
+    format_level_span,
+    format_px,
     level_book_to_alert,
     level_book_to_sweep_approach,
     level_book_to_watching,
@@ -2834,6 +2843,9 @@ async def run() -> None:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
             return None
+        if text_grants_entry(message):
+            print(f"[relay] blocked entry-phrase: {str(message or '')[:160]}")
+            return None
         ev = str(event_type or "").strip().upper()
         st = str(stream or "general").strip().lower() or "general"
         if ev in (EVENT_TRADE_UPDATE, EVENT_TRADE_CLOSED, EVENT_SIGNAL_ENTRY):
@@ -4898,6 +4910,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         except Exception:
                             created_dt = now_utc
 
+                        if status == "CONFIRMED":
+                            # Повторна зона після підтвердження — не новий вхід.
+                            continue
+
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
                             signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
                             continue
@@ -4943,6 +4959,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 symbol=symbol,
                             )
                             if plan.in_zone:
+                                zkey = origin_key(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    zone_lo=e_low,
+                                    zone_hi=e_high if e_high is not None else e_low,
+                                    origin="t0",
+                                )
+                                apply_setup_event(zkey, "ZONE_IN", in_zone=True)
+                                zg = may_emit_telegram(
+                                    key=zkey,
+                                    intent="ZONE_IN",
+                                    in_zone=True,
+                                )
                                 if _allow_notify(signal_id, "ZONE_REACHED"):
                                     log_event(
                                         db_path,
@@ -4951,12 +4980,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             "symbol": symbol,
                                             "price": current_price,
                                             "signal": "YES" if plan.signal_ok else "NO",
-                                            "reason": plan.block_reason,
+                                            "reason": plan.block_reason or zg.get("reason"),
                                         },
                                         signal_id,
                                     )
-                                    if zone_reached_to_telegram(plan):
-                                        card = format_zone_signal_entry(
+                                    # Навіть SIGNAL=YES: зона ≠ «можна входити». Telegram тихий.
+                                    if zone_reached_to_telegram(plan) and not text_grants_entry(
+                                        format_zone_signal_entry(
                                             symbol=symbol,
                                             current_price=current_price,
                                             entry_low=e_low,
@@ -4965,28 +4995,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             tp1=tp1_v,
                                             tp2=tp2_v,
                                         )
-                                        await send_proactive(
-                                            EVENT_SIGNAL_ENTRY,
-                                            fmt_agent_line("lev", card),
-                                            stream="general",
-                                        )
-                                        try:
-                                            journal_open_office_signal(
-                                                db_path,
-                                                signal_id=signal_id,
-                                                symbol=symbol,
-                                                direction=str(row.get("direction") or "LONG"),
-                                                entry_price=float(current_price),
-                                                stop_loss=sl_v,
-                                                take_profit=tp1_v,
-                                                tp2=tp2_v,
-                                                timeframe="M15",
-                                                setup_note="ZONE_REACHED",
-                                            )
-                                        except Exception as exc_j:
-                                            print(f"[steer] journal zone signal failed: {exc_j}")
-                                    else:
-                                        print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
+                                    ):
+                                        pass
+                                    print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
                                 post = after_zone_reached_action(
                                     analysis_note=row.get("analysis_note"),
                                     plan=plan,
@@ -5011,7 +5022,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     )
                                     continue
                                 if plan.promote_active:
-                                    signal_update(db_path, signal_id=signal_id, status="ACTIVE")
+                                    # Не піднімаємо ACTIVE з факту «ціна в зоні».
+                                    print(f"[t0] skip promote_active {symbol} (zone ≠ entry)")
                                     continue
                                 if plan.run_reanalyze:
                                     print(
@@ -5070,16 +5082,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if missing_levels_active:
                                 print(f"[t0] ACTIVE incomplete SL/TP {symbol}: silent, no desk LLM")
                                 continue
-                            signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
-                            if _allow_notify(symbol, "HIT_ENTRY"):
-                                _kyiv_hm = _now_kyiv_hm()
-                                await send_proactive(
-                                    EVENT_SIGNAL_ENTRY,
-                                    f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
-                                    f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}\n"
-                                    f"🕐 Зараз за Києвом: {_kyiv_hm}",
-                                    stream="general",
-                                )
+                            hkey = origin_key(
+                                symbol=symbol,
+                                direction=direction,
+                                zone_lo=e_low,
+                                zone_hi=e_high,
+                                origin="t0",
+                            )
+                            apply_setup_event(hkey, "HIT_ENTRY", in_zone=True)
+                            hg = may_emit_telegram(key=hkey, intent="HIT_ENTRY_PRICE", in_zone=True)
+                            print(
+                                f"[t0] HIT_ENTRY blocked {symbol}: {hg.get('reason')} "
+                                f"zone={format_level_span(e_low, e_high)} px={format_px(current_price)}"
+                            )
                             continue
 
                         if status in ("ACTIVE", "HIT_ENTRY") and tp1_v is not None:
@@ -6157,6 +6172,22 @@ EV позитивне: {prob.get('ev_positive', '')}
                     fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf)
                     act = str(fu.get("action") or "")
                     if act == "confirm":
+                        okey = origin_key(
+                            symbol=sym_f,
+                            direction=str(st.get("direction") or ""),
+                            zone_lo=st.get("zone_lo"),
+                            zone_hi=st.get("zone_hi"),
+                            origin="desk",
+                        )
+                        cg = may_emit_telegram(
+                            key=okey,
+                            intent="CONFIRM",
+                            ltf_confirmed=True,
+                            chase=bool(fu.get("need_retest")),
+                        )
+                        if not cg.get("send"):
+                            print(f"[confluence] confirm hold {key}: {cg.get('reason')}")
+                            continue
                         await send_proactive(
                             EVENT_TRADE_UPDATE,
                             fmt_agent_line(
@@ -6168,7 +6199,28 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     detail=str(fu.get("detail") or fu.get("reason") or ""),
                                 ),
                             ),
+                            symbol=sym_f,
+                            kind="CONFIRM",
                         )
+                        mark_confirm_sent(okey)
+                        apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
+                        try:
+                            for row_c in signal_get_active(db_path) or []:
+                                if str(row_c.get("symbol") or "").upper() != str(sym_f).upper():
+                                    continue
+                                sid_c = str(row_c.get("signal_id") or "")
+                                if sid_c:
+                                    signal_update(
+                                        db_path,
+                                        signal_id=sid_c,
+                                        status="CONFIRMED",
+                                        analysis_note=(
+                                            str(row_c.get("analysis_note") or "")
+                                            + f" confirmed_px={fu.get('price')}"
+                                        )[:2000],
+                                    )
+                        except Exception as exc_cu:
+                            print(f"[confluence] status CONFIRMED {sym_f}: {exc_cu}")
                         live_drop(key)
                         print(f"[confluence] confirmed {key}")
                     elif act == "cancel":

@@ -27,13 +27,17 @@ def _db() -> str:
 
 def _status_ua(st: Any) -> str:
     u = str(st or "").upper()
-    if u in ("WATCHING", "WAIT"):
+    if u in ("WATCHING", "WAIT", "ZONE_REACHED", "CONFIRMATION_PENDING"):
         return "чекаємо"
+    if u in ("CONFIRMED",):
+        return "підтверджено"
+    if u in ("HIT_ENTRY",):
+        return "у зоні"
     if u in ("HIT_TP1", "TP1"):
         return "TP1"
-    if u in ("HIT_TP2", "TP2", "CLOSED", "EXPIRED", "STOPPED", "HIT_SL"):
+    if u in ("HIT_TP2", "TP2", "CLOSED", "EXPIRED", "STOPPED", "HIT_SL", "INVALIDATED"):
         return "закрито"
-    if u in ("ACTIVE", "HIT_ENTRY"):
+    if u in ("ACTIVE",):
         return "активний"
     return u.lower() or "чекаємо"
 
@@ -77,12 +81,14 @@ def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
         "rr": row.get("rr"),
         "signal_id": row.get("signal_id"),
         "note": str(row.get("analysis_note") or row.get("note") or "")[:240],
+        "in_position": False,
+        "confirmed_is_position": False,
     }
 
 
 def live_unique_cards(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Один сетап на монету+напрям. Без WATCHING, без HIT_TP2, без дірок у рівнях."""
-    ok_st = {"ACTIVE", "HIT_ENTRY", "HIT_TP1"}
+    ok_st = {"ACTIVE", "HIT_ENTRY", "HIT_TP1", "CONFIRMED"}
     seen: set[str] = set()
     out: List[Dict[str, Any]] = []
     for r in rows or []:

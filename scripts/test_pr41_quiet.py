@@ -105,8 +105,8 @@ def main() -> int:
         tp2=104.0,
         symbol="SOLUSDT",
     )
-    if not zone_reached_to_telegram(ready):
-        return _fail("ready must be signal entry")
+    if zone_reached_to_telegram(ready) or ready.promote_active:
+        return _fail("ready zone must not telegram entry")
     card = format_zone_signal_entry(
         symbol="SOLUSDT",
         current_price=100.0,
@@ -118,6 +118,10 @@ def main() -> int:
     )
     if "ZONE_REACHED" in card or "SIGNAL=NO" in card:
         return _fail("card must not be zone_reached text")
+    if "можна входити" in card.lower() or "входь" in card.lower():
+        return _fail(f"card grants entry {card}")
+    if "0.07144666000000001" in card:
+        return _fail("float junk")
 
     z = allow_proactive_telegram(kind="zone_reached", symbol="KORUUSDT")
     if z.get("send"):

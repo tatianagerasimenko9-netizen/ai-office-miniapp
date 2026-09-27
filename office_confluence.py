@@ -422,12 +422,47 @@ def detect_ltf_confirms(
             if side == "SHORT" and float(last["high"]) > rh and float(last["close"]) < rh:
                 hits.append("upthrust")
 
-    # Унікальний порядок.
+    # Унікальний порядок. Triple з тих самих свінгів замінює double.
     seen = []
     for h in hits:
         if h not in seen:
             seen.append(h)
+    if "triple_top" in seen and "double_top" in seen:
+        seen = [h for h in seen if h != "double_top"]
+    if "triple_bottom" in seen and "double_bottom" in seen:
+        seen = [h for h in seen if h != "double_bottom"]
     return seen
+
+
+def _retest_close_after_break(
+    rows: List[Dict[str, Any]],
+    *,
+    side: str,
+    zone_lo: float,
+    zone_hi: float,
+) -> Optional[float]:
+    """Після пробою потрібна пізніша свічка із закриттям знову в зоні. Не вигадуємо ціну."""
+    if len(rows) < 2:
+        return None
+    lo, hi = float(zone_lo), float(zone_hi)
+    broke_i = None
+    for i, r in enumerate(rows):
+        c = _f(r.get("close"))
+        if c is None:
+            continue
+        if side == "SHORT" and c <= lo:
+            broke_i = i
+        if side == "LONG" and c >= hi:
+            broke_i = i
+    if broke_i is None or broke_i >= len(rows) - 1:
+        return None
+    for r in rows[broke_i + 1 :]:
+        c = _f(r.get("close"))
+        if c is None:
+            continue
+        if lo <= c <= hi:
+            return float(c)
+    return None
 
 
 def range_break_is_event(
@@ -674,33 +709,48 @@ def follow_setup(
     )
     rows = _bars(candles_ltf)
     cl = float(rows[-1]["close"]) if rows else px
-    entered = False
+    broke = False
+    inside = False
     if cl is not None and lo is not None and hi is not None:
-        if side == "SHORT" and cl <= lo:
-            entered = True
-        if side == "LONG" and cl >= hi:
-            entered = True
-        if lo <= cl <= hi and confirms:
-            entered = True
-    if entered and confirms:
+        broke = (side == "SHORT" and cl <= lo) or (side == "LONG" and cl >= hi)
+        inside = lo <= cl <= hi
+    if broke:
+        retest_px = _retest_close_after_break(rows, side=side, zone_lo=lo, zone_hi=hi)
+        if retest_px is None:
+            return {
+                "action": "hold",
+                "reason": "пробій зони — чекаю ретест окремими свічками",
+                "need_retest": True,
+                "price": cl,
+            }
+        names = " + ".join(CONFIRM_UA.get(x, x) for x in confirms[:3]) if confirms else "ретест"
+        return {
+            "action": "confirm",
+            "reason": names,
+            "price": retest_px,
+            "detail": f"{names} + ретест у зоні після пробою",
+            "need_retest": False,
+        }
+    if inside and confirms:
+        from office_telegram_filter import format_level_span
+
         names = " + ".join(CONFIRM_UA.get(x, x) for x in confirms[:3])
-        below = "нижче" if side == "SHORT" else "вище"
-        edge = lo if side == "SHORT" else hi
         return {
             "action": "confirm",
             "reason": names,
             "price": cl,
-            "detail": f"{names} + закриття {below} {edge}",
+            "detail": f"{names} + закриття в зоні {format_level_span(lo, hi)}",
+            "need_retest": False,
         }
     return {"action": "hold", "reason": "чекаємо"}
 
 
 def format_confirm_card(*, symbol: str, direction: str, price: Any, detail: str) -> str:
-    from office_desk_card import _px
+    from office_telegram_filter import format_px
 
     side = str(direction or "").upper()
     return (
-        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {_px(price)}\n"
+        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {format_px(price)}\n"
         f"Підтвердження: {detail}"
     )
 
