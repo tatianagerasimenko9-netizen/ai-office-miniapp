@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from office_atr_policy import classify_atr_day_used
+from office_risk_officer import review_plan
 from office_confluence import TAG_UA, evaluate_confluence
 from office_desk_card import _f, widen_sl_to_atr_h1
 from office_ict_hunter import evaluate_ict_hunter
@@ -505,6 +506,7 @@ def finalize_lev(
     stances: Optional[Dict[str, Any]] = None,
     *,
     hunter_only_enter: bool = False,
+    risk_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """ENTER лише якщо є власний сетап Лева. Індикатор не відкриває угоду."""
     st = stances or {}
@@ -564,6 +566,27 @@ def finalize_lev(
                 action = ACTION_SEND
                 reason = "власний сетап Лева придатний; індикатори аргумент"
 
+    # Opt-in integration: the independent officer may veto, never promote.
+    # Existing callers retain their historical analyst-only behavior until
+    # portfolio exposure, verified feed health and execution quality are wired.
+    risk_review = None
+    if risk_context is not None:
+        rc = dict(risk_context)
+        risk_review = review_plan(
+            {"direction": draft.get("direction"), "entry": entry, "sl": sl,
+             "tp1": tp1, "quantity": rc.get("quantity")},
+            equity_usdt=rc.get("equity_usdt"),
+            max_risk_pct=rc.get("max_risk_pct"),
+            existing_risk_usdt=rc.get("existing_risk_usdt", 0),
+            max_portfolio_risk_pct=rc.get("max_portfolio_risk_pct", 2),
+            data_quality=rc.get("data_quality", "UNAVAILABLE"),
+            context_quality=rc.get("context_quality", "UNAVAILABLE"),
+            execution_quality=rc.get("execution_quality", "UNAVAILABLE"),
+        )
+        if action == ACTION_SEND and not risk_review["approved_for_review"]:
+            action = ACTION_WAIT
+            reason = "незалежний ризик-контроль: " + ", ".join(risk_review["reasons"])
+            recheck = "оновити дані, експозицію та план; не відкривати ордер"
     note = lev_conclusion_text(draft, st, action)
     return {
         "action": action,
@@ -586,6 +609,7 @@ def finalize_lev(
             else ("ACTIVE" if action == ACTION_SEND else "")
         ),
         "creates_enter_from_indicator": False,
+        "risk_review": risk_review,
     }
 
 
@@ -609,6 +633,7 @@ def lev_cycle(
     market_context: Optional[Dict[str, Any]] = None,
     pine_alerts: Any = None,
     stances: Optional[Dict[str, Any]] = None,
+    risk_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Повний цикл: сценарій Лева, потім індикатори, потім рішення."""
     draft = draft_lev_scenario(
@@ -639,4 +664,4 @@ def lev_cycle(
             candles_d1=candles_d1,
             pine_alerts=pine_alerts,
         )
-    return finalize_lev(draft, st)
+    return finalize_lev(draft, st, risk_context=risk_context)
