@@ -560,6 +560,7 @@ def get_data(
         "now_utc": datetime.now(timezone.utc).isoformat(),
         "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f, "chart": chart_symbol.strip().upper()},
         "db_identity": office_db_identity(_db_target_for_identity()),
+        "git_sha": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "")[:40],
         "kpi": {
             "total": total,
             "wins": wins,
@@ -1298,7 +1299,8 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v1/chart.png":
                 qs = parse_qs(u.query)
                 sym = (qs.get("symbol") or ["BTCUSDT"])[0]
-                drawn = render_chart_png(sym)
+                sid = (qs.get("signal_id") or [""])[0]
+                drawn = render_chart_png(sym, sid)
                 if drawn.get("ok") and drawn.get("path") and os.path.isfile(drawn["path"]):
                     with open(drawn["path"], "rb") as fh:
                         raw = fh.read()

@@ -644,6 +644,52 @@ def note_db_only(key: str) -> bool:
     return True
 
 
+def hydrate_live_from_db(db_path: str) -> int:
+    """Після рестарту Worker: живі ключі з ACTIVE, не з desk-range."""
+    import re
+
+    from office_bridge import signal_get_active
+    from office_desk_card import is_legacy_desk_range
+
+    n = 0
+    try:
+        rows = signal_get_active(db_path) or []
+    except Exception:
+        return 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if is_legacy_desk_range(r):
+            continue
+        st = str(r.get("status") or "").upper()
+        if st not in ("ACTIVE", "HIT_ENTRY", "WATCHING"):
+            continue
+        note = str(r.get("analysis_note") or "")
+        m = re.search(r"ckey=([^\s]+)", note)
+        key = m.group(1) if m else setup_key(
+            symbol=str(r.get("symbol") or ""),
+            direction=str(r.get("direction") or ""),
+            zone_lo=r.get("entry_low"),
+            zone_hi=r.get("entry_high"),
+        )
+        if not key or key in _LIVE:
+            continue
+        mark_live(
+            key,
+            {
+                "symbol": r.get("symbol"),
+                "direction": r.get("direction"),
+                "timeframe": "H1",
+                "sl": r.get("sl"),
+                "zone_lo": r.get("entry_low"),
+                "zone_hi": r.get("entry_high"),
+                "grade": "",
+            },
+        )
+        n += 1
+    return n
+
+
 def follow_setup(
     *,
     setup: Dict[str, Any],

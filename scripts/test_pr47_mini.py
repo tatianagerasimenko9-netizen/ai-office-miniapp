@@ -169,20 +169,50 @@ def main() -> int:
             status="WATCHING",
             analysis_note="NEAR",
         )
+        hm_hide = home_payload()
+        btc_hide = [x for x in (hm_hide.get("active_signals") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
+        if btc_hide:
+            return _fail(f"legacy desk-range must be hidden, got {btc_hide}")
+        sc_hide = scanner_payload()
+        sc_btc = [x for x in (sc_hide.get("candidates") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
+        if sc_btc:
+            return _fail(f"scanner must not use desk-range as score, got {sc_btc}")
+        signal_upsert(
+            db,
+            signal_id="desk-conf-BTCUSDT-1",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry_low=84100.0,
+            entry_high=84300.0,
+            sl=83676.0,
+            tp1=86200.0,
+            tp2=None,
+            rr=2.1,
+            status="ACTIVE",
+            analysis_note="ckey=BTCUSDT|LONG|84100|84300 confluence",
+        )
         hm2 = home_payload()
+        if hm2.get("opens_position") is not False:
+            return _fail("home must not open position")
+        if "не /position" not in str(hm2.get("card_note") or ""):
+            return _fail(f"card_note {hm2.get('card_note')}")
         btc = [x for x in (hm2.get("active_signals") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
         if len(btc) != 1:
-            return _fail(f"BTC dupes must collapse to 1, got {btc}")
+            return _fail(f"BTC confluence must be 1, got {btc}")
+        if "desk-range" in str(btc[0].get("signal_id") or ""):
+            return _fail(f"legacy id leaked {btc[0]}")
         lv = (hm2.get("levels") or {}).get("levels") or {}
         if lv.get("sl") is None or lv.get("tp1") in (None, 1, 1.0):
             return _fail(f"btc key levels {hm2.get('levels')}")
         if abs(float(lv.get("entry_low") or 0) - 84860.8) < 1e-6:
             return _fail("watching price must not be key levels")
+        if abs(float(lv.get("entry_low") or 0) - 84870.5) < 1e-6:
+            return _fail("desk-range chase must not be key levels")
         sigs = signals_payload()
         btc_s = [x for x in (sigs.get("cards") or []) if str(x.get("symbol")).upper() == "BTCUSDT"]
         if len(btc_s) != 1:
             return _fail(f"signals tab dupes {btc_s}")
-        print("OK BTC 4→1, junk hidden")
+        print("OK desk-range hidden, confluence BTC=1, junk hidden")
         return 0
     finally:
         try:
