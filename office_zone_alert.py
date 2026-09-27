@@ -217,9 +217,9 @@ def format_zone_signal_entry(
     from office_telegram_filter import format_level_span, format_px
 
     _ = tp2
-    zone = format_level_span(entry_low, entry_high)
+    zone = format_level_span(entry_low, entry_high, symbol)
     return (
         f"Тетяно, {symbol} досяг зони {zone}.\n"
-        f"Зараз {format_px(current_price)}. У зоні — чекаю підтвердження, не вхід."
-        f" SL {format_px(sl)} · TP1 {format_px(tp1)}"
+        f"Зараз {format_px(current_price, symbol)}. У зоні — чекаю підтвердження, не вхід."
+        f" SL {format_px(sl, symbol)} · TP1 {format_px(tp1, symbol)}"
     )

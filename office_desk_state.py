@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 
 from office_atr_policy import ATR_POLICY_DOC, GERCHIK_TREND_ENTRY_BLOCK_PCT, T0_ENTRY_BLOCK_PCT
 from office_bridge import is_confirmed_position_row, signal_get_active
+from office_price_format import format_price_fields
 from office_session_radar import KIND_LIVE, KIND_PAPER, KIND_SIGNAL, KIND_WATCHING
 
 
@@ -41,15 +42,18 @@ def build_desk_state(
             rows = []
     for r in rows or []:
         watching.append(
-            {
-                "kind": KIND_WATCHING,
-                "signal_id": r.get("signal_id"),
-                "symbol": r.get("symbol"),
-                "direction": r.get("direction"),
-                "entry_low": r.get("entry_low"),
-                "entry_high": r.get("entry_high"),
-                "note": str(r.get("analysis_note") or "")[:240],
-            }
+            format_price_fields(
+                {
+                    "kind": KIND_WATCHING,
+                    "signal_id": r.get("signal_id"),
+                    "symbol": r.get("symbol"),
+                    "direction": r.get("direction"),
+                    "entry_low": r.get("entry_low"),
+                    "entry_high": r.get("entry_high"),
+                    "note": str(r.get("analysis_note") or "")[:240],
+                },
+                str(r.get("symbol") or ""),
+            )
         )
 
     live: List[Dict[str, Any]] = []

@@ -53,7 +53,7 @@ def _f(v: Any) -> Optional[float]:
 
 
 def _complete_levels(row: Dict[str, Any]) -> bool:
-    """Картка без входу/стопа/TP або TP=1 при ціні монети — сміття, не показуємо."""
+    """Картка без входу/стопа/TP, TP=1 при ціні монети або зламана геометрія — не показуємо."""
     e = _f(row.get("entry_low") if row.get("entry_low") is not None else row.get("entry"))
     if e is None:
         e = _f(row.get("entry_high"))
@@ -65,11 +65,25 @@ def _complete_levels(row: Dict[str, Any]) -> bool:
         return False
     if t == 1.0 and e > 2:
         return False
-    return True
+    from office_alert_gate import validate_trade_geometry
+
+    geo = validate_trade_geometry(
+        direction=str(row.get("direction") or ""),
+        sl=s,
+        tp1=t,
+        entry=e,
+        entry_low=row.get("entry_low"),
+        entry_high=row.get("entry_high"),
+        tp2=row.get("tp2"),
+    )
+    return bool(geo.get("ok"))
 
 
 def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    from office_price_format import format_price_fields
+
+    sym = str(row.get("symbol") or "")
+    raw = {
         "symbol": row.get("symbol"),
         "direction": row.get("direction"),
         "status": _status_ua(row.get("status")),
@@ -84,6 +98,13 @@ def _card_from_signal(row: Dict[str, Any]) -> Dict[str, Any]:
         "in_position": False,
         "confirmed_is_position": False,
     }
+    out = format_price_fields(raw, sym)
+    if raw.get("rr") is not None:
+        try:
+            out["rr"] = f"{float(raw['rr']):.2f}"
+        except (TypeError, ValueError):
+            out["rr"] = raw.get("rr")
+    return out
 
 
 def live_unique_cards(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -117,14 +138,16 @@ def key_levels(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     row = next((c for c in cards if str(c.get("symbol") or "").upper() == symbol.upper()), None)
     if not row:
         return out
+    from office_price_format import format_px
+
     lv = {
-        "entry_low": _f(row.get("entry_low")),
-        "entry_high": _f(row.get("entry_high")),
-        "sl": _f(row.get("sl")),
-        "tp1": _f(row.get("tp1")),
-        "tp2": _f(row.get("tp2")),
+        "entry_low": format_px(row.get("entry_low"), symbol) or row.get("entry_low"),
+        "entry_high": format_px(row.get("entry_high"), symbol) or row.get("entry_high"),
+        "sl": format_px(row.get("sl"), symbol) or row.get("sl"),
+        "tp1": format_px(row.get("tp1"), symbol) or row.get("tp1"),
+        "tp2": format_px(row.get("tp2"), symbol) or row.get("tp2"),
     }
-    if lv["entry_low"] is None or lv["sl"] is None or lv["tp1"] is None:
+    if not lv["entry_low"] or not lv["sl"] or not lv["tp1"]:
         return out
     out["data_status"] = "DATA_OK"
     out["levels"] = lv
@@ -149,11 +172,13 @@ def home_payload() -> Dict[str, Any]:
     except Exception:
         active = []
     lv = key_levels("BTCUSDT")
+    from office_price_format import format_px
+
     return {
         "ok": True,
         "readonly": True,
         "btc": {
-            "price": btc.get("price"),
+            "price": format_px(btc.get("price"), "BTCUSDT") or btc.get("price"),
             "change_24h": btc.get("change_24h"),
             "regime": regime,
             "data_status": "DATA_OK" if btc.get("price") is not None else DATA_UNAVAILABLE,
@@ -304,18 +329,23 @@ def positions_payload() -> Dict[str, Any]:
     for r in rows:
         if not is_confirmed_position_row(r[8], r[9], r[0]):
             continue
+        from office_price_format import format_price_fields
+
         live.append(
-            {
-                "trade_id": r[0],
-                "symbol": r[1],
-                "direction": r[2],
-                "status": r[3],
-                "entry": r[4],
-                "sl": r[5],
-                "tp": r[6],
-                "pnl_pct": r[7],
-                "source": "/position",
-            }
+            format_price_fields(
+                {
+                    "trade_id": r[0],
+                    "symbol": r[1],
+                    "direction": r[2],
+                    "status": r[3],
+                    "entry": r[4],
+                    "sl": r[5],
+                    "tp": r[6],
+                    "pnl_pct": r[7],
+                    "source": "/position",
+                },
+                str(r[1] or ""),
+            )
         )
     return {
         "ok": True,

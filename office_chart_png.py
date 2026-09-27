@@ -233,8 +233,11 @@ def render_signal_chart(
                     arrowprops=dict(arrowstyle="->", color="#ffd54f") if en_mid is None else None,
                 )
                 if en_mid is not None:
+                    lo_z = min(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
+                    hi_z = max(en_lo, en_hi) if en_lo is not None and en_hi is not None else en_mid
+                    outside = last_px > hi_z or last_px < lo_z
                     ax.annotate(
-                        "зона",
+                        "очікуваний відкат до зони" if outside else "зона",
                         xy=(x_end, en_mid),
                         xytext=(max(0, x_end - 6), last_px),
                         color="#00e5a0",

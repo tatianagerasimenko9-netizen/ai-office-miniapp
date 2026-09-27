@@ -44,8 +44,12 @@ def plan_position_size(
     score: Any = None,
     min_score: Any = 8,
     depo: Any = None,
+    direction: str = "",
 ) -> Dict[str, Any]:
-    """Кількість USDT = ризик$ ÷ (відстань до стопа в частках ціни)."""
+    """Кількість USDT = ризик$ ÷ (відстань до стопа в частках ціни).
+
+    Стоп з неправильного боку не маскуємо через abs().
+    """
     e, s = _f(entry), _f(sl)
     empty = {
         "ok": False,
@@ -56,7 +60,19 @@ def plan_position_size(
     }
     if e is None or s is None or e == s:
         return empty
-    stop_frac = abs(e - s) / e
+    side = str(direction or "").upper()
+    if side == "LONG" and s >= e:
+        return {**empty, "reason": "SL для LONG не нижче entry"}
+    if side == "SHORT" and s <= e:
+        return {**empty, "reason": "SL для SHORT не вище entry"}
+    if side == "LONG":
+        stop_frac = (e - s) / e
+    elif side == "SHORT":
+        stop_frac = (s - e) / e
+    else:
+        stop_frac = abs(e - s) / e
+    if stop_frac <= 0:
+        return {**empty, "reason": "дистанція ризику не додатна"}
     stop_pct = stop_frac * 100.0
     rp = risk_pct_for_score(score, min_score)
     dep = _f(depo) if depo is not None else depo_usdt()

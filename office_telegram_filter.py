@@ -42,34 +42,17 @@ def resolve_trade_style(mode: Any = "", timeframe: Any = "") -> dict:
     return dict(TRADE_STYLE["intraday"])
 
 
-def format_px(value: Any) -> str:
-    """Читабельна ціна без float-сміття і без 'None'."""
-    try:
-        x = float(value)
-    except (TypeError, ValueError):
-        return ""
-    if x <= 0 or x != x:
-        return ""
-    if x < 1:
-        x = round(x, 8)
-    if x >= 100:
-        s = f"{x:.2f}"
-    elif x >= 1:
-        s = f"{x:.4f}"
-    else:
-        s = f"{x:.6f}"
-    if "." in s:
-        s = s.rstrip("0").rstrip(".")
-    return s
+def format_px(value: Any, symbol: str = "", *, tick: Any = None) -> str:
+    """Читабельна ціна: tickSize + Decimal, без float-хвостів."""
+    from office_price_format import format_px as _fmt
+
+    return _fmt(value, symbol, tick=tick)
 
 
-def format_level_span(low: Any, high: Any) -> str:
-    a, b = format_px(low), format_px(high)
-    if not a and not b:
-        return ""
-    if not b or a == b:
-        return a
-    return f"{a}–{b}"
+def format_level_span(low: Any, high: Any, symbol: str = "", *, tick: Any = None) -> str:
+    from office_price_format import format_level_span as _span
+
+    return _span(low, high, symbol, tick=tick)
 
 
 def parse_quote_dt(ts: Any) -> Optional[datetime]:

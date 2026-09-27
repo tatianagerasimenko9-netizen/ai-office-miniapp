@@ -714,6 +714,25 @@ def follow_setup(
     if cl is not None and lo is not None and hi is not None:
         broke = (side == "SHORT" and cl <= lo) or (side == "LONG" and cl >= hi)
         inside = lo <= cl <= hi
+    if sl is not None and lo is not None and hi is not None:
+        from office_alert_gate import validate_trade_geometry
+
+        geo = validate_trade_geometry(
+            direction=side,
+            sl=sl,
+            tp1=setup.get("tp1"),
+            entry_low=lo,
+            entry_high=hi,
+            tp2=setup.get("tp2"),
+            require_tp=setup.get("tp1") is not None,
+        )
+        if not geo.get("ok"):
+            return {
+                "action": "hold",
+                "reason": str(geo.get("reason") or "геометрія"),
+                "geometry_invalid": True,
+                "price": cl,
+            }
     if broke:
         retest_px = _retest_close_after_break(rows, side=side, zone_lo=lo, zone_hi=hi)
         if retest_px is None:
@@ -750,7 +769,7 @@ def format_confirm_card(*, symbol: str, direction: str, price: Any, detail: str)
 
     side = str(direction or "").upper()
     return (
-        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {format_px(price)}\n"
+        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {format_px(price, symbol)}\n"
         f"Підтвердження: {detail}"
     )
 

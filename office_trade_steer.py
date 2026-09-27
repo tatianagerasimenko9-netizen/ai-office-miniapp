@@ -1265,17 +1265,13 @@ def next_manage_event(
             if pump_add_retest(direction=side, entry=book.entry, candle=last_c, candles=rows):
                 if book.last_event != "ADD":
                     book.last_event = "ADD"
-                    return {
-                        "event": "TRADE_UPDATE",
-                        "kind": "ADD",
-                        "message": format_trade_update_card(
-                            symbol=book.symbol,
-                            direction=side,
-                            headline="добір",
-                            lines=["Ретест входу на об'ємі — добір дозволений"],
-                        ),
-                        "state": book.state,
-                    }
+                    from office_alert_gate import may_emit_telegram, scale_in_review
+
+                    pos = bool(getattr(book, "confirmed_position", False) or book.extras.get("confirmed_position"))
+                    ag = may_emit_telegram(intent="ADD_ON", in_position=pos)
+                    plan = scale_in_review(in_position=pos, geometry_ok=True, setup_valid=True)
+                    print(f"[steer] ADD blocked {book.symbol}: {ag.get('reason')} / {plan.get('reason')}")
+                    return None
         except Exception:
             pass
     return None

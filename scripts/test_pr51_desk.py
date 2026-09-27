@@ -132,7 +132,7 @@ def main() -> int:
         timeframe="H1",
         entry=84042.0,
         sl=84210.0,
-        tp1=86000.0,
+        tp1=82500.0,
         atr_h1=900.0,
         score=10,
         min_score=10,
@@ -150,7 +150,7 @@ def main() -> int:
         direction="SHORT",
         entry=84042.0,
         sl=84942.0,
-        tp1=86000.0,
+        tp1=82000.0,
         atr_h1=900.0,
         score=11,
         min_score=10,
@@ -173,7 +173,7 @@ def main() -> int:
         timeframe="H1",
         entry=84042.0,
         sl=84942.0,
-        tp1=86000.0,
+        tp1=82000.0,
         atr_h1=900.0,
         score=10,
         min_score=10,
@@ -263,13 +263,13 @@ def main() -> int:
     if "🎯 Вхід · " not in ake or "сила B" not in ake:
         return _fail(ake)
 
-    # Live: BTC стоп 0.20% → розмір > 3× депо
+    # Live: BTC стоп 0.20% → розмір > 3× депо (TP нижче entry, інакше геометрія ріже раніше)
     btc_slim = desk_entry_gate(
         symbol="BTCUSDT",
         direction="SHORT",
         entry=84042.0,
         sl=84210.0,  # 0.20%
-        tp1=86000.0,
+        tp1=83000.0,
         atr_h1=168.0,
         score=10,
         min_score=10,

@@ -113,6 +113,7 @@ from office_zone_alert import (
 )
 from office_alert_gate import (
     apply_setup_event,
+    has_explicit_position,
     mark_confirm_sent,
     may_emit_telegram,
     origin_key,
@@ -4871,10 +4872,11 @@ EV позитивне: {prob.get('ev_positive', '')}
         WATCHING_COOLDOWN_SEC = 4 * 3600
 
         def _lev_msg(sym: str, happened: str, action_now: str, sl_after: str) -> str:
+            sls = format_px(sl_after, sym) or str(sl_after or "")
             return (
                 f"Тетяно, {sym}: {happened}\n"
                 f"Що робити зараз: {action_now}\n"
-                f"SL після дії: {sl_after}"
+                f"SL після дії: {sls}"
             )
         _win_streak_celebrated_at = 0
         while True:
@@ -5127,14 +5129,24 @@ EV позитивне: {prob.get('ev_positive', '')}
                             and sl_v is not None
                             and e_low <= current_price <= e_high
                         ):
-                            if _allow_notify(symbol, "ADD_ON"):
-                                add_note = _lev_msg(
-                                    symbol,
-                                    f"ціна повернулась в entry-зону {e_low}-{e_high}",
-                                    "можливий добір позиції малим обсягом у зоні",
-                                    f"{sl_v}",
-                                )
-                                await send_proactive(EVENT_TRADE_UPDATE, add_note, stream="general")
+                            in_pos = has_explicit_position(db_path, symbol, direction)
+                            ag = may_emit_telegram(
+                                key=origin_key(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    zone_lo=e_low,
+                                    zone_hi=e_high,
+                                    origin="t0",
+                                ),
+                                intent="ADD_ON",
+                                in_position=in_pos,
+                                in_zone=True,
+                            )
+                            print(
+                                f"[t0] ADD_ON blocked {symbol}: {ag.get('reason')} "
+                                f"zone={format_level_span(e_low, e_high, symbol)} "
+                                f"px={format_px(current_price, symbol)} pos={in_pos}"
+                            )
 
                         if status == "HIT_TP1" and tp2_v is not None:
                             try:

@@ -20,21 +20,33 @@ os.environ["OFFICE_DEPO_USDT"] = "1000"
 
 from office_alert_gate import (  # noqa: E402
     apply_setup_event,
+    chase_blocks_entry,
+    format_zone_wait_message,
+    has_explicit_position,
     may_emit_telegram,
     origin_key,
     plan_metrics,
     reset_alert_gate,
+    scale_in_review,
     text_grants_entry,
-    format_zone_wait_message,
+    validate_trade_geometry,
 )
 from office_atr_policy import GERCHIK_TREND_ENTRY_BLOCK_PCT  # noqa: E402
-from office_bridge import init_office_db, signal_get_active, signal_upsert  # noqa: E402
+from office_bridge import (  # noqa: E402
+    POSITION_CONFIRM_REASON,
+    init_office_db,
+    journal_open_trade,
+    signal_get_active,
+    signal_upsert,
+)
 from office_confluence import detect_ltf_confirms, follow_setup, format_confirm_card  # noqa: E402
+from office_desk_card import desk_entry_gate, format_desk_card, prepare_desk_send  # noqa: E402
 from office_lifecycle import next_lifecycle_state  # noqa: E402
 from office_market_data import SIGNAL_THRESHOLD  # noqa: E402
 from office_mini_v1 import _card_from_signal, live_unique_cards  # noqa: E402
+from office_position_size import plan_position_size  # noqa: E402
+from office_price_format import format_level_span, format_px, has_float_tail  # noqa: E402
 from office_radar import MIN_RR  # noqa: E402
-from office_telegram_filter import format_px  # noqa: E402
 from office_zone_alert import (  # noqa: E402
     ATR_DAY_USED_ENTRY_BLOCK_PCT,
     format_zone_signal_entry,
@@ -272,22 +284,194 @@ def main() -> int:
         return _fail("in_position")
     print("OK Mini App: CONFIRMED, не в позиції")
 
+    if has_explicit_position(db, "MANTAUSDT", "SHORT"):
+        return _fail("/position falsely true on CONFIRMED signal")
+    add0 = may_emit_telegram(intent="ADD_ON", in_position=False)
+    if add0.get("send") or "добір заборонено" not in str(add0.get("reason") or ""):
+        return _fail(f"add without position {add0}")
+    add1 = may_emit_telegram(intent="ADD_ON", in_position=True)
+    if add1.get("send"):
+        return _fail(f"add auto with position {add1}")
+    plan0 = scale_in_review(in_position=False)
+    if plan0.get("order") or plan0.get("ok"):
+        return _fail(f"scale without pos {plan0}")
+    journal_open_trade(
+        db,
+        trade_id="pos-manta-1",
+        symbol="MANTAUSDT",
+        direction="SHORT",
+        entry_price=PX_CONFIRM,
+        stop_loss=SL,
+        take_profit=TP1,
+        setup_name="T1_MY_POSITION",
+        entry_reason=POSITION_CONFIRM_REASON,
+    )
+    if not has_explicit_position(db, "MANTAUSDT", "SHORT"):
+        return _fail("/position not seen")
+    plan1 = scale_in_review(in_position=True, geometry_ok=True, setup_valid=True)
+    if plan1.get("order") or not plan1.get("plan_only"):
+        return _fail(f"scale with pos must be plan only {plan1}")
+    print("OK добір: без /position заборонено; з /position лише план, без ордера")
+
+    junk_span = format_level_span(0.07047058, 0.07144666000000001, "MANTAUSDT")
+    sl_txt = format_px(0.07250414754616397, "MANTAUSDT")
+    if junk_span != "0.070471–0.071447":
+        return _fail(f"manta zone display {junk_span}")
+    if sl_txt != "0.072504":
+        return _fail(f"manta sl display {sl_txt}")
+    fake_add = (
+        f"Тетяно, MANTAUSDT: ціна повернулась в entry-зону {junk_span}. "
+        "Що робити зараз: можливий добір позиції малим обсягом у зоні. "
+        f"SL після дії: {sl_txt}"
+    )
+    if not text_grants_entry(fake_add) or has_float_tail(fake_add):
+        return _fail(f"add phrase/float {fake_add}")
+    print(f"OK виправлений текст зони: {junk_span} SL {sl_txt}")
+
+    btc_lo, btc_hi = 83343.89, 84411.2
+    btc_sl, btc_t1, btc_t2 = 84623.82, 85023.51, 85263.33
+    geo_btc = validate_trade_geometry(
+        direction="LONG",
+        sl=btc_sl,
+        tp1=btc_t1,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+        tp2=btc_t2,
+    )
+    if geo_btc.get("ok") or geo_btc.get("size_allowed"):
+        return _fail(f"BTC LONG SL above zone must fail {geo_btc}")
+    card_btc = format_desk_card(
+        symbol="BTCUSDT",
+        direction="LONG",
+        timeframe="H1",
+        entry=btc_lo,
+        sl=btc_sl,
+        tp1=btc_t1,
+        tp2=btc_t2,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+        now_line="Зараз: ціна вже вище зони — не ганяю",
+    )
+    if card_btc:
+        return _fail(f"BTC invalid card leaked {card_btc}")
+    gate_btc = desk_entry_gate(
+        symbol="BTCUSDT",
+        direction="LONG",
+        entry=(btc_lo + btc_hi) / 2,
+        sl=btc_sl,
+        tp1=btc_t1,
+        atr_h1=800.0,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+        tp2=btc_t2,
+    )
+    if gate_btc.get("send") or gate_btc.get("size"):
+        return _fail(f"BTC gate size {gate_btc}")
+    sz_bad = plan_position_size(entry=83877.0, sl=btc_sl, direction="LONG", depo=1000)
+    if sz_bad.get("ok") or sz_bad.get("size_usdt"):
+        return _fail(f"abs() hid wrong-side SL {sz_bad}")
+    if not chase_blocks_entry(direction="LONG", price=84800.0, zone_lo=btc_lo, zone_hi=btc_hi):
+        return _fail("chase LONG")
+    prep_btc = prepare_desk_send(
+        symbol="BTCUSDT",
+        direction="LONG",
+        timeframe="H1",
+        entry=btc_lo,
+        sl=btc_sl,
+        tp1=btc_t1,
+        tp2=btc_t2,
+        atr_h1=800.0,
+        price=84800.0,
+        require_confluence=False,
+        add_px=btc_hi,
+    )
+    if prep_btc.get("send"):
+        return _fail(f"prepare sent invalid BTC {prep_btc}")
+    print("OK BTC LONG SL вище зони: картка/розмір/send заборонені")
+
+    geo_short = validate_trade_geometry(
+        direction="SHORT",
+        sl=83000.0,
+        tp1=82000.0,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+        tp2=81000.0,
+    )
+    if geo_short.get("ok"):
+        return _fail(f"SHORT SL below zone {geo_short}")
+    geo_edge = validate_trade_geometry(
+        direction="LONG",
+        sl=btc_lo,
+        tp1=btc_t1,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+    )
+    if geo_edge.get("ok"):
+        return _fail("LONG SL == zone_lo must fail")
+    geo_tp = validate_trade_geometry(
+        direction="LONG",
+        sl=82000.0,
+        tp1=84000.0,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+    )
+    if geo_tp.get("ok"):
+        return _fail(f"LONG TP inside zone {geo_tp}")
+    geo_ok = validate_trade_geometry(
+        direction="LONG",
+        sl=82000.0,
+        tp1=87000.0,
+        entry_low=btc_lo,
+        entry_high=btc_hi,
+        tp2=88000.0,
+    )
+    if not geo_ok.get("ok"):
+        return _fail(f"valid LONG {geo_ok}")
+    print("OK SHORT-дзеркало, межа зони, невірний TP")
+
+    routes = [
+        format_zone_wait_message(
+            symbol="MANTAUSDT",
+            current_price=0.07144666000000001,
+            entry_low=0.07047058,
+            entry_high=0.07144666000000001,
+            sl=0.07250414754616397,
+            tp1=TP1,
+        ),
+        junk_span,
+        format_px(83343.89, "BTCUSDT"),
+        format_desk_card(
+            symbol="SNXXUSDT",
+            direction="SHORT",
+            timeframe="M15",
+            entry=17.46,
+            sl=17.62,
+            tp1=17.22,
+            tp2=16.98,
+        ),
+    ]
+    for blob in routes:
+        if has_float_tail(blob) or "00000001" in str(blob):
+            return _fail(f"float tail {blob}")
+    print("OK ціни без float-хвостів на маршрутах")
+
     ART.mkdir(parents=True, exist_ok=True)
     (ART / "manta_alert_audit.md").write_text(
         "\n".join(
             [
-                "# MANTAUSDT audit",
+                "# MANTAUSDT + BTC geometry audit",
                 "",
-                "## Три повідомлення — три рушії (не один код)",
-                "1. Desk/confluence картка Лева (`format_desk_card` / `_desk_send`): SHORT M15, зона, «чекаю підтвердження M5». Origin=desk. Telegram SIGNAL_ENTRY.",
-                "2. Follow loop (`follow_setup` + `format_confirm_card`): «вхід підтверджено · 0.07111». Origin=desk follow. EVENT_TRADE_UPDATE. Раніше detail брехав «закриття нижче zone_lo», навіть коли close був у зоні.",
-                "3. Legacy T0 HIT_ENTRY (`monitor` ACTIVE + ціна в зоні, `stream=general`): «досяг зони… Можна входити» з сирими float. Origin=t0. Не desk. Графік «чекаю», бо в тексті немає «сила A».",
+                "## MANTA ADD_ON",
+                "Джерело: T0 monitor HIT_ENTRY + ціна знову в зоні (`office_relay_wizard.py`).",
+                "Не /position. Текст був «можливий добір…» з сирими float.",
+                "Після gate: Telegram ADD_ON завжди deny; без /position — заборона; з /position — лише план.",
                 "",
-                "## Live OHLCV / prod signal_id",
-                "DATA_UNAVAILABLE — у цьому середовищі немає production DB і стрічки Telegram.",
+                "## BTC LONG H1",
+                "Entry 83343.89–84411.2, SL 84623.82 вище зони. widen_sl_to_atr_h1 тримав |entry-SL|≥ATR.",
+                "plan_position_size(abs) малював 1124 USDT. Gate тепер fail-closed, картки немає.",
                 "",
-                "## Gate",
-                "ZONE_IN / HIT_ENTRY_PRICE ніколи не send. Після CONFIRMED повторна зона не ENTRY.",
+                "## Live",
+                "DATA_UNAVAILABLE — немає production DB / стрічки Telegram у цьому середовищі.",
                 "",
             ]
         ),

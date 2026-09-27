@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from office_telegram_filter import format_level_span, format_px
+from office_price_format import format_level_span, format_px
+from office_radar import MIN_RR
 
 STATES = (
     "FOUND",
@@ -26,6 +27,7 @@ INTENT_CONFIRM = "LTF_CONFIRM"
 INTENT_ENTRY = "ENTRY_PERMISSION"
 INTENT_HIT_ENTRY = "HIT_ENTRY_PRICE"
 INTENT_POSITION = "POSITION_MANAGE"
+INTENT_ADD = "ADD_ON"
 
 _LIVE: Dict[str, Dict[str, Any]] = {}
 
@@ -173,6 +175,14 @@ def may_emit_telegram(
             "opens_position": False,
         }
 
+    if intent_u in (INTENT_ADD, "ADD", "ADD_ON", "SCALE_IN"):
+        if not in_position:
+            return {**deny, "reason": "немає явного /position — добір заборонено"}
+        return {
+            **deny,
+            "reason": "добір не автоматичний: потрібна перевірка ризику і підтвердження Тетяни",
+        }
+
     if intent_u in (INTENT_POSITION, "TP", "SL", "TRAIL"):
         if not in_position:
             return {**deny, "reason": "немає явного /position"}
@@ -201,22 +211,195 @@ def format_zone_wait_message(
     tp1: Any = None,
 ) -> str:
     """Текст очікування. Без «можна входити» і без float-сміття."""
-    zone = format_level_span(entry_low, entry_high)
-    px = format_px(current_price)
+    sym = str(symbol or "")
+    zone = format_level_span(entry_low, entry_high, sym)
+    px = format_px(current_price, sym)
     lines = [
-        f"{str(symbol or '').upper()} досяг зони {zone}.".replace("  ", " "),
+        f"{sym.upper()} досяг зони {zone}.".replace("  ", " "),
         f"Зараз {px}. У зоні — чекаю підтвердження, не вхід.",
     ]
     if sl is not None:
-        lines.append(f"SL {format_px(sl)}")
+        lines.append(f"SL {format_px(sl, sym)}")
     if tp1 is not None:
-        lines.append(f"TP1 {format_px(tp1)}")
+        lines.append(f"TP1 {format_px(tp1, sym)}")
     return "\n".join(lines)
 
 
 def text_grants_entry(text: str) -> bool:
     low = str(text or "").lower()
-    return "можна входити" in low or "входь" in low
+    if "можна входити" in low or "входь" in low:
+        return True
+    if "добір позиції" in low or "добір дозволений" in low:
+        return True
+    if "збільшити позицію" in low or "перенести стоп позиції" in low:
+        return True
+    return False
+
+
+def has_explicit_position(db_path: str, symbol: str, direction: str = "") -> bool:
+    """Лише явний /position. CONFIRMED / WATCHING / office OPEN ≠ позиція."""
+    if not db_path:
+        return False
+    from office_desk_card import list_confirmed_open_positions
+
+    want = str(symbol or "").upper()
+    side = str(direction or "").upper()
+    for p in list_confirmed_open_positions(db_path) or []:
+        if str(p.get("symbol") or "").upper() != want:
+            continue
+        if side and str(p.get("direction") or "").upper() != side:
+            continue
+        return True
+    return False
+
+
+def chase_blocks_entry(*, direction: str, price: Any, zone_lo: Any, zone_hi: Any) -> bool:
+    px, lo, hi = _f(price), _f(zone_lo), _f(zone_hi)
+    if px is None or lo is None or hi is None:
+        return False
+    if lo > hi:
+        lo, hi = hi, lo
+    side = str(direction or "").upper()
+    if side == "LONG" and px > hi:
+        return True
+    if side == "SHORT" and px < lo:
+        return True
+    return False
+
+
+def validate_trade_geometry(
+    *,
+    direction: str,
+    sl: Any,
+    tp1: Any = None,
+    entry: Any = None,
+    entry_low: Any = None,
+    entry_high: Any = None,
+    tp2: Any = None,
+    require_tp: bool = True,
+) -> Dict[str, Any]:
+    """Fail-closed: LONG SL нижче зони входу, SHORT SL вище. Без «виправлення» рівнів."""
+    side = str(direction or "").upper()
+    deny = {"ok": False, "send": False, "opens_position": False, "size_allowed": False}
+    s, t1, t2 = _f(sl), _f(tp1), _f(tp2)
+    e = _f(entry)
+    lo, hi = _f(entry_low), _f(entry_high)
+    if lo is None:
+        lo = e
+    if hi is None:
+        hi = e
+    if lo is not None and hi is not None and lo > hi:
+        lo, hi = hi, lo
+    if side not in ("LONG", "SHORT"):
+        return {**deny, "reason": "немає напрямку"}
+    if s is None or lo is None or hi is None:
+        return {**deny, "reason": "немає зони/SL"}
+    if side == "LONG":
+        if s >= lo - 1e-18:
+            return {
+                **deny,
+                "reason": "LONG SL не нижче нижньої межі entry-зони — картку не шлемо",
+                "zone_lo": lo,
+                "zone_hi": hi,
+                "sl": s,
+            }
+        risk = lo - s
+        if t1 is None:
+            if require_tp:
+                return {**deny, "reason": "немає TP1", "sl": s}
+            return {
+                "ok": True,
+                "send": False,
+                "size_allowed": False,
+                "reason": "SL vs зона ок, TP не перевірено",
+                "risk": risk,
+                "zone_lo": lo,
+                "zone_hi": hi,
+                "sl": s,
+                "opens_position": False,
+            }
+        if t1 <= hi:
+            return {**deny, "reason": "LONG TP1 не вище верхньої межі зони", "sl": s}
+        reward = t1 - hi
+        if t2 is not None and t2 <= t1:
+            return {**deny, "reason": "LONG TP2 не далі за TP1", "sl": s}
+    else:
+        if s <= hi + 1e-18:
+            return {
+                **deny,
+                "reason": "SHORT SL не вище верхньої межі entry-зони — картку не шлемо",
+                "zone_lo": lo,
+                "zone_hi": hi,
+                "sl": s,
+            }
+        risk = s - hi
+        if t1 is None:
+            if require_tp:
+                return {**deny, "reason": "немає TP1", "sl": s}
+            return {
+                "ok": True,
+                "send": False,
+                "size_allowed": False,
+                "reason": "SL vs зона ок, TP не перевірено",
+                "risk": risk,
+                "zone_lo": lo,
+                "zone_hi": hi,
+                "sl": s,
+                "opens_position": False,
+            }
+        if t1 >= lo:
+            return {**deny, "reason": "SHORT TP1 не нижче нижньої межі зони", "sl": s}
+        reward = lo - t1
+        if t2 is not None and t2 >= t1:
+            return {**deny, "reason": "SHORT TP2 не далі за TP1", "sl": s}
+    if risk <= 0:
+        return {**deny, "reason": "дистанція ризику не додатна — abs() не ховає стоп з неправильного боку"}
+    rr = reward / risk if risk else 0.0
+    if rr + 1e-12 < MIN_RR:
+        return {**deny, "reason": f"RR {rr:.2f} < {MIN_RR} (знаковий ризик)", "rr": rr, "sl": s}
+    return {
+        "ok": True,
+        "send": True,
+        "reason": "геометрія валідна",
+        "size_allowed": True,
+        "risk": risk,
+        "reward": reward,
+        "rr": rr,
+        "zone_lo": lo,
+        "zone_hi": hi,
+        "sl": s,
+        "opens_position": False,
+    }
+
+
+def scale_in_review(
+    *,
+    in_position: bool,
+    geometry_ok: bool = False,
+    setup_valid: bool = False,
+    owner_confirmed: bool = False,
+) -> Dict[str, Any]:
+    """Добір ніколи не ордер. Без /position — заборона. З /position — лише план."""
+    deny = {"ok": False, "order": False, "telegram": False, "plan_only": False}
+    if not in_position:
+        return {**deny, "reason": "немає явного /position — добір заборонено"}
+    if not geometry_ok:
+        return {**deny, "reason": "геометрія невалідна — добір заборонено"}
+    if not setup_valid:
+        return {**deny, "reason": "сетап не чинний — добір заборонено"}
+    if not owner_confirmed:
+        return {
+            **deny,
+            "plan_only": True,
+            "reason": "є /position: лише план зміни ризику, потрібне підтвердження Тетяни",
+        }
+    return {
+        "ok": False,
+        "order": False,
+        "telegram": False,
+        "plan_only": True,
+        "reason": "підтверджений план без ордера",
+    }
 
 
 def plan_metrics(
