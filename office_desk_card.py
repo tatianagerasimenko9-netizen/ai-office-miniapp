@@ -45,9 +45,17 @@ def _f(v: Any) -> Optional[float]:
 
 
 def _px(v: Any) -> str:
-    """Ціна як у картці: 84 069, без Entry/SL англійською."""
+    """Ціна як у картці: 84 069; альти <1 — однакова точність (0.940, не 0.94)."""
     from office_telegram_filter import format_px
 
+    x = _f(v)
+    if x is None:
+        return ""
+    if x < 0.1:
+        s = f"{x:.6f}".rstrip("0").rstrip(".")
+        return s
+    if x < 1:
+        return f"{x:.3f}"
     s = format_px(v)
     if not s:
         return s
@@ -296,24 +304,17 @@ def desk_entry_gate(
     }
 
 
-def _kind_line(setup_type: str, *, reentry: bool = False) -> str:
+def _kind_line(setup_type: str, *, reentry: bool = False, direction: str = "", grade: str = "") -> str:
+    from office_confluence import kind_ua
+
     if reentry:
-        return "Повторний вхід"
-    raw = str(setup_type or "").strip()
-    ul = raw.upper()
-    if "ПОВТОРНИЙ" in ul:
-        return "Повторний вхід"
-    if "СИЛЬН" in raw or "HUNTER" in ul:
-        return "Відкат у сильну свічку"
-    if ul in ("DUMP", "PUMP"):
-        return ul
-    if "РАДАР" in ul or ul == "RADAR":
-        return "Радар"
-    if ul == "BOUNCE":
-        return "Відскік"
-    if raw:
-        return raw.replace("_", " ")[:40]
-    return "Сетап"
+        base = "Повторний вхід"
+    else:
+        base = kind_ua(setup_type, direction)
+    g = str(grade or "").strip().upper()
+    if g in ("A", "B"):
+        return f"{base} · сила {g}"
+    return base
 
 
 def _pct_txt(pct: float) -> str:
@@ -346,13 +347,29 @@ def format_desk_card(
     prev: Optional[Dict[str, Any]] = None,
     rev_reason: str = "",
     reentry: bool = False,
+    entry_low: Any = None,
+    entry_high: Any = None,
+    grade: str = "",
+    zone_line: str = "",
+    confirm_wait: str = "",
+    now_line: str = "",
 ) -> str:
-    """Картка: кожне значення окремим рядком. Без RR, балів, моделей."""
+    """Універсальна картка LONG/SHORT. Без RR, range, балів."""
+    from office_telegram_filter import format_level_span
+
     side = str(direction or "").upper()
     mark = "🟢" if side == "LONG" else "🔴"
     e, s, t1 = _f(entry), _f(sl), _f(tp1)
+    elo, ehi = _f(entry_low), _f(entry_high)
+    if elo is None:
+        elo = e
+    if ehi is None:
+        ehi = _f(add_px) or e
+    mid = e
+    if mid is None and elo is not None and ehi is not None:
+        mid = (elo + ehi) / 2.0
     tf = str(timeframe or "M15").upper()
-    kind = _kind_line(setup_type, reentry=reentry)
+    kind = _kind_line(setup_type, reentry=reentry, direction=side, grade=grade)
     lines: List[str] = []
     if reversal and prev:
         pdir = str(prev.get("direction") or "").upper()
@@ -366,28 +383,28 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
     lines.append(f"{mark} {side} · {str(symbol).upper()} · {tf}")
     lines.append(kind)
-    lines.append("")
-    addv = _f(add_px)
-    if addv is not None and e is not None:
-        lines.append(_lvl("🎯 Вхід 60%", e))
-        lines.append(_lvl("➕ Добір 40%", addv))
-    else:
-        lines.append(_lvl("🎯 Вхід", e))
-    if e is not None and s is not None:
-        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(e, s)))
+    span = format_level_span(elo, ehi) if elo is not None else _px(mid)
+    lines.append(f"🎯 Вхід · {span}")
+    if mid is not None and s is not None:
+        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(mid, s)))
     else:
         lines.append(_lvl("❌ Стоп", s))
     if t1 is not None:
-        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(e, t1) if e else None))
+        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None))
     if tp2 is not None:
-        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(e, _f(tp2)) if e and _f(tp2) else None))
+        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None))
     if tp3 is not None:
-        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(e, _f(tp3)) if e and _f(tp3) else None))
-    lines.append("")
-    below = "нижче" if side == "SHORT" else "вище"
-    lines.append(f"Вхід після закриття {tf} {below} {_px(e)}")
+        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(mid, _f(tp3)) if mid and _f(tp3) else None))
+    z = str(zone_line or "").strip()
+    if z:
+        lines.append(f"Зона: {z}")
+    w = str(confirm_wait or "").strip()
+    if w:
+        lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
+    lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
+    lines.append("При TP1 — частина + стоп у беззбиток")
     sz = size if isinstance(size, dict) else plan_position_size(
-        entry=e, sl=s, score=score, min_score=min_score
+        entry=mid, sl=s, score=score, min_score=min_score
     )
     usdt = _f(sz.get("size_usdt"))
     dep = _f(sz.get("depo")) or depo_usdt()
@@ -397,7 +414,10 @@ def format_desk_card(
         lines.append(f"Позиція {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " "))
     else:
         lines.append(f"Ризик {rp * 100:.0f}% депо")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if "range" in text.lower():
+        text = text.replace("range", "межа").replace("Range", "Межа").replace("RANGE", "межа")
+    return text
 
 
 def card_has_banned(text: str) -> List[str]:
@@ -607,14 +627,69 @@ def prepare_desk_send(
     m15_close: Any = None,
     candle: Any = None,
     prev: Optional[Dict[str, Any]] = None,
+    candles_m15: Any = None,
+    candles_h1: Any = None,
+    candles_h4: Any = None,
+    candles_d1: Any = None,
+    candles_w: Any = None,
+    candles_ltf: Any = None,
+    price: Any = None,
+    require_confluence: bool = True,
+    confluence: Optional[Dict[str, Any]] = None,
+    candidates: Optional[List[Dict[str, Any]]] = None,
+    now_ts: Any = None,
 ) -> Dict[str, Any]:
-    """Gate + текст картки. Закриває попередній сигнал лише якщо send і reversal."""
+    """Gate + збіги + текст картки. Закриває попередній сигнал лише якщо send і reversal."""
+    from office_confluence import evaluate_confluence, mark_live
+
     if prev is None and db_path:
         prev = latest_open_desk_signal(db_path, symbol)
+    conf = confluence
+    if conf is None and require_confluence:
+        has_px = any(
+            x is not None
+            for x in (candles_m15, candles_h1, candles_h4, candles_d1, candles_ltf)
+        )
+        if not has_px and not candidates:
+            return {
+                "send": False,
+                "sl": sl,
+                "size": None,
+                "reversal": False,
+                "reason": "DATA_UNAVAILABLE збіги",
+                "message": "",
+            }
+        conf = evaluate_confluence(
+            symbol=symbol,
+            direction=direction,
+            timeframe=timeframe,
+            candles_m15=candles_m15,
+            candles_h1=candles_h1,
+            candles_h4=candles_h4,
+            candles_d1=candles_d1,
+            candles_w=candles_w,
+            candles_ltf=candles_ltf,
+            price=price if price is not None else entry,
+            now_ts=now_ts,
+            candidates=candidates,
+        )
+    if require_confluence and conf is not None and not conf.get("send_card"):
+        return {
+            "send": False,
+            "sl": sl,
+            "size": None,
+            "reversal": False,
+            "reason": str(conf.get("reason") or "збіги"),
+            "confluence": conf,
+            "message": "",
+        }
+    zone_lo = (conf or {}).get("zone_lo")
+    zone_hi = (conf or {}).get("zone_hi")
+    entry_use = (conf or {}).get("entry") if conf and conf.get("entry") is not None else entry
     gate = desk_entry_gate(
         symbol=symbol,
         direction=direction,
-        entry=entry,
+        entry=entry_use,
         sl=sl,
         tp1=tp1,
         atr_h1=atr_h1,
@@ -625,14 +700,14 @@ def prepare_desk_send(
         candle=candle,
     )
     if not gate.get("send"):
-        return gate
+        return {**gate, "confluence": conf}
     if gate.get("reversal") and db_path:
-        close_desk_reversal(db_path, gate.get("prev") or prev, exit_price=entry)
+        close_desk_reversal(db_path, gate.get("prev") or prev, exit_price=entry_use)
     text = format_desk_card(
         symbol=symbol,
         direction=direction,
         timeframe=timeframe,
-        entry=entry,
+        entry=entry_use,
         sl=gate.get("sl"),
         tp1=tp1,
         tp2=tp2,
@@ -645,5 +720,26 @@ def prepare_desk_send(
         reversal=bool(gate.get("reversal")),
         prev=gate.get("prev") or prev,
         rev_reason=str(gate.get("rev_reason") or ""),
+        entry_low=zone_lo if zone_lo is not None else entry_use,
+        entry_high=zone_hi if zone_hi is not None else (add_px if add_px is not None else entry_use),
+        grade=str((conf or {}).get("grade") or ""),
+        zone_line=str((conf or {}).get("zone_line") or ""),
+        confirm_wait=str((conf or {}).get("confirm_wait") or ""),
+        now_line=str((conf or {}).get("now_line") or ""),
     )
-    return {**gate, "text": text}
+    key = str((conf or {}).get("setup_key") or "")
+    if key:
+        mark_live(
+            key,
+            {
+                "symbol": symbol,
+                "direction": direction,
+                "timeframe": timeframe,
+                "sl": gate.get("sl"),
+                "zone_lo": zone_lo,
+                "zone_hi": zone_hi,
+                "grade": (conf or {}).get("grade"),
+                "ts": now_ts,
+            },
+        )
+    return {**gate, "text": text, "confluence": conf, "setup_key": key, "entry": entry_use}

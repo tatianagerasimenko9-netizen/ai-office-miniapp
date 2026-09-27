@@ -306,6 +306,9 @@ def evaluate_radar(
             card["sc_plan"] = sc_plan
             card["entry_low"] = sc_plan.get("ote_lo")
             card["entry_high"] = sc_plan.get("ote_hi")
+            ote_lo, ote_hi = _f(sc_plan.get("ote_lo")), _f(sc_plan.get("ote_hi"))
+            if ote_lo is not None and ote_hi is not None:
+                card["entry"] = (float(ote_lo) + float(ote_hi)) / 2.0
             card["sc_note"] = encode_sc_zone_note(sc_plan)
     except Exception:
         pass
