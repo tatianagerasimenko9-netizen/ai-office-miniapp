@@ -3059,11 +3059,11 @@ async def run() -> None:
                         print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
                         delivered_id = msg_id
                         skip_text = True
-                    elif ledger_token:
+                    else:
+                        # A None response is not proof that Telegram rejected
+                        # the photo. Never send a second text copy.
                         print(f"[chart] photo outcome ambiguous {sym}; no fallback text")
                         skip_text = True
-                    else:
-                        print(f"[chart] photo failed {sym}, fallback text")
                 else:
                     print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
             if not skip_text:
