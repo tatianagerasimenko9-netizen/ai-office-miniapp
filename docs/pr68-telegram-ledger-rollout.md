@@ -83,3 +83,19 @@ the owner explicitly approves both the production DB migration and Worker deploy
   `scripts/fetch_binance_archive.py`; real-data workflow `pr68-real-replay.yml`
   fetches BTC/MANTA archives without credentials. BTC T6 replay and MANTA
   data validation are separate; this is NOT MANTA strategy replay.
+
+## Verified real archive replay result (2026-09-27)
+
+GitHub Actions run `36347711570` SUCCESS on commit `190b69d`.
+Source: Binance Vision USD-M completed July 2026 monthly archives, 31 D1,
+744 H1, 2976 M15 real candles per BTCUSDT and MANTAUSDT.
+BTC-only T6 evaluated 542 hourly-spaced decisions; WATCHING 256,
+SIGNAL 40, SKIP 502, simulated closed trades 40 (17 wins, 23 losses),
+WR 42.5%, average R 0.468, simulated total 18.7201 R after configured
+costs, max drawdown 11.6107 R. These are historical simulation outputs,
+NOT realized returns, a forecast, live order authorization, or an
+independent strategy validation. MANTA historical data passed integrity
+checks only; no MANTA strategy replay was performed.
+
+The historical replay run predates the later incremental-pointer optimization
+and control-test commit. Its evidence applies to its exact workflow SHA.
