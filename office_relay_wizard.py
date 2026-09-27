@@ -3033,6 +3033,8 @@ async def run() -> None:
             ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
         delivered_id = None
         send_attempted = False
+        skip_text = False
+        ledger_committed = not ledger_enabled or not dedup_key
         try:
             if ev == EVENT_SIGNAL_ENTRY:
                 sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
@@ -3056,26 +3058,27 @@ async def run() -> None:
                     if msg_id:
                         print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
                         delivered_id = msg_id
-                        return msg_id
-                    if ledger_token:
+                        skip_text = True
+                    elif ledger_token:
                         print(f"[chart] photo outcome ambiguous {sym}; no fallback text")
-                        return None
-                    print(f"[chart] photo failed {sym}, fallback text")
+                        skip_text = True
+                    else:
+                        print(f"[chart] photo failed {sym}, fallback text")
                 else:
                     print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
-            send_attempted = True
-            delivered_id = await send_office(
-                message,
-                reply_to_message_id=reply_to_message_id,
-                stream=st,
-                allow_draft=False,
-                intent=intent,
-                event_type=event_type,
-                symbol=symbol,
-                direction=direction,
-                skip_gate=True,
-            )
-            return delivered_id
+            if not skip_text:
+                send_attempted = True
+                delivered_id = await send_office(
+                    message,
+                    reply_to_message_id=reply_to_message_id,
+                    stream=st,
+                    allow_draft=False,
+                    intent=intent,
+                    event_type=event_type,
+                    symbol=symbol,
+                    direction=direction,
+                    skip_gate=True,
+                )
 
         finally:
             ledger_heartbeat_stop.set()
@@ -3115,7 +3118,7 @@ async def run() -> None:
                 )
             if ledger_token and delivered_id and not ledger_committed:
                 print("[relay] BLOCKED lifecycle: delivery not committed in ledger")
-                return None
+        return delivered_id if ledger_committed else None
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             _RELAY_OFFICE_STARTUP_PING_SENT = True
