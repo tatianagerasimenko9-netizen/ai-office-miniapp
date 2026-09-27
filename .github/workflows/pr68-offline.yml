@@ -63,3 +63,5 @@ jobs:
         run: python scripts/test_risk_officer.py
       - name: Evidence-backed market thesis contract (offline, no orders)
         run: python scripts/test_market_thesis.py
+      - name: Market feed freshness and provenance veto (offline)
+        run: python scripts/test_feed_quality.py
