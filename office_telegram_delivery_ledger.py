@@ -84,6 +84,23 @@ def reserve_delivery(
         return token if cur.rowcount == 1 else None
 
 
+def renew_delivery(
+    db_path: str, key: str, token: str, *,
+    now: Optional[float] = None, lease_seconds: float = 120.0,
+) -> bool:
+    """Extend only the current pending owner's lease; never resurrect an expired lease."""
+    if not key or not token or lease_seconds <= 0:
+        return False
+    ts = float(time.time() if now is None else now)
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            _sql(db_path, "UPDATE office_telegram_delivery SET expires_at=? "
+                "WHERE dedup_key=? AND token=? AND state='PENDING' AND expires_at>?"),
+            (ts + lease_seconds, key, token, ts),
+        )
+        return cur.rowcount == 1
+
+
 def finish_delivery(
     db_path: str, key: str, token: str, *, delivered: bool,
     stable: bool = False, now: Optional[float] = None,
