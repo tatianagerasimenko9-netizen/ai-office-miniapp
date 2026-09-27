@@ -282,6 +282,8 @@ def run_t6_backtest(
     peak = 0.0
     max_dd = 0.0
     r_closed: List[float] = []
+    # A signal is observed at candle close; a simulated market fill may only
+    # occur at the NEXT candle open, never at an unfilled OTE card midpoint.
 
     daily_end = h1_end = 0
     for i, bar in enumerate(m15_all):
@@ -365,14 +367,39 @@ def run_t6_backtest(
             continue
         card = res.card
         side = res.direction
-        raw_entry = float(card["entry"])
+        raw_entry = float(nxt["open"])
         fill = _fill_price(side, raw_entry, slippage_pct)
+        sl, tp = float(card["sl"]), float(card["tp"])
+        if (side == "LONG" and not sl < fill < tp) or (side == "SHORT" and not tp < fill < sl):
+            reasons["SKIP_NEXT_OPEN_GEOMETRY"] += 1
+            continue
+        tp1_pct = abs(tp - fill) / fill * 100.0
+        min_tp1_pct = 1.2 if symbol in ("BTCUSDT", "ETHUSDT") else 3.0
+        if tp1_pct < min_tp1_pct:
+            reasons["SKIP_TP1_MIN"] += 1
+            continue
+        risk = abs(fill - sl)
+        if abs(tp - fill) / risk < 1.5:
+            reasons["SKIP_NEXT_OPEN_RR"] += 1
+            continue
+        # Use only fully closed H1 candles. A too-tight stop can inflate R.
+        if len(h1) < 15:
+            reasons["SKIP_H1_ATR_UNAVAILABLE"] += 1
+            continue
+        h1_tr = [max(float(h1[j]["high"]) - float(h1[j]["low"]),
+                     abs(float(h1[j]["high"]) - float(h1[j - 1]["close"])),
+                     abs(float(h1[j]["low"]) - float(h1[j - 1]["close"])))
+                 for j in range(len(h1) - 14, len(h1))]
+        h1_atr = sum(h1_tr) / len(h1_tr)
+        if risk < h1_atr:
+            reasons["SKIP_H1_ATR_STOP"] += 1
+            continue
         open_trade = SimulatedTrade(
             direction=side,
             entry=fill,
-            sl=float(card["sl"]),
-            tp=float(card["tp"]),
-            entry_ts=close_time(nxt, "15m").isoformat(),
+            sl=sl,
+            tp=tp,
+            entry_ts=parse_ts(nxt["ts"]).isoformat(),
         )
 
     report.reject_reasons = dict(reasons)
