@@ -65,3 +65,21 @@ the owner explicitly approves both the production DB migration and Worker deploy
 - Next step requires an authorized data source reachable from the runner or
   owner-supplied verified historical BTC/MANTA OHLCV files. MANTA strategy
   replay needs its own harness: existing T6 evaluates the BTC-only radar.
+
+## Ambiguous delivery quarantine (2026-09-27)
+
+- Lost lease cancels the sender and attempts to mark the event UNCERTAIN.
+  UNCERTAIN keys cannot be reclaimed after lease expiry; manual Telegram
+  reconciliation is required before any administrative resolution.
+- If Telegram acknowledges a message but DELIVERED commit raises, relay
+  attempts UNCERTAIN quarantine and returns no successful lifecycle result.
+  If both DB writes fail, exact-once delivery cannot be guaranteed; do not
+  automatically retry or enable production dedup until the DB is restored and
+  the Telegram message has been manually reconciled.
+- Temporary-SQLite regression covers UNCERTAIN expiry and stale tokens.
+  Real Telegram failure injection and independent final security review remain
+  required before rollout.
+- Alternative public Binance Vision monthly archive fetch is implemented in
+  `scripts/fetch_binance_archive.py`; real-data workflow `pr68-real-replay.yml`
+  fetches BTC/MANTA archives without credentials. BTC T6 replay and MANTA
+  data validation are separate; this is NOT MANTA strategy replay.
