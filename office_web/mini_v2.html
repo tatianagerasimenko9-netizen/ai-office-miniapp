@@ -208,6 +208,19 @@ async function paintChart(el, symbol, tf, levels){
     if(levels.zone_hi!=null) series.createPriceLine({price:levels.zone_hi,color:'#c9a227',lineStyle:2,title:'зона'});
     if(levels.sl!=null) series.createPriceLine({price:levels.sl,color:'#ef6b7b',title:'SL'});
     if(levels.tp1!=null) series.createPriceLine({price:levels.tp1,color:'#3dcf8a',title:'TP1'});
+    if(S.ch){
+      const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      if(chp&&chp.ok){
+        const mid=chart.addLineSeries({color:'#6e7681',lineWidth:1,title:'регр.'});
+        const up=chart.addLineSeries({color:'#6e7681',lineStyle:2,title:'канал'});
+        const dn=chart.addLineSeries({color:'#6e7681',lineStyle:2});
+        const t0=candles[Math.max(0,candles.length-(chp.length||100))].time;
+        const t1=candles[candles.length-1].time;
+        mid.setData([{time:t0,value:chp.mid_start},{time:t1,value:chp.mid_end}]);
+        up.setData([{time:t0,value:chp.upper_start},{time:t1,value:chp.upper_end}]);
+        dn.setData([{time:t0,value:chp.lower_start},{time:t1,value:chp.lower_end}]);
+      }
+    }
     chart.timeScale().fitContent();
   } else {
     usingLW=false; drawFallback(el,candles,levels);
