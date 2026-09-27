@@ -189,7 +189,7 @@ from office_telegram_policy import (
     finish_trade_telegram,
     trade_update_streams,
 )
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, renew_delivery
+from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
@@ -3004,6 +3004,7 @@ async def run() -> None:
                 return None
         ledger_heartbeat = None
         ledger_heartbeat_stop = asyncio.Event()
+        ledger_lease_lost = asyncio.Event()
         ledger_sender_task = asyncio.current_task()
         if ledger_token:
             async def _renew_telegram_lease() -> None:
@@ -3019,11 +3020,13 @@ async def run() -> None:
                         )
                         if not renewed:
                             print("[relay] ERROR Telegram lease lost during send")
+                            ledger_lease_lost.set()
                             if ledger_sender_task is not None:
                                 ledger_sender_task.cancel()
                             return
                     except Exception as exc:
                         print(f"[relay] ERROR Telegram lease renewal: {type(exc).__name__}: {exc}")
+                        ledger_lease_lost.set()
                         if ledger_sender_task is not None:
                             ledger_sender_task.cancel()
                         return
@@ -3078,7 +3081,11 @@ async def run() -> None:
             ledger_committed = not ledger_enabled or not dedup_key
             if ledger_token:
                 try:
-                    ledger_committed = finish_delivery(
+                    if ledger_lease_lost.is_set():
+                        ledger_committed = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                        ledger_committed = False
+                    else:
+                        ledger_committed = finish_delivery(
                         db_path, dedup_key, ledger_token,
                         delivered=bool(delivered_id), stable=ledger_stable,
                     )
