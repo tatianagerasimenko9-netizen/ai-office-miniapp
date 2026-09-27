@@ -99,3 +99,16 @@ checks only; no MANTA strategy replay was performed.
 
 The historical replay run predates the later incremental-pointer optimization
 and control-test commit. Its evidence applies to its exact workflow SHA.
+
+## Real MANTA WATCHING gate replay (2026-09-27)
+
+GitHub Actions run `36348088790` SUCCESS at SHA `4fabdb06`.
+On July 2026 real Binance Vision MANTAUSDT candles, the safety-gate
+harness evaluated 2,973 M15 observations against the preceding closed H1
+range; 2,254 observations were in-zone, 369 in-zone observations had
+ATR >90%, and zero WATCHING checks granted entry. This is an intentionally
+incomplete-SL/TP gate stress test; previous-H1 ranges are test inputs, NOT
+Lev's independent market-selected zones. It is NOT a full Lev MANTA strategy
+replay, performance validation, or a live Telegram delivery test.
+BTC T6 historical replay also succeeded in the same run. Offline safety
+workflow `36348088818` succeeded at the same SHA.
