@@ -47,6 +47,17 @@ jobs:
           print("REAL_MANTA_DATA_VALIDATED", {tf:len(v) for tf,v in manta["timeframes"].items()})
           print("MANTA strategy replay is NOT covered by BTC-only T6; no trading claims.")
           PY
+      - name: Real MANTA T6 radar replay (historical, no orders)
+        run: |
+          python - <<'PY'
+          import json
+          from office_t6_backtest import run_t6_backtest
+          report = run_t6_backtest("/tmp/pr68-real/MANTAUSDT.json", decision_stride=4)
+          assert report.symbol == "MANTAUSDT" and report.n_decisions > 100
+          assert not report.data_error, report.data_error
+          print("REAL_MANTA_T6", json.dumps(report.as_dict(), ensure_ascii=False))
+          print("MANTA T6 is historical radar simulation, NOT full Lev cognition or live returns.")
+          PY
       - name: Replay real MANTA WATCHING safety gates (no strategy PnL)
         run: python scripts/replay_real_manta_gate.py /tmp/pr68-real/MANTAUSDT.json
       - name: Upload non-sensitive replay inputs
