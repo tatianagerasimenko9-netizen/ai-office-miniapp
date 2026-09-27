@@ -18,6 +18,7 @@ STATES = (
     "ZONE_REACHED",
     "CONFIRMATION_PENDING",
     "CONFIRMED",
+    "CANCELLED",
     "INVALIDATED",
     "EXPIRED",
 )
@@ -100,7 +101,9 @@ def apply_setup_event(
         state = "EXPIRED"
     elif invalidated:
         state = "INVALIDATED"
-    elif state in ("CONFIRMED", "INVALIDATED", "EXPIRED"):
+    elif ev in ("CANCEL", "CANCELLED"):
+        state = "CANCELLED"
+    elif state in ("CONFIRMED", "CANCELLED", "INVALIDATED", "EXPIRED"):
         if ev in ("ZONE_IN", "HIT_ENTRY", "ZONE_REACHED") and state == "CONFIRMED":
             state = "CONFIRMED"
         elif in_position:
@@ -169,6 +172,8 @@ def may_emit_telegram(
         return {**deny, "reason": "ENTRY_PERMISSION лише через CONFIRMED-картку Лева, не T0"}
 
     if intent_u in (INTENT_CONFIRM, "CONFIRM"):
+        if st in ("CANCELLED", "INVALIDATED", "EXPIRED"):
+            return {**deny, "reason": f"сценарій завершено: {st}"}
         if rec.get("confirm_sent") or st == "CONFIRMED":
             return {**deny, "reason": "підтвердження вже надіслано"}
         if not ltf_confirmed:
@@ -208,13 +213,17 @@ def mark_confirm_sent(key: str) -> None:
 
 def hydrate_alert_gate_from_db(db_path: str) -> int:
     """Після рестарту: CONFIRMED у БД = confirm_sent, без другого CONFIRM."""
-    from office_bridge import signal_get_active
+    from office_bridge import signal_get_active, signal_get_scenarios
     from office_desk_card import is_legacy_desk_range
     from office_scenario_memory import parse_note_meta
 
     n = 0
     try:
-        rows = signal_get_active(db_path) or []
+        canonical_rows = signal_get_scenarios(db_path) or []
+        canonical_ids = {str(x.get("signal_id") or "") for x in canonical_rows}
+        rows = canonical_rows + [
+            x for x in (signal_get_active(db_path) or []) if str(x.get("signal_id") or "") not in canonical_ids
+        ]
     except Exception:
         return 0
     for r in rows:
@@ -223,7 +232,7 @@ def hydrate_alert_gate_from_db(db_path: str) -> int:
         st = str(r.get("status") or "").upper()
         note = str(r.get("analysis_note") or "")
         meta = parse_note_meta(note)
-        key = str(meta.get("okey") or "").strip()
+        key = str(meta.get("scenario_id") or meta.get("okey") or "").strip()
         if not key:
             key = origin_key(
                 symbol=str(r.get("symbol") or ""),
@@ -236,10 +245,11 @@ def hydrate_alert_gate_from_db(db_path: str) -> int:
         if not key:
             continue
         confirmed = st in ("CONFIRMED", "HIT_ENTRY", "HIT_TP1", "HIT_TP2") or "confirm_sent=1" in note or "confirmed_px=" in note
+        cancelled = st in ("CANCELLED", "STOPPED", "HIT_SL", "EXPIRED")
         prev = dict(_LIVE.get(key) or {})
         _LIVE[key] = {
             **prev,
-            "state": "CONFIRMED" if confirmed else str(prev.get("state") or "WATCHING"),
+            "state": "CANCELLED" if cancelled else ("CONFIRMED" if confirmed else str(prev.get("state") or "WATCHING")),
             "confirm_sent": bool(confirmed or prev.get("confirm_sent")),
             "entry_alert_sent": bool(confirmed or prev.get("entry_alert_sent")),
             "in_position": bool(prev.get("in_position")),

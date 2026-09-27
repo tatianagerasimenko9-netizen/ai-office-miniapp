@@ -2032,6 +2032,59 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
+    """Усі стани канонічних сценаріїв для hydrate/dedup, включно з terminal."""
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+               status, ts_created, ts_updated, outcome, analysis_note
+        FROM office_signals
+        WHERE analysis_note LIKE '%scenario_id=%'
+        ORDER BY COALESCE(NULLIF(ts_updated, ''), ts_created) DESC
+        """,
+        (),
+    )
+    return [
+        {
+            "signal_id": r[0],
+            "symbol": r[1],
+            "direction": r[2],
+            "entry_low": r[3],
+            "entry_high": r[4],
+            "sl": r[5],
+            "tp1": r[6],
+            "tp2": r[7],
+            "rr": r[8],
+            "status": r[9],
+            "ts_created": r[10],
+            "ts_updated": r[11],
+            "outcome": r[12],
+            "analysis_note": r[13],
+        }
+        for r in rows
+    ]
+
+
+def signal_refresh_scenario(
+    db_path: str,
+    *,
+    signal_id: str,
+    entry_low: Optional[float],
+    entry_high: Optional[float],
+) -> None:
+    """Оновити дрейф зони, не скидаючи lifecycle/status канонічного сценарію."""
+    _db_write(
+        db_path,
+        """
+        UPDATE office_signals
+        SET entry_low = ?, entry_high = ?, ts_updated = ?
+        WHERE signal_id = ?
+        """,
+        (entry_low, entry_high, _now_iso(), signal_id),
+    )
+
+
 def check_portfolio_correlation(db_path: str) -> Dict[str, Any]:
     """
     Кореляція лише явних /position у журналі.

@@ -927,6 +927,63 @@ def prepare_desk_send(
             "confluence": conf,
             "message": "",
         }
+    if db_path and conf is not None:
+        from office_bridge import signal_get_scenarios, signal_refresh_scenario
+        from office_scenario_memory import find_canonical_scenario, market_basis_key, parse_note_meta
+
+        basis = str(conf.get("market_basis") or market_basis_key(conf))
+        existing = find_canonical_scenario(
+            signal_get_scenarios(db_path),
+            symbol=symbol,
+            direction=direction,
+            timeframe=timeframe,
+            basis=basis,
+            zone_lo=conf.get("zone_lo"),
+            zone_hi=conf.get("zone_hi"),
+        )
+        if existing:
+            canonical_id = str(
+                parse_note_meta(existing.get("analysis_note")).get("scenario_id")
+                or existing.get("signal_id")
+                or ""
+            )
+            signal_refresh_scenario(
+                db_path,
+                signal_id=str(existing.get("signal_id") or canonical_id),
+                entry_low=conf.get("zone_lo"),
+                entry_high=conf.get("zone_hi"),
+            )
+            mark_live(
+                canonical_id,
+                {
+                    "symbol": symbol,
+                    "direction": direction,
+                    "timeframe": timeframe,
+                    "origin": "desk",
+                    "signal_id": existing.get("signal_id"),
+                    "sl": existing.get("sl"),
+                    "zone_lo": conf.get("zone_lo"),
+                    "zone_hi": conf.get("zone_hi"),
+                    "entry_low": conf.get("zone_lo"),
+                    "entry_high": conf.get("zone_hi"),
+                    "basis": basis,
+                    "status": existing.get("status") or "WATCHING",
+                    "ts": now_ts,
+                },
+            )
+            return {
+                "send": False,
+                "sl": existing.get("sl"),
+                "size": None,
+                "reversal": False,
+                "reason": f"канонічний сценарій живий: {existing.get('status')}",
+                "confluence": {**conf, "setup_key": canonical_id, "scenario_id": canonical_id},
+                "setup_key": canonical_id,
+                "scenario_id": canonical_id,
+                "market_basis": basis,
+                "canonical_match": True,
+                "message": "",
+            }
     from office_alert_gate import chase_blocks_entry, validate_trade_geometry
 
     zone_lo = (conf or {}).get("zone_lo")
@@ -1031,6 +1088,10 @@ def prepare_desk_send(
                 "sl": gate.get("sl"),
                 "zone_lo": zone_lo,
                 "zone_hi": zone_hi,
+                "entry_low": zone_lo,
+                "entry_high": zone_hi,
+                "basis": (conf or {}).get("market_basis") or "",
+                "scenario_id": key,
                 "grade": (conf or {}).get("grade"),
                 "ts": now_ts,
             },
@@ -1051,6 +1112,8 @@ def prepare_desk_send(
         "text": text,
         "confluence": conf,
         "setup_key": key,
+        "scenario_id": key,
+        "market_basis": (conf or {}).get("market_basis") or "",
         "entry": entry_use,
         "chasing": chasing,
         "opens_position": False,

@@ -2944,6 +2944,8 @@ async def run() -> None:
         confirmed_position: bool = False,
         position_id: str = "",
         position_open: bool = False,
+        canonical_id: str = "",
+        scenario_event: str = "",
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
@@ -2974,6 +2976,8 @@ async def run() -> None:
                 symbol=symbol,
                 sl=sl,
                 stream=st,
+                canonical_id=canonical_id,
+                event=scenario_event or ev,
             )
             if not gate.get("send"):
                 print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
@@ -5030,6 +5034,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp1 = row.get("tp1")
                         tp2 = row.get("tp2")
                         ts_created = str(row.get("ts_created") or "")
+                        from office_scenario_memory import parse_note_meta
+
+                        scenario_meta = parse_note_meta(row.get("analysis_note"))
+                        canonical_sid = str(scenario_meta.get("scenario_id") or "")
                         if not signal_id or not symbol:
                             continue
 
@@ -5093,7 +5101,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 symbol=symbol,
                             )
                             if plan.in_zone:
-                                zkey = origin_key(
+                                zkey = canonical_sid or origin_key(
                                     symbol=symbol,
                                     direction=direction,
                                     zone_lo=e_low,
@@ -5216,7 +5224,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if missing_levels_active:
                                 print(f"[t0] ACTIVE incomplete SL/TP {symbol}: silent, no desk LLM")
                                 continue
-                            hkey = origin_key(
+                            hkey = canonical_sid or origin_key(
                                 symbol=symbol,
                                 direction=direction,
                                 zone_lo=e_low,
@@ -5944,8 +5952,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                     sl=prep.get("sl"),
                     kind=KIND_SIGNAL,
                     intent="SIGNAL",
+                    canonical_id=str(prep.get("scenario_id") or prep.get("setup_key") or ""),
+                    scenario_event=EVENT_SIGNAL_ENTRY,
                 )
-                sid = f"desk-{tag}-{sym}-{int(now_ts)}"
+                sid = str(prep.get("scenario_id") or prep.get("setup_key") or f"desk-{tag}-{sym}-{int(now_ts)}")
                 e_px = prep.get("entry")
                 try:
                     e_px = float(e_px) if e_px is not None else (float(entry) if entry is not None else None)
@@ -5962,6 +5972,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                     "zone_hi": conf.get("zone_hi"),
                 }
                 try:
+                    from office_scenario_memory import stamp_scenario_note
+
+                    scenario_note = stamp_scenario_note(
+                        (
+                            f"{setup_type or tag}"
+                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
+                            + (f" ckey={conf.get('zone_key')}" if conf.get("zone_key") else "")
+                        ),
+                        origin="desk",
+                        timeframe=timeframe,
+                        scenario_id=sid,
+                        basis=str(prep.get("market_basis") or conf.get("market_basis") or ""),
+                    )
                     signal_upsert(
                         db_path,
                         signal_id=sid,
@@ -5974,12 +5997,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp2=tp2,
                         rr=None,
                         status="ACTIVE",
-                        analysis_note=(
-                            f"{setup_type or tag}"
-                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
-                            + (f" ckey={prep.get('setup_key')}" if prep.get("setup_key") else "")
-                        )[:2000],
+                        analysis_note=scenario_note[:2000],
                     )
+                    apply_setup_event(sid, "FOUND")
                     journal_open_office_signal(
                         db_path,
                         signal_id=sid,
@@ -6470,6 +6490,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     sym_f = str(st.get("symbol") or "")
                     if not sym_f:
                         continue
+                    if str(st.get("status") or "WATCHING").upper() not in ("WATCHING", "ACTIVE", "ZONE_REACHED"):
+                        continue
                     tf_wait = "5m" if str(st.get("timeframe") or "M15").upper() in ("M15", "M5", "M1") else "15m"
                     try:
                         ltf = fetch_candles(sym_f, tf_wait, 40)
@@ -6484,14 +6506,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf)
                     act = str(fu.get("action") or "")
                     if act == "confirm":
-                        okey = origin_key(
-                            symbol=sym_f,
-                            direction=str(st.get("direction") or ""),
-                            zone_lo=st.get("zone_lo"),
-                            zone_hi=st.get("zone_hi"),
-                            origin=str(st.get("origin") or "desk"),
-                            timeframe=str(st.get("timeframe") or ""),
-                        )
+                        okey = str(st.get("scenario_id") or key)
                         cg = may_emit_telegram(
                             key=okey,
                             intent="CONFIRM",
@@ -6515,6 +6530,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
+                            canonical_id=okey,
+                            scenario_event="CONFIRM",
                         )
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
@@ -6547,7 +6564,25 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     reason=str(fu.get("reason") or ""),
                                 ),
                             ),
+                            symbol=sym_f,
+                            kind="CANCEL_BEFORE_ENTRY",
+                            intent="ANALYTICAL",
+                            canonical_id=str(st.get("scenario_id") or key),
+                            scenario_event="CANCELLED",
                         )
+                        ckey = str(st.get("scenario_id") or key)
+                        apply_setup_event(ckey, "CANCELLED")
+                        try:
+                            from office_bridge import signal_update
+
+                            signal_update(
+                                db_path,
+                                signal_id=str(st.get("signal_id") or ckey),
+                                status="CANCELLED",
+                                outcome="CANCELLED",
+                            )
+                        except Exception as exc_cancel:
+                            print(f"[confluence] status CANCELLED {sym_f}: {exc_cancel}")
                         live_drop(key)
                         print(f"[confluence] cancelled {key}")
             except Exception as exc_fu:

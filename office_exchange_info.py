@@ -22,7 +22,7 @@ _SEED: Dict[str, Dict[str, str]] = {
     "BTCUSDT": {"tickSize": "0.10", "stepSize": "0.001"},
     "ETHUSDT": {"tickSize": "0.01", "stepSize": "0.001"},
     "XAUUSDT": {"tickSize": "0.01", "stepSize": "0.001"},
-    "MANTAUSDT": {"tickSize": "0.000001", "stepSize": "0.1"},
+    "MANTAUSDT": {"tickSize": "0.0000100", "stepSize": "0.1"},
 }
 
 _CACHE: Dict[str, Any] = {"ts": 0.0, "by_sym": {}, "fetched": False, "ok": False}
@@ -44,7 +44,9 @@ def _dec(v: Any) -> Optional[Decimal]:
         return None
     if x.is_nan() or x <= 0:
         return None
-    return x
+    # Binance повертає кроки з padding-нулями (наприклад MANTA 0.0000100).
+    # Для quantize потрібен числовий quantum 0.00001, а не scale рядка 1e-7.
+    return x.normalize()
 
 
 def seed_allowed() -> bool:

@@ -154,12 +154,25 @@ def reset_trade_telegram_dedup() -> None:
     _TRADE_TG_LAST.clear()
 
 
-def _trade_fp_key(*, kind: str, symbol: str, sl: Any, text: str, stream: str) -> str:
+def _trade_fp_key(
+    *,
+    kind: str,
+    symbol: str,
+    sl: Any,
+    text: str,
+    stream: str,
+    canonical_id: str = "",
+    event: str = "",
+) -> str:
     from office_telegram_filter import format_px
 
     k = str(kind or "").strip().upper()
     sym = str(symbol or "").strip().upper()
     st = str(stream or TRADE_UPDATE_STREAM).strip().lower() or TRADE_UPDATE_STREAM
+    cid = str(canonical_id or "").strip()
+    ev = str(event or kind or "").strip().upper()
+    if cid and ev:
+        return f"SCENARIO|{cid}|{ev}|{st}"
     sls = format_px(sl)
     if k == "TRAIL" and sym and sls:
         return f"TRAIL|{sym}|{sls}|{st}"
@@ -176,16 +189,27 @@ def should_send_trade_telegram(
     sl: Any = None,
     stream: str = TRADE_UPDATE_STREAM,
     now_ts: float = 0.0,
+    canonical_id: str = "",
+    event: str = "",
 ) -> Dict[str, Any]:
     """Другий той самий SL / той самий текст — тільки лог. Форсує одну гілку general."""
     st = TRADE_UPDATE_STREAM
-    key = _trade_fp_key(kind=kind, symbol=symbol, sl=sl, text=text, stream=st)
+    key = _trade_fp_key(
+        kind=kind,
+        symbol=symbol,
+        sl=sl,
+        text=text,
+        stream=st,
+        canonical_id=canonical_id,
+        event=event,
+    )
     try:
         now = float(now_ts or time_mod.time())
     except (TypeError, ValueError):
         now = time_mod.time()
     last = _TRADE_TG_LAST.get(key)
-    if last is not None and now - last < TRADE_TG_DEDUP_SEC:
+    stable_scenario_event = bool(str(canonical_id or "").strip() and str(event or kind or "").strip())
+    if last is not None and (stable_scenario_event or now - last < TRADE_TG_DEDUP_SEC):
         return {"send": False, "reason": "duplicate telegram", "key": key, "stream": st}
     _TRADE_TG_LAST[key] = now
     _ = stream  # ігноруємо другий stream — гілка одна

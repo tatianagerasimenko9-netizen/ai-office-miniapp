@@ -315,9 +315,9 @@ def main() -> int:
 
     junk_span = format_level_span(0.07047058, 0.07144666000000001, "MANTAUSDT")
     sl_txt = format_px(0.07250414754616397, "MANTAUSDT")
-    if junk_span != "0.070471–0.071447":
+    if junk_span != "0.07047–0.07145":
         return _fail(f"manta zone display {junk_span}")
-    if sl_txt != "0.072504":
+    if sl_txt != "0.0725":
         return _fail(f"manta sl display {sl_txt}")
     fake_add = (
         f"Тетяно, MANTAUSDT: ціна повернулась в entry-зону {junk_span}. "

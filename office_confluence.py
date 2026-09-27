@@ -702,16 +702,56 @@ def evaluate_confluence(
         range_bounds=bounds,
     )
     grade = grade_for(n_zone=n, confirms=confirms)
-    key = setup_key(symbol=symbol, direction=side, zone_lo=best["lo"], zone_hi=best["hi"])
+    zone_key = setup_key(symbol=symbol, direction=side, zone_lo=best["lo"], zone_hi=best["hi"])
+    from office_scenario_memory import (
+        canonical_scenario_id,
+        market_basis_key,
+        scenario_identity_matches,
+    )
+
+    basis = market_basis_key(best)
+    key = canonical_scenario_id(
+        symbol=symbol,
+        direction=side,
+        timeframe=timeframe,
+        basis=basis,
+        zone_lo=best["lo"],
+        zone_hi=best["hi"],
+    )
     ts = float(now_ts if now_ts is not None else time.time())
     live = _LIVE.get(key)
-    if live and str(live.get("status")) == "WATCHING":
+    if not live:
+        for existing_key, existing in _LIVE.items():
+            if scenario_identity_matches(
+                existing,
+                symbol=symbol,
+                direction=side,
+                timeframe=timeframe,
+                basis=basis,
+                zone_lo=best["lo"],
+                zone_hi=best["hi"],
+            ):
+                key, live = existing_key, existing
+                break
+    if live:
         born = float(live.get("ts") or 0)
         if ts - born < ttl_sec(timeframe):
+            live.update(
+                {
+                    "zone_lo": float(best["lo"]),
+                    "zone_hi": float(best["hi"]),
+                    "entry_low": float(best["lo"]),
+                    "entry_high": float(best["hi"]),
+                    "zone_key": zone_key,
+                }
+            )
             return {
                 **empty,
-                "reason": "сетап живий",
+                "reason": f"сетап живий: {str(live.get('status') or 'WATCHING').upper()}",
                 "setup_key": key,
+                "scenario_id": key,
+                "market_basis": basis,
+                "zone_key": zone_key,
                 "cluster": best,
                 "grade": live.get("grade") or grade,
                 "zone_lo": best["lo"],
@@ -730,6 +770,9 @@ def evaluate_confluence(
             "n": n,
             "tags": best["tags"],
             "setup_key": key,
+            "scenario_id": key,
+            "market_basis": basis,
+            "zone_key": zone_key,
             "zone_lo": best["lo"],
             "zone_hi": best["hi"],
             "entry": float(best["mid"]),
@@ -746,6 +789,9 @@ def evaluate_confluence(
         "cluster": best,
         "confirms": confirms,
         "setup_key": key,
+        "scenario_id": key,
+        "market_basis": basis,
+        "zone_key": zone_key,
         "zone_lo": float(best["lo"]),
         "zone_hi": float(best["hi"]),
         "entry": entry_mid,
@@ -775,7 +821,11 @@ def evaluate_confluence(
 def mark_live(key: str, payload: Dict[str, Any]) -> None:
     if not key:
         return
-    _LIVE[key] = {**payload, "status": "WATCHING", "ts": float(payload.get("ts") or time.time())}
+    _LIVE[key] = {
+        **payload,
+        "status": str(payload.get("status") or "WATCHING").upper(),
+        "ts": float(payload.get("ts") or time.time()),
+    }
 
 
 def live_items() -> List[Tuple[str, Dict[str, Any]]]:
@@ -801,16 +851,20 @@ def note_db_only(key: str) -> bool:
 
 
 def hydrate_live_from_db(db_path: str) -> int:
-    """Після рестарту Worker: живі ключі з ACTIVE, не з desk-range."""
+    """Після рестарту Worker: канонічний ID і lifecycle з БД."""
     import re
 
-    from office_bridge import signal_get_active
+    from office_bridge import signal_get_active, signal_get_scenarios
     from office_desk_card import is_legacy_desk_range
     from office_scenario_memory import parse_note_meta
 
     n = 0
     try:
-        rows = signal_get_active(db_path) or []
+        canonical_rows = signal_get_scenarios(db_path) or []
+        canonical_ids = {str(x.get("signal_id") or "") for x in canonical_rows}
+        rows = canonical_rows + [
+            x for x in (signal_get_active(db_path) or []) if str(x.get("signal_id") or "") not in canonical_ids
+        ]
     except Exception:
         return 0
     for r in rows:
@@ -819,16 +873,19 @@ def hydrate_live_from_db(db_path: str) -> int:
         if is_legacy_desk_range(r):
             continue
         st = str(r.get("status") or "").upper()
-        if st not in ("ACTIVE", "HIT_ENTRY", "WATCHING"):
+        if st not in ("ACTIVE", "HIT_ENTRY", "WATCHING", "ZONE_REACHED", "CONFIRMED", "CANCELLED"):
             continue
         note = str(r.get("analysis_note") or "")
+        meta = parse_note_meta(note)
         m = re.search(r"ckey=([^\s]+)", note)
-        key = m.group(1) if m else setup_key(
-            symbol=str(r.get("symbol") or ""),
-            direction=str(r.get("direction") or ""),
-            zone_lo=r.get("entry_low"),
-            zone_hi=r.get("entry_high"),
-        )
+        key = str(meta.get("scenario_id") or "")
+        if not key:
+            key = m.group(1) if m else setup_key(
+                symbol=str(r.get("symbol") or ""),
+                direction=str(r.get("direction") or ""),
+                zone_lo=r.get("entry_low"),
+                zone_hi=r.get("entry_high"),
+            )
         if not key or key in _LIVE:
             continue
         mark_live(
@@ -842,7 +899,11 @@ def hydrate_live_from_db(db_path: str) -> int:
                 "sl": r.get("sl"),
                 "zone_lo": r.get("entry_low"),
                 "zone_hi": r.get("entry_high"),
+                "entry_low": r.get("entry_low"),
+                "entry_high": r.get("entry_high"),
+                "basis": meta.get("basis") or "",
                 "grade": "",
+                "status": st,
             },
         )
         n += 1

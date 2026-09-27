@@ -8,6 +8,7 @@ BTC-контекст лише коли є підтверджені дані.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Dict, List, Optional
 
@@ -47,11 +48,13 @@ def normalize_tf(tf: Any) -> str:
 
 def parse_note_meta(note: Any) -> Dict[str, str]:
     raw = str(note or "")
-    out = {"origin": "", "timeframe": "", "okey": "", "ckey": ""}
+    out = {"origin": "", "timeframe": "", "okey": "", "ckey": "", "scenario_id": "", "basis": ""}
     m_o = re.search(r"origin=([^\s]+)", raw, flags=re.I)
     m_t = re.search(r"(?:tf|timeframe)=([^\s]+)", raw, flags=re.I)
     m_k = re.search(r"okey=([^\s]+)", raw, flags=re.I)
     m_c = re.search(r"ckey=([^\s]+)", raw, flags=re.I)
+    m_s = re.search(r"scenario_id=([^\s]+)", raw, flags=re.I)
+    m_b = re.search(r"basis=([^\s]+)", raw, flags=re.I)
     if m_o:
         out["origin"] = str(m_o.group(1) or "").strip().lower()
     if m_t:
@@ -60,6 +63,10 @@ def parse_note_meta(note: Any) -> Dict[str, str]:
         out["okey"] = m_k.group(1)
     if m_c:
         out["ckey"] = m_c.group(1)
+    if m_s:
+        out["scenario_id"] = m_s.group(1)
+    if m_b:
+        out["basis"] = m_b.group(1)
     if not out["origin"] and out["okey"]:
         parts = out["okey"].split("|")
         if len(parts) >= 5:
@@ -75,6 +82,8 @@ def stamp_scenario_note(
     origin: str = "",
     timeframe: str = "",
     origin_key: str = "",
+    scenario_id: str = "",
+    basis: str = "",
 ) -> str:
     raw = str(note or "").strip()
     meta = parse_note_meta(raw)
@@ -85,6 +94,10 @@ def stamp_scenario_note(
         extra.append(f"tf={normalize_tf(timeframe)}")
     if origin_key and not meta.get("okey"):
         extra.append(f"okey={origin_key}")
+    if scenario_id and not meta.get("scenario_id"):
+        extra.append(f"scenario_id={scenario_id}")
+    if basis and not meta.get("basis"):
+        extra.append(f"basis={basis}")
     if not extra:
         return raw
     return (raw + (" " if raw else "") + " ".join(extra)).strip()[:2000]
@@ -107,6 +120,125 @@ def _zone_close(a: Any, b: Any, tol: float = 1e-8) -> bool:
     if x == 0 and y == 0:
         return True
     return abs(x - y) <= max(tol, abs(x) * 1e-8)
+
+
+def market_basis_key(confluence: Any) -> str:
+    """Незалежна ринкова основа: тип/ТФ/джерельна свічка кожного збігу."""
+    if not isinstance(confluence, dict):
+        return ""
+    cluster = confluence.get("cluster") if isinstance(confluence.get("cluster"), dict) else confluence
+    members = cluster.get("members") if isinstance(cluster, dict) else None
+    stable_parts: List[str] = []
+    transient_parts: List[str] = []
+    for item in members or []:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip().lower()
+        tf = normalize_tf(item.get("tf"))
+        origin_ts = str(item.get("origin_ts") or "").strip()
+        if tag:
+            part = f"{tag}:{tf}:{origin_ts}"
+            if tag in ("sc_ote", "sweep"):
+                transient_parts.append(part)
+            else:
+                stable_parts.append(part)
+    parts = stable_parts or transient_parts
+    if not parts:
+        tags = cluster.get("tags") if isinstance(cluster, dict) else confluence.get("tags")
+        parts = [str(x).strip().lower() for x in tags or [] if str(x).strip()]
+    if not parts:
+        return ""
+    raw = "|".join(sorted(set(parts)))
+    basis = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+    return basis
+
+
+def zone_overlap_ratio(a_lo: Any, a_hi: Any, b_lo: Any, b_hi: Any) -> float:
+    a, b, c, d = _f(a_lo), _f(a_hi), _f(b_lo), _f(b_hi)
+    if None in (a, b, c, d):
+        return 0.0
+    assert a is not None and b is not None and c is not None and d is not None
+    if a > b:
+        a, b = b, a
+    if c > d:
+        c, d = d, c
+    union = max(b, d) - min(a, c)
+    if union <= 0:
+        return 1.0 if _zone_close(a, c) else 0.0
+    return max(0.0, min(b, d) - max(a, c)) / union
+
+
+def canonical_scenario_id(
+    *,
+    symbol: str,
+    direction: str,
+    timeframe: str,
+    basis: str,
+    zone_lo: Any,
+    zone_hi: Any,
+) -> str:
+    raw = (
+        f"{str(symbol or '').upper()}|{str(direction or '').upper()}|{normalize_tf(timeframe)}|"
+        f"{str(basis or '')}|{_f(zone_lo)}|{_f(zone_hi)}"
+    )
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"SCN|{str(symbol or '').upper()}|{str(direction or '').upper()}|{normalize_tf(timeframe)}|{digest}"
+
+
+def scenario_identity_matches(
+    row: Dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    timeframe: str,
+    basis: str,
+    zone_lo: Any,
+    zone_hi: Any,
+    min_overlap: float = 0.9,
+) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("symbol") or "").upper() != str(symbol or "").upper():
+        return False
+    if str(row.get("direction") or "").upper() != str(direction or "").upper():
+        return False
+    meta = parse_note_meta(row.get("analysis_note"))
+    row_tf = meta.get("timeframe") or normalize_tf(row.get("timeframe"))
+    if not row_tf or row_tf != normalize_tf(timeframe):
+        return False
+    row_basis = str(meta.get("basis") or row.get("basis") or "")
+    if not basis or not row_basis or row_basis != basis:
+        return False
+    return zone_overlap_ratio(
+        row.get("entry_low") if row.get("entry_low") is not None else row.get("zone_lo"),
+        row.get("entry_high") if row.get("entry_high") is not None else row.get("zone_hi"),
+        zone_lo,
+        zone_hi,
+    ) >= float(min_overlap)
+
+
+def find_canonical_scenario(
+    rows: List[Dict[str, Any]],
+    *,
+    symbol: str,
+    direction: str,
+    timeframe: str,
+    basis: str,
+    zone_lo: Any,
+    zone_hi: Any,
+) -> Optional[Dict[str, Any]]:
+    for row in rows or []:
+        if scenario_identity_matches(
+            row,
+            symbol=symbol,
+            direction=direction,
+            timeframe=timeframe,
+            basis=basis,
+            zone_lo=zone_lo,
+            zone_hi=zone_hi,
+        ):
+            return row
+    return None
 
 
 def row_matches_scenario(
