@@ -281,15 +281,12 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["сценарій"]}
     pos = False
     try:
-        jrows = _fetchall(
-            _db(),
-            "SELECT trade_id, entry_reason, setup_name FROM trade_journal WHERE symbol = ? ORDER BY ts_open_utc DESC LIMIT 20",
-            (row.get("symbol"),),
+        from office_alert_gate import get_explicit_open_position
+
+        rec = get_explicit_open_position(
+            _db(), str(row.get("symbol") or ""), str(row.get("direction") or "")
         )
-        for tid, reason, setup in jrows or []:
-            if is_confirmed_position_row(reason, setup, tid):
-                pos = True
-                break
+        pos = bool(rec.get("ok"))
     except Exception:
         pos = False
     card = scenario_card(row, has_position=pos)

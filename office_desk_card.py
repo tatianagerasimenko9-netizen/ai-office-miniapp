@@ -285,8 +285,11 @@ def desk_entry_gate(
                 direction=str(direction or ""),
                 timeframe=timeframe,
             )
-        except Exception:
-            mem = {"allow_entry": True}
+        except Exception as exc:
+            return {
+                **empty,
+                "reason": f"DATA_UNAVAILABLE пам'ять сценарію: {type(exc).__name__}",
+            }
         if not mem.get("allow_entry"):
             return {**empty, "reason": str(mem.get("reason") or "пам'ять сценарію"), "memory": mem}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)

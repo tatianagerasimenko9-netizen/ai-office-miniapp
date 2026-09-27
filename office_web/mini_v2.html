@@ -56,7 +56,7 @@ th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);white-
   <button data-r="journal">Журнал</button>
   <button data-r="more">Ще</button>
 </nav>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js" integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK" crossorigin="anonymous"></script>
 <script>
 const $=id=>document.getElementById(id);
 const app=$('app');
@@ -100,7 +100,7 @@ async function home(){
     <div class="row">
       <div class="card kpi"><div class="mut">Сесія</div><b>${esc(una(sess))}</b></div>
       <div class="card kpi"><div class="mut">Придатні</div><b>${d.ready_count??0}</b></div>
-      <div class="card kpi"><div class="mut">BTC 24h</div><b>${una(b.change_24h)}</b></div>
+      <div class="card kpi"><div class="mut">BTC 24h</div><b>${esc(una(b.change_24h))}</b></div>
     </div>
     <h2 style="font-size:15px">Сценарії Лева</h2>${list}`;
   app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));
