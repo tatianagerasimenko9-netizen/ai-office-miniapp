@@ -447,6 +447,7 @@ def format_desk_card(
     chart_tf: str = "",
     why_line: str = "",
     invalidate_line: str = "",
+    confluence: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
     from office_alert_gate import validate_trade_geometry
@@ -534,8 +535,11 @@ def format_desk_card(
         lines.append(f"Структура: {z}")
     from office_lev_verdict import scenario_ready_to_present
 
+    pack = dict(confluence or {})
+    if z and not pack.get("zone_line"):
+        pack["zone_line"] = z
     ready = scenario_ready_to_present(
-        confluence={"zone_line": z, "tags": []},
+        confluence=pack,
         sl=s,
         invalidate_line=inv,
         lev_note=ln,
@@ -1013,6 +1017,7 @@ def prepare_desk_send(
         now_line=str((conf or {}).get("now_line") or ""),
         lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
         chart_tf="M15",
+        confluence=conf,
     )
     key = str((conf or {}).get("setup_key") or "")
     if key and (ready.get("ready") or not require_confluence):

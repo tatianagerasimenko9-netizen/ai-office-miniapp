@@ -5858,7 +5858,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         last_px = float((src[-1] or {}).get("close") or entry or 0) or entry
                 except Exception:
                     last_px = entry
-                from office_lev_verdict import ACTION_SKIP, lev_cycle
+                from office_lev_verdict import ACTION_SKIP, ACTION_WAIT, lev_cycle
 
                 cycle = lev_cycle(
                     symbol=sym,
@@ -5875,8 +5875,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     now_ts=now_ts,
                     market_context={"data_status": "DATA_UNAVAILABLE"},
                 )
-                if str(cycle.get("action") or "") == ACTION_SKIP:
-                    print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('reason')}")
+                if str(cycle.get("action") or "") in (ACTION_SKIP, ACTION_WAIT):
+                    print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('action')} {cycle.get('reason')}")
                     return False
                 if lev_note:
                     lev_note = f"{lev_note} · {cycle.get('reason') or ''}".strip(" ·")
