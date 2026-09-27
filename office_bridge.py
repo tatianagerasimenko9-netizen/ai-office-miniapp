@@ -1463,6 +1463,13 @@ def journal_open_office_signal(
     }
     if extra:
         ctx.update(extra)
+    if not ctx.get("session"):
+        try:
+            from office_signal_stats import kyiv_session
+
+            ctx["session"] = kyiv_session(_now_iso())
+        except Exception:
+            pass
     journal_open_trade(
         db_path,
         trade_id=tid,
@@ -3703,6 +3710,12 @@ def build_olesya_evening_debrief(db_path: str, *, now: Optional[datetime] = None
     ]
     if best_line:
         lines.append(best_line)
+    try:
+        from office_signal_stats import format_stats_one_liner
+
+        lines.append(format_stats_one_liner(db_path))
+    except Exception:
+        pass
     return "\n".join(lines)
 
 
