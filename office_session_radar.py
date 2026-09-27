@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple
 
 from office_atr_policy import classify_atr_day_used
@@ -30,6 +31,48 @@ KIND_SIGNAL = "signal"
 KIND_WATCHING = "watching"
 KIND_PAPER = "paper"
 KIND_LIVE = "live"
+
+
+def session_clock_dst(ts: datetime) -> Dict[str, Any]:
+    """Exchange-independent desk clock with London/NY daylight saving.
+
+    Asia is a fixed 00:00–08:00 UTC desk window; London is 08:00–16:00
+    Europe/London local and NY is 08:00–16:00 America/New_York local.
+    No trading session clock is an exchange-hours or liquidity guarantee.
+    """
+    if ts.tzinfo is None:
+        raise ValueError("session clock requires an aware timestamp")
+    now = ts.astimezone(timezone.utc)
+    asia = 0 <= now.hour < 8
+    london_local = now.astimezone(ZoneInfo("Europe/London"))
+    ny_local = now.astimezone(ZoneInfo("America/New_York"))
+    london = 8 <= london_local.hour < 16
+    ny = 8 <= ny_local.hour < 16
+    active = [name for name, enabled in (("asia", asia), ("london", london), ("ny", ny)) if enabled]
+    starts = []
+    for name, zone, hour in (
+        ("asia", timezone.utc, 0),
+        ("london", ZoneInfo("Europe/London"), 8),
+        ("ny", ZoneInfo("America/New_York"), 8),
+    ):
+        local_now = now.astimezone(zone)
+        for days in range(3):
+            local_date = (local_now + timedelta(days=days)).date()
+            candidate = datetime(local_date.year, local_date.month, local_date.day, hour, tzinfo=zone)
+            utc_candidate = candidate.astimezone(timezone.utc)
+            if utc_candidate > now:
+                starts.append((utc_candidate, name))
+                break
+    next_start, next_name = min(starts)
+    return {
+        "active": active,
+        "overlap": london and ny,
+        "next": next_name,
+        "next_in_min": int((next_start - now).total_seconds() // 60),
+        "london_utc_offset_hours": london_local.utcoffset().total_seconds() / 3600,
+        "ny_utc_offset_hours": ny_local.utcoffset().total_seconds() / 3600,
+        "order_authorized": False,
+    }
 
 
 def session_at_utc(ts: Optional[datetime] = None) -> str:
