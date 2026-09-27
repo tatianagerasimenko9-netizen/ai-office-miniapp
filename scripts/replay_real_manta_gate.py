@@ -6,6 +6,9 @@ actual price observations. No fabricated candles, no Telegram, no orders.
 """
 import argparse
 import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from datetime import timedelta
 from office_t6_backtest import load_ohlcv_file, parse_ts, day_used_pct_offline
 from office_zone_alert import plan_watching_zone_hit, zone_reached_to_telegram
