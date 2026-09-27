@@ -52,8 +52,9 @@ def reserve_delivery(
     """Atomically claim one event. None means pending or already delivered.
 
     stable=True means a canonical scenario event is never re-sent after delivery.
-    An expired in-flight lease can be retried; a crash after Telegram accepts a
-    message but before DB commit can still cause a duplicate (no Telegram 2PC).
+    An expired PENDING lease is never automatically retried: the worker may
+    have crashed after Telegram accepted the message (no Telegram 2PC).
+    Reconcile expired PENDING and UNCERTAIN events manually before retry.
     """
     if not key or lease_seconds <= 0 or dedup_seconds <= 0:
         raise ValueError("invalid delivery reservation")
@@ -75,6 +76,9 @@ def reserve_delivery(
         if row and row[0] == "DELIVERED" and stable:
             return None
         if row and row[0] == "UNCERTAIN":
+            return None
+        # Never reclaim PENDING: the Telegram send outcome may be unknown.
+        if row and row[0] == "PENDING":
             return None
         # Conditional UPDATE serializes concurrent claimants across processes.
         cur = conn.execute(
