@@ -284,6 +284,8 @@ def run_t6_backtest(
     r_closed: List[float] = []
 
     for i, bar in enumerate(m15_all):
+        if open_trade is None and i % decision_stride:
+            continue
         asof = close_time(bar, "15m")
         daily = closed_asof(daily_all, "1d", asof)
         h1 = closed_asof(h1_all, "1h", asof)
@@ -321,8 +323,6 @@ def run_t6_backtest(
             continue
 
         if len(m15) < 1 or not daily or not h1:
-            continue
-        if i % decision_stride:
             continue
         price = float(bar["close"])
         day_used = day_used_pct_offline(daily)
