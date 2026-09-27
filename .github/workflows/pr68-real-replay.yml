@@ -28,18 +28,10 @@ jobs:
           python-version: '3.11'
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
-      - name: Download real closed BTC and MANTA candles
+      - name: Download real completed monthly BTC and MANTA archives
         run: |
-          python - <<'PY'
-          import datetime
-          import subprocess
-          end = datetime.datetime.now(datetime.timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
-          start = end - datetime.timedelta(days=21)
-          for symbol in ("BTCUSDT","MANTAUSDT"):
-              subprocess.run(["python","scripts/fetch_real_ohlcv.py","--symbol",symbol,
-                              "--start",start.isoformat(),"--end",end.isoformat(),
-                              "--output",f"/tmp/pr68-real/{symbol}.json"],check=True)
-          PY
+          python scripts/fetch_binance_archive.py --symbol BTCUSDT --month 2026-07 --output /tmp/pr68-real/BTCUSDT.json
+          python scripts/fetch_binance_archive.py --symbol MANTAUSDT --month 2026-07 --output /tmp/pr68-real/MANTAUSDT.json
       - name: Real BTC T6 replay and MANTA data-integrity gate
         run: |
           python - <<'PY'
