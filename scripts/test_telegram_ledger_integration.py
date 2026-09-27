@@ -17,6 +17,10 @@ assert 'if ledger_token and delivered_id and not ledger_committed:' in source
 assert 'return None' in source
 assert 'finish_trade_telegram(key=dedup_key, delivered=False)' in source
 assert 'await ledger_heartbeat' in source
+assert 'send_attempted = True' in source
+assert 'send_attempted and not delivered_id' in source
+assert 'photo outcome ambiguous' in source
+assert 'mark_delivery_uncertain(db_path, dedup_key, ledger_token)' in source
 assert any(isinstance(node, ast.AsyncFunctionDef) and node.name == "_renew_telegram_lease"
            for node in ast.walk(tree))
 print("OK Telegram opt-in integration source guards (offline)")
