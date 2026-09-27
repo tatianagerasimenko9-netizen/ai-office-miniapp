@@ -59,3 +59,5 @@ jobs:
         run: python scripts/test_telegram_ledger_integration.py
       - name: Real relay behavior with fake Telegram and isolated SQLite
         run: python scripts/test_telegram_relay_behavior.py
+      - name: Independent risk officer veto (offline, no orders)
+        run: python scripts/test_risk_officer.py
