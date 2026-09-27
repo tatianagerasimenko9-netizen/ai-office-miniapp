@@ -190,6 +190,17 @@ def main() -> int:
     )
     if not d1.get("send"):
         return _fail(("first reservation", d1))
+    # A concurrent send must not pass while the first send is still in flight.
+    pending = should_send_trade_telegram(
+        text="Entry 75 610",
+        kind="signal",
+        symbol="BTCUSDT",
+        canonical_id=str(first["scenario_id"]),
+        event="SIGNAL_ENTRY",
+        now_ts=500.0,
+    )
+    if pending.get("send"):
+        return _fail(("concurrent delivery bypassed reservation", pending))
     # A failed Telegram send must release the reservation and allow retry.
     finish_trade_telegram(key=str(d1["key"]), delivered=False)
     retry = should_send_trade_telegram(
