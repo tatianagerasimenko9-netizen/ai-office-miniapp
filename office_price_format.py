@@ -80,7 +80,10 @@ def quantize_display(
         rounding = ROUND_DOWN if sd == "LONG" else (ROUND_UP if sd == "SHORT" else ROUND_HALF_UP)
     elif k in ("TP", "TP1", "TP2", "TP3"):
         rounding = ROUND_DOWN if sd == "LONG" else (ROUND_UP if sd == "SHORT" else ROUND_HALF_UP)
-    # Decimal.quantize(t) only matches decimal places; it does NOT enforce\n    # non-power-of-ten tick sizes (e.g. 0.05 or 0.25).\n    units = (d / t).to_integral_value(rounding=rounding)\n    return (units * t).quantize(t)
+    # Decimal.quantize(t) only matches decimal places; it does NOT enforce
+    # non-power-of-ten tick sizes (e.g. 0.05 or 0.25).
+    units = (d / t).to_integral_value(rounding=rounding)
+    return (units * t).quantize(t)
 
 
 def format_px(
