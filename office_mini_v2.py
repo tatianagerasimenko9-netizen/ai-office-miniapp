@@ -236,6 +236,7 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         wait_tf="M15",
         confirms=[],
         direction=str(row.get("direction") or ""),
+        symbol=str(row.get("symbol") or ""),
     )
     if not labs and note.get("grade"):
         story = {

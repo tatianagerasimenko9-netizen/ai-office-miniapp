@@ -95,3 +95,21 @@ jobs:
         run: |
           python scripts/test_mini_v2.py
           python scripts/test_mini_v2_cards.py
+
+  mini-app-ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OFFICE_EXINFO_SEED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies and Playwright Chromium
+        run: |
+          python -m pip install -r requirements.txt playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Mini App browser smoke (phone/desktop, XSS, error/loading states)
+        run: python scripts/ui_smoke_mini_v2.py

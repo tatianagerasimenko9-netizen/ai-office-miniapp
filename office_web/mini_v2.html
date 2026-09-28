@@ -19,14 +19,14 @@ main{padding:10px var(--pad) 18px;max-width:600px;margin:0 auto}
 h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.05em}
 .mut{color:var(--mut);font-size:12px;line-height:1.45}
 .num{font-variant-numeric:tabular-nums}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 10px;min-width:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 10px;min-width:0;overflow-wrap:anywhere}
 .card.tap{cursor:pointer}.card.tap:active{background:var(--raise)}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;min-width:0}
 .kpi b{display:block;font-size:15px;margin-top:3px;overflow-wrap:anywhere;line-height:1.25}
-.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.sym{font-size:17px;font-weight:700}
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.sym{font-size:17px;font-weight:700;overflow-wrap:anywhere;min-width:0;max-width:100%}
 .side{font-weight:700;font-size:13px;letter-spacing:.03em}
 .L{color:var(--long)}.S{color:var(--short)}
 .pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--mut);white-space:nowrap}
@@ -38,14 +38,15 @@ h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transf
 .lv{display:grid;grid-template-columns:minmax(0,1.6fr) repeat(2,minmax(0,1fr)) minmax(0,.8fr);gap:6px;margin-top:10px}
 .lv div{background:var(--raise);border-radius:10px;padding:7px 8px;min-width:0}
 .lv span{display:block;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
-.lv b{display:block;font-size:13px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv b{display:block;font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media (max-width:420px){.lv{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .lv div:first-child b{white-space:normal;overflow-wrap:anywhere}
 .lv .sl b{color:var(--short)}.lv .tp b{color:var(--long)}
 .sec{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin:0 0 10px}
 .sec h3{margin:0 0 6px;font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
 .sec p{margin:0;font-size:14px;line-height:1.5}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
-.kv:last-child{border-bottom:0}.kv span{color:var(--mut)}.kv b{font-variant-numeric:tabular-nums;text-align:right}
+.kv:last-child{border-bottom:0}.kv span{color:var(--mut)}.kv b{font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere;min-width:0}
 .chips{display:flex;gap:6px;overflow-x:auto;margin:4px 0 10px;padding-bottom:2px;scrollbar-width:none}
 .chips button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:999px;padding:7px 12px;font-size:12px}
 .chips button.on{background:var(--raise);color:var(--txt);border-color:var(--acc)}

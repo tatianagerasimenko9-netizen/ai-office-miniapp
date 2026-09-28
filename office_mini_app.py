@@ -278,7 +278,9 @@ def build_review_draft(trade_id: str | None) -> dict[str, object]:
 
     def fmtp(label: str, v: object) -> str:
         x = _f_or_none(v)
-        return f"{label}: {x:.6g}" if x is not None else f"{label}: —"
+        from office_price_format import format_px
+
+        return f"{label}: {format_px(x) or x}" if x is not None else f"{label}: —"
 
     try:
         pnl_s = f"{float(pnl_pct or 0):+.2f}%"
