@@ -83,6 +83,17 @@ jobs:
         run: python scripts/test_execution_check.py
       - name: Legacy proactive path needs Lev SEND for ACTIVE (offline)
         run: python scripts/test_legacy_guard.py
+      - name: Full regression — every scripts/test_*.py (no network required)
+        run: |
+          fail=0
+          for t in scripts/test_*.py; do
+            if timeout 180 python "$t" </dev/null > /tmp/out.txt 2>&1; then
+              echo "ok  $t"
+            else
+              echo "FAIL $t"; tail -20 /tmp/out.txt; fail=1
+            fi
+          done
+          exit $fail
       - name: London and NY DST desk clock (offline)
         run: python scripts/test_session_dst.py
       - name: Exchange tick display and no float tails (offline)
