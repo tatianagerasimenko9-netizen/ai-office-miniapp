@@ -2655,6 +2655,32 @@ async def run() -> None:
                         "reason": "ризик-контроль недоступний — план не передається"}
             return cycle
 
+    def _lev_cycle_for_symbol(sym: str, price: Any) -> Dict[str, Any]:
+        """Повний lev_cycle для legacy-шляху (sync, для asyncio.to_thread). Помилка = не SEND."""
+        from office_lev_verdict import lev_cycle as _lc
+        from office_market_data import fetch_candles
+
+        try:
+            bars = {tf: fetch_candles(sym, iv, n) for tf, iv, n in (
+                ("H1", "1h", 48), ("H4", "4h", 48), ("M15", "15m", 96), ("D1", "1d", 30),
+            )}
+            bars = {k: (v if isinstance(v, list) else None) for k, v in bars.items()}
+            px = price
+            if px is None and bars.get("M15"):
+                px = (bars["M15"][-1] or {}).get("close")
+            cyc = _lc(
+                symbol=sym, price=px, timeframe="H1",
+                candles_m15=bars["M15"], candles_h1=bars["H1"], candles_h4=bars["H4"],
+                candles_d1=bars["D1"], candles_ltf=bars["M15"], candles_m5=bars["M15"],
+                market_context={"data_status": "DATA_UNAVAILABLE"},
+            )
+            cyc = _lev_risk_review(cyc, sym, candles_ltf=bars["M15"], market_context={"data_status": "DATA_UNAVAILABLE"})
+            _lev_record_thesis(cyc, bars)
+            return cyc
+        except Exception as exc:
+            print(f"[lev] legacy gate error {sym}: {type(exc).__name__}: {exc}")
+            return {"action": "SKIP", "send": False, "reason": f"lev_cycle error: {type(exc).__name__}"}
+
     def _lev_record_thesis(cycle: Dict[str, Any], candles_by_tf: Dict[str, Any]) -> None:
         """Версія тези Лева в журнал. Помилка журналу не змінює рішення."""
         try:
@@ -5040,7 +5066,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                 print(f"[scanner] {symbol} → немає чіткого сетапу, мовчимо")
                 return
 
-            await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            # LLM-текст «entry/sl» не є висновком Лева: ACTIVE лише якщо lev_cycle дав SEND
+            # у тому самому напрямку. Інакше — тихий WATCHING (OFFICE_LEGACY_ACTIVE_REQUIRES_LEV=0
+            # повертає стару поведінку).
+            from office_legacy_guard import legacy_requires_lev, legacy_scenario_status
+
+            legacy_cycle: Dict[str, Any] = {}
+            if legacy_requires_lev():
+                legacy_cycle = await asyncio.to_thread(_lev_cycle_for_symbol, symbol, current_price)
+            legacy = legacy_scenario_status(legacy_cycle, direction=direction, enforce=legacy_requires_lev())
+            if legacy["status"] == "ACTIVE":
+                await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            else:
+                print(f"[scanner] {symbol} LLM-сетап без підтвердження Лева → WATCHING тихо: {legacy['reason']}")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
             signal_id = f"proactive-{symbol}-{int(time.time())}"
@@ -5055,9 +5093,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                 tp1=parsed.get("tp1"),
                 tp2=parsed.get("tp2"),
                 rr=parsed.get("rr"),
-                status="ACTIVE",
-                analysis_note=lev_final or "",
+                status=legacy["status"],
+                analysis_note=(legacy["note_prefix"] + (lev_final or ""))[:2000],
             )
+            if legacy["status"] != "ACTIVE":
+                return
             # ФІКС 4: Олеся автоматично заносить сигнал у бібліотеку угод.
             try:
                 rid = trade_journal_add(

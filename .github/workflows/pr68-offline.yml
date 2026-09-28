@@ -81,6 +81,8 @@ jobs:
         run: python scripts/test_session_desk.py
       - name: Execution Planner v1 pre-entry checks (offline)
         run: python scripts/test_execution_check.py
+      - name: Legacy proactive path needs Lev SEND for ACTIVE (offline)
+        run: python scripts/test_legacy_guard.py
       - name: London and NY DST desk clock (offline)
         run: python scripts/test_session_dst.py
       - name: Exchange tick display and no float tails (offline)
