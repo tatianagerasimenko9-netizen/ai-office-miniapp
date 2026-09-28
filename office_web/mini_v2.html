@@ -365,6 +365,24 @@ async function paintChart(el, s){
   return pack;
 }
 
+const REASON_UA={REGIME_NOT_VERIFIED:'режим ринку не підтверджено даними',MISSING_ALTERNATIVE:'немає альтернативи',
+  MISSING_INVALIDATION:'немає інвалідації',MISSING_EVIDENCE:'немає доказів',EVIDENCE_STALE_OR_FUTURE:'докази застарілі',
+  EVIDENCE_PROVENANCE_MISSING:'у доказу немає джерела/часу',EXPIRED_OR_INVALID_EXPIRY:'теза прострочена',THESIS_NOT_ACTIVE:'теза не активна'};
+function thesisHtml(t){
+  if(!t) return '<div class="sec"><h3>Теза Лева</h3><p class="mut">Версії тези в журналі ще немає — не реконструюємо.</p></div>';
+  const ch=t.check||{}, ok=!!ch.valid_for_analyst_review;
+  const why=(ch.reasons||[]).map(r=>REASON_UA[r]||r).join(' · ');
+  return `<div class="sec"><h3>Теза Лева</h3>
+    <div class="kv"><span>Режим</span><b>${esc(t.regime==='UNKNOWN'?'Не визначено':t.regime)}</b></div>
+    <div class="kv"><span>Гіпотеза</span><b>${esc(t.hypothesis)}</b></div>
+    <div class="kv"><span>Альтернатива</span><b>${esc(t.alternative)}</b></div>
+    <div class="kv"><span>Інвалідація</span><b>${esc(t.invalidation||NA)}</b></div>
+    <div class="kv"><span>Актуальна до</span><b>${hhmm(t.expires_at)}</b></div>
+    <div style="margin-top:8px"><span class="pill ${ok?'ok':'watch'}">${ok?'✓ контракт тези виконано':'⚠ теза неповна'}</span>
+      <span class="mut"> версія ${esc(t.version_hash||'')} · ${hhmm(t.recorded_at)}</span></div>
+    ${why?`<div class="mut" style="margin-top:6px">${esc(why)}</div>`:''}</div>`;
+}
+
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
   killPoll();
@@ -383,6 +401,7 @@ async function openSc(id){
     </div>
     <div class="sec"><h3>Висновок Лева</h3><p>${esc(s.why||story||'Лев не залишив пояснення в записі сценарію.')}</p>
       ${s.why&&story?`<div class="mut" style="margin-top:6px">${esc(story)}</div>`:''}</div>
+    ${thesisHtml(d.thesis)}
     <div class="sec"><h3>Торговий план</h3>
       ${kv('Зона входу',dp.zone||dp.entry)}${kv('Стоп',dp.sl,'S')}${kv('TP1',dp.tp1,'L')}${dp.tp2?kv('TP2',dp.tp2,'L'):''}
       ${kv('RR',dp.rr?`${dp.rr} (${dp.rr_basis})`:'')}${kv('Потенціал до TP1',dp.potential)}

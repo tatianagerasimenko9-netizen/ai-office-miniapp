@@ -375,12 +375,20 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         pos = False
     card = scenario_card(row, has_position=pos)
     events = scenario_events(sid)
+    thesis = None
+    try:
+        from office_thesis_journal import latest_thesis
+
+        thesis = latest_thesis(_db(), sid)
+    except Exception:
+        thesis = None
     return {
         "ok": True,
         "readonly": True,
         "data_status": "DATA_OK",
         "scenario": card,
         "events": events,
+        "thesis": thesis,
         "has_position": pos,
         "hypothetical": not pos,
     }
