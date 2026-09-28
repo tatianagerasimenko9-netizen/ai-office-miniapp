@@ -60,6 +60,9 @@ def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None) -> Dict[s
         )
     except Exception as exc:
         return {"action": "SKIP", "send": False, "reason": f"lev_cycle error: {type(exc).__name__}"}
+    from office_feed_quality import gate_send_on_fresh_data
+
+    cyc = gate_send_on_fresh_data(cyc, bars["M15"], interval="15m")
     if db_path:
         try:
             from office_risk_context import apply_risk_officer

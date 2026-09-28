@@ -2649,8 +2649,10 @@ async def run() -> None:
 
     def _lev_risk_review(cycle: Dict[str, Any], sym: str, *, candles_ltf: Any, market_context: Any) -> Dict[str, Any]:
         """Risk Officer після Лева. Shadow: лише журнал. Enforce: помилка = WAIT (fail closed)."""
+        from office_feed_quality import gate_send_on_fresh_data
         from office_risk_context import apply_risk_officer, enforce_enabled
 
+        cycle = gate_send_on_fresh_data(cycle, candles_ltf, interval=_ltf_interval(candles_ltf))
         try:
             return apply_risk_officer(
                 cycle, db_path=db_path, symbol=sym,
@@ -2662,6 +2664,16 @@ async def run() -> None:
                 return {**cycle, "action": "WAIT", "send": False,
                         "reason": "ризик-контроль недоступний — план не передається"}
             return cycle
+
+    def _ltf_interval(candles: Any) -> str:
+        """Інтервал LTF за кроком часу двох останніх свічок (5m або 15m у викликах Лева)."""
+        try:
+            a = datetime.fromisoformat(str(candles[-2]["ts"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(candles[-1]["ts"]).replace("Z", "+00:00"))
+            step = int((b - a).total_seconds())
+            return {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}.get(step, "15m")
+        except Exception:
+            return "15m"
 
     def _lev_record_thesis(cycle: Dict[str, Any], candles_by_tf: Dict[str, Any]) -> None:
         """Версія тези Лева в журнал. Помилка журналу не змінює рішення."""
