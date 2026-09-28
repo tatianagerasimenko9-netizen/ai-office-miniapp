@@ -75,15 +75,21 @@ def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     }
 
 
-def session_at_utc(ts: Optional[datetime] = None) -> str:
+def session_at_utc(ts: Optional[datetime] = None, *, dst: bool = False) -> str:
+    """Код сесії. dst=False — фіксовані UTC-вікна (replay/T8/paper, історичні тести).
+
+    dst=True — London/NY за місцевим часом (Europe/London, America/New_York).
+    """
     dt = ts or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    h = int(dt.astimezone(timezone.utc).hour)
-    names: List[str] = []
-    for name, (a, b) in SESSION_WINDOWS_UTC.items():
-        if a <= h < b:
-            names.append(name)
+    if dst:
+        names = session_clock_dst(dt)["active"]
+        if len(names) > 1 and "asia" in names:
+            names = [n for n in names if n != "asia"]  # літній Лондон відкривається до 08:00 UTC
+    else:
+        h = int(dt.astimezone(timezone.utc).hour)
+        names = [name for name, (a, b) in SESSION_WINDOWS_UTC.items() if a <= h < b]
     if not names:
         return "off_session"
     if "ny" in names and "london" in names:
@@ -92,12 +98,12 @@ def session_at_utc(ts: Optional[datetime] = None) -> str:
 
 
 def session_clock(ts: Optional[datetime] = None) -> Dict[str, Any]:
-    """Активна сесія і хвилини до наступної. З годинника, не з вигаданого ринку."""
+    """Активна сесія і хвилини до наступної для Mini App. Літній/зимовий час враховано."""
     dt = ts or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     dt = dt.astimezone(timezone.utc)
-    active = session_at_utc(dt)
+    active = session_at_utc(dt, dst=True)
     label = {
         "asia": "ASIA",
         "london": "LONDON",
@@ -105,22 +111,11 @@ def session_clock(ts: Optional[datetime] = None) -> Dict[str, Any]:
         "london_ny_overlap": "NY",
         "off_session": "OFF",
     }.get(active, active.upper() if active else None)
-    h, m = dt.hour, dt.minute
-    now_min = h * 60 + m
-    # Наступне вікно: London 08:00, NY 13:00, Asia 00:00 наступної доби.
-    starts = [("LONDON", 8 * 60), ("NY", 13 * 60), ("ASIA", 24 * 60)]
-    nxt_name = None
-    nxt_in = None
-    for name, start in starts:
-        if start > now_min:
-            nxt_name, nxt_in = name, start - now_min
-            break
-    if nxt_name is None:
-        nxt_name, nxt_in = "ASIA", (24 * 60 - now_min)
+    dst = session_clock_dst(dt)
     return {
         "active": label,
-        "next": nxt_name,
-        "next_in_min": int(nxt_in) if nxt_in is not None else None,
+        "next": str(dst["next"]).upper(),
+        "next_in_min": dst["next_in_min"],
         "code": active,
     }
 
