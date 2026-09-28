@@ -71,6 +71,8 @@ jobs:
         run: python scripts/test_feed_quality.py
       - name: Lev independent risk veto integration (offline)
         run: python scripts/test_lev_risk_integration.py
+      - name: Risk Officer in live Lev cycle, shadow/enforce (temporary SQLite)
+        run: python scripts/test_risk_context_cycle.py
       - name: London and NY DST desk clock (offline)
         run: python scripts/test_session_dst.py
       - name: Exchange tick display and no float tails (offline)

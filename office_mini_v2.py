@@ -692,21 +692,36 @@ def risk_payload() -> Dict[str, Any]:
     pos = positions_v2()
     confirmed = pos.get("positions") or []
     vetoes: List[Dict[str, Any]] = []
+    shadow: List[Dict[str, Any]] = []
     try:
         rows = _fetchall(
             _db(),
             """
-            SELECT ts_utc, event_type, signal_id
+            SELECT ts_utc, event_type, signal_id, payload_json
             FROM office_events
-            WHERE UPPER(event_type) LIKE '%RISK%' OR UPPER(event_type) LIKE '%VETO%'
+            WHERE event_type IN ('RISK_VETO', 'RISK_SHADOW_REVIEW')
             ORDER BY ts_utc DESC
-            LIMIT 20
+            LIMIT 40
             """,
             (),
         )
-        vetoes = [{"ts": r[0], "type": r[1], "scenario_id": r[2]} for r in rows or []]
+        for r in rows or []:
+            try:
+                pl = json.loads(r[3] or "{}")
+            except Exception:
+                pl = {}
+            item = {
+                "ts": r[0],
+                "type": r[1],
+                "scenario_id": r[2],
+                "symbol": pl.get("symbol"),
+                "direction": pl.get("direction"),
+                "would_veto": bool(pl.get("would_veto")),
+                "reasons": [str(x) for x in (pl.get("reasons") or [])][:8],
+            }
+            (vetoes if r[1] == "RISK_VETO" else shadow).append(item)
     except Exception:
-        vetoes = []
+        vetoes, shadow = [], []
     plans = []
     for c in list_scenarios(include_watching=False):
         if c.get("legacy_range") or (c.get("status") or {}).get("group") != "live":
@@ -742,6 +757,8 @@ def risk_payload() -> Dict[str, Any]:
         "plans": plans[:20],
         "vetoes": vetoes,
         "vetoes_note": None if vetoes else "Записів veto Risk Officer у журналі ще немає",
+        "shadow": shadow[:20],
+        "risk_mode": "enforce" if os.getenv("OFFICE_RISK_OFFICER_ENFORCE", "").strip() == "1" else "shadow",
         "limits": settings_payload().get("gates"),
         "note": "Схвалення аналітичного плану не створює ордер.",
     }

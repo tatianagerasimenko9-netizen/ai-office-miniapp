@@ -80,6 +80,11 @@ def main() -> int:
         assert ids == ["lev-MANTA-L1"], ids  # WATCHING is not a plan for risk review
         assert all(p["risk_usdt"] is None for p in r["plans"])
         assert r["vetoes"] == [] and r["vetoes_note"]
+        log_event(db, "RISK_SHADOW_REVIEW", {"symbol": "MANTAUSDT", "would_veto": True,
+                                             "reasons": ["EXECUTION_NOT_VERIFIED"]}, "lev-MANTA-L1")
+        r2 = risk_payload()
+        assert r2["vetoes"] == [] and r2["shadow"][0]["would_veto"] is True, "shadow review is not a veto"
+        assert r2["risk_mode"] == "shadow"
         log_event(db, "RISK_VETO", {"reason": "fixture"}, "lev-MANTA-L1")
         assert risk_payload()["vetoes"][0]["type"] == "RISK_VETO"
     finally:

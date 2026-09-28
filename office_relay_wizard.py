@@ -2636,6 +2636,22 @@ async def run() -> None:
             return tech_thread_id or general_thread_id
         return general_thread_id
 
+    def _lev_risk_review(cycle: Dict[str, Any], sym: str, *, candles_ltf: Any, market_context: Any) -> Dict[str, Any]:
+        """Risk Officer після Лева. Shadow: лише журнал. Enforce: помилка = WAIT (fail closed)."""
+        from office_risk_context import apply_risk_officer, enforce_enabled
+
+        try:
+            return apply_risk_officer(
+                cycle, db_path=db_path, symbol=sym,
+                candles_ltf=candles_ltf, market_context=market_context,
+            )
+        except Exception as exc:
+            print(f"[risk] review error {sym}: {type(exc).__name__}: {exc}")
+            if enforce_enabled() and cycle.get("send"):
+                return {**cycle, "action": "WAIT", "send": False,
+                        "reason": "ризик-контроль недоступний — план не передається"}
+            return cycle
+
     async def send_office(
         message: str,
         reply_to_message_id: Optional[int] = None,
@@ -6016,6 +6032,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                     now_ts=now_ts,
                     market_context={"data_status": "DATA_UNAVAILABLE"},
                 )
+                cycle = _lev_risk_review(
+                    cycle, sym, candles_ltf=m5_bars, market_context={"data_status": "DATA_UNAVAILABLE"},
+                )
                 if str(cycle.get("action") or "") in (ACTION_SKIP, ACTION_WAIT):
                     print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('action')} {cycle.get('reason')}")
                     return False
@@ -6404,6 +6423,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 candles_ltf=rm5 if isinstance(rm5, list) else rm15,
                                 atr_h1=_atr_h1(rh1),
                                 day_used_pct=r_used,
+                                market_context=mctx,
+                            )
+                            cycle = _lev_risk_review(
+                                cycle, rsym,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
                                 market_context=mctx,
                             )
                             print(

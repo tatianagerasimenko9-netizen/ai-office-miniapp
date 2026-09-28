@@ -263,6 +263,12 @@ async function risk(){
     <h2>Veto Risk Officer</h2>
     ${(d.vetoes||[]).map(v=>`<div class="card"><span class="pill bad">⛔ ${esc(v.type)}</span> <span class="mut">${hhmm(v.ts)} · ${esc(v.scenario_id||'')}</span></div>`).join('')
       ||`<div class="empty">${esc(d.vetoes_note||'')}</div>`}
+    <h2>Тіньові перевірки</h2>
+    <div class="mut" style="margin:-4px 0 8px">Режим Risk Officer: ${d.risk_mode==='enforce'?'veto увімкнено':'shadow — рішення Лева не змінюються, лише запис'}</div>
+    ${(d.shadow||[]).map(v=>`<div class="card"><div class="top"><b>${esc(v.symbol||'')}</b><span class="side ${side(v.direction)}">${sideTxt(v.direction)}</span>
+      <span class="pill ${v.would_veto?'bad':'ok'}">${v.would_veto?'⛔ заблокував би':'✓ пройшов би'}</span><span class="mut" style="margin-left:auto">${hhmm(v.ts)}</span></div>
+      ${(v.reasons||[]).length?`<div class="mut" style="margin-top:4px">${esc(v.reasons.join(' · '))}</div>`:''}</div>`).join('')
+      ||'<div class="empty">Тіньових перевірок ще немає</div>'}
     <h2>Підтверджені позиції</h2>${posHtml(d)}
     <h2>Правила (заморожені)</h2>
     <div class="card">
