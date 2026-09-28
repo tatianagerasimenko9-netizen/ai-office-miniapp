@@ -124,3 +124,29 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Mini App browser smoke (phone/desktop, XSS, error/loading states)
         run: python scripts/ui_smoke_mini_v2.py
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: office
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      OFFICE_EXINFO_SEED: '1'
+      OFFICE_TEST_PG_URL: postgresql://postgres:ci@127.0.0.1:5432/office
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: PR68/69 schema, ledger, journals and Mini App queries on PostgreSQL 16
+        run: python scripts/test_pg_integration.py
