@@ -176,6 +176,17 @@ def status_view(status: Any) -> Dict[str, str]:
     return {"code": st, "icon": icon, "short": short, "text": long_, "group": group}
 
 
+def _ttl_status(row: Dict[str, Any]) -> Dict[str, Any]:
+    """WATCHING понад TTL показуємо чесно; саму БД не змінюємо (це робить worker за прапорцем)."""
+    from office_lifecycle import WATCHING_EXPIRE_SEC, watching_ttl_exceeded
+
+    v = dict(status_view(row.get("status")))
+    if watching_ttl_exceeded(row.get("status"), row.get("ts_created"), datetime.now(timezone.utc)):
+        v["ttl_exceeded"] = True
+        v["text"] = f"{v['text']} · понад TTL {WATCHING_EXPIRE_SEC // 3600} год — теза могла застаріти"
+    return v
+
+
 def note_lines(note: Any) -> Dict[str, Optional[str]]:
     """Рядки «Чекаю / Що скасує / Чому» з фактичного тексту картки Лева. Не генеруємо."""
     wait = cancel = why = None
@@ -265,7 +276,7 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         "tp2": _f(row.get("tp2")),
         "rr": rr_val,
         "display": display,
-        "status": status_view(row.get("status")),
+        "status": _ttl_status(row),
         "wait": lines["wait"],
         "cancel": lines["cancel"],
         "why": lines["why"],

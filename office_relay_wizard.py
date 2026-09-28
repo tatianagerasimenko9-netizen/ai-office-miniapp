@@ -5251,6 +5251,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             # Повторна зона після підтвердження — не новий вхід.
                             continue
 
+                        from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
+
+                        if watching_ttl_enabled() and watching_ttl_exceeded(status, created_dt, now_utc):
+                            signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="TTL")
+                            try:
+                                log_event(db_path, "SCENARIO_EXPIRED", {"symbol": symbol, "reason": "WATCHING TTL 4h",
+                                                                         "from": status}, signal_id)
+                                apply_setup_event(canonical_sid or signal_id, "EXPIRED", expired=True)
+                            except Exception as exc_ttl:
+                                print(f"[ttl] {symbol} expire bookkeeping: {exc_ttl}")
+                            print(f"[ttl] {symbol} {signal_id} WATCHING → EXPIRED (TTL)")
+                            continue
+
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
                             signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
                             continue

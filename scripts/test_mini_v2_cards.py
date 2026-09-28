@@ -112,6 +112,19 @@ def _radar_check() -> None:
     assert r == ["pump-score 82", "RSI 74 — перекупленість", "режим TREND", "рішення офісу: WATCH"], r
     assert radar_reasons({}) == []
     print("OK radar reasons only from stored scan facts")
+    from datetime import datetime, timedelta, timezone
+    from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
+    from office_mini_v2 import _ttl_status
+
+    now = datetime.now(timezone.utc)
+    old_ts = (now - timedelta(hours=5)).isoformat()
+    assert watching_ttl_exceeded("WATCHING", old_ts, now) and watching_ttl_exceeded("PIERCE_WATCHING", old_ts, now)
+    assert not watching_ttl_exceeded("ACTIVE", old_ts, now)
+    assert not watching_ttl_exceeded("WATCHING", (now - timedelta(hours=1)).isoformat(), now)
+    assert not watching_ttl_enabled(), "DB auto-expiry is opt-in"
+    st = _ttl_status({"status": "WATCHING", "ts_created": old_ts})
+    assert st["ttl_exceeded"] and "понад TTL 4 год" in st["text"] and st["group"] == "watch"
+    print("OK WATCHING TTL: display-only by default, DB expiry opt-in")
 
 
 def _feed_check() -> None:
