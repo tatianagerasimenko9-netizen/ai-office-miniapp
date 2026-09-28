@@ -403,6 +403,17 @@ function thesisHtml(t){
     ${why?`<div class="mut" style="margin-top:6px">${esc(why)}</div>`:''}</div>`;
 }
 
+const CHK={OK:['ok','✓'],FAIL:['bad','✗'],UNAVAILABLE:['watch','?']};
+function execHtml(x){
+  if(!x) return '';
+  const v={CHECKED:['ok','Перевірено'],NOT_VERIFIED:['watch','Не все перевірено'],BLOCKED:['bad','Вхід зараз не розглядати']}[x.verdict]||['','—'];
+  return `<div class="sec"><h3>Перевірки перед входом</h3>
+    <div style="margin-bottom:6px"><span class="pill ${v[0]}">${esc(v[1])}</span>
+      <span class="mut">${x.price_display?`ціна ${esc(x.price_display)} · ${esc(x.price_source||'')}`:'ціни немає'}</span></div>
+    ${(x.checks||[]).map(c=>{const k=CHK[c.state]||['','•']; return `<div class="kv"><span><span class="pill ${k[0]}">${k[1]}</span> ${esc(c.title)}</span><b class="mut" style="font-weight:500">${esc(c.detail)}</b></div>`;}).join('')}
+    <div class="mut" style="margin-top:6px">${esc(x.text)}</div></div>`;
+}
+
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
   killPoll();
@@ -427,6 +438,7 @@ async function openSc(id){
       ${kv('RR',dp.rr?`${dp.rr} (${dp.rr_basis})`:'')}${kv('Потенціал до TP1',dp.potential)}
       ${kv('Плановий ризик','Очікує перевірки Risk Officer')}
     </div>
+    ${execHtml(d.execution)}
     <div class="sec"><h3>Що чекаємо</h3><p>${esc(s.wait||'Конкретну умову підтвердження не записано — вхід не розглядати.')}</p></div>
     <div class="sec"><h3>Коли сценарій скасовується</h3><p>${esc(s.cancel||NA)}</p>
       <div class="mut" style="margin-top:6px">Скасування до входу ≠ стоп після входу.</div></div>

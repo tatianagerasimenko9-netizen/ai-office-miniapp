@@ -65,6 +65,8 @@ def main() -> int:
         assert c["wait"].startswith("Чекаю") and c["cancel"] == "закриття H1 вище 2686"
         assert c["status"]["short"] == "WATCHING" and c["opens_position"] is False
         assert [e["type"] for e in eth["events"]] == ["WATCHING_CREATED"]
+        ex = eth["execution"]
+        assert ex and ex["order_authorized"] is False and ex["verdict"] in ("NOT_VERIFIED", "BLOCKED"), ex
 
         manta = scenario_detail("lev-MANTA-L1")["scenario"]
         for k, v in manta["display"].items():

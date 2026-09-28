@@ -371,9 +371,14 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             _db(), str(row.get("symbol") or ""), str(row.get("direction") or "")
         )
         pos = bool(rec.get("ok"))
+        pos_known: Optional[bool] = pos
     except Exception:
         pos = False
+        pos_known = None
     card = scenario_card(row, has_position=pos)
+    execution = None
+    if (card.get("status") or {}).get("group") != "done":
+        execution = execution_payload(card, has_open_position=pos_known)
     events = scenario_events(sid)
     thesis = None
     try:
@@ -389,9 +394,37 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         "scenario": card,
         "events": events,
         "thesis": thesis,
+        "execution": execution,
         "has_position": pos,
         "hypothetical": not pos,
     }
+
+
+def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:
+    """Перевірки перед входом за поточною ціною (M1). Не ордер, рішень не змінює."""
+    from office_execution_check import execution_checks
+
+    sym = str(card.get("symbol") or "")
+    pack = candles_payload(sym, "M1", 20)
+    last = (pack.get("candles") or [None])[-1]
+    fresh = pack.get("data_status") == "DATA_OK" and not pack.get("fixture")
+    maj = sym.upper() in MAJORS
+    res = execution_checks(
+        symbol=sym,
+        direction=str(card.get("direction") or ""),
+        zone_lo=card.get("zone_lo"),
+        zone_hi=card.get("zone_hi"),
+        sl=card.get("sl"),
+        tp1=card.get("tp1"),
+        price=(last or {}).get("close"),
+        price_fresh=fresh,
+        has_open_position=has_open_position,
+        min_rr=float(MIN_RR),
+        min_tp1_pct=float(MAJORS_TP1_PCT if maj else ALTS_TP1_PCT),
+    )
+    res["price_display"] = format_px((last or {}).get("close"), sym) if last else ""
+    res["price_source"] = "fixture" if pack.get("fixture") else pack.get("source")
+    return res
 
 
 def scenario_events(sid: str) -> List[Dict[str, Any]]:
