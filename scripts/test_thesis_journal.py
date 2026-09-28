@@ -79,6 +79,18 @@ def main():
                       sl=136, tp1=150, tp2=None, rr=None, status="ACTIVE", analysis_note="")
         det = scenario_detail(KEY)
         assert det["ok"] and det["thesis"]["version_hash"] == r3["version_hash"]
+
+        # Zone drifted slightly: thesis attaches to the existing canonical scenario id.
+        signal_upsert(db, signal_id="CANON-1", symbol="ADAUSDT", direction="SHORT", entry_low=0.50,
+                      entry_high=0.52, sl=0.54, tp1=0.46, tp2=None, rr=None, status="WATCHING",
+                      analysis_note="origin=desk tf=H1 basis=B-ada scenario_id=CANON-1")
+        drift = cycle()
+        drift["draft"].update({"symbol": "ADAUSDT", "direction": "SHORT", "zone_lo": 0.5001, "zone_hi": 0.52,
+                               "invalidation": 0.54})
+        drift["draft"]["confluence"] = {"setup_key": "ADAUSDT|SHORT|0.5001|0.52", "market_basis": "B-ada", "tags": ["OB H1"]}
+        rd = tj.record_thesis(db, drift, candles_by_tf=fresh, now_utc=NOW)
+        assert rd["thesis_id"] == "CANON-1", rd["thesis_id"]
+        assert scenario_detail("CANON-1")["thesis"]["version_hash"] == rd["version_hash"]
     finally:
         os.unlink(db)
     print("OK Lev thesis journal: contract check, append-only versions, restart dedup, Mini App card")

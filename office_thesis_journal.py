@@ -121,6 +121,30 @@ def build_thesis(
     }
 
 
+def canonical_scenario_id(db_path: str, cycle: Dict[str, Any]) -> str:
+    """Та сама ідентичність, що й prepare_desk_send: зсув зони ≠ новий сценарій."""
+    draft = cycle.get("draft") or {}
+    conf = draft.get("confluence") or {}
+    try:
+        from office_bridge import signal_get_scenarios
+        from office_scenario_memory import find_canonical_scenario, market_basis_key, parse_note_meta
+
+        existing = find_canonical_scenario(
+            signal_get_scenarios(db_path),
+            symbol=str(draft.get("symbol") or ""),
+            direction=str(draft.get("direction") or ""),
+            timeframe=str(draft.get("timeframe") or "H1"),
+            basis=str(conf.get("market_basis") or market_basis_key(conf)),
+            zone_lo=draft.get("zone_lo"),
+            zone_hi=draft.get("zone_hi"),
+        )
+    except Exception:
+        return ""
+    if not existing:
+        return ""
+    return str(parse_note_meta(existing.get("analysis_note")).get("scenario_id") or existing.get("signal_id") or "")
+
+
 def _content_hash(thesis: Dict[str, Any]) -> str:
     """Зміст без часових міток: нова версія лише коли змінилась теза, а не годинник."""
     core = {k: thesis.get(k) for k in (
@@ -142,6 +166,9 @@ def record_thesis(
     thesis = build_thesis(cycle, candles_by_tf=candles_by_tf, now_utc=now)
     if thesis is None:
         return None
+    canon = canonical_scenario_id(db_path, cycle)
+    if canon:
+        thesis["thesis_id"] = canon
     digest = _content_hash(thesis)
     tid = thesis["thesis_id"]
     if tid not in _LAST:
