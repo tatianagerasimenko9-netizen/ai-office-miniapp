@@ -56,8 +56,14 @@ def main():
         assert r1["alternative"].startswith("SHORT: підстав немає")
 
         # Same content later -> no new version; after a restart (memory wiped) either.
+        calls = []
+        orig = tj.canonical_scenario_id
+        tj.canonical_scenario_id = lambda *a, **k: calls.append(1) or orig(*a, **k)
         assert tj.record_thesis(db, cycle(), candles_by_tf=fresh, now_utc=NOW + timedelta(minutes=5)) is None
+        assert calls == [], "unchanged thesis must not hit the DB"
+        tj.canonical_scenario_id = orig
         tj._LAST.clear()
+        tj._LAST_RAW.clear()
         assert tj.record_thesis(db, cycle(), candles_by_tf=fresh, now_utc=NOW + timedelta(minutes=6)) is None
 
         # Changed thesis -> new version; old one untouched.

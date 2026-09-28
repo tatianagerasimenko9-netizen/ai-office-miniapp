@@ -20,6 +20,7 @@ from office_market_thesis import REGIMES, evaluate_thesis
 
 EVENT = "THESIS_VERSION"
 _LAST: Dict[str, str] = {}
+_LAST_RAW: Dict[str, str] = {}
 
 
 TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400, "LTF": 300}
@@ -181,6 +182,10 @@ def record_thesis(
     thesis = build_thesis(cycle, candles_by_tf=candles_by_tf, now_utc=now)
     if thesis is None:
         return None
+    raw_key = thesis["thesis_id"]
+    raw_digest = _content_hash(thesis)
+    if _LAST_RAW.get(raw_key) == raw_digest:
+        return None  # зміст не змінився — без жодного запиту до БД
     canon = canonical_scenario_id(db_path, cycle)
     if canon:
         thesis["thesis_id"] = canon
@@ -191,6 +196,7 @@ def record_thesis(
         if prev and prev.get("version_hash"):
             _LAST[tid] = str(prev["version_hash"])
     if _LAST.get(tid) == digest:
+        _LAST_RAW[raw_key] = raw_digest
         return None
     check = evaluate_thesis(thesis, now_utc=now)
     record = {**thesis, "version_hash": digest, "recorded_at": now.isoformat(), "check": check}
@@ -198,6 +204,7 @@ def record_thesis(
 
     log_event(db_path, EVENT, record, signal_id=tid)
     _LAST[tid] = digest
+    _LAST_RAW[raw_key] = raw_digest
     return record
 
 

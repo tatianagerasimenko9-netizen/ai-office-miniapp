@@ -40,4 +40,9 @@ assert "Лондон" in s["active"], s["active"]
 
 assert session_brief([], now_utc=day)["data_status"] == "DATA_UNAVAILABLE"
 assert session_brief(m15(day, [(1, 2, 1)] * 10), now_utc=day + timedelta(hours=9))["data_status"] == "DATA_UNAVAILABLE"
+import os
+from office_mini_v2 import session_payload
+assert session_payload("BTC/../x?y=1")["data_status"] == "DATA_UNAVAILABLE"
+os.environ["OFFICE_MINI_FIXTURE"] = "1"
+assert session_payload("BTCUSDT")["fixture"] is True
 print("OK Session Desk: ranges, sweep vs acceptance, DST London open, honest unavailable")

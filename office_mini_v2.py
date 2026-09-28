@@ -723,7 +723,12 @@ def session_payload(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """План сесії з M15. Лише спостереження; ціни через tick-форматер."""
     from office_session_desk import session_brief
 
+    import re
+
     sym = str(symbol or "BTCUSDT").upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", sym):
+        return {"ok": False, "readonly": True, "data_status": DATA_UNAVAILABLE, "reason": "некоректний символ",
+                "order_authorized": False, "is_signal": False}
     if _fixture_on():
         raw = synth_candles(sym, "15m", 200)
     else:
