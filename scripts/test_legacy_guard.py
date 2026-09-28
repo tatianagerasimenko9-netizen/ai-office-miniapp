@@ -28,22 +28,26 @@ assert "legacy_scenario_status" in block and 'status=legacy["status"]' in block
 assert 'status="ACTIVE",\n                analysis_note=lev_final' not in src
 print("OK legacy proactive path: ACTIVE only with Lev SEND, WATCHING otherwise, flag rollback")
 
-# The relay helper runs end-to-end on empty market data and never returns SEND.
-import ast  # noqa: E402
+# The shared helper runs end-to-end on empty market data and never returns SEND.
+import tempfile  # noqa: E402
 
 import office_market_data  # noqa: E402
+from office_bridge import _fetchall, init_office_db  # noqa: E402
+from office_legacy_guard import lev_cycle_for_symbol  # noqa: E402
 
-tree = ast.parse(src)
-fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_lev_cycle_for_symbol")
-mod = ast.fix_missing_locations(ast.Module(body=[fn], type_ignores=[]))
 _orig = office_market_data.fetch_candles
 office_market_data.fetch_candles = lambda s, iv, n: []
 try:
-    env = {"Dict": dict, "Any": object, "_lev_risk_review": lambda c, *a, **k: c, "_lev_record_thesis": lambda *a: None}
-    exec(compile(mod, "office_relay_wizard.py", "exec"), env)
-    res = env["_lev_cycle_for_symbol"]("SOLUSDT", None)
+    db = str(Path(tempfile.mkdtemp()) / "legacy.db")
+    init_office_db(db)
+    res = lev_cycle_for_symbol(db, "SOLUSDT", None)
     assert not res.get("send"), res
     assert legacy_scenario_status(res, direction="LONG")["status"] == "WATCHING"
+    res2 = lev_cycle_for_symbol("", "SOLUSDT", 1.0)
+    assert not res2.get("send")
 finally:
     office_market_data.fetch_candles = _orig
-print("OK legacy helper runs on empty data and yields WATCHING")
+for name in ("manual-{symbol}", "proactive-{symbol}"):
+    k = src.index(name)
+    assert "lev_cycle_for_symbol, db_path" in src[k - 900:k], name
+print("OK legacy helper runs on empty data and yields WATCHING; both legacy paths use it")

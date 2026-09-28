@@ -1919,6 +1919,12 @@ async def full_auto_analysis(
                 if not correlation.get("safe"):
                     await agent_say(sender, "daryna", correlation["message"])
                     return False
+                from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
+
+                manual_cycle: Dict[str, Any] = {}
+                if legacy_requires_lev():
+                    manual_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, None)
+                legacy = legacy_scenario_status(manual_cycle, direction=direction, enforce=legacy_requires_lev())
                 signal_id = f"manual-{symbol}-{int(time.time())}"
                 signal_upsert(
                     db_path,
@@ -1931,9 +1937,11 @@ async def full_auto_analysis(
                     tp1=parsed.get("tp1"),
                     tp2=parsed.get("tp2"),
                     rr=parsed.get("rr"),
-                    status="ACTIVE",
-                    analysis_note=response_for_parse,
+                    status=legacy["status"],
+                    analysis_note=(legacy["note_prefix"] + response_for_parse)[:4000],
                 )
+                if legacy["status"] != "ACTIVE":
+                    print(f"[signal] {symbol} manual LLM levels → WATCHING: {legacy['reason']}")
             print(f"[signal] saved {symbol} {direction} (Olesya journal silent)")
         else:
             await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
@@ -2654,32 +2662,6 @@ async def run() -> None:
                 return {**cycle, "action": "WAIT", "send": False,
                         "reason": "ризик-контроль недоступний — план не передається"}
             return cycle
-
-    def _lev_cycle_for_symbol(sym: str, price: Any) -> Dict[str, Any]:
-        """Повний lev_cycle для legacy-шляху (sync, для asyncio.to_thread). Помилка = не SEND."""
-        from office_lev_verdict import lev_cycle as _lc
-        from office_market_data import fetch_candles
-
-        try:
-            bars = {tf: fetch_candles(sym, iv, n) for tf, iv, n in (
-                ("H1", "1h", 48), ("H4", "4h", 48), ("M15", "15m", 96), ("D1", "1d", 30),
-            )}
-            bars = {k: (v if isinstance(v, list) else None) for k, v in bars.items()}
-            px = price
-            if px is None and bars.get("M15"):
-                px = (bars["M15"][-1] or {}).get("close")
-            cyc = _lc(
-                symbol=sym, price=px, timeframe="H1",
-                candles_m15=bars["M15"], candles_h1=bars["H1"], candles_h4=bars["H4"],
-                candles_d1=bars["D1"], candles_ltf=bars["M15"], candles_m5=bars["M15"],
-                market_context={"data_status": "DATA_UNAVAILABLE"},
-            )
-            cyc = _lev_risk_review(cyc, sym, candles_ltf=bars["M15"], market_context={"data_status": "DATA_UNAVAILABLE"})
-            _lev_record_thesis(cyc, bars)
-            return cyc
-        except Exception as exc:
-            print(f"[lev] legacy gate error {sym}: {type(exc).__name__}: {exc}")
-            return {"action": "SKIP", "send": False, "reason": f"lev_cycle error: {type(exc).__name__}"}
 
     def _lev_record_thesis(cycle: Dict[str, Any], candles_by_tf: Dict[str, Any]) -> None:
         """Версія тези Лева в журнал. Помилка журналу не змінює рішення."""
@@ -5069,11 +5051,11 @@ EV позитивне: {prob.get('ev_positive', '')}
             # LLM-текст «entry/sl» не є висновком Лева: ACTIVE лише якщо lev_cycle дав SEND
             # у тому самому напрямку. Інакше — тихий WATCHING (OFFICE_LEGACY_ACTIVE_REQUIRES_LEV=0
             # повертає стару поведінку).
-            from office_legacy_guard import legacy_requires_lev, legacy_scenario_status
+            from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
 
             legacy_cycle: Dict[str, Any] = {}
             if legacy_requires_lev():
-                legacy_cycle = await asyncio.to_thread(_lev_cycle_for_symbol, symbol, current_price)
+                legacy_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, current_price)
             legacy = legacy_scenario_status(legacy_cycle, direction=direction, enforce=legacy_requires_lev())
             if legacy["status"] == "ACTIVE":
                 await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
