@@ -596,8 +596,8 @@ def scenario_story(
             "missing": ["межі зони"],
             "text": "Немає підтверджених меж зони — не чекаємо вигаданий відкат.",
         }
-    ztype = kinds[0] if kinds else "зона"
-    reasons = " · ".join(kinds[:3]) if kinds else "немає незалежних збігів"
+    ztype = kinds[0] if kinds else "зону"
+    reasons = f"тут збігаються {' · '.join(kinds[:3])}" if kinds else "незалежних збігів немає"
     wt = wait_tf or confirm_timeframe(timeframe)
     conf_names = [CONFIRM_UA.get(x, x) for x in (confirms or []) if x]
     if conf_names:
@@ -612,7 +612,7 @@ def scenario_story(
         "zone_type": ztype,
         "text": (
             f"Чекаємо відкат у {ztype} {lo:g}–{hi:g} на {timeframe or 'H1'}; "
-            f"тут збігаються {reasons}; на {wt} потрібне {need}."
+            f"{reasons}; на {wt} потрібне підтвердження: {need}."
         ),
     }
 

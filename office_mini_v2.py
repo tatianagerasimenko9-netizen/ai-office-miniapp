@@ -25,7 +25,7 @@ from office_mini_v1 import (
     scanner_payload as v1_scanner,
     stats_payload as v1_stats,
 )
-from office_price_format import format_price_fields
+from office_price_format import format_level_span, format_price_fields, format_px, tick_size_for
 from office_radar import MIN_RR
 from office_signal_stats import MIN_GROUP, build_stats_report
 
@@ -143,6 +143,49 @@ def _signal_rows(limit: int = 80, *, all_status: bool = False) -> List[Dict[str,
     return out
 
 
+STATUS_UA = {
+    "WATCHING": ("👁", "WATCHING", "Спостереження · входу немає"),
+    "ACTIVE": ("🎯", "ПЛАН", "План активний · очікує рішення трейдера"),
+    "CONFIRMED": ("✅", "ПІДТВЕРДЖЕНО", "Умову підтверджено · не позиція"),
+    "HIT_ENTRY": ("📍", "ЗОНА ВХОДУ", "Ціна в зоні входу · не позиція"),
+    "HIT_TP1": ("🏁", "TP1 (модель)", "Модельний TP1 · не PnL угоди"),
+    "HIT_TP2": ("🏁", "TP2 (модель)", "Модельний TP2 · не PnL угоди"),
+    "HIT_SL": ("⛔", "SL (модель)", "Модельний SL · не збиток угоди"),
+    "CANCELLED": ("✖", "СКАСОВАНО", "Сценарій скасовано до входу"),
+    "EXPIRED": ("⌛", "ПРОСТРОЧЕНО", "Термін сценарію минув"),
+}
+
+
+def status_view(status: Any) -> Dict[str, str]:
+    """Статус завжди текстом і значком, не лише кольором."""
+    st = str(status or "").upper()
+    icon, short, long_ = STATUS_UA.get(st, ("•", st or "—", st or "Невідомий стан"))
+    group = "watch" if st == "WATCHING" else ("live" if st in ("ACTIVE", "CONFIRMED", "HIT_ENTRY") else "done")
+    return {"code": st, "icon": icon, "short": short, "text": long_, "group": group}
+
+
+def note_lines(note: Any) -> Dict[str, Optional[str]]:
+    """Рядки «Чекаю / Що скасує / Чому» з фактичного тексту картки Лева. Не генеруємо."""
+    wait = cancel = why = None
+    for raw in str(note or "").splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if not line:
+            continue
+        if wait is None and low.startswith("чекаю"):
+            wait = line[:300]
+        elif cancel is None and low.startswith("що скасує"):
+            cancel = line.split(":", 1)[-1].strip()[:300] or None
+        elif why is None and low.startswith("чому"):
+            why = line.split(":", 1)[-1].strip()[:400] or None
+    return {"wait": wait, "cancel": cancel, "why": why}
+
+
+def rr_text(rr: Any) -> Optional[str]:
+    x = _f(rr)
+    return None if x is None else f"1:{x:.1f}"
+
+
 def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[str, Any]:
     note = parse_note(row.get("analysis_note"))
     lo, hi = _f(row.get("entry_low")), _f(row.get("entry_high"))
@@ -175,10 +218,25 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         story = {
             **story,
             "text": (
-                (story.get("text") or "").replace("немає незалежних збігів", f"сила {note.get('grade')} (теги в нотатці не розкладені)")
+                (story.get("text") or "").replace("незалежних збігів немає", f"сила {note.get('grade')} (теги в нотатці не розкладені)")
             ),
         }
     life = lifecycle_for_row(row, has_position=has_position)
+    sym = str(row.get("symbol") or "")
+    side = str(row.get("direction") or "").upper()
+    rr_val = pot.get("rr") if pot.get("rr") is not None else _f(row.get("rr"))
+    lines = note_lines(row.get("analysis_note"))
+    display = {
+        "zone": format_level_span(lo, hi, sym) if lo is not None else "",
+        "entry": format_px(mid, sym),
+        "sl": format_px(row.get("sl"), sym, side=side, kind="SL"),
+        "tp1": format_px(row.get("tp1"), sym, side=side, kind="TP1"),
+        "tp2": format_px(row.get("tp2"), sym, side=side, kind="TP2"),
+        "rr": rr_text(rr_val),
+        "rr_basis": "від середини зони входу до TP1" if rr_val is not None else None,
+        "potential": None if pot.get("pct") is None else f"{pot['pct']:.1f}%",
+        "tick": format(tick_size_for(sym, mid if mid is not None else row.get("sl")), "f"),
+    }
     return {
         "scenario_id": row.get("signal_id"),
         "symbol": row.get("symbol"),
@@ -193,7 +251,12 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         "sl": _f(row.get("sl")),
         "tp1": _f(row.get("tp1")),
         "tp2": _f(row.get("tp2")),
-        "rr": pot.get("rr") if pot.get("rr") is not None else _f(row.get("rr")),
+        "rr": rr_val,
+        "display": display,
+        "status": status_view(row.get("status")),
+        "wait": lines["wait"],
+        "cancel": lines["cancel"],
+        "why": lines["why"],
         "potential_pct": pot.get("pct"),
         "tp1_filter_ok": pot.get("ok_filter"),
         "as_of": row.get("ts_updated") or row.get("ts_created"),
@@ -239,6 +302,18 @@ def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
     return out
 
 
+def _btc_regime() -> Optional[str]:
+    """Режим ринку лише з market_state Worker. Сесія не підставляється як режим."""
+    try:
+        from office_market_state import market_state_get
+
+        st = market_state_get(_db(), "BTCUSDT") or {}
+        reg = str(st.get("regime") or "").strip()
+        return reg or None
+    except Exception:
+        return None
+
+
 def home_v2() -> Dict[str, Any]:
     base = v1_home()
     cards = [c for c in list_scenarios(include_watching=False) if not c.get("legacy_range")]
@@ -250,6 +325,7 @@ def home_v2() -> Dict[str, Any]:
             "note": "стан Worker з /api/summary t7_status на Web; тут без секретів",
         },
         "market_mode": base.get("market_mode"),
+        "market_regime": _btc_regime(),
         "gex": None,
         "gex_status": DATA_UNAVAILABLE,
         "gex_reason": "шар GEX не в main",
@@ -608,6 +684,66 @@ def settings_payload() -> Dict[str, Any]:
             "tp1_majors_pct": MAJORS_TP1_PCT,
             "tp1_alts_pct": ALTS_TP1_PCT,
         },
+    }
+
+
+def risk_payload() -> Dict[str, Any]:
+    """Екран «Ризик». Невідоме ≠ нуль: без перевіреного джерела — «Дані недоступні»."""
+    pos = positions_v2()
+    confirmed = pos.get("positions") or []
+    vetoes: List[Dict[str, Any]] = []
+    try:
+        rows = _fetchall(
+            _db(),
+            """
+            SELECT ts_utc, event_type, signal_id
+            FROM office_events
+            WHERE UPPER(event_type) LIKE '%RISK%' OR UPPER(event_type) LIKE '%VETO%'
+            ORDER BY ts_utc DESC
+            LIMIT 20
+            """,
+            (),
+        )
+        vetoes = [{"ts": r[0], "type": r[1], "scenario_id": r[2]} for r in rows or []]
+    except Exception:
+        vetoes = []
+    plans = []
+    for c in list_scenarios(include_watching=False):
+        if c.get("legacy_range") or (c.get("status") or {}).get("group") != "live":
+            continue
+        plans.append(
+            {
+                "scenario_id": c.get("scenario_id"),
+                "symbol": c.get("symbol"),
+                "direction": c.get("direction"),
+                "status": c.get("status"),
+                "rr": (c.get("display") or {}).get("rr"),
+                "risk_usdt": None,
+                "risk_note": "Плановий ризик не розраховано: немає перевіреного капіталу",
+            }
+        )
+    return {
+        "ok": True,
+        "readonly": True,
+        "orders": False,
+        "order_authorized": False,
+        "equity": {"value": None, "status": DATA_UNAVAILABLE, "text": "Дані недоступні: капітал не підключено"},
+        "exposure": {
+            "value": None,
+            "status": DATA_UNAVAILABLE if not confirmed else "PARTIAL",
+            "text": (
+                "Дані про відкриті позиції не підтверджені"
+                if not confirmed
+                else f"Підтверджених позицій через /position: {len(confirmed)}; сума ризику не розрахована"
+            ),
+        },
+        "budget": {"value": None, "status": DATA_UNAVAILABLE, "text": "Ризиковий бюджет дня не затверджено"},
+        "positions": confirmed,
+        "plans": plans[:20],
+        "vetoes": vetoes,
+        "vetoes_note": None if vetoes else "Записів veto Risk Officer у журналі ще немає",
+        "limits": settings_payload().get("gates"),
+        "note": "Схвалення аналітичного плану не створює ордер.",
     }
 
 

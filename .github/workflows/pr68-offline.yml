@@ -79,3 +79,7 @@ jobs:
         run: |
           python scripts/test_lev_trader_card.py
           python scripts/test_t8_telegram_filter.py
+      - name: Mini App five tabs, scenario card and honest Risk tab (offline)
+        run: |
+          python scripts/test_mini_v2.py
+          python scripts/test_mini_v2_cards.py

@@ -38,9 +38,14 @@ def main() -> int:
     for ban in ("ggshot", "купити premium", "enter long", "enter short", "auto trading", "підключити біржу"):
         if ban in html:
             return _fail(f"brand/order leaked {ban}")
-    if "голівна" in html or True:
-        if "сигнали" not in html or "сканер" not in html:
-            return _fail("nav")
+    for tab in ("офіс", "радар", "сценарії", "журнал", "ризик"):
+        if f"</i>{tab}</button>" not in html:
+            return _fail(f"nav tab {tab}")
+    for tok in ("#0b1018", "#27c99a", "#f36b78", "#f2b65d", "#5da9ff"):
+        if tok not in html:
+            return _fail(f"palette {tok}")
+    if "tofixed(4)" in html:
+        return _fail("client-side price rounding must use backend tick display")
     if "position:fixed" not in html_v2() and "nav{" not in html_v2().replace(" ", ""):
         pass
     if "lightweight-charts" not in html:

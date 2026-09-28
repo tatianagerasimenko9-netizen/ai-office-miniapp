@@ -6,273 +6,425 @@
 <title>AI Office</title>
 <style>
 :root{
-  --bg:#121418;--card:#1b1e24;--line:#2a2e36;--txt:#e8eaed;--mut:#8b919c;
-  --long:#3dcf8a;--short:#ef6b7b;--acc:#c9a227;--pad:12px;
-  --navh:calc(58px + env(safe-area-inset-bottom));
+  --bg:#0B1018;--card:#151D29;--raise:#1D2938;--line:#243244;--txt:#F3F6FA;--mut:#94A3B8;
+  --acc:#5DA9FF;--long:#27C99A;--short:#F36B78;--watch:#F2B65D;--neu:#8392A5;--pad:16px;
+  --navh:calc(60px + env(safe-area-inset-bottom));
 }
-*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
-  font-family:Inter,ui-sans-serif,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
-body{padding:env(safe-area-inset-top) 0 var(--navh) 0}
-header{padding:10px var(--pad) 0;display:flex;justify-content:space-between;align-items:flex-end}
-header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.02em}
-.mut{color:var(--mut);font-size:12px} .ok{color:var(--long)} .bad{color:var(--short)}
-main{padding:10px var(--pad);max-width:560px;margin:0 auto}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 10px}
-.row{display:flex;gap:8px} .kpi{flex:1;min-width:0}
-.kpi b{display:block;font-size:16px;margin-top:2px}
-.sc{display:flex;gap:10px;align-items:center}
-.pill{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 8px;color:var(--mut)}
-.pill.on{border-color:var(--acc);color:var(--acc)}
-.dir-l{color:var(--long);font-weight:700} .dir-s{color:var(--short);font-weight:700}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-.chips button,.tf button,nav button{border:0;background:#252830;color:var(--txt);border-radius:10px;padding:8px 10px;font-size:12px}
-nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#16181d;border-top:1px solid var(--line);
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}
+body{padding:env(safe-area-inset-top) 0 var(--navh) 0;min-height:100vh;overflow-x:hidden}
+header{padding:12px var(--pad) 0;display:flex;justify-content:space-between;align-items:center;gap:8px;max-width:600px;margin:0 auto}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.02em}
+main{padding:10px var(--pad) 18px;max-width:600px;margin:0 auto}
+h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.05em}
+.mut{color:var(--mut);font-size:12px;line-height:1.45}
+.num{font-variant-numeric:tabular-nums}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 10px;min-width:0}
+.card.tap{cursor:pointer}.card.tap:active{background:var(--raise)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;min-width:0}
+.kpi b{display:block;font-size:15px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sym{font-size:17px;font-weight:700}
+.side{font-weight:700;font-size:13px;letter-spacing:.03em}
+.L{color:var(--long)}.S{color:var(--short)}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--mut);white-space:nowrap}
+.pill.watch{border-color:var(--watch);color:var(--watch)}
+.pill.live{border-color:var(--acc);color:var(--acc)}
+.pill.done{border-color:var(--neu);color:var(--neu)}
+.pill.ok{border-color:var(--long);color:var(--long)}.pill.bad{border-color:var(--short);color:var(--short)}
+.lv{display:grid;grid-template-columns:minmax(0,1.6fr) repeat(2,minmax(0,1fr)) minmax(0,.8fr);gap:6px;margin-top:10px}
+.lv div{background:var(--raise);border-radius:10px;padding:7px 8px;min-width:0}
+.lv span{display:block;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.lv b{display:block;font-size:13px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv div:first-child b{white-space:normal;overflow-wrap:anywhere}
+.lv .sl b{color:var(--short)}.lv .tp b{color:var(--long)}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin:0 0 10px}
+.sec h3{margin:0 0 6px;font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.sec p{margin:0;font-size:14px;line-height:1.5}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:0}.kv span{color:var(--mut)}.kv b{font-variant-numeric:tabular-nums;text-align:right}
+.chips{display:flex;gap:6px;overflow-x:auto;margin:4px 0 10px;padding-bottom:2px;scrollbar-width:none}
+.chips button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:999px;padding:7px 12px;font-size:12px}
+.chips button.on{background:var(--raise);color:var(--txt);border-color:var(--acc)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#0F1621;border-top:1px solid var(--line);
   padding:6px 4px env(safe-area-inset-bottom);z-index:20}
-nav button{flex:1;background:transparent;padding:8px 4px;font-size:11px;color:var(--mut)}
-nav button.on{color:var(--txt);font-weight:700}
-.chart{height:280px;width:100%;border-radius:12px;background:#0e1014;border:1px solid var(--line)}
+nav button{flex:1;border:0;background:transparent;padding:6px 2px;font-size:11px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button i{font-style:normal;font-size:17px;line-height:1}
+nav button.on{color:var(--txt);font-weight:600}nav button.on i{filter:none}
+.chart{height:320px;width:100%;border-radius:14px;background:#0E141D;border:1px solid var(--line);overflow:hidden}
 .chart.full{position:fixed;inset:env(safe-area-inset-top) 0 var(--navh) 0;height:auto;z-index:15;border-radius:0}
-.table-wrap{overflow-x:auto} table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
-.empty{padding:28px 8px;text-align:center;color:var(--mut)}
-.banner{font-size:11px;color:var(--mut);margin:4px 0 10px}
-.sk{height:14px;background:linear-gradient(90deg,#222,#2c2,#222);background-size:200% 100%;animation:s 1.2s infinite;border-radius:6px;margin:8px 0}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:11px}
+.empty{padding:26px 10px;text-align:center;color:var(--mut);font-size:13px}
+.banner{font-size:12px;color:var(--mut);margin:2px 0 10px}
+.back{border:0;background:transparent;color:var(--acc);font-size:14px;padding:4px 0;margin-bottom:6px}
+.tl{border-left:2px solid var(--line);margin-left:4px;padding-left:12px}
+.tl div{position:relative;padding:4px 0;font-size:13px}
+.tl div:before{content:"";position:absolute;left:-17px;top:10px;width:8px;height:8px;border-radius:50%;background:var(--acc)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--neu)}
+.dot.ok{background:var(--long)}.dot.bad{background:var(--short)}.dot.warn{background:var(--watch)}
+.sk{height:14px;background:linear-gradient(90deg,#151D29,#1D2938,#151D29);background-size:200% 100%;animation:s 1.2s infinite;border-radius:6px;margin:10px 0}
 @keyframes s{to{background-position:-200% 0}}
+.err{border-color:var(--short)}
 </style>
 </head>
 <body>
 <header>
-  <div>
+  <div style="min-width:0">
     <h1>AI Office</h1>
     <div class="mut" id="sub">Лише читання · не ордер</div>
   </div>
-  <div class="pill" id="stale">дані</div>
+  <span class="pill" id="stale"><span class="dot"></span> дані</span>
 </header>
 <main id="app"><div class="sk"></div><div class="sk"></div></main>
 <nav>
-  <button data-r="home" class="on">Головна</button>
-  <button data-r="signals">Сигнали</button>
-  <button data-r="scan">Сканер</button>
-  <button data-r="journal">Журнал</button>
-  <button data-r="more">Ще</button>
+  <button data-r="office" class="on"><i>◎</i>Офіс</button>
+  <button data-r="radar"><i>⌖</i>Радар</button>
+  <button data-r="scenarios"><i>◧</i>Сценарії</button>
+  <button data-r="journal"><i>≡</i>Журнал</button>
+  <button data-r="risk"><i>⛨</i>Ризик</button>
 </nav>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js" integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK" crossorigin="anonymous"></script>
 <script>
 const $=id=>document.getElementById(id);
 const app=$('app');
+const NA='Не визначено';
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
-const S={tf:localStorage.getItem('ao_tf')||'H1', ch:localStorage.getItem('ao_ch')==='1'};
+function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'scenarios',
+  layers:{zone:true,sl:true,tp:true}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:-]/g,'');}
-function j(url){return fetch(url,{cache:'no-store'}).then(r=>r.json());}
-function dirC(d){return String(d||'').toUpperCase()==='SHORT'?'dir-s':'dir-l';}
-function money(x){if(x==null||x==='')return '—'; const n=Number(x); if(!isFinite(n))return '—';
-  if(Math.abs(n)>=1000) return n.toLocaleString('uk-UA',{maximumFractionDigits:1});
-  if(Math.abs(n)<1) return n.toFixed(4); return String(Math.round(n*100)/100);}
-function scRow(s){
-  const life=esc((s.lifecycle&&s.lifecycle.ua)||s.status_raw||'');
-  const st=esc(s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони');
-  const id=sid(s.scenario_id);
-  const note=s.analysis_note?`<div class="mut">${esc(s.analysis_note)}</div>`:'';
-  return `<div class="card" data-id="${esc(id)}">
-    <div class="sc">
-      <div style="flex:1;min-width:0">
-        <b>${esc(s.symbol||'')}</b> <span class="${dirC(s.direction)}">${esc(s.direction||'')}</span>
-        <span class="pill">${life}</span>
-        ${s.grade?`<span class="pill on">збіги ${esc(s.grade)}</span>`:''}
-        <div class="mut">${st}</div>${note}
-        <div class="mut">зона ${esc(money(s.zone_lo))}–${esc(money(s.zone_hi))} · SL ${esc(money(s.sl))} · TP1 ${esc(money(s.tp1))}
-          ${s.potential_pct!=null?` · +${esc(s.potential_pct)}%`:''}
-          ${s.rr!=null?` · ${esc(s.rr)}R`:''}</div>
+function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|-]/g,'');}
+async function j(url){
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+function side(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'S':'L';}
+function sideTxt(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'▼ SHORT':(s==='LONG'?'▲ LONG':esc(s||'—'));}
+function ago(ts){
+  if(!ts) return '—'; const t=Date.parse(ts); if(!isFinite(t)) return esc(ts);
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<1) return 'щойно'; if(m<60) return m+' хв тому'; if(m<1440) return Math.round(m/60)+' год тому';
+  return new Date(t).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+}
+function hhmm(ts){const t=Date.parse(ts); if(!isFinite(t)) return esc(ts||''); return new Date(t).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function pill(st){st=st||{}; return `<span class="pill ${esc(st.group||'')}">${esc(st.icon||'•')} ${esc(st.short||st.code||'—')}</span>`;}
+function fail(e, what){
+  app.innerHTML=`<div class="card err"><b>Не вдалося завантажити ${esc(what)}</b>
+    <div class="mut">${esc(e&&e.message||e)} · дані не показано, щоб не вводити в оману</div>
+    <button class="back" id="retry">Спробувати ще раз</button></div>`;
+  $('retry').onclick=()=>routes[cur]();
+  setHealth('bad','немає зв’язку');
+}
+function setHealth(kind,text){$('stale').innerHTML=`<span class="dot ${kind}"></span> ${esc(text)}`;}
+function levels(s){
+  const d=s.display||{};
+  return `<div class="lv">
+    <div><span>Вхід</span><b>${esc(d.zone||d.entry||NA)}</b></div>
+    <div class="sl"><span>Стоп</span><b>${esc(d.sl||NA)}</b></div>
+    <div class="tp"><span>TP1</span><b>${esc(d.tp1||NA)}</b></div>
+    <div><span>RR</span><b>${esc(d.rr||NA)}</b></div></div>`;
+}
+function scCard(s){
+  const st=s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони';
+  return `<div class="card tap" data-id="${esc(sid(s.scenario_id))}">
+    <div class="top"><span class="sym">${esc(s.symbol||'')}</span>
+      <span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}
       </div>
-    </div></div>`;
+    <div class="mut" style="margin-top:4px">${esc(s.timeframe||'')} · оновлено ${ago(s.as_of)}</div>
+    <div class="mut" style="margin-top:6px">${esc((s.status||{}).text||'')}. ${esc(st)}</div>
+    ${levels(s)}</div>`;
 }
-async function home(){
-  app.innerHTML='<div class="sk"></div>';
-  const [d,ov]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview')]);
-  $('sub').textContent=`git ${una(d.git_sha)} · ${una(d.db_backend)} · ${d.card_note||''}`;
-  const b=d.btc||{}; const sess=(d.sessions||{}).active;
-  const marks=(ov.marks||[]).map(m=>`<div class="card kpi"><div class="mut">${esc(m.symbol)}</div><b>${esc(una(m.price))}</b>
-    <div class="mut">${esc(m.data_status||'')}</div></div>`).join('');
-  const list=(d.scenarios||[]).map(scRow).join('') || `<div class="empty">Немає придатних сценаріїв Лева</div>`;
-  app.innerHTML=`<div class="banner">Сценарій ≠ позиція. GEX/OI не live.</div>
-    <div class="row">${marks||''}</div>
-    <div class="row">
-      <div class="card kpi"><div class="mut">Сесія</div><b>${esc(una(sess))}</b></div>
-      <div class="card kpi"><div class="mut">Придатні</div><b>${d.ready_count??0}</b></div>
-      <div class="card kpi"><div class="mut">BTC 24h</div><b>${esc(una(b.change_24h))}</b></div>
+function bindCards(){app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));}
+function chips(items, curv, attr){
+  return `<div class="chips">${items.map(([k,t])=>`<button data-${attr}="${k}" class="${k===curv?'on':''}">${t}</button>`).join('')}</div>`;
+}
+
+/* ---------- Офіс ---------- */
+async function office(){
+  app.innerHTML='<div class="sk"></div><div class="sk"></div>';
+  let d,ov,sc;
+  try{[d,ov,sc]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview'), j('/api/v2/scenarios?watching=1')]);}
+  catch(e){return fail(e,'огляд офісу');}
+  $('sub').textContent=`${una(d.db_backend)} · git ${String(d.git_sha||'—').slice(0,7)} · лише читання`;
+  const b=d.btc||{}, se=d.sessions||{};
+  const all=sc.scenarios||[];
+  const live=all.filter(s=>(s.status||{}).group==='live');
+  const watch=all.filter(s=>(s.status||{}).group==='watch');
+  const marks=(ov.marks||[]);
+  const okFeeds=marks.filter(m=>m.data_status==='DATA_OK').length;
+  setHealth(okFeeds===marks.length&&marks.length?'ok':(okFeeds?'warn':'bad'), okFeeds===marks.length&&marks.length?'дані актуальні':(okFeeds?'дані частково':'дані недоступні'));
+  const ch=b.change_24h; const chTxt=(ch==null)?'—':((ch>0?'+':'')+Number(ch).toFixed(2)+'%');
+  app.innerHTML=`
+    <div class="card">
+      <div class="mut">Що зараз важливо</div>
+      <p style="margin:6px 0 0;font-size:15px;line-height:1.5">${live.length?`${live.length} ${live.length===1?'сценарій потребує':'сценарії потребують'} уваги.`:'Підтверджених планів немає — «сьогодні без входу» теж рішення.'}
+      ${watch.length?` Під спостереженням: ${watch.length}.`:''}</p>
+      <div class="mut" style="margin-top:6px">Сценарій ≠ позиція. Ордерів офіс не відкриває.</div>
     </div>
-    <h2 style="font-size:15px">Сценарії Лева</h2>${list}`;
-  app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));
+    <div class="grid">
+      <div class="kpi"><div class="mut">BTC</div><b class="num">${esc(una(b.price))}</b><div class="mut num ${ch>0?'L':(ch<0?'S':'')}">${esc(chTxt)} · 24h</div></div>
+      <div class="kpi"><div class="mut">Сесія</div><b>${esc(una(se.active))}</b><div class="mut">далі ${esc(una(se.next))}${se.next_in_min!=null?` · ${esc(se.next_in_min)} хв`:''}</div></div>
+      <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
+    </div>
+    <h2>Активні сценарії</h2>
+    ${live.map(scCard).join('')||'<div class="empty">Немає активних планів Лева</div>'}
+    ${watch.length?`<h2>Спостереження</h2>${watch.slice(0,4).map(scCard).join('')}`:''}
+    <h2>Стан даних</h2>
+    <div class="card">${marks.map(m=>`<div class="kv"><span><span class="dot ${m.data_status==='DATA_OK'?'ok':'bad'}"></span> ${esc(m.symbol)}</span>
+      <b>${m.data_status==='DATA_OK'?ago(m.as_of):'недоступно'}</b></div>`).join('')}
+      ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
+    </div>`;
+  bindCards();
 }
-async function signals(){
-  const d=await j('/api/v2/scenarios');
-  const rows=(d.scenarios||[]).filter(s=>['ACTIVE','HIT_ENTRY','HIT_TP1','WATCHING'].includes(String(s.status_raw||'').toUpperCase()));
-  app.innerHTML=`<div class="banner">${esc(d.empty_reason||'Картка сценарію. Тап — графік і деталі.')}</div>
-    ${rows.map(scRow).join('')||'<div class="empty">Немає придатних сценаріїв</div>'}`;
-  app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));
-}
-async function scan(){
-  const d=await j('/api/v2/scanner');
+
+/* ---------- Радар ---------- */
+async function radar(){
+  app.innerHTML='<div class="sk"></div>';
+  let d,sc; try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
   const rows=d.candidates||[];
-  const body=rows.map(c=>`<tr><td>${esc(c.symbol)}</td><td>${c.score==null?'—':esc(c.score)}</td><td>${c.rsi==null?'—':esc(c.rsi)}</td><td class="mut">${esc(c.as_of||'')}</td></tr>`).join('');
-  const empty=rows.length?'' : `<div class="empty">${esc(d.empty_reason||'Немає фактів скану. Це не помилка мережі, якщо Worker ще не записав RSI.')}</div>`;
-  app.innerHTML=`<div class="banner">Universe Worker. Без алертів. Score/RSI лише зі збережених фактів.</div>
-    <div class="card"><div class="table-wrap"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>час</th></tr>${body}</table></div></div>${empty}`;
+  const watch=(sc.scenarios||[]).filter(s=>(s.status||{}).group==='watch');
+  const f=S.rf;
+  const body=rows.map(c=>`<tr><td><b>${esc(c.symbol)}</b></td><td class="num">${c.score==null?'—':esc(c.score)}</td><td class="num">${c.rsi==null?'—':esc(c.rsi)}</td><td class="mut">${ago(c.as_of)}</td></tr>`).join('');
+  const shortlist=`<div class="card"><div class="mut" style="margin-bottom:6px">Shortlist сканера — кандидати на аналіз, не сигнали.</div>
+    ${rows.length?`<div class="table-wrap"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>Оновлено</th></tr>${body}</table></div>`
+      :`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}</div>`;
+  const wl=watch.map(scCard).join('')||'<div class="empty">Лев зараз ні за чим не спостерігає</div>';
+  app.innerHTML=`<div class="banner">Радар показує, чому монета в полі зору. Готовий сигнал дає лише Лев.</div>
+    ${chips([['all','Усе'],['short','Shortlist'],['watch','WATCHING']],f,'rf')}
+    ${f!=='watch'?`<h2>Shortlist</h2>${shortlist}`:''}
+    ${f!=='short'?`<h2>Під спостереженням Лева</h2>${wl}`:''}`;
+  app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
+  bindCards();
 }
+
+/* ---------- Сценарії ---------- */
+async function scenarios(){
+  app.innerHTML='<div class="sk"></div>';
+  let d; try{d=await j('/api/v2/journal?kind=scenarios');}catch(e){return fail(e,'сценарії');}
+  const all=d.rows||[];
+  const f=S.sf;
+  const pick=s=>{const g=(s.status||{}).group, dir=String(s.direction||'').toUpperCase();
+    if(f==='live') return g==='live'; if(f==='watch') return g==='watch'; if(f==='done') return g==='done';
+    if(f==='LONG'||f==='SHORT') return dir===f && g!=='done'; return g!=='done';};
+  const rows=all.filter(pick);
+  app.innerHTML=`${chips([['all','Актуальні'],['live','Плани'],['watch','WATCHING'],['LONG','▲ LONG'],['SHORT','▼ SHORT'],['done','Архів']],f,'sf')}
+    ${rows.map(scCard).join('')||'<div class="empty">Немає сценаріїв за цим фільтром</div>'}`;
+  app.querySelectorAll('[data-sf]').forEach(b=>b.onclick=()=>{S.sf=b.dataset.sf; scenarios();});
+  bindCards();
+}
+
+/* ---------- Журнал ---------- */
 async function journal(){
-  const kind=S.jkind||'scenarios';
-  const d=await j('/api/v2/journal?kind='+kind);
-  const chips=`<div class="chips">
-    <button data-k="scenarios">Сценарії</button>
-    <button data-k="positions">/position</button>
-    <button data-k="stats">Статистика</button></div>`;
+  const kind=S.jkind;
+  let d; try{d=await j('/api/v2/journal?kind='+kind);}catch(e){return fail(e,'журнал');}
   let body='';
   if(kind==='stats'){
-    body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px">${esc(d.message||d.note||'мало даних')}</pre>
+    body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(d.message||d.note||'мало даних')}</pre>
       <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
   } else if(kind==='positions'){
     body=posHtml(d);
   } else {
     const rows=d.rows||[];
-    body=rows.map(scRow).join('')||'<div class="empty">Порожній журнал сценаріїв</div>';
+    body=rows.map(s=>`<div class="card tap" data-id="${esc(sid(s.scenario_id))}"><div class="top">
+      <span class="mut num">${hhmm(s.created_at)}</span><b>${esc(s.symbol)}</b><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}</div></div>`).join('')
+      ||'<div class="empty">Журнал сценаріїв порожній</div>';
   }
-  app.innerHTML=`<div class="banner">Три режими окремо: сценарії Лева, /position, /stats.</div>${chips}${body}`;
+  app.innerHTML=`<div class="banner">Історія фактичних записів. Минуле не переписується.</div>
+    ${chips([['scenarios','Сценарії'],['positions','Позиції /position'],['stats','Статистика']],kind,'k')}${body}`;
   app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
-  app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));
+  bindCards();
 }
 function posHtml(d){
   const rows=d.positions||[];
   if(!rows.length) return `<div class="empty">${esc(d.empty_reason||'Немає підтверджених позицій')}</div>`;
-  return rows.map(p=>`<div class="card"><b>${esc(p.symbol)}</b> ${esc(p.direction)} ${esc(p.status)}
-    <div class="mut">entry ${esc(una(p.entry))} SL ${esc(una(p.sl))} PnL ${p.pnl_pct==null?'немає перевіреного outcome':esc(p.pnl_pct)} · лише /position</div></div>`).join('');
+  return rows.map(p=>`<div class="card"><div class="top"><b>${esc(p.symbol)}</b><span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span><span class="pill">${esc(p.status)}</span></div>
+    <div class="lv"><div><span>Вхід</span><b>${esc(una(p.entry))}</b></div><div class="sl"><span>Стоп</span><b>${esc(una(p.sl))}</b></div>
+    <div class="tp"><span>TP</span><b>${esc(una(p.tp))}</b></div><div><span>PnL</span><b>${p.pnl_pct==null?'—':esc(p.pnl_pct)}</b></div></div>
+    <div class="mut" style="margin-top:6px">Джерело: /position</div></div>`).join('');
 }
-async function more(){
-  const [p,s]=await Promise.all([j('/api/v2/positions'), j('/api/v2/settings')]);
-  app.innerHTML=`<h2 style="font-size:15px">Мої позиції</h2>${posHtml(p)}
-    <h2 style="font-size:15px">Налаштування</h2>
+
+/* ---------- Ризик ---------- */
+async function risk(){
+  app.innerHTML='<div class="sk"></div>';
+  let d,s; try{[d,s]=await Promise.all([j('/api/v2/risk'), j('/api/v2/settings')]);}catch(e){return fail(e,'ризик');}
+  const kv=(k,o)=>`<div class="kv"><span>${esc(k)}</span><b>${o&&o.value!=null?esc(o.value):esc((o&&o.text)||'Дані недоступні')}</b></div>`;
+  const g=d.limits||{};
+  app.innerHTML=`<div class="banner">${esc(d.note||'')}</div>
+    <div class="card">${kv('Капітал',d.equity)}${kv('Відкрита експозиція',d.exposure)}${kv('Ризиковий бюджет дня',d.budget)}</div>
+    <h2>Плани на розгляді</h2>
+    ${(d.plans||[]).map(p=>`<div class="card tap" data-id="${esc(sid(p.scenario_id))}"><div class="top"><b>${esc(p.symbol)}</b>
+      <span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span>${pill(p.status)}<span class="mut num" style="margin-left:auto">RR ${esc(p.rr||NA)}</span></div>
+      <div class="mut" style="margin-top:4px">${esc(p.risk_note)}</div></div>`).join('')||'<div class="empty">Немає планів, що чекають ризик-контролю</div>'}
+    <h2>Veto Risk Officer</h2>
+    ${(d.vetoes||[]).map(v=>`<div class="card"><span class="pill bad">⛔ ${esc(v.type)}</span> <span class="mut">${hhmm(v.ts)} · ${esc(v.scenario_id||'')}</span></div>`).join('')
+      ||`<div class="empty">${esc(d.vetoes_note||'')}</div>`}
+    <h2>Підтверджені позиції</h2>${posHtml(d)}
+    <h2>Правила (заморожені)</h2>
     <div class="card">
-      <div>Мова: українська</div>
-      <div>Пояс Europe/Kyiv</div>
-      <div class="chips tf">${['M1','M5','M15','H1','H4','D1'].map(t=>`<button data-tf="${t}">${t}</button>`).join('')}</div>
-      <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (не сигнал, MPL 2.0)</label>
-      <div class="mut" style="margin-top:8px">${esc((s.risk_presets&&s.risk_presets.note)||'')}</div>
-      <div class="mut">Сповіщення не підключені · auto-trading немає · ордерів немає</div>
-      <div class="mut">Гейті: ATR ${JSON.stringify(s.gates||{})}</div>
+      <div class="kv"><span>ATR: блок входу / T0</span><b>${esc(g.atr_entry_block)}% / ${esc(g.atr_t0)}%</b></div>
+      <div class="kv"><span>Edge</span><b>${esc(g.edge)}</b></div>
+      <div class="kv"><span>Мінімальний RR</span><b>1:${esc(g.min_rr)}</b></div>
+      <div class="kv"><span>TP1 мінімум BTC/ETH · альти</span><b>${esc(g.tp1_majors_pct)}% · ${esc(g.tp1_alts_pct)}%</b></div>
+      <div class="kv"><span>Автоторгівля / ордери</span><b>вимкнено</b></div>
+    </div>
+    <h2>Відображення</h2>
+    <div class="card">
+      <div class="mut">Таймфрейм графіка за замовчуванням</div>
+      ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+      <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
+      <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
   $('chov').checked=S.ch;
-  $('chov').onchange=e=>{S.ch=e.target.checked; localStorage.setItem('ao_ch', S.ch?'1':'0');};
-  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; localStorage.setItem('ao_tf', S.tf);});
+  $('chov').onchange=e=>{S.ch=e.target.checked; lsSet('ao_ch', S.ch?'1':'0');};
+  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
+  bindCards();
 }
+
+/* ---------- Графік ---------- */
 let poll=null, chart=null, series=null, usingLW=false;
 function killPoll(){ if(poll){clearInterval(poll); poll=null;} }
-function drawFallback(el, candles, levels){
-  const c=document.createElement('canvas'); c.width=el.clientWidth*2||640; c.height=el.clientHeight*2||560;
+function priceFormat(tick){
+  const t=Number(tick); if(!(t>0)) return {type:'price',precision:6,minMove:0.000001};
+  const p=Math.max(0,Math.min(10,(String(tick).split('.')[1]||'').replace(/0+$/,'').length));
+  return {type:'price',precision:p,minMove:t};
+}
+function drawFallback(el, candles, lv){
+  const c=document.createElement('canvas'); c.width=(el.clientWidth||320)*2; c.height=(el.clientHeight||320)*2;
   c.style.width='100%'; c.style.height='100%'; el.innerHTML=''; el.appendChild(c);
   const ctx=c.getContext('2d'); const w=c.width,h=c.height, pad=40;
   const xs=candles.filter(x=>x.time);
-  if(!xs.length){ctx.fillStyle='#8b919c'; ctx.fillText('немає свічок',20,40); return;}
+  if(!xs.length){ctx.fillStyle='#94A3B8'; ctx.fillText('немає свічок',20,40); return;}
   let mn=Math.min(...xs.map(x=>x.low)), mx=Math.max(...xs.map(x=>x.high));
-  ['zone_lo','zone_hi','sl','tp1'].forEach(k=>{const v=levels[k]; if(v!=null){mn=Math.min(mn,v); mx=Math.max(mx,v);}});
+  Object.values(lv).forEach(v=>{if(v!=null){mn=Math.min(mn,v); mx=Math.max(mx,v);}});
   const x=i=>pad+(w-2*pad)*i/Math.max(xs.length-1,1);
   const y=v=>h-pad-(h-2*pad)*(v-mn)/Math.max(mx-mn,1e-9);
-  ctx.fillStyle='#0e1014'; ctx.fillRect(0,0,w,h);
-  if(levels.zone_lo!=null && levels.zone_hi!=null){
-    ctx.fillStyle='rgba(201,162,39,.18)';
-    ctx.fillRect(pad,y(levels.zone_hi),w-2*pad, y(levels.zone_lo)-y(levels.zone_hi));
-  }
+  ctx.fillStyle='#0E141D'; ctx.fillRect(0,0,w,h);
+  if(lv.zone_lo!=null && lv.zone_hi!=null){ctx.fillStyle='rgba(93,169,255,.16)'; ctx.fillRect(pad,y(lv.zone_hi),w-2*pad,y(lv.zone_lo)-y(lv.zone_hi));}
   ctx.lineWidth=2;
-  [['sl','#ef6b7b'],['tp1','#3dcf8a']].forEach(([k,col])=>{
-    if(levels[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(levels[k])); ctx.lineTo(w-pad,y(levels[k])); ctx.stroke();
-  });
-  xs.forEach((b,i)=>{
-    const up=b.close>=b.open; ctx.strokeStyle=up?'#3dcf8a':'#ef6b7b';
+  [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A']].forEach(([k,col])=>{
+    if(lv[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(lv[k])); ctx.lineTo(w-pad,y(lv[k])); ctx.stroke();});
+  xs.forEach((b,i)=>{const up=b.close>=b.open; ctx.strokeStyle=ctx.fillStyle=up?'#27C99A':'#F36B78';
     ctx.beginPath(); ctx.moveTo(x(i),y(b.high)); ctx.lineTo(x(i),y(b.low)); ctx.stroke();
-    const top=y(Math.max(b.open,b.close)), bot=y(Math.min(b.open,b.close));
-    ctx.fillStyle=up?'#3dcf8a':'#ef6b7b';
-    ctx.fillRect(x(i)-2, top, 4, Math.max(2, bot-top));
-  });
+    const top=y(Math.max(b.open,b.close)), bot=y(Math.min(b.open,b.close)); ctx.fillRect(x(i)-2,top,4,Math.max(2,bot-top));});
 }
-async function paintChart(el, symbol, tf, levels){
-  const pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=180`);
-  $('stale').textContent = pack.live ? 'потік' : (pack.data_status==='DATA_OK' ? pack.quote_mode : 'stale');
+function chartLevels(s){
+  const L=S.layers, o={};
+  if(L.zone){o.zone_lo=s.zone_lo; o.zone_hi=s.zone_hi;}
+  if(L.sl) o.sl=s.sl;
+  if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2;}
+  return o;
+}
+async function paintChart(el, s){
+  const symbol=s.symbol, tf=S.tf, lv=chartLevels(s);
+  let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=180`);}
+  catch(e){el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
+  const stamp=$('asof'); if(stamp) stamp.textContent=pack.as_of?`Остання свічка: ${hhmm(pack.as_of)} · ${pack.fixture?'FIXTURE, не ринок':pack.source}`:'';
+  setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad', pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):'дані застарілі');
   const candles=(pack.candles||[]).filter(c=>c.time);
+  if(chart){try{chart.remove();}catch(e){} chart=null; series=null;}
   el.innerHTML='';
   if(!candles.length){ el.innerHTML='<div class="empty">Свічки недоступні — графік не live</div>'; return pack; }
   if(window.LightweightCharts){
     usingLW=true;
-    chart=LightweightCharts.createChart(el,{layout:{background:{color:'#0e1014'},textColor:'#8b919c'},
-      grid:{vertLines:{color:'#1c1f25'},horzLines:{color:'#1c1f25'}},rightPriceScale:{borderColor:'#2a2e36'},
-      timeScale:{borderColor:'#2a2e36'},crosshair:{mode:0},height:el.clientHeight||280,width:el.clientWidth||320});
-    series=chart.addCandlestickSeries({upColor:'#3dcf8a',downColor:'#ef6b7b',borderVisible:false,wickUpColor:'#3dcf8a',wickDownColor:'#ef6b7b'});
+    chart=LightweightCharts.createChart(el,{layout:{background:{color:'#0E141D'},textColor:'#94A3B8'},
+      grid:{vertLines:{color:'#18212E'},horzLines:{color:'#18212E'}},rightPriceScale:{borderColor:'#243244'},
+      timeScale:{borderColor:'#243244',timeVisible:true},crosshair:{mode:0},height:el.clientHeight||320,width:el.clientWidth||320});
+    series=chart.addCandlestickSeries({upColor:'#27C99A',downColor:'#F36B78',borderVisible:false,wickUpColor:'#27C99A',wickDownColor:'#F36B78',
+      priceFormat:priceFormat((s.display||{}).tick)});
     series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
     const vol=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:''});
-    vol.setData(candles.map(c=>({time:c.time,value:c.volume||0,color:'#2a2e36'})));
-    if(levels.zone_lo!=null) series.createPriceLine({price:levels.zone_lo,color:'#c9a227',lineStyle:2,title:'зона'});
-    if(levels.zone_hi!=null) series.createPriceLine({price:levels.zone_hi,color:'#c9a227',lineStyle:2,title:'зона'});
-    if(levels.sl!=null) series.createPriceLine({price:levels.sl,color:'#ef6b7b',title:'SL'});
-    if(levels.tp1!=null) series.createPriceLine({price:levels.tp1,color:'#3dcf8a',title:'TP1'});
+    vol.priceScale().applyOptions({scaleMargins:{top:.85,bottom:0}});
+    vol.setData(candles.map(c=>({time:c.time,value:c.volume||0,color:'#243244'})));
+    const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
+    line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
+    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2);
     if(S.ch){
-      const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      try{const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
       if(chp&&chp.ok){
-        const mid=chart.addLineSeries({color:'#6e7681',lineWidth:1,title:'регр.'});
-        const up=chart.addLineSeries({color:'#6e7681',lineStyle:2,title:'канал'});
-        const dn=chart.addLineSeries({color:'#6e7681',lineStyle:2});
-        const t0=candles[Math.max(0,candles.length-(chp.length||100))].time;
-        const t1=candles[candles.length-1].time;
+        const mk=o=>chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false},o));
+        const mid=mk({}), up=mk({lineStyle:2}), dn=mk({lineStyle:2});
+        const t0=candles[Math.max(0,candles.length-(chp.length||100))].time, t1=candles[candles.length-1].time;
         mid.setData([{time:t0,value:chp.mid_start},{time:t1,value:chp.mid_end}]);
         up.setData([{time:t0,value:chp.upper_start},{time:t1,value:chp.upper_end}]);
         dn.setData([{time:t0,value:chp.lower_start},{time:t1,value:chp.lower_end}]);
-      }
+      }}catch(e){}
     }
     chart.timeScale().fitContent();
-  } else {
-    usingLW=false; drawFallback(el,candles,levels);
-  }
+  } else { usingLW=false; drawFallback(el,candles,lv); }
   return pack;
 }
+
+/* ---------- Картка сценарію ---------- */
 async function openSc(id){
   killPoll();
-  const d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));
-  if(!d.ok){ app.innerHTML='<div class="empty">Сценарій недоступний</div>'; return; }
-  const s=d.scenario||{};
-  const ev=(d.events||[]).map(e=>`<div class="mut">${esc(e.ts)} · ${esc(e.type)} · ${esc(e.source)}</div>`).join('') || '<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>';
-  const hyp=d.hypothetical? '<div class="mut">Потенціал гіпотетичний. Це не PnL угоди.</div>':'';
-  app.innerHTML=`<button class="pill" id="back">← назад</button>
-    ${scRow(s)}
-    ${hyp}
-    <div class="chips" id="tfs">${['M1','M5','M15','H1','H4','D1'].map(t=>`<button data-tf="${t}">${t}</button>`).join('')}
-      <button id="fs">повний екран</button></div>
+  app.innerHTML='<div class="sk"></div><div class="sk"></div>';
+  let d; try{d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'сценарій');}
+  if(!d.ok){ app.innerHTML='<button class="back" id="back">← Сценарії</button><div class="empty">Сценарій недоступний</div>'; $('back').onclick=()=>go('scenarios'); return; }
+  const s=d.scenario||{}, dp=s.display||{}, st=s.status||{};
+  const story=s.story&&s.story.ok?s.story.text:'';
+  const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
+  const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
+  app.innerHTML=`<button class="back" id="back">← Сценарії</button>
+    <div class="card">
+      <div class="top"><span class="sym">${esc(s.symbol)}</span><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(st)}</div>
+      <div style="margin-top:6px;font-size:14px">${esc(st.text||'')}</div>
+      <div class="mut" style="margin-top:4px">${esc(s.timeframe||'')} · оновлено ${ago(s.as_of)} · ID ${esc(s.scenario_id)}</div>
+    </div>
+    <div class="sec"><h3>Висновок Лева</h3><p>${esc(s.why||story||'Лев не залишив пояснення в записі сценарію.')}</p>
+      ${s.why&&story?`<div class="mut" style="margin-top:6px">${esc(story)}</div>`:''}</div>
+    <div class="sec"><h3>Торговий план</h3>
+      ${kv('Зона входу',dp.zone||dp.entry)}${kv('Стоп',dp.sl,'S')}${kv('TP1',dp.tp1,'L')}${dp.tp2?kv('TP2',dp.tp2,'L'):''}
+      ${kv('RR',dp.rr?`${dp.rr} (${dp.rr_basis})`:'')}${kv('Потенціал до TP1',dp.potential)}
+      ${kv('Плановий ризик','Очікує перевірки Risk Officer')}
+    </div>
+    <div class="sec"><h3>Що чекаємо</h3><p>${esc(s.wait||'Конкретну умову підтвердження не записано — вхід не розглядати.')}</p></div>
+    <div class="sec"><h3>Коли сценарій скасовується</h3><p>${esc(s.cancel||NA)}</p>
+      <div class="mut" style="margin-top:6px">Скасування до входу ≠ стоп після входу.</div></div>
+    <div class="sec"><h3>Після підтвердження</h3><p>План передається на незалежний ризик-контроль. Ордер офіс не відкриває — рішення за трейдером.</p>
+      ${d.hypothetical?'<div class="mut" style="margin-top:6px">Позиції немає. Будь-які TP/SL тут — модельні рівні, не PnL угоди.</div>':''}</div>
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+    <div class="chips" id="lay">
+      <button data-l="zone" class="${S.layers.zone?'on':''}">Зона</button>
+      <button data-l="sl" class="${S.layers.sl?'on':''}">SL</button>
+      <button data-l="tp" class="${S.layers.tp?'on':''}">TP</button>
+      <button id="fs">⤢ Повний екран</button></div>
     <div id="chart" class="chart"></div>
-    <div class="card"><div class="mut">Журнал сценарію ${esc(s.scenario_id)}</div>${ev}</div>`;
-  $('back').onclick=()=>{killPoll(); signals();};
+    <div class="mut" id="asof" style="margin:6px 0 12px"></div>
+    <div class="sec"><h3>Історія сценарію</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>'}</div>`;
+  $('back').onclick=()=>{killPoll(); go('scenarios');};
   const el=$('chart');
-  const levels={zone_lo:s.zone_lo, zone_hi:s.zone_hi, sl:s.sl, tp1:s.tp1};
-  await paintChart(el, s.symbol, S.tf, levels);
-  app.querySelectorAll('#tfs [data-tf]').forEach(b=>b.onclick=async()=>{S.tf=b.dataset.tf; localStorage.setItem('ao_tf',S.tf); await paintChart(el,s.symbol,S.tf,levels);});
+  await paintChart(el, s);
+  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=async()=>{
+    S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
+    app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; b.classList.toggle('on',S.layers[b.dataset.l]); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
-    const pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);
+    if(document.hidden) return;
+    let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){setHealth('bad','немає зв’язку'); return;}
     const last=(pack.candles||[]).slice(-1)[0];
     if(!last||!last.time) return;
-    $('stale').textContent=pack.live?'потік':pack.quote_mode;
-    if(usingLW && series){
-      series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
-    } else {
-      paintChart(el,s.symbol,S.tf,levels);
-    }
+    if(usingLW && series) series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
+    else paintChart(el,s);
   }, 8000);
 }
-const routes={home,signals,scan,journal,more};
-document.querySelectorAll('nav button').forEach(b=>{
-  b.onclick=()=>{
-    killPoll();
-    document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on');
-    routes[b.dataset.r]();
-  };
-});
-home();
+
+const routes={office,radar,scenarios,journal,risk};
+let cur='office';
+function go(r){
+  killPoll(); cur=r;
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.r===r));
+  routes[r]();
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.r));
+const qs=new URLSearchParams(location.search);
+if(qs.get('scenario')) openSc(qs.get('scenario')); else go('office');
 </script>
 </body>
 </html>

@@ -82,7 +82,14 @@ def quantize_display(
         rounding = ROUND_DOWN if sd == "LONG" else (ROUND_UP if sd == "SHORT" else ROUND_HALF_UP)
     # Decimal.quantize(t) only matches decimal places; it does NOT enforce
     # non-power-of-ten tick sizes (e.g. 0.05 or 0.25).
-    units = (d / t).to_integral_value(rounding=rounding)
+    raw = d / t
+    nearest = raw.to_integral_value(rounding=ROUND_HALF_UP)
+    # Float noise (2686.0000000002) is not a real price: do not push SL/TP a
+    # whole tick further out because of it.
+    if abs(raw - nearest) <= Decimal("0.000001"):
+        units = nearest
+    else:
+        units = raw.to_integral_value(rounding=rounding)
     return (units * t).quantize(t)
 
 

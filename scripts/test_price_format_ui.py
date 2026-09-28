@@ -19,4 +19,7 @@ out = format_price_fields(source)
 assert out["sl"] == "0.0725" and source["sl"] == 0.07250414754616397
 assert out["risk"] == source["risk"]
 assert format_px(None) == ""
+# float noise must not move a stop a whole tick in the conservative direction
+assert format_px(2686.0000000002, "ETHUSDT", tick="0.01", side="SHORT", kind="SL") == "2 686"
+assert format_px(0.0700999999999, "MANTAUSDT", tick="0.0001", side="LONG", kind="SL") == "0.0701"
 print("OK UI tick formatting: no float tails, true tick multiples, source unchanged")

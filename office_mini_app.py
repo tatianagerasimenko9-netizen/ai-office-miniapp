@@ -1296,6 +1296,7 @@ class Handler(BaseHTTPRequestHandler):
                 journal_payload,
                 overview_payload,
                 positions_v2,
+                risk_payload,
                 scanner_v2,
                 scenario_detail,
                 scenarios_payload,
@@ -1331,6 +1332,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = positions_v2()
             elif u.path == "/api/v2/settings":
                 data = settings_payload()
+            elif u.path == "/api/v2/risk":
+                data = risk_payload()
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
