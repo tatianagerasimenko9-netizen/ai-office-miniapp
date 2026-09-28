@@ -700,9 +700,51 @@ def positions_v2() -> Dict[str, Any]:
     }
 
 
+SCAN_STALE_SEC = 2 * 3600
+
+
+def radar_reasons(c: Dict[str, Any]) -> List[str]:
+    """«Чому в радарі» лише зі збережених полів market_state. Не сигнал."""
+    out: List[str] = []
+    for key, label in (("pump", "pump-score"), ("dump", "dump-score"), ("score", "score")):
+        v = _f(c.get(key))
+        if v is not None and not (key == "score" and (c.get("pump") is not None or c.get("dump") is not None)):
+            out.append(f"{label} {v:g}")
+    rsi = c.get("rsi")
+    try:
+        r = float(rsi)
+        out.append(f"RSI {r:.0f}" + (" — перекупленість" if r >= 70 else (" — перепроданість" if r <= 30 else "")))
+    except (TypeError, ValueError):
+        pass
+    if c.get("regime"):
+        out.append(f"режим {c['regime']}")
+    if c.get("decision"):
+        out.append(f"рішення офісу: {c['decision']}")
+    return out
+
+
+def _age_sec(ts: Any) -> Optional[float]:
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        return None
+    return (datetime.now(timezone.utc) - dt).total_seconds()
+
+
 def scanner_v2() -> Dict[str, Any]:
     sc = v1_scanner()
-    cands = sc.get("candidates") or []
+    cands = []
+    for c in sc.get("candidates") or []:
+        age = _age_sec(c.get("as_of"))
+        cands.append({
+            **c,
+            "reasons": radar_reasons(c),
+            "stale": age is None or age > SCAN_STALE_SEC,
+            "is_signal": False,
+        })
+    sc = {**sc, "candidates": cands}
     if cands:
         return {**sc, "empty_kind": None, "universe_note": "shortlist зі збереженого market_state Worker"}
     return {

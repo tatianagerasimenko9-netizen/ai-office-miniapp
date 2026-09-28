@@ -207,10 +207,12 @@ async function radar(){
   const rows=d.candidates||[];
   const watch=(sc.scenarios||[]).filter(s=>(s.status||{}).group==='watch');
   const f=S.rf;
-  const body=rows.map(c=>`<tr><td><b>${esc(c.symbol)}</b></td><td class="num">${c.score==null?'—':esc(c.score)}</td><td class="num">${c.rsi==null?'—':esc(c.rsi)}</td><td class="mut">${ago(c.as_of)}</td></tr>`).join('');
-  const shortlist=`<div class="card"><div class="mut" style="margin-bottom:6px">Shortlist сканера — кандидати на аналіз, не сигнали.</div>
-    ${rows.length?`<div class="table-wrap"><table><tr><th>Монета</th><th>Score</th><th>RSI</th><th>Оновлено</th></tr>${body}</table></div>`
-      :`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}</div>`;
+  const body=rows.map(c=>`<div class="card"><div class="top"><b class="sym" style="font-size:15px">${esc(c.symbol)}</b>
+      ${c.stale?'<span class="pill watch">⌛ застаріло</span>':'<span class="pill">кандидат</span>'}
+      <span class="mut" style="margin-left:auto">${ago(c.as_of)}</span></div>
+      <div class="mut" style="margin-top:6px">${esc((c.reasons||[]).join(' · ')||'причину не записано')}</div></div>`).join('');
+  const shortlist=`<div class="mut" style="margin-bottom:8px">Shortlist сканера — кандидати на аналіз Лева, не сигнали.</div>
+    ${rows.length?body:`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}`;
   const wl=watch.map(scCard).join('')||'<div class="empty">Лев зараз ні за чим не спостерігає</div>';
   app.innerHTML=`<div class="banner">Радар показує, чому монета в полі зору. Готовий сигнал дає лише Лев.</div>
     ${chips([['all','Усе'],['short','Shortlist'],['watch','WATCHING']],f,'rf')}

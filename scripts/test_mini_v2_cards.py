@@ -97,6 +97,15 @@ def main() -> int:
 
 
 
+def _radar_check() -> None:
+    from office_mini_v2 import radar_reasons
+
+    r = radar_reasons({"pump": 82, "score": 82, "rsi": 74.4, "regime": "TREND", "decision": "WATCH"})
+    assert r == ["pump-score 82", "RSI 74 — перекупленість", "режим TREND", "рішення офісу: WATCH"], r
+    assert radar_reasons({}) == []
+    print("OK radar reasons only from stored scan facts")
+
+
 def _feed_check() -> None:
     from datetime import datetime, timedelta, timezone
     from office_mini_v2 import _feed_health
@@ -115,4 +124,5 @@ def _feed_check() -> None:
 if __name__ == "__main__":
     rc = main()
     _feed_check()
+    _radar_check()
     raise SystemExit(rc)
