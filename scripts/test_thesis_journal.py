@@ -80,6 +80,14 @@ def main():
         det = scenario_detail(KEY)
         assert det["ok"] and det["thesis"]["version_hash"] == r3["version_hash"]
 
+        # Regime from real-looking H1 history when the context has none.
+        h1 = [{"open": 100 + i * 0.8, "high": 100.5 + i * 0.8, "low": 99.5 + i * 0.8, "close": 100 + i * 0.8,
+               "ts": (NOW - timedelta(hours=60 - i)).isoformat()} for i in range(60)]
+        rr = tj.build_thesis(cycle(lo=141.0), candles_by_tf={"H1": h1}, now_utc=NOW)
+        assert rr["regime"] == "TREND" and rr["regime_info"]["source"] == "regime-v1", rr["regime_info"]
+        ctx_r = tj.build_thesis(cycle(regime="range"), candles_by_tf={"H1": h1}, now_utc=NOW)
+        assert ctx_r["regime"] == "RANGE" and ctx_r["regime_info"]["source"] == "market_context"
+
         # Zone drifted slightly: thesis attaches to the existing canonical scenario id.
         signal_upsert(db, signal_id="CANON-1", symbol="ADAUSDT", direction="SHORT", entry_low=0.50,
                       entry_high=0.52, sl=0.54, tp1=0.46, tp2=None, rr=None, status="WATCHING",

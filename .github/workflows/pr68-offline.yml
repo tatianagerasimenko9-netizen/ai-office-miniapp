@@ -75,6 +75,8 @@ jobs:
         run: python scripts/test_risk_context_cycle.py
       - name: Lev thesis journal, append-only versions (temporary SQLite)
         run: python scripts/test_thesis_journal.py
+      - name: Market regime v1 classifier (offline)
+        run: python scripts/test_market_regime.py
       - name: London and NY DST desk clock (offline)
         run: python scripts/test_session_dst.py
       - name: Exchange tick display and no float tails (offline)

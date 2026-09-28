@@ -57,6 +57,19 @@ def _num(v: Any) -> str:
         return "?"
 
 
+def _regime_from_candles(candles_by_tf: Dict[str, Any]) -> tuple:
+    """Найстарший ТФ із достатньою історією; інакше UNKNOWN."""
+    from office_market_regime import MIN_BARS, classify_regime
+
+    for tf in ("H4", "H1", "M15"):
+        c = candles_by_tf.get(tf)
+        if isinstance(c, list) and len(c) >= MIN_BARS:
+            r = classify_regime(c, timeframe=tf)
+            if r.get("data_status") == "DATA_OK":
+                return r["regime"], {"source": r["version"], "timeframe": tf, "reason": r["reason"]}
+    return "UNKNOWN", {"source": "none", "reason": "недостатньо свічок для режиму"}
+
+
 def build_thesis(
     cycle: Dict[str, Any],
     *,
@@ -77,8 +90,9 @@ def build_thesis(
     alt = draft.get("alternative") or {}
     ctx = draft.get("market_context") or {}
     regime = str(ctx.get("regime") or "").upper()
-    if regime not in REGIMES:
-        regime = "UNKNOWN"
+    regime_info: Dict[str, Any] = {"source": "market_context"} if regime in REGIMES else {}
+    if regime not in REGIMES or regime == "UNKNOWN":
+        regime, regime_info = _regime_from_candles(candles_by_tf)
     evidence: List[Dict[str, Any]] = []
     for etf, candles in candles_by_tf.items():
         ts = _observed_at(_last_ts(candles), etf, now_utc)
@@ -103,6 +117,7 @@ def build_thesis(
         "direction": side,
         "timeframe": tf,
         "regime": regime,
+        "regime_info": regime_info,
         "state": "CONFIRMED" if action == "SEND" else "WATCHING",
         "hypothesis": (
             f"{side} від зони {_num(lo)}–{_num(hi)} на {tf}"

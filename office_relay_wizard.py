@@ -6062,7 +6062,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                 cycle = _lev_risk_review(
                     cycle, sym, candles_ltf=m5_bars, market_context={"data_status": "DATA_UNAVAILABLE"},
                 )
-                _lev_record_thesis(cycle, {"H1": h1_bars, "M15": m15_bars, "LTF": m5_bars})
+                _lev_record_thesis(cycle, {"H4": h4_bars, "H1": h1_bars, "M15": m15_bars, "LTF": m5_bars})
                 if str(cycle.get("action") or "") in (ACTION_SKIP, ACTION_WAIT):
                     print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('action')} {cycle.get('reason')}")
                     return False
