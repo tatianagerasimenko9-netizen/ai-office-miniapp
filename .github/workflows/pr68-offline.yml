@@ -69,3 +69,5 @@ jobs:
         run: python scripts/test_lev_risk_integration.py
       - name: London and NY DST desk clock (offline)
         run: python scripts/test_session_dst.py
+      - name: Exchange tick display and no float tails (offline)
+        run: python scripts/test_price_format_ui.py
