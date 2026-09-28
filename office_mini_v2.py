@@ -516,8 +516,12 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
             quote_mode = "unavailable"
             source = "none"
     last = bars[-1] if bars else None
+    feed = _feed_health(last.get("ts") if last else None, interval, source)
+    if status == "DATA_OK" and not feed["usable_for_review"] and not _fixture_on():
+        status = "STALE"
     return {
         "ok": bool(bars),
+        "feed": feed,
         "readonly": True,
         "data_status": status,
         "live": False if _fixture_on() else live_stream,
@@ -533,6 +537,24 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
     }
 
 
+_INTERVAL_TF = {"1m": "M1", "5m": "M5", "15m": "M15", "1h": "H1", "4h": "H4", "1d": "D1"}
+
+
+def _feed_health(open_ts: Any, interval: str, source: str) -> Dict[str, Any]:
+    """Свіжість останньої свічки через office_feed_quality (не «є дані = актуально»)."""
+    from office_feed_quality import assess_feed
+    from office_thesis_journal import _observed_at
+
+    now = datetime.now(timezone.utc)
+    obs = _observed_at(str(open_ts) if open_ts else None, _INTERVAL_TF.get(interval, "M5"), now)
+    res = assess_feed(
+        {"kind": "ohlcv", "source": source if source not in ("none", "") else "", "observed_at": obs, "complete": bool(obs)},
+        now_utc=now,
+    )
+    return {"quality": res["quality"], "usable_for_review": res["usable_for_review"],
+            "age_seconds": res["age_seconds"], "reasons": res["reasons"]}
+
+
 def overview_payload() -> Dict[str, Any]:
     from office_market_data import fetch_candles, fetch_top_movers
 
@@ -545,6 +567,8 @@ def overview_payload() -> Dict[str, Any]:
             row["price"] = last.get("close")
             row["as_of"] = last.get("ts")
             row["data_status"] = "DATA_OK"
+            if not _fixture_on() and not _feed_health(last.get("ts"), "1m", "binance_futures")["usable_for_review"]:
+                row["data_status"] = "STALE"
             if _fixture_on():
                 row["source"] = "fixture"
         marks.append(row)

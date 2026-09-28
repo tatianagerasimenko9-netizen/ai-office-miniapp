@@ -176,7 +176,7 @@ async function office(){
     ${watch.length?`<h2>Спостереження</h2>${watch.slice(0,4).map(scCard).join('')}`:''}
     <h2>Стан даних</h2>
     <div class="card">${marks.map(m=>`<div class="kv"><span><span class="dot ${m.data_status==='DATA_OK'?'ok':'bad'}"></span> ${esc(m.symbol)}</span>
-      <b>${m.data_status==='DATA_OK'?ago(m.as_of):'недоступно'}</b></div>`).join('')}
+      <b>${m.data_status==='DATA_OK'?ago(m.as_of):(m.data_status==='STALE'?'застаріло · '+ago(m.as_of):'недоступно')}</b></div>`).join('')}
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
@@ -330,7 +330,9 @@ async function paintChart(el, s){
   let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=180`);}
   catch(e){el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
   const stamp=$('asof'); if(stamp) stamp.textContent=pack.as_of?`Остання свічка: ${hhmm(pack.as_of)} · ${pack.fixture?'FIXTURE, не ринок':pack.source}`:'';
-  setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad', pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):'дані застарілі');
+  setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad',
+    pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
+  if(stamp && pack.data_status==='STALE') stamp.textContent+=' · фід застарів — рівні не підтверджують вхід';
   const candles=(pack.candles||[]).filter(c=>c.time);
   if(chart){try{chart.remove();}catch(e){} chart=null; series=null;}
   el.innerHTML='';

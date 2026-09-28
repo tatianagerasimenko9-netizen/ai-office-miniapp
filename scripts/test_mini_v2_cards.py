@@ -93,5 +93,24 @@ def main() -> int:
     return 0
 
 
+
+
+def _feed_check() -> None:
+    from datetime import datetime, timedelta, timezone
+    from office_mini_v2 import _feed_health
+
+    now = datetime.now(timezone.utc)
+    forming = _feed_health((now - timedelta(minutes=40)).isoformat(), "1h", "binance_futures")
+    assert forming["quality"] == "OK", forming
+    stalled = _feed_health((now - timedelta(hours=3)).isoformat(), "1h", "binance_futures")
+    assert stalled["quality"] == "UNAVAILABLE" and "STALE_SNAPSHOT" in stalled["reasons"], stalled
+    none = _feed_health(None, "1h", "none")
+    assert none["quality"] == "UNAVAILABLE"
+    print("OK Mini App feed freshness via office_feed_quality")
+
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc = main()
+    _feed_check()
+    raise SystemExit(rc)
