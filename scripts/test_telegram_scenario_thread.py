@@ -30,12 +30,12 @@ def _load_sender(db: str, sent: list, next_id: list, photo: dict):
 
     async def send_text(message, reply_to_message_id=None, **kwargs):
         next_id[0] += 1
-        sent.append(("text", message, reply_to_message_id, next_id[0]))
+        sent.append(("text", message, reply_to_message_id, next_id[0], kwargs.get("scenario_id")))
         return next_id[0]
 
     async def send_photo(path, message, stream="general", *, reply_to_message_id=None, **kwargs):
         next_id[0] += 1
-        sent.append(("photo", message, reply_to_message_id, next_id[0]))
+        sent.append(("photo", message, reply_to_message_id, next_id[0], kwargs.get("scenario_id")))
         return next_id[0]
 
     env = {
@@ -76,11 +76,13 @@ async def exercise() -> None:
             root = await send("SIGNAL_ENTRY", "plan", scenario_event="WATCHING", **base)
             assert root == 101 and sent[-1][0] == "photo" and sent[-1][2] is None, sent
             assert get_scenario_root(db, "ETH|S1") == 101
+            assert sent[-1][4] == "ETH|S1", "photo button must link the canonical scenario"
 
             # 2. Later event of the same scenario replies to the root.
             photo["on"] = False
             upd = await send("TRADE_UPDATE", "confirmed", scenario_event="CONFIRMED", **base)
             assert upd == 102 and sent[-1][2] == 101, sent
+            assert sent[-1][4] == "ETH|S1"
 
             # 3. Worker restart: fresh function, chain restored from DB.
             send = _load_sender(db, sent, next_id, photo)
@@ -115,6 +117,13 @@ async def exercise() -> None:
         # Migration is additive and idempotent.
         migrate_delivery_ledger(db)
         assert get_scenario_root(db, "ETH|S1") == 101
+    from office_telegram_policy import mini_app_button
+
+    b = mini_app_button(symbol="ETHUSDT", scenario_id="desk|ETH|S 1", base_url="https://x.test/")
+    assert b["inline_keyboard"][0][0]["url"] == "https://x.test/v2?scenario=desk%7CETH%7CS%201", b
+    assert mini_app_button(symbol="BTCUSDT", scenario_id="", base_url="https://x.test") is None
+    assert "symbol=SOLUSDT" in mini_app_button(symbol="SOLUSDT", base_url="https://x.test")["inline_keyboard"][0][0]["url"]
+    assert mini_app_button(symbol="SOLUSDT", scenario_id="a", base_url="") is None
     print("OK scenario Telegram chain: root, replies, restart-safe, dedup intact, ledger-off inert")
 
 

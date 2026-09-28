@@ -97,7 +97,7 @@ function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'scenarios',
   layers:{zone:true,sl:true,tp:true}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|-]/g,'');}
+function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
 async function j(url){
   const r=await fetch(url,{cache:'no-store'});
   if(!r.ok) throw new Error('HTTP '+r.status);

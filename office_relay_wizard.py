@@ -677,6 +677,7 @@ async def send_via_bot_photo(
     caption: str = "",
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -689,6 +690,8 @@ async def send_via_bot_photo(
         data.add_field("reply_to_message_id", str(int(reply_to_message_id)))
     if message_thread_id:
         data.add_field("message_thread_id", str(int(message_thread_id)))
+    if reply_markup:
+        data.add_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
     try:
         with open(photo_path, "rb") as fh:
             data.add_field("photo", fh, filename=os.path.basename(photo_path), content_type="image/png")
@@ -2663,6 +2666,7 @@ async def run() -> None:
         symbol: str = "",
         direction: str = "",
         skip_gate: bool = False,
+        scenario_id: str = "",
     ) -> Optional[int]:
         if not skip_gate:
             tg = gate_outbound_telegram(
@@ -2689,11 +2693,13 @@ async def run() -> None:
             thread_id = _thread_for_stream(stream)
             btn_markup: Optional[Dict[str, Any]] = None
             if use_markup:
-                sym_for_btn = _extract_first_usdt_symbol(text_part)
-                if sym_for_btn and sym_for_btn != "BTCUSDT":
-                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
-                    mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
-                    btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
+                from office_telegram_policy import mini_app_button
+
+                btn_markup = mini_app_button(
+                    symbol=_extract_first_usdt_symbol(text_part) or "",
+                    scenario_id=scenario_id,
+                    base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+                )
             token = agent_bot_tokens.get(agent_key or "")
             # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
             # для desk лише sendMessage + thread_id «Загальний».
@@ -2788,6 +2794,7 @@ async def run() -> None:
         stream: str = "general",
         *,
         reply_to_message_id: Optional[int] = None,
+        scenario_id: str = "",
         intent: str = "",
         event_type: str = "",
         symbol: str = "",
@@ -2812,6 +2819,13 @@ async def run() -> None:
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
         token = agent_bot_tokens.get("lev") or tg_bot_token
+        from office_telegram_policy import mini_app_button
+
+        photo_btn = mini_app_button(
+            symbol=symbol or _extract_first_usdt_symbol(cap) or "",
+            scenario_id=scenario_id,
+            base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+        )
         if token:
             ok, reason, msg_id = await send_via_bot_photo(
                 bot_http,
@@ -2821,6 +2835,7 @@ async def run() -> None:
                 caption=cap,
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
+                reply_markup=photo_btn,
             )
             if ok:
                 return msg_id
@@ -2832,6 +2847,7 @@ async def run() -> None:
                     photo_path,
                     caption=cap,
                     message_thread_id=thread_id,
+                    reply_markup=photo_btn,
                 )
                 if ok:
                     print("[relay][WARN] photo reply root missing: sent without reply_to")
@@ -3092,6 +3108,7 @@ async def run() -> None:
                         message,
                         stream=st,
                         reply_to_message_id=reply_to_message_id,
+                        scenario_id=str(canonical_id or ""),
                         intent=intent,
                         event_type=event_type,
                         symbol=sym,
@@ -3121,6 +3138,7 @@ async def run() -> None:
                     symbol=symbol,
                     direction=direction,
                     skip_gate=True,
+                    scenario_id=str(canonical_id or ""),
                 )
 
         finally:
