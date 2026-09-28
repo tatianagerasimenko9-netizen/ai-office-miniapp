@@ -37,6 +37,9 @@ def main() -> int:
         assert v["icon"] and v["short"] and v["text"], v
     assert status_view("WATCHING")["group"] == "watch"
     assert "не збиток угоди" in status_view("HIT_SL")["text"]
+    assert status_view("PIERCE_WATCHING")["group"] == "watch" and status_view("RANGE_WATCHING")["group"] == "watch"
+    assert status_view("INVALIDATED")["group"] == "done"
+    assert status_view("SOMETHING_NEW")["group"] == "unknown", "unknown state is neither archived nor a plan"
 
     fd, db = tempfile.mkstemp(suffix=".db")
     os.close(fd)

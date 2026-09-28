@@ -153,14 +153,26 @@ STATUS_UA = {
     "HIT_SL": ("⛔", "SL (модель)", "Модельний SL · не збиток угоди"),
     "CANCELLED": ("✖", "СКАСОВАНО", "Сценарій скасовано до входу"),
     "EXPIRED": ("⌛", "ПРОСТРОЧЕНО", "Термін сценарію минув"),
+    "INVALIDATED": ("✖", "ІНВАЛІДОВАНО", "Теза зламалась до входу"),
+    "PIERCE_WATCHING": ("👁", "WATCHING", "Спостереження після проколу рівня · входу немає"),
+    "RANGE_WATCHING": ("👁", "WATCHING", "Спостереження за діапазоном · входу немає"),
 }
+_DONE = ("HIT_TP1", "HIT_TP2", "HIT_SL", "CANCELLED", "EXPIRED", "INVALIDATED", "CLOSED")
+_LIVE = ("ACTIVE", "CONFIRMED", "HIT_ENTRY")
 
 
 def status_view(status: Any) -> Dict[str, str]:
     """Статус завжди текстом і значком, не лише кольором."""
     st = str(status or "").upper()
     icon, short, long_ = STATUS_UA.get(st, ("•", st or "—", st or "Невідомий стан"))
-    group = "watch" if st == "WATCHING" else ("live" if st in ("ACTIVE", "CONFIRMED", "HIT_ENTRY") else "done")
+    if st.endswith("WATCHING"):
+        group = "watch"
+    elif st in _LIVE:
+        group = "live"
+    elif st in _DONE:
+        group = "done"
+    else:
+        group = "unknown"  # невідомий стан не ховаємо в архів і не видаємо за план
     return {"code": st, "icon": icon, "short": short, "text": long_, "group": group}
 
 
