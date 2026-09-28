@@ -1298,6 +1298,7 @@ class Handler(BaseHTTPRequestHandler):
                 positions_v2,
                 risk_payload,
                 scanner_v2,
+                session_payload,
                 scenario_detail,
                 scenarios_payload,
                 settings_payload,
@@ -1334,6 +1335,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = settings_payload()
             elif u.path == "/api/v2/risk":
                 data = risk_payload()
+            elif u.path == "/api/v2/session":
+                data = session_payload(_q("symbol") or "BTCUSDT")
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")

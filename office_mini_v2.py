@@ -719,6 +719,34 @@ def settings_payload() -> Dict[str, Any]:
     }
 
 
+def session_payload(symbol: str = "BTCUSDT") -> Dict[str, Any]:
+    """План сесії з M15. Лише спостереження; ціни через tick-форматер."""
+    from office_session_desk import session_brief
+
+    sym = str(symbol or "BTCUSDT").upper()
+    if _fixture_on():
+        raw = synth_candles(sym, "15m", 200)
+    else:
+        from office_market_data import fetch_candles
+
+        raw = fetch_candles(sym, "15m", 200)
+    brief = session_brief(raw if isinstance(raw, list) else [], symbol=sym)
+    for k in ("previous", "current"):
+        blk = brief.get(k)
+        if isinstance(blk, dict):
+            for f in ("high", "low", "close"):
+                if blk.get(f) is not None:
+                    blk[f + "_display"] = format_px(blk[f], sym)
+    sp = brief.get("since_previous")
+    if isinstance(sp, dict):
+        for t in ("high_test", "low_test"):
+            if isinstance(sp.get(t), dict) and sp[t].get("extreme") is not None:
+                sp[t]["extreme_display"] = format_px(sp[t]["extreme"], sym)
+    brief["fixture"] = bool(_fixture_on())
+    brief["readonly"] = True
+    return brief
+
+
 def risk_payload() -> Dict[str, Any]:
     """Екран «Ризик». Невідоме ≠ нуль: без перевіреного джерела — «Дані недоступні»."""
     pos = positions_v2()

@@ -24,7 +24,7 @@ h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transf
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;min-width:0}
-.kpi b{display:block;font-size:15px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kpi b{display:block;font-size:15px;margin-top:3px;overflow-wrap:anywhere;line-height:1.25}
 .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sym{font-size:17px;font-weight:700}
 .side{font-weight:700;font-size:13px;letter-spacing:.03em}
@@ -148,8 +148,10 @@ function chips(items, curv, attr){
 async function office(){
   app.innerHTML='<div class="sk"></div><div class="sk"></div>';
   let d,ov,sc;
+  let ses=null;
   try{[d,ov,sc]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview'), j('/api/v2/scenarios?watching=1')]);}
   catch(e){return fail(e,'огляд офісу');}
+  try{ses=await j('/api/v2/session');}catch(e){ses=null;}
   $('sub').textContent=`${una(d.db_backend)} · git ${String(d.git_sha||'—').slice(0,7)} · лише читання`;
   const b=d.btc||{}, se=d.sessions||{};
   const all=sc.scenarios||[];
@@ -171,6 +173,7 @@ async function office(){
       <div class="kpi"><div class="mut">Сесія</div><b>${esc(una(se.active))}</b><div class="mut">далі ${esc(una(se.next))}${se.next_in_min!=null?` · ${esc(se.next_in_min)} хв`:''}</div></div>
       <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
     </div>
+    ${sessionHtml(ses)}
     <h2>Активні сценарії</h2>
     ${live.map(scCard).join('')||'<div class="empty">Немає активних планів Лева</div>'}
     ${watch.length?`<h2>Спостереження</h2>${watch.slice(0,4).map(scCard).join('')}`:''}
@@ -180,6 +183,21 @@ async function office(){
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
+}
+
+const TEST_UA={SWEEP:'свіп — вийшли й повернулись',ACCEPTED:'прийняття за рівнем',NOT_TESTED:'не тестували'};
+function sessionHtml(b){
+  if(!b) return '';
+  if(b.data_status!=='DATA_OK') return `<h2>План сесії · BTC</h2><div class="card mut">Дані для плану сесії недоступні${b.reason?': '+esc(b.reason):''}</div>`;
+  const p=b.previous||{}, c=b.current, sp=b.since_previous||{};
+  const t=(x,lvl)=>x?`<div class="kv"><span>${lvl}</span><b>${esc(TEST_UA[x.state]||x.state)}${x.at?` · ${hhmm(x.at)}`:''}</b></div>`:'';
+  return `<h2>План сесії · BTC${b.fixture?' · FIXTURE':''}</h2>
+    <div class="card">
+      <div class="kv"><span>Попередня: ${esc(p.name)}</span><b class="num">${esc(p.low_display)}–${esc(p.high_display)}</b></div>
+      ${c&&c.high_display?`<div class="kv"><span>Поточна: ${esc(c.name)}</span><b class="num">${esc(c.low_display)}–${esc(c.high_display)}</b></div>`:''}
+      ${t(sp.high_test,'High попередньої')}${t(sp.low_test,'Low попередньої')}
+      <div class="mut" style="margin-top:6px">Спостереження, не сигнал. Свіп ≠ автоматичний розворот.</div>
+    </div>`;
 }
 
 /* ---------- Радар ---------- */
