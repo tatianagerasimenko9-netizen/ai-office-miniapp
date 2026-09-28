@@ -139,7 +139,7 @@ def main() -> int:
     )
     if any(b in alert for b in banned):
         return _fail(f"template leaked {alert}")
-    if "🟢 LONG · SOLUSDT · H1" not in alert:
+    if "🟢 LONG · SOLUSDT · сценарій H1" not in alert:
         return _fail(f"type line {alert}")
     if "BOUNCE" not in alert and "Відскік" not in alert:
         return _fail(f"type line {alert}")
