@@ -203,6 +203,9 @@ def record_thesis(
     from office_bridge import log_event
 
     log_event(db_path, EVENT, record, signal_id=tid)
+    if len(_LAST) > 5000 or len(_LAST_RAW) > 5000:
+        _LAST.clear()
+        _LAST_RAW.clear()
     _LAST[tid] = digest
     _LAST_RAW[raw_key] = raw_digest
     return record

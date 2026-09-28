@@ -24,6 +24,13 @@ _PROBABILITY_PHASE4_DEFAULT: Dict[str, Any] = {
 SIGNAL_THRESHOLD = 85
 
 
+def _px(value: Any, symbol: str) -> str:
+    """Ціна в тексті — через єдиний tick-форматер (не :.4f, що обнуляє дешеві альти)."""
+    from office_price_format import format_px
+
+    return format_px(value, symbol) or str(value)
+
+
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
     qs = urlencode(params)
     full_url = f"{url}?{qs}" if qs else url
@@ -210,7 +217,7 @@ def fetch_liquidity_sweep(symbol: str, tf: str = "1h") -> Dict[str, Any]:
             result["bsl_sweep"] = True
             result["sweep_level"] = prev_high
             result["description"] = (
-                f"BSL sweep {prev_high:.4f} — пробила хай і повернулась. Можливий SHORT сетап."
+                f"BSL sweep {_px(prev_high, symbol)} — пробила хай і повернулась. Можливий SHORT сетап."
             )
 
         prev_low = min(l1, l2)
@@ -218,7 +225,7 @@ def fetch_liquidity_sweep(symbol: str, tf: str = "1h") -> Dict[str, Any]:
             result["ssl_sweep"] = True
             result["sweep_level"] = prev_low
             ssl_desc = (
-                f"SSL sweep {prev_low:.4f} — пробила лоу і повернулась. Можливий LONG сетап."
+                f"SSL sweep {_px(prev_low, symbol)} — пробила лоу і повернулась. Можливий LONG сетап."
             )
             if result["bsl_sweep"]:
                 result["description"] = (str(result.get("description") or "").strip() + " | " + ssl_desc).strip(
@@ -292,21 +299,21 @@ def fetch_pd_array(symbol: str, tf: str = "4h") -> Dict[str, Any]:
             zone = "PREMIUM"
             bias = "SHORT"
             description = (
-                f"Ціна в Premium зоні ({current_price:.4f} > EQ {eq:.4f}). "
+                f"Ціна в Premium зоні ({_px(current_price, symbol)} > EQ {_px(eq, symbol)}). "
                 f"Шукаємо SHORT від рівнів опору."
             )
         elif current_price < eq - eps:
             zone = "DISCOUNT"
             bias = "LONG"
             description = (
-                f"Ціна в Discount зоні ({current_price:.4f} < EQ {eq:.4f}). "
+                f"Ціна в Discount зоні ({_px(current_price, symbol)} < EQ {_px(eq, symbol)}). "
                 f"Шукаємо LONG від рівнів підтримки."
             )
         else:
             zone = "EQUILIBRIUM"
             bias = "NEUTRAL"
             description = (
-                f"Ціна біля Equilibrium ({current_price:.4f} ≈ EQ {eq:.4f}). "
+                f"Ціна біля Equilibrium ({_px(current_price, symbol)} ≈ EQ {_px(eq, symbol)}). "
                 f"Нейтрально — чекаємо дислокації в Premium/Discount."
             )
 
@@ -411,7 +418,7 @@ def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
             if current > sh1:
                 result["event"] = "BOS_BULLISH"
                 result["description"] = (
-                    f"BOS вгору — пробило SH {sh1:.4f}. "
+                    f"BOS вгору — пробило SH {_px(sh1, symbol)}. "
                     f"Тренд продовжується вгору. "
                     f"Шукаємо LONG від підтримок."
                 )
@@ -426,7 +433,7 @@ def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
             if current < sl1:
                 result["event"] = "BOS_BEARISH"
                 result["description"] = (
-                    f"BOS вниз — пробило SL {sl1:.4f}. "
+                    f"BOS вниз — пробило SL {_px(sl1, symbol)}. "
                     f"Тренд продовжується вниз. "
                     f"Шукаємо SHORT від опорів."
                 )
@@ -610,7 +617,7 @@ def fetch_order_blocks(symbol: str, tf: str = "1h") -> Dict[str, Any]:
                     "close": cl,
                     "index": i,
                 }
-                descriptions.append(f"Bullish OB: зона {l:.4f}–{h:.4f}")
+                descriptions.append(f"Bullish OB: зона {_px(l, symbol)}–{_px(h, symbol)}")
 
             is_bullish = cl > o
             next_bearish_strong = cl_next < o_next and cl_next < l
@@ -623,7 +630,7 @@ def fetch_order_blocks(symbol: str, tf: str = "1h") -> Dict[str, Any]:
                     "close": cl,
                     "index": i,
                 }
-                descriptions.append(f"Bearish OB: зона {l:.4f}–{h:.4f}")
+                descriptions.append(f"Bearish OB: зона {_px(l, symbol)}–{_px(h, symbol)}")
 
         result["description"] = " | ".join(descriptions) if descriptions else "Order Blocks не знайдено"
         return result
@@ -708,12 +715,12 @@ def fetch_fvg(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         if active_bull:
             closest = active_bull[0]
             descriptions.append(
-                f"Bullish FVG: {float(closest['low']):.4f}–{float(closest['high']):.4f} ({closest['gap_pct']}%)"
+                f"Bullish FVG: {_px(closest['low'], symbol)}–{_px(closest['high'], symbol)} ({closest['gap_pct']}%)"
             )
         if active_bear:
             closest = active_bear[0]
             descriptions.append(
-                f"Bearish FVG: {float(closest['low']):.4f}–{float(closest['high']):.4f} ({closest['gap_pct']}%)"
+                f"Bearish FVG: {_px(closest['low'], symbol)}–{_px(closest['high'], symbol)} ({closest['gap_pct']}%)"
             )
 
         return {

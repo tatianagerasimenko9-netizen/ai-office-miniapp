@@ -2594,14 +2594,13 @@ def _level_pack(signal: OfficeSignal) -> Dict[str, Optional[float]]:
     }
 
 
-def _fmt_level(v: Optional[float]) -> str:
+def _fmt_level(v: Optional[float], symbol: str = "") -> str:
+    """Ціна для тексту журналу/позиції — через єдиний tick-форматер."""
     if v is None:
         return "—"
-    if abs(v) >= 1000:
-        return f"{v:.1f}"
-    if abs(v) >= 1:
-        return f"{v:.4f}".rstrip("0").rstrip(".")
-    return f"{v:.6f}".rstrip("0").rstrip(".")
+    from office_price_format import format_px
+
+    return format_px(v, symbol) or "—"
 
 
 def clean_self_naming(text: str, agent_key: str) -> str:

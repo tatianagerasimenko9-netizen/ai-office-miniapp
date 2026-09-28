@@ -33,6 +33,14 @@ KIND_PAPER = "paper"
 KIND_LIVE = "live"
 
 
+# Єдине джерело меж desk-сесій (місцевий час біржового міста, DST враховано).
+DESK_SESSIONS: Tuple[Tuple[str, Any, int, int], ...] = (
+    ("asia", timezone.utc, 0, 8),
+    ("london", ZoneInfo("Europe/London"), 8, 16),
+    ("ny", ZoneInfo("America/New_York"), 8, 16),
+)
+
+
 def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     """Exchange-independent desk clock with London/NY daylight saving.
 
@@ -43,18 +51,13 @@ def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     if ts.tzinfo is None:
         raise ValueError("session clock requires an aware timestamp")
     now = ts.astimezone(timezone.utc)
-    asia = 0 <= now.hour < 8
     london_local = now.astimezone(ZoneInfo("Europe/London"))
     ny_local = now.astimezone(ZoneInfo("America/New_York"))
-    london = 8 <= london_local.hour < 16
-    ny = 8 <= ny_local.hour < 16
-    active = [name for name, enabled in (("asia", asia), ("london", london), ("ny", ny)) if enabled]
+    flags = {name: a <= now.astimezone(zone).hour < b for name, zone, a, b in DESK_SESSIONS}
+    london, ny = flags["london"], flags["ny"]
+    active = [name for name, _z, _a, _b in DESK_SESSIONS if flags[name]]
     starts = []
-    for name, zone, hour in (
-        ("asia", timezone.utc, 0),
-        ("london", ZoneInfo("Europe/London"), 8),
-        ("ny", ZoneInfo("America/New_York"), 8),
-    ):
+    for name, zone, hour, _end in DESK_SESSIONS:
         local_now = now.astimezone(zone)
         for days in range(3):
             local_date = (local_now + timedelta(days=days)).date()

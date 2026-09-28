@@ -28,6 +28,8 @@ SHADOW_EVENT = "RISK_SHADOW_REVIEW"
 VETO_EVENT = "RISK_VETO"
 MAX_PORTFOLIO_RISK_PCT = 2.0
 LTF_MAX_AGE_SECONDS = 900
+# Той самий план з тим самим висновком не пишемо в журнал на кожному проході радара.
+_LOGGED: Dict[str, str] = {}
 
 
 def enforce_enabled() -> bool:
@@ -161,7 +163,19 @@ def apply_risk_officer(
     approved = bool(review.get("approved_for_review"))
     out = reviewed if enf else {**cycle, "risk_review": review}
     out = {**out, "risk_mode": "enforce" if enf else "shadow", "risk_context": _public_ctx(ctx)}
-    if log and db_path:
+    sid = str(cycle.get("scenario_id") or "")
+    if not sid:
+        try:
+            from office_thesis_journal import canonical_scenario_id
+
+            conf = (cycle.get("draft") or {}).get("confluence") or {}
+            sid = canonical_scenario_id(db_path, cycle) or str(conf.get("setup_key") or conf.get("scenario_id") or "")
+        except Exception:
+            sid = ""
+    out["scenario_id"] = sid or None
+    dedup = json.dumps([sid, cycle.get("direction"), cycle.get("entry"), cycle.get("sl"), cycle.get("tp1"),
+                        out["risk_mode"], approved, review.get("reasons")], sort_keys=True, default=str)
+    if log and db_path and _LOGGED.get(sid or str(symbol)) != dedup:
         try:
             from office_bridge import log_event
 
@@ -179,8 +193,11 @@ def apply_risk_officer(
                     "context": _public_ctx(ctx),
                     "order_authorized": False,
                 },
-                signal_id=str(cycle.get("scenario_id") or ""),
+                signal_id=sid,
             )
+            if len(_LOGGED) > 5000:
+                _LOGGED.clear()
+            _LOGGED[sid or str(symbol)] = dedup
         except Exception as exc:
             print(f"[risk] journal write failed: {type(exc).__name__}: {exc}")
     return out

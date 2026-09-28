@@ -16,13 +16,8 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
-SESSIONS = (
-    ("asia", timezone.utc, 0, 8),
-    ("london", ZoneInfo("Europe/London"), 8, 16),
-    ("ny", ZoneInfo("America/New_York"), 8, 16),
-)
+from office_session_radar import DESK_SESSIONS as SESSIONS  # одне джерело меж сесій
 LABEL = {"asia": "Азія", "london": "Лондон", "ny": "Нью-Йорк"}
 MIN_BARS = 4
 

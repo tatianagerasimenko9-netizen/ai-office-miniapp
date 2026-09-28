@@ -60,6 +60,19 @@ def main():
         assert out["risk_review"]["order_authorized"] is False
         ev = events(db)
         assert ev[-1][0] == "RISK_SHADOW_REVIEW" and ev[-1][1]["would_veto"] is True
+        assert not out["scenario_id"], out["scenario_id"]
+        # The same plan on the next radar pass is not journaled again.
+        n0 = len(ev)
+        apply_risk_officer(cycle, db_path=db, symbol="SOLUSDT", candles_ltf=FRESH,
+                           market_context={"data_status": "DATA_OK"}, now_utc=NOW)
+        assert len(events(db)) == n0, "duplicate shadow review written"
+        # Linked to the scenario id from the draft's setup key.
+        keyed = finalize_lev({**DRAFT, "confluence": {"tags": ["H1"], "n": 3, "setup_key": "SOLUSDT|LONG|99|101"}})
+        k = apply_risk_officer(keyed, db_path=db, symbol="SOLUSDT", candles_ltf=FRESH,
+                               market_context={"data_status": "DATA_OK"}, now_utc=NOW)
+        assert k["scenario_id"] == "SOLUSDT|LONG|99|101"
+        row = _fetchall(db, "SELECT signal_id FROM office_events ORDER BY id DESC LIMIT 1", ())[0]
+        assert row[0] == "SOLUSDT|LONG|99|101", row
         assert "EXECUTION_NOT_VERIFIED" in ev[-1][1]["reasons"]
 
         # Stale LTF data is reported, never treated as OK.

@@ -23,3 +23,14 @@ assert format_px(None) == ""
 assert format_px(2686.0000000002, "ETHUSDT", tick="0.01", side="SHORT", kind="SL") == "2 686"
 assert format_px(0.0700999999999, "MANTAUSDT", tick="0.0001", side="LONG", kind="SL") == "0.0701"
 print("OK UI tick formatting: no float tails, true tick multiples, source unchanged")
+
+# No second formatter: journal/position texts and SMC descriptions use format_px.
+from office_bridge import _fmt_level
+from office_market_data import _px
+assert _fmt_level(0.07250414754616397, "MANTAUSDT") == format_px(0.07250414754616397, "MANTAUSDT")
+assert _fmt_level(None) == "—"
+assert _px(0.0000123, "PEPEUSDT") not in ("0.0000", "0"), "cheap alts must not be zeroed"
+import re as _re
+_src = (Path(__file__).resolve().parent.parent / "office_market_data.py").read_text(encoding="utf-8")
+assert not _re.search(r"(price|high|low|eq|sh1|sl1|\])\S*:\.4f\}", _src), "raw :.4f price formatting is back"
+print("OK single price formatter for journal texts and SMC descriptions")
