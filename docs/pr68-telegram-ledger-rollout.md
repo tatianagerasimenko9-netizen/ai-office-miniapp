@@ -164,3 +164,18 @@ The single MANTA win is statistically insufficient for any WR or return
 inference; previous 224.4202 R was invalidated. The conservative T6 engine
 is not full Lev cognition or a fill-verified exchange execution model.
 Offline tests for the revised fixture succeeded in `36349828028`.
+
+## Scenario reply chain (claude/eager-pascal-t9e1ac)
+
+- `migrate_delivery_ledger()` now also creates the additive
+  `office_telegram_scenario_thread (scenario_id PK, root_message_id, created_at)`
+  table. Same owner-approved migration step; no request path creates it.
+- Only when `OFFICE_TG_PERSISTENT_DEDUP=1`: the first delivered and
+  ledger-committed message of a `canonical_id` becomes the root; later events
+  of that scenario are sent as `reply_to_message_id=root` (text and photo).
+  The root is never overwritten and is restored from the DB after restart.
+- If the root was deleted in Telegram, the bot retries once without reply
+  (same message, not a second copy of an ambiguous send).
+- A caller-supplied `reply_to_message_id` wins and never becomes a root.
+- Flag OFF: behaviour is unchanged (no lookups, no replies).
+- Offline test: `scripts/test_telegram_scenario_thread.py` (fake Telegram).

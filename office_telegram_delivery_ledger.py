@@ -25,6 +25,14 @@ DDL = """CREATE TABLE IF NOT EXISTS office_telegram_delivery (
     delivered_at DOUBLE PRECISION
 )"""
 
+# Root Telegram message of a canonical scenario: later events of the same
+# scenario_id are sent as replies to it (one chain per scenario, restart-safe).
+THREAD_DDL = """CREATE TABLE IF NOT EXISTS office_telegram_scenario_thread (
+    scenario_id TEXT PRIMARY KEY,
+    root_message_id BIGINT NOT NULL,
+    created_at DOUBLE PRECISION
+)"""
+
 
 def _connect(db_path: str):
     if _is_pg(db_path):
@@ -42,6 +50,7 @@ def migrate_delivery_ledger(db_path: str) -> None:
     """Additive migration only; never deletes existing data."""
     with _connect(db_path) as conn:
         conn.execute(DDL)
+        conn.execute(THREAD_DDL)
 
 
 def reserve_delivery(
@@ -145,3 +154,38 @@ def mark_delivery_uncertain(db_path: str, key: str, token: str) -> bool:
             (key, token),
         )
         return cur.rowcount == 1
+
+
+def get_scenario_root(db_path: str, scenario_id: str) -> Optional[int]:
+    """Root message_id of the scenario chain, or None when the chain has not started."""
+    sid = str(scenario_id or "").strip()
+    if not sid:
+        return None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            _sql(db_path, "SELECT root_message_id FROM office_telegram_scenario_thread "
+                "WHERE scenario_id=?"), (sid,),
+        ).fetchone()
+    return int(row[0]) if row and row[0] else None
+
+
+def remember_scenario_root(
+    db_path: str, scenario_id: str, message_id: int, *, now: Optional[float] = None,
+) -> Optional[int]:
+    """First delivered message wins; returns the stored root (never overwritten)."""
+    sid = str(scenario_id or "").strip()
+    if not sid or not message_id:
+        return None
+    ts = float(time.time() if now is None else now)
+    with _connect(db_path) as conn:
+        conn.execute(
+            _sql(db_path, "INSERT INTO office_telegram_scenario_thread "
+                "(scenario_id,root_message_id,created_at) VALUES (?,?,?) "
+                "ON CONFLICT(scenario_id) DO NOTHING"),
+            (sid, int(message_id), ts),
+        )
+        row = conn.execute(
+            _sql(db_path, "SELECT root_message_id FROM office_telegram_scenario_thread "
+                "WHERE scenario_id=?"), (sid,),
+        ).fetchone()
+    return int(row[0]) if row and row[0] else None

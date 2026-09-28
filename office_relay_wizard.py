@@ -189,7 +189,10 @@ from office_telegram_policy import (
     finish_trade_telegram,
     trade_update_streams,
 )
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain
+from office_telegram_delivery_ledger import (
+    reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain,
+    get_scenario_root, remember_scenario_root,
+)
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
@@ -2768,6 +2771,7 @@ async def run() -> None:
         caption: str,
         stream: str = "general",
         *,
+        reply_to_message_id: Optional[int] = None,
         intent: str = "",
         event_type: str = "",
         symbol: str = "",
@@ -2799,17 +2803,30 @@ async def run() -> None:
                 office_chat_id,
                 photo_path,
                 caption=cap,
+                reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
             )
             if ok:
                 return msg_id
+            if reply_to_message_id and "message to be replied not found" in str(reason).lower():
+                ok, reason, msg_id = await send_via_bot_photo(
+                    bot_http,
+                    token,
+                    office_chat_id,
+                    photo_path,
+                    caption=cap,
+                    message_thread_id=thread_id,
+                )
+                if ok:
+                    print("[relay][WARN] photo reply root missing: sent without reply_to")
+                    return msg_id
             print(f"[relay][WARN] photo send failed: {reason}")
         try:
             sent = await client.send_file(
                 office_entity,
                 photo_path,
                 caption=cap,
-                reply_to=thread_id,
+                reply_to=reply_to_message_id or thread_id,
             )
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
@@ -3031,6 +3048,15 @@ async def run() -> None:
                             ledger_sender_task.cancel()
                         return
             ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
+        # One chain per canonical scenario: later events reply to the first card.
+        thread_sid = str(canonical_id or "").strip() if ledger_enabled else ""
+        thread_starts = False
+        if thread_sid and reply_to_message_id is None:
+            try:
+                reply_to_message_id = get_scenario_root(db_path, thread_sid)
+                thread_starts = reply_to_message_id is None
+            except Exception as exc:
+                print(f"[relay] WARN scenario thread lookup: {type(exc).__name__}: {exc}")
         delivered_id = None
         send_attempted = False
         skip_text = False
@@ -3049,6 +3075,7 @@ async def run() -> None:
                         str(drawn["path"]),
                         message,
                         stream=st,
+                        reply_to_message_id=reply_to_message_id,
                         intent=intent,
                         event_type=event_type,
                         symbol=sym,
@@ -3118,6 +3145,11 @@ async def run() -> None:
                 )
             if ledger_token and delivered_id and not ledger_committed:
                 print("[relay] BLOCKED lifecycle: delivery not committed in ledger")
+            if thread_starts and delivered_id and ledger_committed:
+                try:
+                    remember_scenario_root(db_path, thread_sid, int(delivered_id))
+                except Exception as exc:
+                    print(f"[relay] WARN scenario thread root not saved: {type(exc).__name__}: {exc}")
         return delivered_id if ledger_committed else None
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
