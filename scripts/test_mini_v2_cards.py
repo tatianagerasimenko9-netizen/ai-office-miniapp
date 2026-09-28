@@ -89,6 +89,11 @@ def main() -> int:
         assert r2["risk_mode"] == "shadow"
         log_event(db, "RISK_VETO", {"reason": "fixture"}, "lev-MANTA-L1")
         assert risk_payload()["vetoes"][0]["type"] == "RISK_VETO"
+        from office_mini_v2 import audit_payload
+
+        au = audit_payload()
+        assert au["counts"]["RISK_SHADOW_REVIEW"] == 1 and au["counts"]["RISK_VETO"] == 1
+        assert au["would_veto"] == 2 and au["top_veto_reasons"][0] == ("EXECUTION_NOT_VERIFIED", 1), au
     finally:
         os.unlink(db)
     print("OK Mini App cards: tick display, status text, Lev lines, honest risk (no orders)")

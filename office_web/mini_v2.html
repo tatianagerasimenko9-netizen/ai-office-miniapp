@@ -248,6 +248,20 @@ async function journal(){
       <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
   } else if(kind==='positions'){
     body=posHtml(d);
+  } else if(kind==='audit'){
+    const c=d.counts||{};
+    const RU={EXECUTION_NOT_VERIFIED:'виконання не перевірено',DATA_NOT_VERIFIED:'дані не перевірені',CONTEXT_NOT_VERIFIED:'контекст не перевірено',
+      INCOMPLETE_PLAN:'неповний план (немає кількості)',INVALID_EXISTING_RISK:'ризик відкритих позицій невідомий',TRADE_RISK_LIMIT:'ліміт ризику угоди',
+      PORTFOLIO_RISK_LIMIT:'ліміт ризику портфеля',INVALID_RISK_LIMIT:'капітал не задано'};
+    body=d.ok===false?`<div class="empty">${esc(d.reason||'журнал недоступний')}</div>`:`<div class="card">
+      <div class="kv"><span>Версій тез за ${esc(d.days)} дн.</span><b>${esc(c.THESIS_VERSION||0)}</b></div>
+      <div class="kv"><span>…з них неповних</span><b>${esc(d.thesis_incomplete||0)}</b></div>
+      <div class="kv"><span>Перевірок Risk Officer</span><b>${esc(d.risk_reviews||0)}</b></div>
+      <div class="kv"><span>…заблокував би / заблокував</span><b>${esc(d.would_veto||0)}</b></div>
+      <div class="kv"><span>Реальних veto</span><b>${esc(c.RISK_VETO||0)}</b></div></div>
+      <h2>Причини veto</h2><div class="card">${(d.top_veto_reasons||[]).map(([r,n])=>`<div class="kv"><span>${esc(RU[r]||r)}</span><b>${esc(n)}</b></div>`).join('')||'<div class="mut">Записів немає</div>'}</div>
+      <h2>Режими в тезах</h2><div class="card">${(d.regimes||[]).map(([r,n])=>`<div class="kv"><span>${esc(r==='UNKNOWN'?'Не визначено':r)}</span><b>${esc(n)}</b></div>`).join('')||'<div class="mut">Записів немає</div>'}</div>
+      <div class="mut">${esc(d.note||'')}</div>`;
   } else {
     const rows=d.rows||[];
     body=rows.map(s=>`<div class="card tap" data-id="${esc(sid(s.scenario_id))}"><div class="top">
@@ -255,7 +269,7 @@ async function journal(){
       ||'<div class="empty">Журнал сценаріїв порожній</div>';
   }
   app.innerHTML=`<div class="banner">Історія фактичних записів. Минуле не переписується.</div>
-    ${chips([['scenarios','Сценарії'],['positions','Позиції /position'],['stats','Статистика']],kind,'k')}${body}`;
+    ${chips([['scenarios','Сценарії'],['audit','Аудит рішень'],['positions','Позиції /position'],['stats','Статистика']],kind,'k')}${body}`;
   app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
   bindCards();
 }

@@ -9,7 +9,7 @@ import json
 import math
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -628,8 +628,65 @@ def overview_payload() -> Dict[str, Any]:
     }
 
 
+AUDIT_TYPES = ("THESIS_VERSION", "RISK_SHADOW_REVIEW", "RISK_VETO")
+
+
+def audit_payload(days: int = 7) -> Dict[str, Any]:
+    """Аудит журналу рішень: лише лічильники фактичних записів, без WR/PnL."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        rows = _fetchall(
+            _db(),
+            """
+            SELECT event_type, payload_json FROM office_events
+            WHERE ts_utc >= ? AND event_type IN ('THESIS_VERSION', 'RISK_SHADOW_REVIEW', 'RISK_VETO')
+            ORDER BY id DESC LIMIT 5000
+            """,
+            (since,),
+        )
+    except Exception:
+        return {"ok": False, "readonly": True, "data_status": DATA_UNAVAILABLE, "reason": "журнал недоступний"}
+    counts = {t: 0 for t in AUDIT_TYPES}
+    reasons: Dict[str, int] = {}
+    would_veto = 0
+    thesis_incomplete = 0
+    regimes: Dict[str, int] = {}
+    for et, pj in rows or []:
+        counts[et] = counts.get(et, 0) + 1
+        try:
+            pl = json.loads(pj or "{}")
+        except Exception:
+            pl = {}
+        if et in ("RISK_SHADOW_REVIEW", "RISK_VETO"):
+            if pl.get("would_veto") or et == "RISK_VETO":
+                would_veto += 1
+            for r in pl.get("reasons") or []:
+                reasons[str(r)] = reasons.get(str(r), 0) + 1
+        elif et == "THESIS_VERSION":
+            if not (pl.get("check") or {}).get("valid_for_analyst_review"):
+                thesis_incomplete += 1
+            reg = str(pl.get("regime") or "UNKNOWN")
+            regimes[reg] = regimes.get(reg, 0) + 1
+    reviews = counts["RISK_SHADOW_REVIEW"] + counts["RISK_VETO"]
+    return {
+        "ok": True,
+        "readonly": True,
+        "days": days,
+        "data_status": "DATA_OK" if rows else "EMPTY",
+        "counts": counts,
+        "risk_reviews": reviews,
+        "would_veto": would_veto,
+        "top_veto_reasons": sorted(reasons.items(), key=lambda x: -x[1])[:6],
+        "thesis_incomplete": thesis_incomplete,
+        "regimes": sorted(regimes.items(), key=lambda x: -x[1]),
+        "note": "Лічильники записів журналу, не результативність стратегії.",
+    }
+
+
 def journal_payload(*, kind: str = "scenarios") -> Dict[str, Any]:
     k = str(kind or "scenarios").lower()
+    if k == "audit":
+        return audit_payload()
     if k == "stats":
         st = v1_stats()
         n = int(st.get("n") or 0)
