@@ -292,10 +292,19 @@ def desk_entry_gate(
             }
         if not mem.get("allow_entry"):
             return {**empty, "reason": str(mem.get("reason") or "пам'ять сценарію"), "memory": mem}
+    side_u = str(direction or "").upper()
+    side_ok = (s > e > t) if side_u == "SHORT" else (s < e < t)
+    if not side_ok:
+        return {**empty, "reason": "стоп/TP1 не з того боку від входу"}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)
     if not wide.get("ok"):
         return {**empty, "reason": str(wide.get("reason") or "стоп/ATR")}
     s2 = float(wide["sl"])
+    from office_radar import MIN_RR
+
+    rr = abs(t - e) / abs(e - s2) if abs(e - s2) > 1e-12 else 0.0
+    if rr + 1e-12 < float(MIN_RR):
+        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR}"}
     need = min_tp1_pct(symbol)
     move = move_pct_to_tp(entry=e, tp=t)
     if move is None or move + 1e-12 < need:
@@ -979,6 +988,8 @@ def prepare_desk_send(
                     "origin": "desk",
                     "signal_id": existing.get("signal_id"),
                     "sl": existing.get("sl"),
+                    "tp1": existing.get("tp1"),
+                    "tp2": existing.get("tp2"),
                     "zone_lo": conf.get("zone_lo"),
                     "zone_hi": conf.get("zone_hi"),
                     "entry_low": conf.get("zone_lo"),
@@ -1104,6 +1115,8 @@ def prepare_desk_send(
                 "timeframe": timeframe,
                 "origin": "desk",
                 "sl": gate.get("sl"),
+                "tp1": tp1,
+                "tp2": tp2,
                 "zone_lo": zone_lo,
                 "zone_hi": zone_hi,
                 "entry_low": zone_lo,

@@ -5291,7 +5291,26 @@ EV позитивне: {prob.get('ev_positive', '')}
                             created_dt = now_utc
 
                         if status == "CONFIRMED":
-                            # Повторна зона після підтвердження — не новий вхід.
+                            # Повторна зона після підтвердження — не новий вхід. Але план уже надіслано власниці: якщо до входу
+                            # годинна свічка закрилась за рівнем скасування — це подія надісланого сигналу, повідомляємо один раз.
+                            try:
+                                sl_c = float(sl) if sl is not None else None
+                                if sl_c is not None and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
+                                    _h1x = fetch_candles(symbol, "1h", 8)
+                                    if _lc.closed_h1_beyond(_h1x, side=direction, level=sl_c,
+                                                            since_ts=_lc._ts(row.get("ts_updated")) or 0.0, now_ts=time.time()):
+                                        signal_update(db_path, signal_id=signal_id, status="CANCELLED", outcome="CANCELLED",
+                                                      analysis_note=f"CANCELLED after confirm: H1 close beyond {sl_c}")
+                                        from office_confluence import format_cancel_card as _fcc
+
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            _fcc(symbol=symbol, direction=direction, reason=_lc.cancel_reason_h1(direction, sl_c, symbol) + ". Якщо ти вже в угоді — перевір свій стоп"),
+                                            stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
+                                            kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="CANCELLED",
+                                        )
+                            except Exception as exc_cc:
+                                print(f"[signals] confirmed-cancel check {symbol}: {type(exc_cc).__name__}: {exc_cc}")
                             continue
 
                         from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
@@ -6219,22 +6238,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 pass
                     print(f"[{tag}] {sym} hold: {prep.get('reason')}")
                     return False
-                sent_signal_id = await send_proactive(
-                    EVENT_SIGNAL_ENTRY,
-                    fmt_agent_line("lev", str(prep.get("text") or "")),
-                    symbol=sym,
-                    direction=str(direction or ""),
-                    sl=prep.get("sl"),
-                    kind=KIND_SIGNAL,
-                    intent="SIGNAL",
-                    canonical_id=str(prep.get("scenario_id") or prep.get("setup_key") or ""),
-                    scenario_event=EVENT_SIGNAL_ENTRY,
-                )
-                if not sent_signal_id:
-                    print(f"[{tag}] {sym} SIGNAL_ENTRY delivery not verified: no ACTIVE journal")
-                    return False
-                _last_notified["__FEED_COOLDOWN__"] = now_ts
-                mark_cycle_sent(sent_this_cycle, sym)
+                # Сценарій без підтвердження в Telegram НЕ шлемо (це WATCHING: «входу немає»). Він зберігається в БД, видно в Mini App,
+                # а worker стежить за умовами; у Telegram піде лише повний план після підтвердження (вхід, стоп, цілі) і події вже надісланого.
+                print(f"[{tag}] {sym} {direction} сценарій записано без Telegram (WATCHING): {str(prep.get('text') or '').splitlines()[:1]}")
                 sid = str(prep.get("scenario_id") or prep.get("setup_key") or f"desk-{tag}-{sym}-{int(now_ts)}")
                 e_px = prep.get("entry")
                 try:
@@ -6276,23 +6282,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp1=tp1,
                         tp2=tp2,
                         rr=None,
-                        status="ACTIVE",
+                        status="WATCHING",
                         analysis_note=scenario_note[:2000],
                     )
                     apply_setup_event(sid, "FOUND")
-                    journal_open_office_signal(
-                        db_path,
-                        signal_id=sid,
-                        symbol=sym,
-                        direction=str(direction or "LONG"),
-                        entry_price=e_px,
-                        stop_loss=sl_px,
-                        take_profit=tp1,
-                        tp2=tp2,
-                        timeframe=str(timeframe or "H1"),
-                        setup_note=str(setup_type or tag),
-                        extra=extra_j,
-                    )
+                    from office_confluence import mark_live as _mark_live
+
+                    _mark_live(sid, {
+                        "symbol": sym, "direction": str(direction or "LONG"), "timeframe": str(timeframe or "H1"), "origin": "desk",
+                        "signal_id": sid, "scenario_id": sid, "sl": sl_px, "tp1": tp1, "tp2": tp2,
+                        "zone_lo": conf.get("zone_lo") or e_px, "zone_hi": conf.get("zone_hi") or e_px,
+                        "entry_low": conf.get("zone_lo") or e_px, "entry_high": conf.get("zone_hi") or e_px,
+                        "basis": str(prep.get("market_basis") or conf.get("market_basis") or ""), "status": "WATCHING", "ts": now_ts,
+                    })
                 except Exception as exc_jf:
                     print(f"[steer] journal feed {sym} failed: {exc_jf}")
                 return True

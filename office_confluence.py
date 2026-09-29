@@ -695,6 +695,15 @@ def evaluate_confluence(
         candles_w=candles_w,
     )
     clusters = cluster_zones(cands)
+    px_side = _f(price)
+    if px_side is not None and clusters:
+        # Відкат іде проти поточного руху: LONG — зона на/під ціною, SHORT — на/над ціною; з іншого боку — це погоня
+        if side == "SHORT":
+            clusters = [c for c in clusters if float(c["hi"]) >= px_side]
+        else:
+            clusters = [c for c in clusters if float(c["lo"]) <= px_side]
+        if not clusters:
+            return {**empty, "reason": "зона збігів з іншого боку ціни — не відкат"}
     if not clusters:
         return {**empty, "reason": "немає збігів"}
     best = clusters[0]
@@ -919,6 +928,8 @@ def hydrate_live_from_db(db_path: str) -> int:
                 "origin": parse_note_meta(note).get("origin") or "desk",
                 "signal_id": r.get("signal_id"),
                 "sl": r.get("sl"),
+                "tp1": r.get("tp1"),
+                "tp2": r.get("tp2"),
                 "zone_lo": r.get("entry_low"),
                 "zone_hi": r.get("entry_high"),
                 "entry_low": r.get("entry_low"),

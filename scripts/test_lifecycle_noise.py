@@ -74,6 +74,7 @@ try:
     assert not any("lev-watch-" in str(v.get("signal_id")) for v in keys.values()), "службові рядки не оживають"
     fresh = [v for k, v in keys.items() if k.endswith("fresh0000000001")][0]
     assert abs(float(fresh["ts"]) - (real_now - 1 * H)) < 5, "вік сценарію береться з БД, а не з часу рестарту"
+    assert float(fresh["tp1"]) == 0.27, "TP1 переживає рестарт (інакше «план неповний: немає цілі»)"
 
     # 3) пауза після скасування
     signal_update(db, signal_id="SCN|ENAUSDT|LONG|H1|fresh0000000001", status="CANCELLED", outcome="CANCELLED")
@@ -96,3 +97,15 @@ assert "ЧЕКАЄМО" in txt and "КОЛИ СКАСУЄМО: годинна с
 for bad in ("Плановий обсяг", "Приклад обсягу", "❌ Стоп", "Приклад розрахунку", "SHORT"):
     assert bad not in txt, (bad, txt)
 print("OK lifecycle/noise: H1-close cancel, silent unannounced, no resurrection, cooldown, compact card")
+
+# 6) живий сценарій із картки несе TP1 → підтвердження не дає хибного «план неповний»
+from office_confluence import reset_live as _rl  # noqa: E402
+from office_desk_card import prepare_desk_send  # noqa: E402
+
+_rl()
+_c = lambda k, lo, hi, tf, w: {"kind": k, "lo": lo, "hi": hi, "tf": tf, "label": w, "weight": 1.0}
+import inspect  # noqa: E402
+import office_desk_card as _dc  # noqa: E402
+
+assert '"tp1": tp1' in inspect.getsource(_dc.prepare_desk_send), "mark_live у prepare_desk_send має нести tp1"
+print("OK live setups carry TP1")
