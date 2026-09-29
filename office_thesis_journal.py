@@ -21,6 +21,8 @@ from office_market_thesis import REGIMES, evaluate_thesis
 EVENT = "THESIS_VERSION"
 _LAST: Dict[str, str] = {}
 _LAST_RAW: Dict[str, str] = {}
+_LAST_META: Dict[str, Dict[str, Any]] = {}
+MIN_VERSION_GAP_SEC = 900  # дрейф зони без зміни стану/режиму/рішення — не частіше ніж раз на 15 хв
 
 
 TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "H4": 14400, "D1": 86400, "LTF": 300}
@@ -198,6 +200,12 @@ def record_thesis(
     if _LAST.get(tid) == digest:
         _LAST_RAW[raw_key] = raw_digest
         return None
+    core = {k: thesis.get(k) for k in ("state", "direction", "regime", "lev_action")}
+    last = _LAST_META.get(tid)
+    if last and last["core"] == core and (now - last["at"]).total_seconds() < MIN_VERSION_GAP_SEC:
+        # Той самий сценарій, лише зсув меж зони: не роздуваємо журнал версіями щохвилини.
+        _LAST_RAW[raw_key] = raw_digest
+        return None
     check = evaluate_thesis(thesis, now_utc=now)
     record = {**thesis, "version_hash": digest, "recorded_at": now.isoformat(), "check": check}
     from office_bridge import log_event
@@ -206,8 +214,10 @@ def record_thesis(
     if len(_LAST) > 5000 or len(_LAST_RAW) > 5000:
         _LAST.clear()
         _LAST_RAW.clear()
+        _LAST_META.clear()
     _LAST[tid] = digest
     _LAST_RAW[raw_key] = raw_digest
+    _LAST_META[tid] = {"core": core, "at": now}
     return record
 
 

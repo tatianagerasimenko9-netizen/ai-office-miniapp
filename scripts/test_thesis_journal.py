@@ -64,6 +64,7 @@ def main():
         tj.canonical_scenario_id = orig
         tj._LAST.clear()
         tj._LAST_RAW.clear()
+        tj._LAST_META.clear()
         assert tj.record_thesis(db, cycle(), candles_by_tf=fresh, now_utc=NOW + timedelta(minutes=6)) is None
 
         # Changed thesis -> new version; old one untouched.
@@ -93,6 +94,22 @@ def main():
         assert rr["regime"] == "TREND" and rr["regime_info"]["source"] == "regime-v1", rr["regime_info"]
         ctx_r = tj.build_thesis(cycle(regime="range"), candles_by_tf={"H1": h1}, now_utc=NOW)
         assert ctx_r["regime"] == "RANGE" and ctx_r["regime_info"]["source"] == "market_context"
+
+        # Pure zone drift (same state/regime/decision) within 15 min is not a new version; a state change is.
+        tj._LAST.clear(); tj._LAST_RAW.clear(); tj._LAST_META.clear()
+        base = tj.record_thesis(db, cycle(lo=141.5), candles_by_tf=fresh, now_utc=NOW)
+        assert base
+        n_before = len(_fetchall(db, "SELECT id FROM office_events WHERE event_type='THESIS_VERSION'", ()))
+        drift1 = tj.record_thesis(db, cycle(lo=141.4), candles_by_tf=fresh, now_utc=NOW + timedelta(minutes=2))
+        assert drift1 is None, "zone drift inside the gap must not add a version"
+        state_change = tj.record_thesis(db, cycle(action="SEND", lo=141.4), candles_by_tf=fresh,
+                                        now_utc=NOW + timedelta(minutes=3))
+        assert state_change and state_change["state"] == "CONFIRMED"
+        later = tj.record_thesis(db, cycle(action="SEND", lo=141.2), candles_by_tf=fresh,
+                                 now_utc=NOW + timedelta(minutes=30))
+        assert later is not None, "after the gap a drifted zone may be versioned again"
+        n_after = len(_fetchall(db, "SELECT id FROM office_events WHERE event_type='THESIS_VERSION'", ()))
+        assert n_after == n_before + 2, (n_before, n_after)
 
         # Zone drifted slightly: thesis attaches to the existing canonical scenario id.
         signal_upsert(db, signal_id="CANON-1", symbol="ADAUSDT", direction="SHORT", entry_low=0.50,
