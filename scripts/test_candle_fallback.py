@@ -44,3 +44,33 @@ except m.RateLimited:
     pass
 m.reset_market_cache()
 print("OK candle fallback: vision -> bybit, disable flag, fapi pause does not block fallback")
+
+# --- джерело не змішується непомітно: ф'ючерсний SEND не підтверджується за чужим ринком ---
+import time as _t
+from office_feed_quality import gate_send_on_fresh_data
+from datetime import datetime, timezone
+m._http_get_json = fake  # fapi 429 → spot vision
+m.reset_market_cache(); m._FALLBACK_AT.clear()
+now_ms = int(_t.time() // 900 * 900 * 1000)
+def fake_fresh(url, params):
+    if "fapi.binance.com" in url:
+        raise m.RateLimited(30)
+    return [[now_ms - (4 - i) * 900000, "1", "2", "0.5", "1.5", "10"] for i in range(5)]
+m._http_get_json = fake_fresh
+c = m.fetch_candles("BTCUSDT", "15m", 5)
+assert c and all(x["src"] == "binance_spot_vision" for x in c)
+assert m.fallback_recent("BTC") == "binance_spot_vision"
+cyc = {"send": True, "action": "SEND", "symbol": "BTCUSDT"}
+g = gate_send_on_fresh_data(cyc, c, interval="15m")
+assert g["send"] is False and g["action"] == "WAIT" and "резервного ринку" in g["reason"] and g["data_source"] == "binance_spot_vision", g
+# ф'ючерсні свічки без резервного сліду → шлях не заблоковано цим правилом
+m._FALLBACK_AT.clear()
+fut = [{"open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 1, "ts": datetime.fromtimestamp((now_ms - (4 - i) * 900000) / 1000, tz=timezone.utc).isoformat(), "src": m.FUTURES_SRC} for i in range(5)]
+g2 = gate_send_on_fresh_data({"send": True, "action": "SEND", "symbol": "BTCUSDT"}, fut, interval="15m")
+assert "резервного ринку" not in str(g2.get("reason") or ""), g2
+# лише слід у пам'яті (ціни іншого ринку віддавались недавно) теж блокує
+m._FALLBACK_AT["BTCUSDT"] = (_t.time(), "bybit_linear")
+g3 = gate_send_on_fresh_data({"send": True, "action": "SEND", "symbol": "BTCUSDT"}, fut, interval="15m")
+assert g3["send"] is False and g3["data_source"] == "bybit_linear"
+m.reset_market_cache(); m._FALLBACK_AT.clear()
+print("OK source tagging: fallback candles tagged, futures SEND blocked on other market, futures path untouched")
