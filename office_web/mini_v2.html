@@ -379,7 +379,7 @@ async function paintChart(el, s){
     usingLW=true;
     chart=LightweightCharts.createChart(el,{layout:{background:{color:'#0E141D'},textColor:'#94A3B8'},
       grid:{vertLines:{color:'#18212E'},horzLines:{color:'#18212E'}},rightPriceScale:{borderColor:'#243244'},
-      timeScale:{borderColor:'#243244',timeVisible:true},crosshair:{mode:0},height:el.clientHeight||320,width:el.clientWidth||320});
+      timeScale:{borderColor:'#243244',timeVisible:true},crosshair:{mode:0},localization:{locale:'uk-UA'},height:el.clientHeight||320,width:el.clientWidth||320});
     series=chart.addCandlestickSeries({upColor:'#27C99A',downColor:'#F36B78',borderVisible:false,wickUpColor:'#27C99A',wickDownColor:'#F36B78',
       priceFormat:priceFormat((s.display||{}).tick)});
     series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));

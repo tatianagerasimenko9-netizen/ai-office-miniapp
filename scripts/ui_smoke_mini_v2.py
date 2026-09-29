@@ -7,7 +7,12 @@ five tabs render without JS errors, no horizontal scroll, XSS payloads in
 DB fields are not executed, API failure shows an error state, slow API
 shows a loading state. No network, Telegram or orders.
 
-Usage: python3 scripts/ui_smoke_mini_v2.py [--chromium /path/to/chrome] [--shots DIR]
+--lwc FILE serves a local copy of lightweight-charts for the CDN URL (integrity hash is
+still verified by the browser) so the interactive chart, not the canvas fallback, is
+exercised even without internet. --posix-locale simulates a runner whose browser
+language is "en-US@posix" (a real CI failure mode).
+
+Usage: python3 scripts/ui_smoke_mini_v2.py [--chromium /path/to/chrome] [--shots DIR] [--lwc FILE] [--posix-locale]
 """
 from __future__ import annotations
 
@@ -44,13 +49,27 @@ def _seed(db: str) -> None:
     log_event(db, "RISK_SHADOW_REVIEW", {"symbol": XSS, "reasons": [XSS], "would_veto": True}, "xss-1")
 
 
+async def _prep(page, lwc: str, posix: bool) -> None:
+    if posix:
+        await page.add_init_script(
+            "Object.defineProperty(navigator,'language',{get:()=>'en-US@posix'});"
+            "Object.defineProperty(navigator,'languages',{get:()=>['en-US@posix']});"
+        )
+    if lwc:
+        body = Path(lwc).read_bytes()
+        await page.route(
+            "https://cdn.jsdelivr.net/npm/lightweight-charts@*/**",
+            lambda r: r.fulfill(status=200, body=body, content_type="application/javascript"),
+        )
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
-async def _run(base: str, chromium: str | None, shots: Path | None) -> list:
+async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "", posix: bool = False) -> list:
     from playwright.async_api import async_playwright
 
     problems = []
@@ -58,10 +77,13 @@ async def _run(base: str, chromium: str | None, shots: Path | None) -> list:
         browser = await p.chromium.launch(**({"executable_path": chromium} if chromium else {}))
         for name, vp in (("phone", {"width": 360, "height": 780}), ("desktop", {"width": 1280, "height": 900})):
             page = await browser.new_page(viewport=vp)
+            await _prep(page, lwc, posix)
             errs: list = []
             page.on("pageerror", lambda e: errs.append(str(e)))
             await page.goto(base + "/v2")
             await page.wait_for_timeout(1500)
+            if lwc and not await page.evaluate("!!window.LightweightCharts"):
+                problems.append(f"{name}: lightweight-charts did not load (integrity/route)")
             for tab in ("office", "radar", "scenarios", "journal", "risk"):
                 await page.click(f"nav button[data-r={tab}]")
                 await page.wait_for_timeout(700)
@@ -82,6 +104,8 @@ async def _run(base: str, chromium: str | None, shots: Path | None) -> list:
                     problems.append(f"{name}/card {sid}: horizontal scroll {sw}")
                 if shots:
                     await page.screenshot(path=str(shots / f"{name}_card_{sid}.png"), full_page=True)
+            if lwc and await page.locator("#chart canvas").count() == 0:
+                problems.append(f"{name}: interactive chart canvas missing on scenario card")
             if await page.evaluate("window.__xss === 1"):
                 problems.append(f"{name}: XSS payload executed")
             if await page.locator("img[src=x]").count():
@@ -92,6 +116,7 @@ async def _run(base: str, chromium: str | None, shots: Path | None) -> list:
 
         # API failure -> explicit error state, no stale numbers.
         page = await browser.new_page(viewport={"width": 390, "height": 844})
+        await _prep(page, lwc, posix)
         await page.route("**/api/v2/**", lambda r: r.fulfill(status=500, body="boom"))
         await page.goto(base + "/v2")
         await page.wait_for_timeout(1200)
@@ -101,6 +126,7 @@ async def _run(base: str, chromium: str | None, shots: Path | None) -> list:
 
         # Slow API -> loading skeleton visible first.
         page = await browser.new_page(viewport={"width": 390, "height": 844})
+        await _prep(page, lwc, posix)
 
         async def slow(route):
             await asyncio.sleep(2.0)
@@ -120,6 +146,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--chromium", default=os.getenv("PW_CHROMIUM") or None)
     ap.add_argument("--shots", default="")
+    ap.add_argument("--lwc", default="", help="local lightweight-charts standalone JS")
+    ap.add_argument("--posix-locale", action="store_true")
     a = ap.parse_args()
     tmp = tempfile.mkdtemp()
     db = str(Path(tmp) / "ui.db")
@@ -139,7 +167,7 @@ def main() -> int:
         shots = Path(a.shots) if a.shots else None
         if shots:
             shots.mkdir(parents=True, exist_ok=True)
-        problems = asyncio.run(_run(f"http://127.0.0.1:{port}", a.chromium, shots))
+        problems = asyncio.run(_run(f"http://127.0.0.1:{port}", a.chromium, shots, a.lwc, a.posix_locale))
     finally:
         proc.terminate()
     if problems:
