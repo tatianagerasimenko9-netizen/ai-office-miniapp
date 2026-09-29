@@ -97,9 +97,29 @@ try:
     assert rp["shadow"] and rp["shadow"][0]["scenario_id"] == "SOLUSDT|LONG|140|142" and rp["vetoes"] == []
     au = audit_payload()
     assert au["counts"]["THESIS_VERSION"] == 1 and au["counts"]["RISK_SHADOW_REVIEW"] == 1, au
+    # 5. Manual position ledger on PostgreSQL (explicit migration, idempotent, real transactions).
+    import office_positions as POS
+    assert not POS.schema_present(DB)
+    POS.migrate_positions(DB); POS.migrate_positions(DB)
+    pos = POS.open_position(DB, symbol="ETHUSDT", direction="LONG", entry="2600", qty="2", sl="2550", tp1="2700",
+                            fee_usdt="1", idem_key="pg-open")
+    try:
+        POS.open_position(DB, symbol="ETHUSDT", direction="LONG", entry="2600", qty="2", sl="2550", idem_key="pg-open")
+        raise AssertionError("duplicate idem_key must be refused")
+    except POS.PositionError as e:
+        assert e.code == "duplicate"
+    POS.partial_exit(DB, pos["trade_id"], price="2650", qty="1", fee_usdt="0.5")
+    POS.move_sl(DB, pos["trade_id"], sl="2605")
+    assert existing_risk_usdt(DB)["value"] == 0.0
+    closed = POS.close_position(DB, pos["trade_id"], price="2640", fee_usdt="0.5")
+    assert closed["status"] == "CLOSED" and closed["outcome"] == "WIN" and closed["realized_gross_usdt"] == 90.0, closed
+    assert [e["kind"] for e in closed["events"]] == ["OPEN", "PARTIAL_EXIT", "MOVE_SL", "CLOSE"]
+    assert POS.stats(DB)["n"] == 1
+    from office_mini_v2 import trades_payload
+    assert trades_payload("closed")["positions"][0]["trade_id"] == pos["trade_id"]
     log_event(DB, "PG_PROBE", {"x": 1}, "p")
     assert json.loads(_fetchall(DB, "SELECT payload_json FROM office_events ORDER BY id DESC LIMIT 1", ())[0][0]) == {"x": 1}
 finally:
     with psycopg.connect(URL, autocommit=True) as c:
         c.execute(f"DROP SCHEMA {SCHEMA} CASCADE")
-print("OK PostgreSQL integration: idempotent schema, ledger, reply root, thesis, shadow risk, Mini App queries")
+print("OK PostgreSQL integration: idempotent schema, ledger, reply root, thesis, shadow risk, manual positions, Mini App queries")
