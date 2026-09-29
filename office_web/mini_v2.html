@@ -621,6 +621,7 @@ async function openSc(id){
       <div class="top"><span class="sym">${esc(hm.ticker)}</span><span class="side ${side(s.direction)}">${esc(hm.action_ua)}</span></div>
       <div class="st ${esc(hm.tone)}">${esc(hm.icon)} ${esc(hm.state_ua)}</div>
       <p style="margin:0 0 6px;font-size:15px">${esc(hm.headline)}</p>
+      ${hm.data_source_ua?`<div class="mut" style="margin-bottom:6px">⚠️ ${esc(hm.data_source_ua)}</div>`:''}
       <div class="kv"><span>Ціна</span><b>${hm.price_fresh?esc(hm.price):'свіжої ціни немає'}</b></div>
       <div class="kv"><span>Ціну перевірено</span><b>${hm.price_fresh?ago(hm.price_as_of):'—'}</b></div>
       <div class="kv"><span>Сценарій оновлено</span><b>${hm.updated_at?hhmm(hm.updated_at):'—'}</b></div></div>

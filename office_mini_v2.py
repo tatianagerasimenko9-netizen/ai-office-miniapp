@@ -508,13 +508,25 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
             targets = structural_targets(direction=str(row.get("direction") or ""), entry=(lo + hi) / 2.0, tp1=tp1, lv=lv)
         except Exception:  # noqa: BLE001
             targets = None
-    v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=check_plan)
+    from office_market_data import fallback_recent, source_ua
+
+    other = fallback_recent(sym)
+
+    def _check(*a: Any, **k: Any) -> Optional[str]:
+        if other:
+            return f"Ціни зараз з резервного ринку ({source_ua(other)}), а не з ф'ючерсів Binance — готовий план входу не підтверджую."
+        return check_plan(*a, **k)
+
+    v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=_check)
+    if other:
+        v["data_source"] = other
+        v["data_source_ua"] = f"Дані з резервного ринку: {source_ua(other)}. Спостереження триває, план входу — лише за ф'ючерсними свічками Binance."
     if v.get("state") == "READY":
         try:  # цілі 2/3 від фактичного входу, а не від середини зони
             entry = float(v_entry(row))
             lv2 = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 5), weekly=fetch_candles(sym, "1w", 4))
             tg = structural_targets(direction=str(row.get("direction") or ""), entry=entry, tp1=tp1, lv=lv2)
-            v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=check_plan)
+            v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=_check)
         except Exception:  # noqa: BLE001
             pass
     return v
