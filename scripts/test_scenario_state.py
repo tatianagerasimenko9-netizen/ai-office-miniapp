@@ -71,7 +71,7 @@ assert v["plan"]["tp2"] == "немає обґрунтованої" and v["plan"]
 # 6. План підтверджено, але не проходить перевірку (ціль надто близько) → «не готовий», не зелений
 v = S.build({**row5, "tp1": 0.3070}, thesis=THESIS, price=FRESH, plan_check=check_plan)
 assert v["state"] == "NOT_READY" and v["icon"] != "🟢" and any("замалий" in m for m in v["missing"]), v
-assert "надто близько" in check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.0, "tp1": 103.0}, 100, 101)   # правило мінімальної цілі (не змінено)
+assert "надто близько" in check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.5, "tp1": 103.0}, 100, 101)   # правило мінімальної цілі (не змінено)
 assert check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.0, "tp1": 104.0}, 100, 101) is None
 # ...і без збереженої ціни входу
 v = S.build({**row5, "analysis_note": ROW["analysis_note"]}, thesis=THESIS, price=FRESH, plan_check=check_plan)

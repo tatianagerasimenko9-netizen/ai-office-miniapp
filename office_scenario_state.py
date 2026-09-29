@@ -93,6 +93,8 @@ def _tf_from_row(row: Dict[str, Any]) -> str:
 
 def _too_old(row: Dict[str, Any], now: Optional[datetime]) -> bool:
     """Картка Лева живе TTL її таймфрейму (H1 — 12 год, M15 — 3 год); підтверджений план не застарює за часом."""
+    if row.get("_has_position"):
+        return False   # угода вже відкрита вручну — закінчення часу дії сигналу не припиняє її супровід
     if str(row.get("status") or "").upper() == "CONFIRMED":
         # підтверджений план діє обмежений час (див. office_scenario_lifecycle.plan_valid_sec), далі знімається
         try:
@@ -190,7 +192,9 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 v["plan"] = {"entry": px(entry, sym), "stop": px(sl, sym), "tp1": px(tp1, sym),
                              "tp2": px(tg["tp2"]["price"], sym) + f" ({tg['tp2']['why']})" if tg.get("tp2") else "немає обґрунтованої",
                              "tp3": (px(tg["tp3"]["price"], sym) + f" ({tg['tp3']['why']})") if tg.get("tp3") else "немає обґрунтованої"}
-                fee = float(os.getenv("OFFICE_DEFAULT_FEE_PCT", "0.04") or 0.04) * 2
+                from office_alert_gate import fee_round_trip_pct
+
+                fee = fee_round_trip_pct()
                 to_tp1 = abs(tp1 - entry) / entry * 100.0
                 to_sl = abs(entry - sl) / entry * 100.0
                 v["levels"] = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": (tg.get("tp2") or {}).get("price"), "tp3": (tg.get("tp3") or {}).get("price"), "cancel": cancel}

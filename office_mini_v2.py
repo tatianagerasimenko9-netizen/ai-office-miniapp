@@ -454,7 +454,7 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             thesis = None
     human = None
     try:
-        human = _human_view(row, thesis, events)
+        human = _human_view({**row, "_has_position": True} if pos else row, thesis, events)
         if human and not _fixture_on():
             try:  # довідковий контекст: не впливає на стан і рішення
                 from office_market_context import context_for

@@ -106,14 +106,20 @@ PLAN_VALID_ENV = "OFFICE_PLAN_VALID_SEC"
 
 
 def plan_valid_sec(tf: Any = "H1") -> int:
-    """Скільки після підтвердження «діє» готовий план, якщо входу не було: сценарій H1+ — 4 год, молодші — 1 год."""
+    """Скільки після підтвердження «діє» готовий план, якщо входу не було: H4 і D1 — 12 год, H1 — 4 год, M15 і молодші — 1 год.
+    Це стосується лише плану без входу: відкриту власницею угоду (кнопка «Я відкрила угоду…») закінчення часу не зачіпає."""
     try:
         v = int(float(os.getenv(PLAN_VALID_ENV, "")))
         if v > 0:
             return v
     except ValueError:
         pass
-    return 4 * 3600 if str(tf or "H1").upper() in ("H1", "H4", "D1", "1H", "4H", "1D") else 3600
+    t = str(tf or "H1").upper()
+    if t in ("H4", "4H", "D1", "1D"):
+        return 12 * 3600
+    if t in ("H1", "1H"):
+        return 4 * 3600
+    return 3600
 
 
 def valid_until_ts(confirmed_ts: float, tf: Any = "H1") -> float:

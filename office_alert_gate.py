@@ -515,13 +515,15 @@ def chase_blocks_entry(*, direction: str, price: Any, zone_lo: Any, zone_hi: Any
 
 
 def fee_round_trip_pct() -> float:
+    """Комісія круга для оцінки плану: тейкер Binance Futures 0,05% з кожного боку (вхід по ринку після підтвердження) = 0,10%.
+    OFFICE_SIGNAL_FEE_PCT — відсоток за один бік. Облік реальних угод (`office_positions`) має власне налаштування."""
     import os
 
     try:
-        v = float(os.getenv("OFFICE_DEFAULT_FEE_PCT", "0.04"))
+        v = float(os.getenv("OFFICE_SIGNAL_FEE_PCT", "0.05"))
     except ValueError:
-        v = 0.04
-    return (v if 0 <= v < 1 else 0.04) * 2.0
+        v = 0.05
+    return (v if 0 <= v < 1 else 0.05) * 2.0
 
 
 def net_rr(entry: Any, sl: Any, tp1: Any) -> Optional[Dict[str, float]]:
