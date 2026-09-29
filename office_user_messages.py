@@ -201,3 +201,25 @@ def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) 
         head, body = "🔴 {} · ПЛАН СКАСОВАНО", f"Ціна пішла {w['cross']} рівня скасування{lv} ще до входу. План {w['gen']} більше не діє."
     return "\n".join([head.format(ticker(symbol)), body, "ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.",
                       "Це аналіз, не ордер: рішення й ордер на біржі — лише твої."])
+
+
+def render_human(h: Dict[str, Any]) -> str:
+    """Той самий стан, що й на сторінці сценарію в Mini App (`office_scenario_state.build`), у вигляді повідомлення."""
+    L = [f"{h.get('icon', '')} {h.get('ticker', '')} · {str(h.get('state_ua') or '').upper()}", f"ЗАРАЗ: {h.get('headline', '')}"]
+    if h.get("price"):
+        L.append(f"Ціна: {h['price']}")
+    if h.get("wait"):
+        L.append(f"ЧОГО ЧЕКАЄМО: {h['wait']}")
+    if h.get("cancel"):
+        L.append(f"КОЛИ СКАСОВУЄМО: {h['cancel']}")
+    p = h.get("plan")
+    if p:
+        L.append(f"ВХІД {p['entry']} · СТОП {p['stop']} · TP1 {p['tp1']} · TP2 {p['tp2']} · TP3 {p['tp3']}")
+        if p.get("potential"):
+            L.append(p["potential"])
+    elif h.get("prelim"):
+        L.append("ПОПЕРЕДНЬО, НЕ ДЛЯ ВХОДУ: " + "; ".join(h["prelim"]))
+    if h.get("next"):
+        L.append(f"ДАЛІ: {h['next']}")
+    L.append("Це аналіз, не ордер: рішення й ордер на біржі — лише твої.")
+    return "\n".join(L)

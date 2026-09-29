@@ -83,6 +83,23 @@ def _confirmed_px(row: Dict[str, Any]) -> Optional[float]:
     return _f(m.group(1)) if m else None
 
 
+def _too_old(row: Dict[str, Any], now: Optional[datetime]) -> bool:
+    """Картка Лева живе TTL її таймфрейму (H1 — 12 год, M15 — 3 год); підтверджений план не застарює за часом."""
+    if str(row.get("status") or "").upper() == "CONFIRMED":
+        return False
+    try:
+        from office_confluence import ttl_sec
+
+        m = re.search(r"(?:tf|timeframe)=([A-Za-z0-9]+)", str(row.get("analysis_note") or ""))
+        tf = (m.group(1) if m else "H1").upper()
+        born = datetime.fromisoformat(str(row.get("ts_created")).replace("Z", "+00:00"))
+        if born.tzinfo is None:
+            born = born.replace(tzinfo=timezone.utc)
+        return ((now or datetime.now(timezone.utc)) - born).total_seconds() >= ttl_sec(tf)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def history(events: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, str]]:
     """Події людською мовою, без кодів і без однакових підряд."""
     out: List[Dict[str, str]] = []
@@ -95,7 +112,7 @@ def history(events: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, str]
 
 
 def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[str, Any], targets: Optional[Dict[str, Any]] = None,
-          events: Optional[List[Dict[str, Any]]] = None, plan_check=None) -> Dict[str, Any]:
+          events: Optional[List[Dict[str, Any]]] = None, plan_check=None, now: Optional[datetime] = None) -> Dict[str, Any]:
     """Людський вигляд сценарію. price: {price, fresh, as_of}. plan_check(symbol, side, plan, lo, hi) → None|причина."""
     sym = str(row.get("symbol") or "").upper()
     side = str(row.get("direction") or "").upper()
@@ -125,6 +142,8 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         state = "EXPIRED"
     elif status in ("HIT_SL", "HIT_TP1", "HIT_TP2", "CLOSED"):
         state = "DONE"
+    elif _too_old(row, now):
+        state = "EXPIRED"          # строк дії сценарію минув, навіть якщо статус у базі ще не оновлено
     elif not fresh:
         state = "NO_DATA"
     elif observe:

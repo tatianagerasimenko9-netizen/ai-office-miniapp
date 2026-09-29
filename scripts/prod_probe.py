@@ -15,6 +15,7 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +77,21 @@ def probe_http(base: str, symbol: str) -> Dict[str, Any]:
         g = (s.get("status") or {}).get("group") or "?"
         groups[g] = groups.get(g, 0) + 1
     rep["scenarios"] = {"n": len(sc), "by_group": groups}
+    # людський стан перших сценаріїв: той самий, що бачить Тетяна; суперечності = проблема
+    rep["scenario_pages"] = []
+    for sc_ in (sc or [])[:6]:
+        sid = sc_.get("scenario_id")
+        r_ = get(base, "/api/v2/scenario?id=" + urllib.parse.quote(str(sid), safe=""))
+        h_ = ((r_.get("json") or {}).get("human")) or {}
+        row_ = {"scenario_id": str(sid)[:60], "list_label": (sc_.get("human") or {}).get("text"), "page_state": h_.get("state"),
+                "page_title": h_.get("state_ua"), "price_fresh": h_.get("price_fresh"), "missing": h_.get("missing"), "status": r_.get("status")}
+        rep["scenario_pages"].append(row_)
+        if r_.get("status") is None or (r_["status"] or 0) >= 500:
+            rep["problems"].append(f"scenario page {str(sid)[:40]} -> {r_.get('status') or r_.get('error')}")
+        if h_.get("state") == "READY" and not h_.get("price_fresh"):
+            rep["problems"].append(f"CONTRADICTION: READY without fresh price {str(sid)[:40]}")
+        if not h_ and r_.get("status") == 200:
+            rep["problems"].append(f"scenario page has no human view {str(sid)[:40]}")
     tr = data.get("/api/v2/trades?state=all") or {}
     rep["trades"] = {"schema_missing": tr.get("schema_missing"), "n": len(tr.get("positions") or []),
                      "exposure_status": (tr.get("exposure") or {}).get("status")}
@@ -155,7 +171,7 @@ def main() -> int:
         rep["browser"] = asyncio.run(probe_browser(a.base, out))
         rep["problems"] += rep["browser"]["problems"]
     (out / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({k: rep[k] for k in ("at", "app", "feeds", "scenarios", "trades", "write_enabled", "verdict")},
+    print(json.dumps({k: rep[k] for k in ("at", "app", "feeds", "scenarios", "trades", "write_enabled", "scenario_pages", "verdict")},
                      ensure_ascii=False, indent=2))
     print("candles:", {t: (c["age_min"], "STALE" if c["stale"] else "ok") for t, c in rep["candles"].items()})
     if rep["problems"]:

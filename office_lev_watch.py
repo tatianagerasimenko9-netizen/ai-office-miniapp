@@ -18,7 +18,9 @@ from office_user_messages import render
 
 EVENT_WATCH = "LEV_WATCH"
 EVENT_NOTE = "LEV_WATCH_EVENT"
-TERMINAL = ("CANCELLED", "EXPIRED", "REJECTED")
+TERMINAL = ("CANCELLED", "EXPIRED", "REJECTED", "HANDOFF")
+MAX_ATTEMPTS = 3
+CARD_STATUSES = ("ACTIVE", "CONFIRMED", "HIT_ENTRY")
 TTL_SEC = 12 * 3600
 M15, H1 = 900, 3600
 STALE_AFTER_SEC = int(M15 * 2.5)
@@ -80,18 +82,24 @@ def active_watches(db: str) -> List[Dict[str, Any]]:
 
 
 def recent_notes(db: str, *, symbol: str = "", limit: int = 12) -> List[Dict[str, Any]]:
+    """Події повідомлень (остання версія кожної пари «умова + подія»): що сталося і чи доставлено."""
     from office_bridge import _fetchall
 
     try:
-        rows = _fetchall(db, "SELECT ts_utc, payload_json FROM office_events WHERE event_type = ? ORDER BY id DESC LIMIT ?", (EVENT_NOTE, 200))
+        rows = _fetchall(db, "SELECT ts_utc, payload_json FROM office_events WHERE event_type = ? ORDER BY id DESC LIMIT ?", (EVENT_NOTE, 300))
     except Exception:  # noqa: BLE001
         return []
-    out = []
+    out: List[Dict[str, Any]] = []
+    seen = set()
     for ts, pj in rows or []:
         try:
             p = json.loads(pj)
         except Exception:  # noqa: BLE001
             continue
+        k = (p.get("watch_id"), p.get("event"))
+        if k in seen:
+            continue
+        seen.add(k)
         if symbol and str(p.get("symbol", "")).upper() != symbol.upper():
             continue
         out.append({**p, "ts": ts})
@@ -100,19 +108,54 @@ def recent_notes(db: str, *, symbol: str = "", limit: int = 12) -> List[Dict[str
     return out
 
 
-def _noted(db: str, wid: str, event: str) -> Optional[str]:
-    """ts_utc останньої відповідної події або None."""
-    for n in recent_notes(db, limit=200):
+def _last_note(db: str, wid: str, event: str) -> Optional[Dict[str, Any]]:
+    for n in recent_notes(db, limit=300):
         if n.get("watch_id") == wid and n.get("event") == event:
-            return str(n.get("ts"))
+            return n
     return None
 
 
-def _note(db: str, watch: Dict[str, Any], event: str, text: str, sent: bool, why: str = "") -> None:
+def _noted(db: str, wid: str, event: str) -> Optional[str]:
+    """ts_utc останньої відповідної події або None."""
+    n = _last_note(db, wid, event)
+    return str(n.get("ts")) if n else None
+
+
+def _note(db: str, watch: Dict[str, Any], event: str, text: str, sent: bool, why: str = "", *, status: str = "", attempts: int = 0,
+          message_id: Any = None) -> None:
     from office_bridge import log_event
 
-    log_event(db, EVENT_NOTE, {"watch_id": watch["watch_id"], "symbol": watch["symbol"], "event": event, "text": text,
-                               "sent": bool(sent), "why": why}, watch["watch_id"])
+    st = status or ("pending" if sent else "disabled")
+    log_event(db, EVENT_NOTE, {"watch_id": watch["watch_id"], "symbol": watch["symbol"], "direction": watch.get("direction"), "event": event,
+                               "text": text, "sent": st == "sent", "status": st, "attempts": attempts, "message_id": message_id, "why": why},
+              watch["watch_id"])
+
+
+def mark_result(db: str, watch_id: str, event: str, ok: bool, message_id: Any = None, error: str = "") -> None:
+    """Результат доставки: sent або failed (з лічильником спроб). Записується завжди — помилки видно, а не мовчки губляться."""
+    n = _last_note(db, watch_id, event)
+    if not n:
+        return
+    attempts = int(n.get("attempts") or 0) + 1
+    _note(db, {"watch_id": watch_id, "symbol": n.get("symbol"), "direction": n.get("direction")}, event, str(n.get("text") or ""), ok,
+          why="" if ok else (error or "не доставлено (заблоковано політикою або помилка Telegram)"), status="sent" if ok else "failed",
+          attempts=attempts, message_id=message_id)
+
+
+def find_card(db: str, symbol: str, direction: str, lo: float, hi: float) -> Optional[Dict[str, Any]]:
+    """Уже відправлена картка Лева (ACTIVE/CONFIRMED) для тієї ж зони: її веде основний трекер worker — двічі не стежимо й не сповіщаємо."""
+    from office_bridge import _fetchall
+
+    try:
+        rows = _fetchall(db, "SELECT signal_id, entry_low, entry_high, status FROM office_signals WHERE symbol = ? AND direction = ? AND status IN (?, ?, ?)",
+                         (str(symbol).upper(), str(direction).upper(), *CARD_STATUSES))
+    except Exception:  # noqa: BLE001
+        return None
+    for sid, elo, ehi, st in rows or []:
+        a, b = _f(elo), _f(ehi)
+        if a is not None and b is not None and _overlap(lo, hi, min(a, b), max(a, b)):
+            return {"signal_id": sid, "status": st}
+    return None
 
 
 # ------------------------------------------------------------------ registration
@@ -127,6 +170,8 @@ def register(db: str, *, symbol: str, direction: str, zone_lo: Any, zone_hi: Any
     if lo > hi:
         lo, hi = hi, lo
     t = now or datetime.now(timezone.utc)
+    if find_card(db, symbol, side, lo, hi):
+        return None  # картку вже веде основний трекер (follow_setup) — дубля стеження немає
     wid = watch_id(symbol, side, lo, hi)
     cur = _latest(db).get(wid)
     if cur and str(cur.get("state")) not in TERMINAL and _dt(cur.get("expires_at")) and _dt(cur["expires_at"]) > t:
@@ -259,8 +304,18 @@ def tick(db: str, *, now: Optional[datetime] = None, fetch: Optional[Callable[[s
 
         cycle_fn = lambda d, s: lev_cycle_for_symbol(d, s, None, record=False)  # noqa: E731
     out: List[Dict[str, Any]] = []
+    # повтор доставки: події, які не дійшли (до MAX_ATTEMPTS спроб), не губимо
+    if send_ok:
+        for n in recent_notes(db, limit=100):
+            if n.get("status") == "failed" and int(n.get("attempts") or 0) < MAX_ATTEMPTS:
+                out.append({"watch_id": n["watch_id"], "symbol": n["symbol"], "direction": n.get("direction"), "event": n["event"],
+                            "text": n.get("text") or "", "retry": True})
     for w in active_watches(db):
         wid, sym = w["watch_id"], w["symbol"]
+        card = find_card(db, sym, w["direction"], float(w["zone_lo"]), float(w["zone_hi"]))
+        if card:  # з'явилась картка Лева для цієї зони — далі її веде основний трекер; тихо передаємо
+            _save(db, {**w, "state": "HANDOFF", "handoff_to": card["signal_id"]})
+            continue
         try:
             m15, h1 = fetch(sym, "15m", 96), fetch(sym, "1h", 48)
         except Exception:  # noqa: BLE001
@@ -289,8 +344,8 @@ def tick(db: str, *, now: Optional[datetime] = None, fetch: Optional[Callable[[s
                 continue
         else:
             _STALE_TICKS.pop(wid, None)
-            if _noted(db, wid, kind) and kind != "STALE":
-                continue  # ця зміна вже повідомлена — без дублів
+            if _noted(db, wid, kind):
+                continue  # ця зміна вже записана — без дублів
         new = {**w, "state": ev["state"], **({"touched_zone": True} if ev.get("touched_zone") else {}), **({"plan": ev["plan"]} if ev.get("plan") else {})}
         if kind != "STALE":
             _save(db, new)
@@ -298,5 +353,5 @@ def tick(db: str, *, now: Optional[datetime] = None, fetch: Optional[Callable[[s
                                                                     "reason": ev.get("reason")}))
         _note(db, w, kind, text, sent=send_ok, why="" if send_ok else "notify_disabled")
         if send_ok:
-            out.append({"watch_id": wid, "symbol": sym, "event": kind, "text": text})
+            out.append({"watch_id": wid, "symbol": sym, "direction": w["direction"], "event": kind, "text": text})
     return out

@@ -346,6 +346,59 @@ def frequency_report(sends: List[Dict[str, Any]], decisions: int, days: float) -
     return rep
 
 
+def simulate_watch_outcomes(waits: List[Dict[str, Any]], send_cycles: Dict[int, Dict[str, Any]], m15_all: List[Dict[str, Any]],
+                            h1_all: List[Dict[str, Any]], symbol: str, close_time, parse_ts, stride: int) -> Dict[str, Any]:
+    """Що б зробив трекер (`office_lev_watch.evaluate` — той самий код, що в production) з кожною оголошеною умовою «чекаємо»
+    на реальних свічках. Підтвердження — коли пізніший РЕАЛЬНИЙ висновок Лева SEND збігається за зоною й напрямом (раз на годину)."""
+    import office_lev_watch as W
+    from datetime import timedelta as _td
+
+    outcomes: Counter = Counter()
+    hours: List[float] = []
+    dup_terminal = 0
+    active: Dict[str, Dict[str, Any]] = {}
+    total = 0
+    touched_then_expired = 0
+    for wt in waits:
+        key = f"{wt['side']}|{wt['lo']:.6g}|{wt['hi']:.6g}"
+        if key in active and active[key]["until"] > wt["asof"]:
+            continue                               # ця умова вже відстежується — дубля немає (як у register())
+        total += 1
+        rec = {"watch_id": key, "symbol": symbol, "direction": wt["side"], "zone_lo": wt["lo"], "zone_hi": wt["hi"], "invalidation": wt["inv"],
+               "wait_tf": wt["wait_tf"], "scenario_tf": "H1", "state": "WAIT", "touched_zone": False,
+               "created_at": wt["asof"].isoformat(), "expires_at": (wt["asof"] + _td(seconds=W.TTL_SEC)).isoformat()}
+        active[key] = {"until": wt["asof"] + _td(seconds=W.TTL_SEC)}
+        terminals = 0
+        final = None
+        for j in range(wt["i"] + 1, min(len(m15_all), wt["i"] + 1 + W.TTL_SEC // 900 + 4)):
+            now = close_time(m15_all[j], "15m")
+            m15 = [dict(c) for c in m15_all[max(0, j - 95): j + 1]]
+            h1 = [dict(c) for c in h1_all if close_time(c, "1h") <= now][-48:]
+            cyc = send_cycles.get(j) if (j % stride == 0) else None
+            ev = W.evaluate(rec, now=now, m15=m15, h1=h1, cycle=cyc)
+            if not ev or ev["event"] == "STALE":
+                continue
+            if ev["event"] == "IN_ZONE":
+                rec = {**rec, "state": "IN_ZONE", "touched_zone": True}
+                outcomes["IN_ZONE(проміжна)"] += 1
+                continue
+            terminals += 1
+            final = ev["event"]
+            hours.append((now - wt["asof"]).total_seconds() / 3600.0)
+            if final == "EXPIRED" and rec.get("touched_zone"):
+                touched_then_expired += 1
+            break
+        if terminals > 1:
+            dup_terminal += 1
+        outcomes[final or "ще_триває_на_кінці_даних"] += 1
+        if final:
+            active[key]["until"] = wt["asof"]
+    hours.sort()
+    return {"watches": total, "outcomes": dict(outcomes), "median_hours_to_outcome": round(hours[len(hours) // 2], 2) if hours else None,
+            "expired_after_touching_zone": touched_then_expired, "duplicate_terminal_events": dup_terminal,
+            "note": "Реальні свічки Binance Vision + реальні висновки Лева (щогодини); логіка стану — production-код. Це діагностика, не результат торгівлі."}
+
+
 def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
                 until: Optional[datetime] = None) -> Dict[str, Any]:
     from office_confluence import reset_live, ttl_sec
@@ -372,6 +425,8 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
     reasons: Counter = Counter()
     errors: Counter = Counter()
     sends: List[Dict[str, Any]] = []
+    waits: List[Dict[str, Any]] = []
+    send_cycles: Dict[int, Dict[str, Any]] = {}
     d_end = h_end = 0
     n_dec = 0
     for i, bar in enumerate(m15_all):
@@ -416,7 +471,14 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
         by_dir[f"{action}:{side}"] += 1
         by_regime_action[regime][action] += 1
         reasons[(action, str(cyc.get("reason") or "")[:70])] += 1
+        _d = cyc.get("draft") or {}
+        if action == "WAIT" and _d.get("zone_lo") is not None and _d.get("zone_hi") is not None and _d.get("invalidation") is not None \
+                and str(cyc.get("direction") or _d.get("direction") or "").upper() in ("LONG", "SHORT"):
+            waits.append({"i": i, "asof": asof, "side": str(cyc.get("direction") or _d.get("direction")).upper(),
+                          "lo": float(_d["zone_lo"]), "hi": float(_d["zone_hi"]), "inv": float(_d["invalidation"]),
+                          "wait_tf": ((_d.get("confluence") or {}).get("wait_tf") or "M15")})
         if action == "SEND" and cyc.get("send"):
+            send_cycles[i] = cyc
             conf = (cyc.get("draft") or {}).get("confluence") or {}
             sends.append({
                 "i": i, "asof": asof, "side": side, "regime": regime,
@@ -447,6 +509,7 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
         "share_tp1_below_rule": round(sum(1 for t in tp_pcts if t < min_tp1) / len(tp_pcts), 3) if tp_pcts else None,
         "unique_setup_keys": len({x["key"] for x in sends}),
     }
+    watch_outcomes = simulate_watch_outcomes(waits, send_cycles, m15_all, h1_all, symbol, close_time, parse_ts, stride)
     model_a = simulate_immediate(sends, bars_ctx)
     model_b = simulate_zone_limit(sends, bars_ctx)
     span_days = (parse_ts(m15_all[-1]["ts"]) - eval_from).total_seconds() / 86400 if m15_all else 0.0
@@ -516,6 +579,7 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
         "send_geometry": send_geometry,
         "model_a_next_open_immediate": model_report(model_a),
         "model_b_zone_limit_no_ltf_confirm": model_report(model_b),
+        "watch_outcomes": watch_outcomes,
         "variants_what_if": variants,
         "send_frequency": freq,
         "regime_validation": {"h1_window": 48, "forward_h1": FWD_H1,
@@ -594,6 +658,7 @@ def summarize(rep: Dict[str, Any]) -> str:
             L.append(f"      rejected_at_fill={m['rejected_at_fill']} fates={m['scenario_fates']}")
             L.append("      by_side=" + json.dumps({k: (v['n'], v['wr_pct'], v['sum_r']) for k, v in m['by_side'].items()}))
             L.append("      by_regime=" + json.dumps({k: (v['n'], v['wr_pct'], v['sum_r']) for k, v in m['by_regime'].items()}))
+        L.append("   watch_outcomes=" + json.dumps(x["watch_outcomes"], ensure_ascii=False))
         for vn, v in x["variants_what_if"].items():
             t = v["trades"]
             L.append(f"   variant {vn:15} scen={v['unique_scenarios']:4} trades={t['n']:3} wr={t['wr_pct']} sumR={t['sum_r']} "
