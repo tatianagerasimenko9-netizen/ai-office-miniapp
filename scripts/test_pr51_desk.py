@@ -132,7 +132,7 @@ def main() -> int:
         timeframe="H1",
         entry=84042.0,
         sl=84210.0,
-        tp1=82500.0,
+        tp1=82300.0,
         atr_h1=900.0,
         score=10,
         min_score=10,

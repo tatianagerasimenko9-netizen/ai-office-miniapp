@@ -100,3 +100,36 @@ def cooldown_active(db_path: str, symbol: str, direction: str, *, now_ts: Option
         if str(sid).startswith("SCN|") and str(d).upper() == str(direction).upper() and t is not None and 0 <= now - t < win:
             return str(sid)
     return None
+
+
+PLAN_VALID_ENV = "OFFICE_PLAN_VALID_SEC"
+
+
+def plan_valid_sec(tf: Any = "H1") -> int:
+    """Скільки після підтвердження «діє» готовий план, якщо входу не було: H4 і D1 — 12 год, H1 — 4 год, M15 і молодші — 1 год.
+    Це стосується лише плану без входу: відкриту власницею угоду (кнопка «Я відкрила угоду…») закінчення часу не зачіпає."""
+    try:
+        v = int(float(os.getenv(PLAN_VALID_ENV, "")))
+        if v > 0:
+            return v
+    except ValueError:
+        pass
+    t = str(tf or "H1").upper()
+    if t in ("H4", "4H", "D1", "1D"):
+        return 12 * 3600
+    if t in ("H1", "1H"):
+        return 4 * 3600
+    return 3600
+
+
+def valid_until_ts(confirmed_ts: float, tf: Any = "H1") -> float:
+    return float(confirmed_ts) + plan_valid_sec(tf)
+
+
+def kyiv_hhmm(ts: float) -> str:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Kyiv")).strftime("%H:%M")
+    except Exception:  # noqa: BLE001
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M") + " UTC"

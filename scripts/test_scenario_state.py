@@ -56,14 +56,14 @@ for st in ("ACTIVE", "CONFIRMED", "WATCHING"):
     assert v["state"] == "NO_DATA" and "plan" not in v and v["price"] is None, (st, v)
 
 # 5. CONFIRMED + свіжа ціна + вхід + стоп + ціль 1 + скасування + перевірки → «План готовий», цілі 2/3 лише за рівнями
-row5 = {**ROW, "status": "CONFIRMED", "analysis_note": ROW["analysis_note"] + " confirm_sent=1 confirmed_px=0.3035"}
-lv = {"asia_high": 0.3200, "asia_low": 0.29, "pdh": 0.3300, "pdl": 0.28, "w_high": 0.35, "w_low": 0.25}
-tg = T.structural_targets(direction="LONG", entry=0.3035, tp1=0.31393, lv=lv)
-assert tg["tp2"]["price"] == 0.32 and tg["tp3"]["price"] == 0.33 and tg["tp2"]["why"] == "межа азійської сесії", tg
+row5 = {**ROW, "tp1": 0.3180, "status": "CONFIRMED", "analysis_note": ROW["analysis_note"] + " confirm_sent=1 confirmed_px=0.3035"}
+lv = {"asia_high": 0.3260, "asia_low": 0.29, "pdh": 0.3300, "pdl": 0.28, "w_high": 0.35, "w_low": 0.25, "atr_d1": 0.02}
+tg = T.structural_targets(direction="LONG", entry=0.3035, tp1=0.3180, lv=lv)
+assert tg["tp2"]["price"] == 0.326 and tg["tp3"]["price"] == 0.33 and tg["tp2"]["why"] == "межа азійської сесії", tg
 v = S.build(row5, thesis=THESIS, price={**FRESH, "price": 0.3036}, targets=tg, plan_check=check_plan)
 assert v["state"] == "READY" and v["icon"] == "🟢", v
 p = v["plan"]
-assert p["entry"] == "0,3035 $" and p["tp1"].startswith("0,3139") and "азійської" in p["tp2"] and "попереднього дня" in p["tp3"] and "після комісій" in p["potential"], p
+assert p["entry"] == "0,3035 $" and p["tp1"].startswith("0,318") and "азійської" in p["tp2"] and "попереднього дня" in p["tp3"] and "після комісій" in p["potential"], p
 # без цілей за рівнями — «немає обґрунтованої», рівні не вигадуємо
 v = S.build(row5, thesis=THESIS, price={**FRESH, "price": 0.3036}, targets={"tp2": None, "tp3": None}, plan_check=check_plan)
 assert v["plan"]["tp2"] == "немає обґрунтованої" and v["plan"]["tp3"] == "немає обґрунтованої"
@@ -71,7 +71,7 @@ assert v["plan"]["tp2"] == "немає обґрунтованої" and v["plan"]
 # 6. План підтверджено, але не проходить перевірку (ціль надто близько) → «не готовий», не зелений
 v = S.build({**row5, "tp1": 0.3070}, thesis=THESIS, price=FRESH, plan_check=check_plan)
 assert v["state"] == "NOT_READY" and v["icon"] != "🟢" and any("замалий" in m for m in v["missing"]), v
-assert "надто близько" in check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.0, "tp1": 103.0}, 100, 101)   # правило мінімальної цілі (не змінено)
+assert "надто близько" in check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.5, "tp1": 103.0}, 100, 101)   # правило мінімальної цілі (не змінено)
 assert check_plan("SOLUSDT", "LONG", {"entry": 100.5, "sl": 99.0, "tp1": 104.0}, 100, 101) is None
 # ...і без збереженої ціни входу
 v = S.build({**row5, "analysis_note": ROW["analysis_note"]}, thesis=THESIS, price=FRESH, plan_check=check_plan)
@@ -100,9 +100,28 @@ h = S.history([{"ts": "1", "type": "THESIS_VERSION"}, {"ts": "2", "type": "THESI
 assert [x["text"] for x in h] == ["Лев оновив план", "Ціна досягла зони", "План скасовано"], h
 
 # 10. Цілі: SHORT дзеркально; без рівня — немає; занадто близько до попередньої — немає (санітарний мінімум)
-assert T.structural_targets(direction="SHORT", entry=100, tp1=97, lv={"asia_low": 95, "pdl": 90})["tp3"]["price"] == 90
-assert T.structural_targets(direction="LONG", entry=100, tp1=103, lv={"asia_high": 103.1})["tp2"] is None
+assert T.structural_targets(direction="SHORT", entry=100, tp1=97, lv={"asia_low": 95, "pdl": 90, "atr_d1": 5})["tp3"]["price"] == 90
+assert T.structural_targets(direction="LONG", entry=100, tp1=103, lv={"asia_high": 103.1, "atr_d1": 5})["tp2"] is None
 assert T.structural_targets(direction="LONG", entry=100, tp1=103, lv={})["tp2"] is None
+
+# 11. TP2/TP3 лише в межах досяжності: не далі за 3×ATR(D1) від входу; рівень тижня +61% — не ціль; без ATR(D1) далеких рівнів немає
+far = T.structural_targets(direction="LONG", entry=0.3020, tp1=0.3118, lv={"pdh": 0.3300, "w_high": 0.4862, "atr_d1": 0.005})
+assert far["tp2"] is None and far["tp3"] is None, far  # pdh 0.33 — це 5,6×ATR(D1): далі за 3×ATR
+ok = T.structural_targets(direction="LONG", entry=0.3020, tp1=0.3118, lv={"pdh": 0.3300, "w_high": 0.4862, "atr_d1": 0.04})
+assert ok["tp2"]["price"] == 0.33 and ok["tp3"] is None, ok  # +61% ніколи
+assert T.structural_targets(direction="LONG", entry=0.3020, tp1=0.3118, lv={"pdh": 0.3300, "w_high": 0.4862})["tp2"] is None
+
+# 12. LSK: стоп −2,30%, TP1 +3,23% — RR 1,40 (після комісій ≈1,32) НЕ проходить, хоча геометрія за краями зони пропустила б
+from office_lev_watch import check_plan as _cp  # noqa: E402
+_e = 0.3106
+_plan = {"entry": _e, "sl": _e * (1 - 0.0230), "tp1": _e * (1 + 0.0323)}
+_bad = _cp("LSKUSDT", "LONG", _plan, _e * 0.99, _e * 1.002)
+assert _bad and "після комісій" in _bad and "1,3" in _bad, _bad
+_good = {"entry": _e, "sl": _e * (1 - 0.0200), "tp1": _e * (1 + 0.0400)}
+assert _cp("LSKUSDT", "LONG", _good, _e * 0.99, _e * 1.002) is None
+from office_alert_gate import net_rr  # noqa: E402
+_n = net_rr(_e, _plan["sl"], _plan["tp1"])
+assert abs(_n["rr_gross"] - 1.404) < 0.01 and _n["rr_net"] < 1.5
 print("OK scenario state: one truth for Telegram+Mini App, strict READY, no contradictions, structural TP2/TP3, plain language")
 
 # рядок «lev-watch-*» з новою приміткою: рівень скасування й умова підтвердження записані → сторінка не каже «не визначено»

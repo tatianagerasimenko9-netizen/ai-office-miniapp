@@ -239,6 +239,15 @@ def check_plan(symbol: str, direction: str, plan: Dict[str, Any], zone_lo: Any, 
         if "RR" in reason and g.get("rr") is not None:
             return f"Потенціал до цілі замалий порівняно з ризиком (співвідношення {float(g['rr']):.2f}, потрібно не менше 1,5).".replace(".", ",", 0)
         return "План не пройшов перевірку рівнів: стоп або ціль стоять не на своєму боці від входу."
+    # RR від фактичного входу з комісіями (геометрія вище рахує за краями зони — так LSK з RR 1,40 пройшов би)
+    from office_alert_gate import MIN_RR, net_rr
+
+    nr = net_rr(plan["entry"], plan["sl"], plan["tp1"])
+    if nr is None:
+        return "Не вдалося порахувати співвідношення ризику й потенціалу — плану немає."
+    if nr["rr_net"] + 1e-12 < float(MIN_RR):
+        return (f"Потенціал замалий порівняно з ризиком: до цілі {nr['reward_pct']:.2f}%, до стопа {nr['risk_pct']:.2f}%, "
+                f"після комісій співвідношення {nr['rr_net']:.2f}, потрібно не менше {MIN_RR:g}.").replace(".", ",")
     need = min_tp1_pct(symbol)
     mv = move_pct_to_tp(entry=_f(plan["entry"]), tp=_f(plan["tp1"]))
     if mv is None or mv + 1e-12 < need:

@@ -302,9 +302,12 @@ def desk_entry_gate(
     s2 = float(wide["sl"])
     from office_radar import MIN_RR
 
-    rr = abs(t - e) / abs(e - s2) if abs(e - s2) > 1e-12 else 0.0
+    from office_alert_gate import net_rr
+
+    nr = net_rr(e, s2, t)
+    rr = nr["rr_net"] if nr else 0.0
     if rr + 1e-12 < float(MIN_RR):
-        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR}"}
+        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR} (після комісій)"}
     need = min_tp1_pct(symbol)
     move = move_pct_to_tp(entry=e, tp=t)
     if move is None or move + 1e-12 < need:

@@ -454,7 +454,7 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             thesis = None
     human = None
     try:
-        human = _human_view(row, thesis, events)
+        human = _human_view({**row, "_has_position": True} if pos else row, thesis, events)
         if human and not _fixture_on():
             try:  # довідковий контекст: не впливає на стан і рішення
                 from office_market_context import context_for
@@ -489,11 +489,17 @@ def _watch_as_row(sid: str):
     state = str(w.get("state") or "WAIT")
     status = {"CONFIRMED": "CONFIRMED", "CANCELLED": "CANCELLED", "EXPIRED": "EXPIRED", "REJECTED": "CANCELLED", "HANDOFF": "ACTIVE"}.get(state, "ACTIVE")
     note = f"cancel={w.get('invalidation')}"
+    conf_ts = None
+    if state == "CONFIRMED":
+        try:
+            conf_ts = W._noted(_db(), sid, "CONFIRMED")
+        except Exception:  # noqa: BLE001
+            conf_ts = None
     if state == "CONFIRMED" and plan.get("entry") is not None:
         note += f" confirm_sent=1 confirmed_px={plan['entry']}"
     row = {"signal_id": sid, "symbol": w["symbol"], "direction": w["direction"], "entry_low": w["zone_lo"], "entry_high": w["zone_hi"],
            "sl": plan.get("sl"), "tp1": plan.get("tp1"), "tp2": plan.get("tp2"), "rr": None, "status": status,
-           "ts_created": w.get("created_at"), "ts_updated": w.get("created_at"), "analysis_note": note}
+           "ts_created": w.get("created_at"), "ts_updated": conf_ts or w.get("created_at"), "analysis_note": note}
     thesis = {"invalidation": f"закриття за {w.get('invalidation')}", "confirmation": f"Чекаю на {w.get('wait_tf') or 'M15'}: розворот у зоні"}
     return row, thesis
 
@@ -511,7 +517,7 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
     lo, hi, tp1 = _f(row.get("entry_low")), _f(row.get("entry_high")), _f(row.get("tp1"))
     if not _fixture_on() and tp1 is not None and lo is not None and hi is not None:
         try:
-            lv = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 5), weekly=fetch_candles(sym, "1w", 4))
+            lv = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 20), weekly=fetch_candles(sym, "1w", 4))
             targets = structural_targets(direction=str(row.get("direction") or ""), entry=(lo + hi) / 2.0, tp1=tp1, lv=lv)
         except Exception:  # noqa: BLE001
             targets = None
@@ -531,7 +537,7 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
     if v.get("state") == "READY":
         try:  # цілі 2/3 від фактичного входу, а не від середини зони
             entry = float(v_entry(row))
-            lv2 = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 5), weekly=fetch_candles(sym, "1w", 4))
+            lv2 = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 20), weekly=fetch_candles(sym, "1w", 4))
             tg = structural_targets(direction=str(row.get("direction") or ""), entry=entry, tp1=tp1, lv=lv2)
             v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=_check)
         except Exception:  # noqa: BLE001

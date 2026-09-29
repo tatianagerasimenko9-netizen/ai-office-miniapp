@@ -175,20 +175,30 @@ def _plan_line(symbol: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[st
 
 
 def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,
-                 tp3: Optional[Dict[str, Any]] = None, cancel: Any = None, why: str = "", bad: Optional[str] = None) -> str:
+                 tp3: Optional[Dict[str, Any]] = None, cancel: Any = None, why: str = "", bad: Optional[str] = None,
+                 valid_until: str = "") -> str:
     """Підтвердження умови: або повний план (🟢), або чесне «входу немає» (🔴), якщо план не проходить перевірки."""
     w = _side_words(direction)
     if bad:
         return "\n".join([f"🔴 {ticker(symbol)} · УМОВИ Є, АЛЕ ВХОДУ НЕМАЄ", f"ЗАРАЗ: {w['dont']}. {bad}",
                           "Це аналіз, не ордер: рішення й ордер на біржі — лише твої."])
-    L = [f"🟢 {ticker(symbol)} · ПЛАН ГОТОВИЙ", "ЗАРАЗ: умови виконано. Рішення про вхід — твоє, ордер Офіс не ставить."]
+    L = [f"🟢 {ticker(symbol)} · ПЛАН ГОТОВИЙ", "ЗАРАЗ: умови виконано."]
     if why:
         L.append(f"ПІДСТАВА: {why}.")
     L.append(_plan_line(symbol, entry, sl, tp1, tp2, tp3))
     if cancel is not None:
         L.append(f"КОЛИ СКАСОВУЄМО: якщо годинна свічка закриється {w['cross']} {_px(cancel, symbol)}.")
-    L.append("Це аналіз, не ордер: рішення й ордер на біржі — лише твої.")
+    if valid_until:
+        L.append(f"ДІЄ ДО: {valid_until} (Київ). Якщо входу не буде — план знімається.")
+    L.append("Рішення й ордер — лише твої, Офіс ордерів не ставить.")
     return "\n".join(L)
+
+
+def expired_plan_card(*, symbol: str, direction: str) -> str:
+    w = _side_words(direction)
+    return "\n".join([f"⚪ {ticker(symbol)} · ЧАС ДІЇ ПЛАНУ ЗАКІНЧИВСЯ", f"Входу не було. План {w['gen']} знято.",
+                      "ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.",
+                      "Рішення й ордер — лише твої, Офіс ордерів не ставить."])
 
 
 def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) -> str:
@@ -217,6 +227,8 @@ def render_human(h: Dict[str, Any]) -> str:
         L.append(f"ВХІД {p['entry']} · СТОП {p['stop']} · TP1 {p['tp1']} · TP2 {p['tp2']} · TP3 {p['tp3']}")
         if p.get("potential"):
             L.append(p["potential"])
+        if p.get("valid_until"):
+            L.append(f"ДІЄ ДО: {p['valid_until']} (Київ). Якщо входу не буде — план знімається.")
     elif h.get("prelim"):
         L.append("ПОПЕРЕДНЬО, НЕ ДЛЯ ВХОДУ: " + "; ".join(h["prelim"]))
     if h.get("next"):
