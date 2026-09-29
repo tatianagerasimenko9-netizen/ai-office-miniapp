@@ -119,7 +119,7 @@ def _tx(db_path: str, stmts: List[Tuple[str, tuple]]) -> None:
     """Усі оператори — в одній транзакції (commit при виході, rollback при помилці)."""
     with _connect(db_path) as conn:
         for sql, params in stmts:
-            conn.execute(sql.replace("?", "%s") if _is_pg(db_path) else sql, params)
+            conn.execute(sql.replace("%", "%%").replace("?", "%s") if _is_pg(db_path) else sql, params)
 
 
 # ---------------------------------------------------------------- helpers

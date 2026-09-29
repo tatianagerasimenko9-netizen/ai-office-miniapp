@@ -336,7 +336,8 @@ def _is_pg(db_path: str) -> bool:
 def _adapt_sql(sql: str, db_path: str) -> str:
     if not _is_pg(db_path):
         return sql
-    return sql.replace("?", "%s")
+    # літерал «%» у SQL (напр. LIKE '%x%') у psycopg має бути «%%», інакше ProgrammingError
+    return sql.replace("%", "%%").replace("?", "%s")
 
 
 def _sqlite_path_from_url(db_path: str) -> str:

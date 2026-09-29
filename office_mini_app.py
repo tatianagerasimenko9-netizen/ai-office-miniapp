@@ -39,7 +39,7 @@ def q(sql: str, params: tuple = ()) -> list[tuple]:
     if _is_pg():
         if psycopg is None:
             raise RuntimeError("psycopg is required when DATABASE_URL is set")
-        qry = sql.replace("?", "%s")
+        qry = sql.replace("%", "%%").replace("?", "%s")
         with psycopg.connect(DATABASE_URL) as conn:  # type: ignore[arg-type]
             with conn.cursor() as cur:
                 cur.execute(qry, params)
