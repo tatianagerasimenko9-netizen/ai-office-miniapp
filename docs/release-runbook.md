@@ -1,0 +1,63 @@
+# Реліз АІ офісу: порядок дій, прапорці, відкат, моніторинг
+
+Це план, а не дозвіл. Merge у `main`, міграція й deploy виконуються лише після (1) незалежного review,
+(2) зелених перевірок на актуальному HEAD, (3) окремого підтвердження власниці.
+Render у сесії розробки був недоступний: усі пункти «Render» нижче потребують перевірки з боку Render.
+
+## 0. Що змінюється в базі
+| Зміна | Тип | Коли створюється | Відкат |
+|---|---|---|---|
+| `office_telegram_delivery` (PR #68) | нова таблиця | лише `migrate_delivery_ledger()` вручну | не видаляти під час інциденту; вимкнути `OFFICE_TG_PERSISTENT_DEDUP` |
+| `office_telegram_scenario_thread` (PR #69) | нова таблиця (та сама міграція) | там само | те саме |
+| нові типи рядків `office_events`: `THESIS_VERSION`, `RISK_SHADOW_REVIEW`, `RISK_VETO`, `SCENARIO_EXPIRED` | лише дані, схема не змінюється | воркером | нічого відкочувати; читаються лише Mini App |
+Наявні таблиці не змінюються (`ALTER` немає). Міграції ідемпотентні (перевірено на SQLite і PostgreSQL 16.13).
+
+## 1. Прапорці (значення за замовчуванням у коді)
+| Змінна | За замовчуванням | Що робить | Ризик |
+|---|---|---|---|
+| `OFFICE_TG_PERSISTENT_DEDUP` | вимкнено | журнал доставки + ланцюжок відповідей | потребує міграції; без таблиці відправка блокується (fail-closed) |
+| `OFFICE_RISK_OFFICER_ENFORCE` | вимкнено | Risk Officer блокує SEND | увімкнений заблокує **кожен** SEND, поки немає даних про виконання |
+| `OFFICE_WATCHING_TTL_EXPIRE` | вимкнено | worker закриває WATCHING старші за 4 год | змінює статуси в БД |
+| `OFFICE_FEED_GATE` | **увімкнено** (`0` — відкат) | SEND→WAIT при застарілих/відсутніх LTF-свічках | **змінює поведінку**: менше нових сигналів при збої даних |
+| `OFFICE_LEGACY_ACTIVE_REQUIRES_LEV` | **увімкнено** (`0` — відкат) | LLM-сканер і ручний аналіз створюють ACTIVE лише за SEND Лева, інакше WATCHING | **змінює поведінку** старих шляхів |
+| `OFFICE_MINI_PUBLIC_URL` | `https://ai-office-miniapp.onrender.com` | база для кнопки «📊 Сценарій» | — |
+Два прапорці «увімкнено» — свідоме посилення захисту (описано в PR #69); власниця вирішує, чи лишати їх такими у першому релізі.
+
+## 2. Безпечний порядок (автодеплой із `main` активний!)
+1. **Заморозити автодеплой** для web і worker у Render (Settings → Auto-Deploy → Off) *до* merge. Без цього merge одразу розгорне код.
+2. **Backup Postgres** (Render → Database → Backups → Create) і перевірити відновлення на окремій тимчасовій БД.
+3. Merge PR #69 → гілка PR #68 → повторити CI → merge PR #68 у `main` (лише після review і підтвердження).
+4. **Deploy web першим** (лише читає БД; нові поля JSON зворотно-сумісні зі старим worker). Перевірити `/v2`, `/api/v2/home`, `/api/v2/risk`.
+5. **Міграція**: разова команда з Render Shell web-сервісу, з тим самим `DATABASE_URL`:
+   `python3 -c "import os; from office_telegram_delivery_ledger import migrate_delivery_ledger as m; m(os.environ['DATABASE_URL'])"`.
+   Перевірити: `SELECT to_regclass('office_telegram_delivery'), to_regclass('office_telegram_scenario_thread');` — обидва не NULL.
+6. **Deploy worker** з `OFFICE_TG_PERSISTENT_DEDUP` вимкненим. Спостерігати логи 30 хв: помилки `[risk]`, `[thesis]`, `[ttl]`, `[relay]`.
+7. Лише після відсутності помилок і окремого дозволу — `OFFICE_TG_PERSISTENT_DEDUP=1` (окремий deploy/перезапуск).
+8. Увімкнути автодеплой назад лише після стабільної доби.
+
+## 3. Відкат
+- Код: у Render → Deploys → «Rollback» на попередній деплой (web і worker окремо). Нові таблиці не заважають старому коду.
+- Поведінка: `OFFICE_FEED_GATE=0`, `OFFICE_LEGACY_ACTIVE_REQUIRES_LEV=0`, прибрати `OFFICE_TG_PERSISTENT_DEDUP` — без деплою коду, лише env + перезапуск.
+- Дані: відновлення з backup із кроку 2 — **лише** якщо пошкоджено наявні таблиці (нові таблиці не чіпають старі).
+- Telegram: після відкату журнал доставки лишається; записи `PENDING`/`UNCERTAIN` звіряти вручну (див. `pr68-telegram-ledger-rollout.md`), автоматично не повторювати.
+
+## 4. Health checks (лише читання)
+- Web: `GET /api/v2/home` → `ok:true`; `GET /api/v2/risk` → `order_authorized:false`.
+- Worker: свіжість `market_state.ts_updated` і `office_events` (нові `THESIS_VERSION`/`RISK_SHADOW_REVIEW` кожні кілька хвилин у Kill Zone).
+- БД: один fingerprint `office_db_identity` для web і worker.
+- Дублікати: `SELECT dedup_key, count(*) FROM office_telegram_delivery GROUP BY 1 HAVING count(*)>1` — має бути порожньо (PK).
+- Застряглі: `SELECT state, count(*) FROM office_telegram_delivery WHERE state IN ('PENDING','UNCERTAIN') GROUP BY 1` — будь-який `UNCERTAIN` = ручна звірка.
+
+## 5. Що робити, якщо…
+| Ситуація | Дія |
+|---|---|
+| Worker зупинився | Render → Logs (останні 200 рядків); перезапуск; після старту перевірити, що немає повторних повідомлень (журнал доставки) і `hydrate_live_from_db` відновив сценарії |
+| Зникли свічки / «дані застарілі» | Mini App покаже STALE, Лев не видає нових SEND (feed gate). Перевірити з Render `curl fapi.binance.com/fapi/v1/ping` (451/403 = блок регіону), потім мережу/ліміти |
+| Telegram не підтвердив доставку | Не повторювати. Знайти рядок `UNCERTAIN`/`PENDING` за `dedup_key`, звірити з чатом, лише потім адміністративно закрити |
+| Нова версія вебки не відкривається | Rollback web-деплою; перевірити, що `office_web/mini_v2.html` присутній у образі; `/api/v2/home` окремо |
+| Shadow-журнал росте надто швидко | Дедуп вже діє (той самий план не пишеться повторно); перевірити розмір `office_events` |
+
+## 6. Моніторинг після запуску (перші 7 днів)
+Щодня: кількість сценаріїв за статусами; частка `RISK_SHADOW_REVIEW.would_veto` і топ причин (вкладка «Журнал → Аудит рішень»);
+`UNCERTAIN`/`PENDING`; помилки в логах; витрати Render. Сповіщення про критичні збої — лише у внутрішній журнал/Mini App,
+у робочий Telegram нічого не надсилати без окремого дозволу.
