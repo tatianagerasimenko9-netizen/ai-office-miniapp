@@ -190,7 +190,10 @@ def check_plan(symbol: str, direction: str, plan: Dict[str, Any], zone_lo: Any, 
         return "План неповний: немає входу, стопа або цілі."
     g = validate_trade_geometry(direction=direction, sl=plan["sl"], tp1=plan["tp1"], entry=plan["entry"], entry_low=zone_lo, entry_high=zone_hi)
     if not g.get("ok"):
-        return "План не пройшов перевірку рівнів (стоп і ціль розташовані неправильно)."
+        reason = str(g.get("reason") or "")
+        if "RR" in reason and g.get("rr") is not None:
+            return f"Потенціал до цілі замалий порівняно з ризиком (співвідношення {float(g['rr']):.2f}, потрібно не менше 1,5).".replace(".", ",", 0)
+        return "План не пройшов перевірку рівнів: стоп або ціль стоять не на своєму боці від входу."
     need = min_tp1_pct(symbol)
     mv = move_pct_to_tp(entry=_f(plan["entry"]), tp=_f(plan["tp1"]))
     if mv is None or mv + 1e-12 < need:

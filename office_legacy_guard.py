@@ -47,7 +47,7 @@ def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None, *, record
     ctx = {"data_status": "DATA_UNAVAILABLE"}
     try:
         bars = {}
-        for tf, iv, n in (("H1", "1h", 48), ("H4", "4h", 48), ("M15", "15m", 96), ("D1", "1d", 30)):
+        for tf, iv, n in (("H1", "1h", 48), ("H4", "4h", 48), ("M15", "15m", 96), ("D1", "1d", 30), ("W", "1w", 12)):
             v = fetch_candles(symbol, iv, n)
             bars[tf] = v if isinstance(v, list) and v else None
         px = price
@@ -56,7 +56,7 @@ def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None, *, record
         cyc = lev_cycle(
             symbol=symbol, price=px, timeframe="H1",
             candles_m15=bars["M15"], candles_h1=bars["H1"], candles_h4=bars["H4"],
-            candles_d1=bars["D1"], candles_ltf=bars["M15"], candles_m5=bars["M15"],
+            candles_d1=bars["D1"], candles_w=bars.get("W"), candles_ltf=bars["M15"], candles_m5=bars["M15"],
             market_context=ctx,
         )
     except Exception as exc:

@@ -38,6 +38,7 @@ def _px(v: Any, symbol: str) -> str:
         out = format_px(float(v), symbol)
     except Exception:  # noqa: BLE001
         return "—"
+    out = out.replace(".", ",")
     return f"{out} $" if str(symbol).upper().endswith("USDT") else out
 
 
@@ -109,45 +110,94 @@ def render(v: Dict[str, Any]) -> str:
     w = _side_words(v.get("direction"))
     L: List[str] = [f"{icon} {ticker(sym)} · {title}"]
     if st == "STALE":
-        L += ["ЩО ЗАРАЗ: нічого не робимо. Свіжих даних немає, висновку не роблю.",
+        L += ["ЗАРАЗ: нічого не робимо. Свіжих даних немає, висновку не роблю.",
               "Не покладайся на це повідомлення: перевір ціну на Binance. Коли дані повернуться, Лев напише сам." if v.get("tracking")
               else "Не покладайся на це повідомлення: перевір ціну на Binance і запитай пізніше."]
         return "\n".join(L)
     if st == "WAIT":
-        L.append(f"ЩО ЗАРАЗ: {w['dont']}. {_price_vs_zone(v)}".strip())
-        L.append("ЩО ЧЕКАЄМО: " + _wait_line(v))
-        L.append("КОЛИ ПЛАН СКАСУЄТЬСЯ: " + _cancel_line(v))
-        L.append("КОЛИ ПОВІДОМИШ: " + _next_line(v) + _until(v))
+        L.append(f"ЗАРАЗ: {w['dont']}. {_price_vs_zone(v)}".strip())
+        L.append("ЧОГО ЧЕКАЄМО: " + _wait_line(v))
+        L.append("КОЛИ СКАСОВУЄМО: " + _cancel_line(v))
+        L.append("ДАЛІ: " + _next_line(v) + (_until(v) if v.get("tracking") else ""))
     elif st == "IN_ZONE":
-        L.append(f"ЩО ЗАРАЗ: {w['dont']} — підтвердження ще немає.")
+        L.append(f"ЗАРАЗ: {w['dont']} — підтвердження ще немає.")
         tf = TF_UA.get(str(v.get("wait_tf") or "M15").upper(), "15-хвилинному")
-        L.append(f"ЩО ЧЕКАЄМО: підтвердження розвороту {w['up']} на {tf} графіку.")
-        L.append("КОЛИ ПЛАН СКАСУЄТЬСЯ: " + _cancel_line(v))
-        L.append("КОЛИ ПОВІДОМИШ: Лев напише, коли підтвердження з'явиться або план скасується." + _until(v))
+        L.append(f"ЧОГО ЧЕКАЄМО: підтвердження розвороту {w['up']} на {tf} графіку.")
+        L.append("КОЛИ СКАСОВУЄМО: " + _cancel_line(v))
+        L.append(("ДАЛІ: Лев напише, коли підтвердження з'явиться або план скасується." + _until(v)) if v.get("tracking") else "ДАЛІ: заглядай сюди або запитай /lev " + ticker(sym))
     elif st == "CONFIRMED":
         p = v.get("plan") or {}
-        L.append("ЩО ЗАРАЗ: умови виконано. Рішення про вхід — за тобою; ордер Офіс не ставить.")
+        L.append("ЗАРАЗ: умови виконано. Рішення про вхід — за тобою; ордер Офіс не ставить.")
         parts = [f"вхід {_px(p.get('entry'), sym)}", f"стоп {_px(p.get('sl'), sym)}", f"ціль 1 {_px(p.get('tp1'), sym)}"]
         if p.get("tp2") is not None:
             parts.append(f"ціль 2 {_px(p.get('tp2'), sym)}")
         L.append("ПЛАН УГОДИ: " + " · ".join(parts))
-        L.append("КОЛИ ПЛАН СКАСУЄТЬСЯ: " + _cancel_line(v))
-        L.append("КОЛИ ПОВІДОМИШ: Лев напише, якщо план втратить чинність.")
+        L.append("КОЛИ СКАСОВУЄМО: " + _cancel_line(v))
+        L.append("ДАЛІ: Лев напише, якщо план втратить чинність." if v.get("tracking") else "ДАЛІ: слідкуй за рівнем скасування — автоматичного повідомлення поки немає.")
     elif st == "CANCELLED":
         L.append(f"Ціна закрилася {w['cross']} рівня скасування ({_px(v.get('invalidation'), sym)}). Попередній план {w['gen']} більше не діє.")
-        L.append("ЩО ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.")
-        L.append("КОЛИ ПОВІДОМИШ: коли з'явиться новий план.")
+        L.append("ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.")
+        L.append("ДАЛІ: новий план з'явиться, коли Лев знайде нову можливість.")
     elif st == "EXPIRED":
         touched = " Ціна заходила в зону, але підтвердження не з'явилося." if v.get("touched_zone") else " Підтвердження не з'явилося."
         L.append(f"Час очікування минув.{touched} План {w['gen']} більше не діє.")
-        L.append("ЩО ЗАРАЗ: нічого не робимо.")
-        L.append("КОЛИ ПОВІДОМИШ: коли з'явиться новий план.")
+        L.append("ЗАРАЗ: нічого не робимо.")
+        L.append("ДАЛІ: новий план з'явиться, коли Лев знайде нову можливість.")
     elif st == "REJECTED":
-        L.append("ЩО ЗАРАЗ: не входити. " + str(v.get("reason") or "План не проходить наші перевірки."))
-        L.append("КОЛИ ПОВІДОМИШ: коли з'явиться новий план.")
+        L.append("ЗАРАЗ: не входити. " + str(v.get("reason") or "План не проходить наші перевірки."))
+        L.append("ДАЛІ: новий план з'явиться, коли Лев знайде нову можливість.")
     else:  # NO_TRADE
-        L.append("ЩО ЗАРАЗ: нічого не робимо. " + str(v.get("reason") or "Підтвердженого напрямку зараз немає."))
+        L.append("ЗАРАЗ: нічого не робимо. " + str(v.get("reason") or "Підтвердженого напрямку зараз немає."))
         L.append("ПЛАН УГОДИ: поки немає.")
-        L.append("КОЛИ ПОВІДОМИШ: " + _next_line(v))
+        L.append("ДАЛІ: " + _next_line(v))
     L.append("Це аналіз, не ордер: рішення й ордер на біржі — лише твої.")
     return "\n".join(L)
+
+
+# ------------------------------------------------------------------ картки підтвердження/скасування (worker)
+PLAIN_CONFIRM = {
+    "double_bottom": "подвійне дно", "double_top": "подвійна вершина", "triple_bottom": "потрійне дно", "triple_top": "потрійна вершина",
+    "sfp": "хибний пробій рівня з поверненням", "engulf": "поглинання попередньої свічки", "bos": "пробій структури",
+    "choch": "зміна напрямку руху", "spring": "хибний прокол вниз і повернення", "upthrust": "хибний прокол вгору і повернення",
+}
+
+
+def plain_confirms(names: List[str]) -> str:
+    out = [PLAIN_CONFIRM.get(str(n).lower(), "") for n in names or []]
+    return ", ".join(x for x in out if x)
+
+
+def _plan_line(symbol: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]], tp3: Optional[Dict[str, Any]]) -> str:
+    def t(x: Optional[Dict[str, Any]]) -> str:
+        return f"{_px(x['price'], symbol)} ({x['why']})" if x else "немає обґрунтованої"
+
+    return f"ВХІД {_px(entry, symbol)} · СТОП {_px(sl, symbol)} · TP1 {_px(tp1, symbol)} · TP2 {t(tp2)} · TP3 {t(tp3)}"
+
+
+def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,
+                 tp3: Optional[Dict[str, Any]] = None, cancel: Any = None, why: str = "", bad: Optional[str] = None) -> str:
+    """Підтвердження умови: або повний план (🟢), або чесне «входу немає» (🔴), якщо план не проходить перевірки."""
+    w = _side_words(direction)
+    if bad:
+        return "\n".join([f"🔴 {ticker(symbol)} · УМОВИ Є, АЛЕ ВХОДУ НЕМАЄ", f"ЗАРАЗ: {w['dont']}. {bad}",
+                          "Це аналіз, не ордер: рішення й ордер на біржі — лише твої."])
+    L = [f"🟢 {ticker(symbol)} · ПЛАН ГОТОВИЙ", "ЗАРАЗ: умови виконано. Рішення про вхід — твоє, ордер Офіс не ставить."]
+    if why:
+        L.append(f"ПІДСТАВА: {why}.")
+    L.append(_plan_line(symbol, entry, sl, tp1, tp2, tp3))
+    if cancel is not None:
+        L.append(f"КОЛИ СКАСОВУЄМО: якщо годинна свічка закриється {w['cross']} {_px(cancel, symbol)}.")
+    L.append("Це аналіз, не ордер: рішення й ордер на біржі — лише твої.")
+    return "\n".join(L)
+
+
+def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) -> str:
+    w = _side_words(direction)
+    low = str(reason or "").lower()
+    if "таймаут" in low:
+        head, body = "⚪ {} · ЧАС ОЧІКУВАННЯ ЗАКІНЧИВСЯ", f"Підтвердження не з'явилося вчасно. План {w['gen']} більше не діє."
+    else:
+        lv = f" ({_px(level, symbol)})" if level is not None else ""
+        head, body = "🔴 {} · ПЛАН СКАСОВАНО", f"Ціна пішла {w['cross']} рівня скасування{lv} ще до входу. План {w['gen']} більше не діє."
+    return "\n".join([head.format(ticker(symbol)), body, "ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.",
+                      "Це аналіз, не ордер: рішення й ордер на біржі — лише твої."])

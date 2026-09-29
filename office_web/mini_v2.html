@@ -71,6 +71,9 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-
 .sk{height:14px;background:linear-gradient(90deg,#151D29,#1D2938,#151D29);background-size:200% 100%;animation:s 1.2s infinite;border-radius:6px;margin:10px 0}
 @keyframes s{to{background-position:-200% 0}}
 .err{border-color:var(--short)}
+.st{margin:8px 0;padding:10px 12px;border-radius:12px;font-weight:700;font-size:15px}
+.st.w{background:rgba(224,169,74,.16);color:var(--watch)}.st.g{background:rgba(76,195,138,.16);color:var(--long)}.st.r{background:rgba(240,120,110,.16);color:var(--short)}.st.n{background:var(--raise);color:var(--mut)}
+details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0}
 .frm label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
 .frm input,.frm select,.frm textarea{width:100%;box-sizing:border-box;background:var(--raise);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;min-height:44px}
 .frm .row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -146,14 +149,12 @@ function levels(s){
     <div><span>RR</span><b>${esc(d.rr||NA)}</b></div></div>`;
 }
 function scCard(s){
-  const st=s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони';
+  const h=s.human||{}, d=s.display||{};
   return `<div class="card tap" role="button" tabindex="0" aria-label="Відкрити сценарій ${esc(s.symbol||'')} ${esc(s.direction||'')}" data-id="${esc(sid(s.scenario_id))}">
-    <div class="top"><span class="sym">${esc(s.symbol||'')}</span>
-      <span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}
-      </div>
-    <div class="mut" style="margin-top:4px">${esc(s.timeframe||'')} · оновлено ${ago(s.as_of)}</div>
-    <div class="mut" style="margin-top:6px">${esc((s.status||{}).text||'')}. ${esc(st)}</div>
-    ${levels(s)}</div>`;
+    <div class="top"><span class="sym">${esc(String(s.symbol||'').replace(/USDT$/,''))}</span>
+      <span class="side ${side(s.direction)}">${String(s.direction||'').toUpperCase()==='SHORT'?'Продаж':'Купівля'}</span></div>
+    <div class="st ${esc(h.tone||'n')}">${esc(h.icon||'')} ${esc(h.text||'')}</div>
+    <div class="mut">оновлено ${ago(s.as_of)}${d.zone?` · зона ${esc(d.zone)}`:''}</div></div>`;
 }
 function bindCards(){app.querySelectorAll('[data-id]').forEach(el=>{
   el.onclick=()=>openSc(el.dataset.id);
@@ -615,7 +616,25 @@ async function openSc(id){
   const story=s.story&&s.story.ok?s.story.text:'';
   const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
   const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
+  const hm=d.human;
+  const humanHtml=hm?`<div class="card">
+      <div class="top"><span class="sym">${esc(hm.ticker)}</span><span class="side ${side(s.direction)}">${esc(hm.action_ua)}</span></div>
+      <div class="st ${esc(hm.tone)}">${esc(hm.icon)} ${esc(hm.state_ua)}</div>
+      <p style="margin:0 0 6px;font-size:15px">${esc(hm.headline)}</p>
+      <div class="kv"><span>Ціна</span><b>${hm.price_fresh?esc(hm.price):'свіжої ціни немає'}</b></div>
+      <div class="kv"><span>Ціну перевірено</span><b>${hm.price_fresh?ago(hm.price_as_of):'—'}</b></div>
+      <div class="kv"><span>Сценарій оновлено</span><b>${hm.updated_at?hhmm(hm.updated_at):'—'}</b></div></div>
+    ${hm.wait?`<div class="sec"><h3>Чого чекаємо</h3><p>${esc(hm.wait)}</p></div>`:''}
+    ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
+    ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry)}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
+      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div></div>`:''}
+    ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
+    ${hm.next?`<div class="sec"><h3>Що Лев зробить далі</h3><p>${esc(hm.next)}</p></div>`:''}
+    ${(hm.history||[]).length?`<div class="sec"><h3>Що було</h3><div class="tl">${hm.history.map(x=>`<div><span class="mut num">${hhmm(x.ts)}</span> — ${esc(x.text)}</div>`).join('')}</div></div>`:''}`
+    :`<div class="card err"><b>Не вдалося скласти зрозумілий висновок</b><div class="mut">Технічні дані нижче, у розділі «Для перевірки». Не вважай цей сценарій готовим планом.</div></div>`;
   app.innerHTML=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
+    ${humanHtml}
+    <details class="dbg"><summary>Для перевірки (технічні дані)</summary>
     <div class="card">
       <div class="top"><span class="sym">${esc(s.symbol)}</span><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(st)}</div>
       <div style="margin-top:6px;font-size:14px">${esc(st.text||'')}</div>
@@ -624,17 +643,13 @@ async function openSc(id){
     <div class="sec"><h3>Висновок Лева</h3><p>${esc(s.why||story||'Лев не залишив пояснення в записі сценарію.')}</p>
       ${s.why&&story?`<div class="mut" style="margin-top:6px">${esc(story)}</div>`:''}</div>
     ${thesisHtml(d.thesis)}
-    <div class="sec"><h3>Торговий план</h3>
+    <div class="sec"><h3>Торговий план (сирий розрахунок)</h3>
       ${kv('Зона входу',dp.zone||dp.entry)}${kv('Стоп',dp.sl,'S')}${kv('TP1',dp.tp1,'L')}${dp.tp2?kv('TP2',dp.tp2,'L'):''}
       ${kv('RR',dp.rr?`${dp.rr} (${dp.rr_basis})`:'')}${kv('Потенціал до TP1',dp.potential)}
-      ${kv('Плановий ризик','Очікує перевірки Risk Officer')}
     </div>
     ${execHtml(d.execution)}
-    <div class="sec"><h3>Що чекаємо</h3><p>${esc(s.wait||'Конкретну умову підтвердження не записано — вхід не розглядати.')}</p></div>
-    <div class="sec"><h3>Коли сценарій скасовується</h3><p>${esc(s.cancel||NA)}</p>
-      <div class="mut" style="margin-top:6px">Скасування до входу ≠ стоп після входу.</div></div>
-    <div class="sec"><h3>Після підтвердження</h3><p>План передається на незалежний ризик-контроль. Ордер офіс не відкриває — рішення за трейдером.</p>
-      ${d.hypothetical?'<div class="mut" style="margin-top:6px">Позиції немає. Будь-які TP/SL тут — модельні рівні, не PnL угоди.</div>':''}</div>
+    <div class="sec"><h3>Журнал подій</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає.</div>'}</div>
+    </details>
     <div class="acts" style="margin:0 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
     <div class="chips" id="lay">
@@ -644,7 +659,7 @@ async function openSc(id){
       <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
     <div id="chart" class="chart"></div>
     <div class="mut" id="asof" style="margin:6px 0 12px"></div>
-    <div class="sec"><h3>Історія сценарію</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>'}</div>`;
+`;
   $('back').onclick=()=>{killPoll(); go('scenarios');};
   $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
     sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};
