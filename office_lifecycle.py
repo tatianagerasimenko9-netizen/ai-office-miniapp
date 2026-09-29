@@ -313,3 +313,22 @@ def record_next_opportunity(
         "kind": KIND_LIFECYCLE,
         "opens_position": False,
     }
+
+
+WATCHING_TTL_ENV = "OFFICE_WATCHING_TTL_EXPIRE"
+
+
+def watching_ttl_enabled() -> bool:
+    """Авто-EXPIRED для WATCHING у живій БД — лише з явним прапорцем (за замовчуванням вимкнено)."""
+    import os
+
+    return os.getenv(WATCHING_TTL_ENV, "").strip() == "1"
+
+
+def watching_ttl_exceeded(status: Any, created: Any, now: Any) -> bool:
+    """WATCHING / *_WATCHING старший за WATCHING_EXPIRE_SEC від створення."""
+    st = str(status or "").upper()
+    if not st.endswith("WATCHING"):
+        return False
+    age = age_sec(created, now)
+    return age is not None and age > WATCHING_EXPIRE_SEC

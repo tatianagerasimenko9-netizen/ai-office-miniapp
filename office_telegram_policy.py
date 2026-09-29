@@ -227,3 +227,27 @@ def finish_trade_telegram(*, key: str, delivered: bool, now_ts: float = 0.0) -> 
     _TRADE_TG_PENDING.discard(k)
     if delivered:
         _TRADE_TG_LAST[k] = float(now_ts or time_mod.time())
+
+
+def mini_app_button(
+    *, symbol: str = "", scenario_id: str = "", base_url: str = "",
+) -> Optional[Dict[str, Any]]:
+    """Кнопка «📊 Сценарій» → картка канонічного сценарію в Mini App.
+
+    З scenario_id — пряме посилання на картку (/v2?scenario=…). Без нього —
+    старий фільтр за монетою (крім BTC, як і раніше). Лише посилання, не дія.
+    """
+    from urllib.parse import quote
+
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    sid = str(scenario_id or "").strip()
+    sym = str(symbol or "").strip().upper()
+    if sid:
+        url = f"{base}/v2?scenario={quote(sid, safe='')}"
+        return {"inline_keyboard": [[{"text": "📊 Сценарій", "url": url}]]}
+    if sym and sym != "BTCUSDT":
+        url = f"{base}/?symbol={quote(sym, safe='')}&filterSymbol={quote(sym, safe='')}"
+        return {"inline_keyboard": [[{"text": "📊 Графік", "url": url}]]}
+    return None

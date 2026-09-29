@@ -415,7 +415,9 @@ def lev_conclusion_text(draft: Dict[str, Any], stances: Dict[str, Any], action: 
     lo, hi = draft.get("zone_lo"), draft.get("zone_hi")
     z = ""
     if _f(lo) is not None and _f(hi) is not None:
-        z = f"зона {_f(lo):.6g}–{_f(hi):.6g}"
+        from office_price_format import format_level_span
+
+        z = f"зона {format_level_span(lo, hi, str(draft.get('symbol') or ''))}"
     alt = draft.get("alternative") if isinstance(draft.get("alternative"), dict) else {}
     parts = [f"Лев: {side} {z}".strip()]
     conf = draft.get("confluence") if isinstance(draft.get("confluence"), dict) else {}

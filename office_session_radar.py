@@ -33,6 +33,14 @@ KIND_PAPER = "paper"
 KIND_LIVE = "live"
 
 
+# Єдине джерело меж desk-сесій (місцевий час біржового міста, DST враховано).
+DESK_SESSIONS: Tuple[Tuple[str, Any, int, int], ...] = (
+    ("asia", timezone.utc, 0, 8),
+    ("london", ZoneInfo("Europe/London"), 8, 16),
+    ("ny", ZoneInfo("America/New_York"), 8, 16),
+)
+
+
 def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     """Exchange-independent desk clock with London/NY daylight saving.
 
@@ -43,18 +51,13 @@ def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     if ts.tzinfo is None:
         raise ValueError("session clock requires an aware timestamp")
     now = ts.astimezone(timezone.utc)
-    asia = 0 <= now.hour < 8
     london_local = now.astimezone(ZoneInfo("Europe/London"))
     ny_local = now.astimezone(ZoneInfo("America/New_York"))
-    london = 8 <= london_local.hour < 16
-    ny = 8 <= ny_local.hour < 16
-    active = [name for name, enabled in (("asia", asia), ("london", london), ("ny", ny)) if enabled]
+    flags = {name: a <= now.astimezone(zone).hour < b for name, zone, a, b in DESK_SESSIONS}
+    london, ny = flags["london"], flags["ny"]
+    active = [name for name, _z, _a, _b in DESK_SESSIONS if flags[name]]
     starts = []
-    for name, zone, hour in (
-        ("asia", timezone.utc, 0),
-        ("london", ZoneInfo("Europe/London"), 8),
-        ("ny", ZoneInfo("America/New_York"), 8),
-    ):
+    for name, zone, hour, _end in DESK_SESSIONS:
         local_now = now.astimezone(zone)
         for days in range(3):
             local_date = (local_now + timedelta(days=days)).date()
@@ -75,15 +78,21 @@ def session_clock_dst(ts: datetime) -> Dict[str, Any]:
     }
 
 
-def session_at_utc(ts: Optional[datetime] = None) -> str:
+def session_at_utc(ts: Optional[datetime] = None, *, dst: bool = False) -> str:
+    """Код сесії. dst=False — фіксовані UTC-вікна (replay/T8/paper, історичні тести).
+
+    dst=True — London/NY за місцевим часом (Europe/London, America/New_York).
+    """
     dt = ts or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    h = int(dt.astimezone(timezone.utc).hour)
-    names: List[str] = []
-    for name, (a, b) in SESSION_WINDOWS_UTC.items():
-        if a <= h < b:
-            names.append(name)
+    if dst:
+        names = session_clock_dst(dt)["active"]
+        if len(names) > 1 and "asia" in names:
+            names = [n for n in names if n != "asia"]  # літній Лондон відкривається до 08:00 UTC
+    else:
+        h = int(dt.astimezone(timezone.utc).hour)
+        names = [name for name, (a, b) in SESSION_WINDOWS_UTC.items() if a <= h < b]
     if not names:
         return "off_session"
     if "ny" in names and "london" in names:
@@ -92,12 +101,12 @@ def session_at_utc(ts: Optional[datetime] = None) -> str:
 
 
 def session_clock(ts: Optional[datetime] = None) -> Dict[str, Any]:
-    """Активна сесія і хвилини до наступної. З годинника, не з вигаданого ринку."""
+    """Активна сесія і хвилини до наступної для Mini App. Літній/зимовий час враховано."""
     dt = ts or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     dt = dt.astimezone(timezone.utc)
-    active = session_at_utc(dt)
+    active = session_at_utc(dt, dst=True)
     label = {
         "asia": "ASIA",
         "london": "LONDON",
@@ -105,22 +114,11 @@ def session_clock(ts: Optional[datetime] = None) -> Dict[str, Any]:
         "london_ny_overlap": "NY",
         "off_session": "OFF",
     }.get(active, active.upper() if active else None)
-    h, m = dt.hour, dt.minute
-    now_min = h * 60 + m
-    # Наступне вікно: London 08:00, NY 13:00, Asia 00:00 наступної доби.
-    starts = [("LONDON", 8 * 60), ("NY", 13 * 60), ("ASIA", 24 * 60)]
-    nxt_name = None
-    nxt_in = None
-    for name, start in starts:
-        if start > now_min:
-            nxt_name, nxt_in = name, start - now_min
-            break
-    if nxt_name is None:
-        nxt_name, nxt_in = "ASIA", (24 * 60 - now_min)
+    dst = session_clock_dst(dt)
     return {
         "active": label,
-        "next": nxt_name,
-        "next_in_min": int(nxt_in) if nxt_in is not None else None,
+        "next": str(dst["next"]).upper(),
+        "next_in_min": dst["next_in_min"],
         "code": active,
     }
 

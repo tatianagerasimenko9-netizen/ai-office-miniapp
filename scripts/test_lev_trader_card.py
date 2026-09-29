@@ -161,7 +161,7 @@ def main() -> int:
         live_price=0.1306,
     )
     for need in (
-        "🔴 SHORT · DEMOUSDT · H1",
+        "🔴 SHORT · DEMOUSDT · сценарій H1",
         "🎯 Вхід · 0.1306",
         "❌ Стоп",
         "✅ TP1",
@@ -196,7 +196,7 @@ def main() -> int:
         rr_net=2.0,
         move_pct=4.0,
     )
-    if "🟢 LONG · AAAUSDT · M5" not in scalp_card:
+    if "🟢 LONG · AAAUSDT · сценарій M5" not in scalp_card:
         return _fail(scalp_card)
     if "🎯 Вхід · 1" not in scalp_card:
         return _fail(scalp_card)
@@ -211,7 +211,7 @@ def main() -> int:
         rr_net=2.2,
         move_pct=6.0,
     )
-    if "🔴 SHORT · BBBUSDT · H4" not in swing_card:
+    if "🔴 SHORT · BBBUSDT · сценарій H4" not in swing_card:
         return _fail(swing_card)
 
     upd = format_manage_update(

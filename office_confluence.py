@@ -555,13 +555,15 @@ def confirm_line(confirms: List[str], wait_tf: str, *, direction: str = "") -> s
     return f"Чекаю на {wait_tf}: подвійна вершина або SFP у зоні"
 
 
-def now_status_line(*, price: Any, zone_lo: Any, zone_hi: Any, direction: str) -> str:
+def now_status_line(*, price: Any, zone_lo: Any, zone_hi: Any, direction: str, symbol: str = "") -> str:
+    from office_price_format import format_level_span
+
     px, lo, hi = _f(price), _f(zone_lo), _f(zone_hi)
     if lo is None or hi is None:
         return "Немає підтверджених меж зони"
     if lo > hi:
         lo, hi = hi, lo
-    span = f"{lo:g}–{hi:g}"
+    span = format_level_span(lo, hi, symbol)
     if px is None:
         return f"Зараз: межі {span}, ціна невідома"
     if lo <= px <= hi:
@@ -584,8 +586,12 @@ def scenario_story(
     wait_tf: str = "",
     confirms: Any = None,
     direction: str = "",
+    symbol: str = "",
 ) -> Dict[str, Any]:
-    """Людською мовою. Без меж — не пишемо «чекаємо відкат/зону»."""
+    """Людською мовою. Без меж — не пишемо «чекаємо відкат/зону».
+
+    Ціни — через єдиний tick-форматер (не :g, що дає 1.23e-05 / 1.23457e+08).
+    """
     lo, hi = _f(zone_lo), _f(zone_hi)
     kinds = [str(x) for x in (labels or []) if str(x).strip()]
     if not kinds:
@@ -596,8 +602,10 @@ def scenario_story(
             "missing": ["межі зони"],
             "text": "Немає підтверджених меж зони — не чекаємо вигаданий відкат.",
         }
-    ztype = kinds[0] if kinds else "зона"
-    reasons = " · ".join(kinds[:3]) if kinds else "немає незалежних збігів"
+    ztype = kinds[0] if kinds else "зону"
+    reasons = f"тут збігаються {' · '.join(kinds[:3])}" if kinds else "незалежних збігів немає"
+    from office_price_format import format_level_span
+
     wt = wait_tf or confirm_timeframe(timeframe)
     conf_names = [CONFIRM_UA.get(x, x) for x in (confirms or []) if x]
     if conf_names:
@@ -611,8 +619,8 @@ def scenario_story(
         "missing": [],
         "zone_type": ztype,
         "text": (
-            f"Чекаємо відкат у {ztype} {lo:g}–{hi:g} на {timeframe or 'H1'}; "
-            f"тут збігаються {reasons}; на {wt} потрібне {need}."
+            f"Чекаємо відкат у {ztype} {format_level_span(lo, hi, symbol)} на {timeframe or 'H1'}; "
+            f"{reasons}; на {wt} потрібне підтвердження: {need}."
         ),
     }
 
@@ -800,7 +808,7 @@ def evaluate_confluence(
         "wait_tf": wait_tf,
         "zone_line": zone_line(best),
         "confirm_wait": confirm_line(confirms, wait_tf, direction=side),
-        "now_line": now_status_line(price=px, zone_lo=best["lo"], zone_hi=best["hi"], direction=side),
+        "now_line": now_status_line(price=px, zone_lo=best["lo"], zone_hi=best["hi"], direction=side, symbol=symbol),
         "price": px,
         "ttl_sec": ttl_sec(timeframe),
         "story": scenario_story(
@@ -812,6 +820,7 @@ def evaluate_confluence(
             wait_tf=wait_tf,
             confirms=confirms,
             direction=side,
+            symbol=symbol,
         ),
         "lifecycle": lifecycle_from_status("ACTIVE", confirms=confirms),
         "zones": best.get("members") or [],

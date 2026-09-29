@@ -9,7 +9,7 @@ import json
 import math
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,7 +25,7 @@ from office_mini_v1 import (
     scanner_payload as v1_scanner,
     stats_payload as v1_stats,
 )
-from office_price_format import format_price_fields
+from office_price_format import format_level_span, format_price_fields, format_px, tick_size_for
 from office_radar import MIN_RR
 from office_signal_stats import MIN_GROUP, build_stats_report
 
@@ -143,6 +143,72 @@ def _signal_rows(limit: int = 80, *, all_status: bool = False) -> List[Dict[str,
     return out
 
 
+STATUS_UA = {
+    "WATCHING": ("👁", "WATCHING", "Спостереження · входу немає"),
+    "ACTIVE": ("🎯", "ПЛАН", "План активний · очікує рішення трейдера"),
+    "CONFIRMED": ("✅", "ПІДТВЕРДЖЕНО", "Умову підтверджено · не позиція"),
+    "HIT_ENTRY": ("📍", "ЗОНА ВХОДУ", "Ціна в зоні входу · не позиція"),
+    "HIT_TP1": ("🏁", "TP1 (модель)", "Модельний TP1 · не PnL угоди"),
+    "HIT_TP2": ("🏁", "TP2 (модель)", "Модельний TP2 · не PnL угоди"),
+    "HIT_SL": ("⛔", "SL (модель)", "Модельний SL · не збиток угоди"),
+    "CANCELLED": ("✖", "СКАСОВАНО", "Сценарій скасовано до входу"),
+    "EXPIRED": ("⌛", "ПРОСТРОЧЕНО", "Термін сценарію минув"),
+    "INVALIDATED": ("✖", "ІНВАЛІДОВАНО", "Теза зламалась до входу"),
+    "PIERCE_WATCHING": ("👁", "WATCHING", "Спостереження після проколу рівня · входу немає"),
+    "RANGE_WATCHING": ("👁", "WATCHING", "Спостереження за діапазоном · входу немає"),
+}
+_DONE = ("HIT_TP1", "HIT_TP2", "HIT_SL", "CANCELLED", "EXPIRED", "INVALIDATED", "CLOSED")
+_LIVE = ("ACTIVE", "CONFIRMED", "HIT_ENTRY")
+
+
+def status_view(status: Any) -> Dict[str, str]:
+    """Статус завжди текстом і значком, не лише кольором."""
+    st = str(status or "").upper()
+    icon, short, long_ = STATUS_UA.get(st, ("•", st or "—", st or "Невідомий стан"))
+    if st.endswith("WATCHING"):
+        group = "watch"
+    elif st in _LIVE:
+        group = "live"
+    elif st in _DONE:
+        group = "done"
+    else:
+        group = "unknown"  # невідомий стан не ховаємо в архів і не видаємо за план
+    return {"code": st, "icon": icon, "short": short, "text": long_, "group": group}
+
+
+def _ttl_status(row: Dict[str, Any]) -> Dict[str, Any]:
+    """WATCHING понад TTL показуємо чесно; саму БД не змінюємо (це робить worker за прапорцем)."""
+    from office_lifecycle import WATCHING_EXPIRE_SEC, watching_ttl_exceeded
+
+    v = dict(status_view(row.get("status")))
+    if watching_ttl_exceeded(row.get("status"), row.get("ts_created"), datetime.now(timezone.utc)):
+        v["ttl_exceeded"] = True
+        v["text"] = f"{v['text']} · понад TTL {WATCHING_EXPIRE_SEC // 3600} год — теза могла застаріти"
+    return v
+
+
+def note_lines(note: Any) -> Dict[str, Optional[str]]:
+    """Рядки «Чекаю / Що скасує / Чому» з фактичного тексту картки Лева. Не генеруємо."""
+    wait = cancel = why = None
+    for raw in str(note or "").splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if not line:
+            continue
+        if wait is None and low.startswith("чекаю"):
+            wait = line[:300]
+        elif cancel is None and low.startswith("що скасує"):
+            cancel = line.split(":", 1)[-1].strip()[:300] or None
+        elif why is None and low.startswith("чому"):
+            why = line.split(":", 1)[-1].strip()[:400] or None
+    return {"wait": wait, "cancel": cancel, "why": why}
+
+
+def rr_text(rr: Any) -> Optional[str]:
+    x = _f(rr)
+    return None if x is None else f"1:{x:.1f}"
+
+
 def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[str, Any]:
     note = parse_note(row.get("analysis_note"))
     lo, hi = _f(row.get("entry_low")), _f(row.get("entry_high"))
@@ -170,15 +236,31 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         wait_tf="M15",
         confirms=[],
         direction=str(row.get("direction") or ""),
+        symbol=str(row.get("symbol") or ""),
     )
     if not labs and note.get("grade"):
         story = {
             **story,
             "text": (
-                (story.get("text") or "").replace("немає незалежних збігів", f"сила {note.get('grade')} (теги в нотатці не розкладені)")
+                (story.get("text") or "").replace("незалежних збігів немає", f"сила {note.get('grade')} (теги в нотатці не розкладені)")
             ),
         }
     life = lifecycle_for_row(row, has_position=has_position)
+    sym = str(row.get("symbol") or "")
+    side = str(row.get("direction") or "").upper()
+    rr_val = pot.get("rr") if pot.get("rr") is not None else _f(row.get("rr"))
+    lines = note_lines(row.get("analysis_note"))
+    display = {
+        "zone": format_level_span(lo, hi, sym) if lo is not None else "",
+        "entry": format_px(mid, sym),
+        "sl": format_px(row.get("sl"), sym, side=side, kind="SL"),
+        "tp1": format_px(row.get("tp1"), sym, side=side, kind="TP1"),
+        "tp2": format_px(row.get("tp2"), sym, side=side, kind="TP2"),
+        "rr": rr_text(rr_val),
+        "rr_basis": "від середини зони входу до TP1" if rr_val is not None else None,
+        "potential": None if pot.get("pct") is None else f"{pot['pct']:.1f}%",
+        "tick": format(tick_size_for(sym, mid if mid is not None else row.get("sl")), "f"),
+    }
     return {
         "scenario_id": row.get("signal_id"),
         "symbol": row.get("symbol"),
@@ -193,7 +275,12 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         "sl": _f(row.get("sl")),
         "tp1": _f(row.get("tp1")),
         "tp2": _f(row.get("tp2")),
-        "rr": pot.get("rr") if pot.get("rr") is not None else _f(row.get("rr")),
+        "rr": rr_val,
+        "display": display,
+        "status": _ttl_status(row),
+        "wait": lines["wait"],
+        "cancel": lines["cancel"],
+        "why": lines["why"],
         "potential_pct": pot.get("pct"),
         "tp1_filter_ok": pot.get("ok_filter"),
         "as_of": row.get("ts_updated") or row.get("ts_created"),
@@ -239,6 +326,18 @@ def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
     return out
 
 
+def _btc_regime() -> Optional[str]:
+    """Режим ринку лише з market_state Worker. Сесія не підставляється як режим."""
+    try:
+        from office_market_state import market_state_get
+
+        st = market_state_get(_db(), "BTCUSDT") or {}
+        reg = str(st.get("regime") or "").strip()
+        return reg or None
+    except Exception:
+        return None
+
+
 def home_v2() -> Dict[str, Any]:
     base = v1_home()
     cards = [c for c in list_scenarios(include_watching=False) if not c.get("legacy_range")]
@@ -250,6 +349,7 @@ def home_v2() -> Dict[str, Any]:
             "note": "стан Worker з /api/summary t7_status на Web; тут без секретів",
         },
         "market_mode": base.get("market_mode"),
+        "market_regime": _btc_regime(),
         "gex": None,
         "gex_status": DATA_UNAVAILABLE,
         "gex_reason": "шар GEX не в main",
@@ -295,19 +395,60 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             _db(), str(row.get("symbol") or ""), str(row.get("direction") or "")
         )
         pos = bool(rec.get("ok"))
+        pos_known: Optional[bool] = pos
     except Exception:
         pos = False
+        pos_known = None
     card = scenario_card(row, has_position=pos)
+    execution = None
+    if (card.get("status") or {}).get("group") != "done":
+        execution = execution_payload(card, has_open_position=pos_known)
     events = scenario_events(sid)
+    thesis = None
+    try:
+        from office_thesis_journal import latest_thesis
+
+        thesis = latest_thesis(_db(), sid)
+    except Exception:
+        thesis = None
     return {
         "ok": True,
         "readonly": True,
         "data_status": "DATA_OK",
         "scenario": card,
         "events": events,
+        "thesis": thesis,
+        "execution": execution,
         "has_position": pos,
         "hypothetical": not pos,
     }
+
+
+def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:
+    """Перевірки перед входом за поточною ціною (M1). Не ордер, рішень не змінює."""
+    from office_execution_check import execution_checks
+
+    sym = str(card.get("symbol") or "")
+    pack = candles_payload(sym, "M1", 20)
+    last = (pack.get("candles") or [None])[-1]
+    fresh = pack.get("data_status") == "DATA_OK" and not pack.get("fixture")
+    maj = sym.upper() in MAJORS
+    res = execution_checks(
+        symbol=sym,
+        direction=str(card.get("direction") or ""),
+        zone_lo=card.get("zone_lo"),
+        zone_hi=card.get("zone_hi"),
+        sl=card.get("sl"),
+        tp1=card.get("tp1"),
+        price=(last or {}).get("close"),
+        price_fresh=fresh,
+        has_open_position=has_open_position,
+        min_rr=float(MIN_RR),
+        min_tp1_pct=float(MAJORS_TP1_PCT if maj else ALTS_TP1_PCT),
+    )
+    res["price_display"] = format_px((last or {}).get("close"), sym) if last else ""
+    res["price_source"] = "fixture" if pack.get("fixture") else pack.get("source")
+    return res
 
 
 def scenario_events(sid: str) -> List[Dict[str, Any]]:
@@ -432,8 +573,12 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
             quote_mode = "unavailable"
             source = "none"
     last = bars[-1] if bars else None
+    feed = _feed_health(last.get("ts") if last else None, interval, source)
+    if status == "DATA_OK" and not feed["usable_for_review"] and not _fixture_on():
+        status = "STALE"
     return {
         "ok": bool(bars),
+        "feed": feed,
         "readonly": True,
         "data_status": status,
         "live": False if _fixture_on() else live_stream,
@@ -449,6 +594,24 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
     }
 
 
+_INTERVAL_TF = {"1m": "M1", "5m": "M5", "15m": "M15", "1h": "H1", "4h": "H4", "1d": "D1"}
+
+
+def _feed_health(open_ts: Any, interval: str, source: str) -> Dict[str, Any]:
+    """Свіжість останньої свічки через office_feed_quality (не «є дані = актуально»)."""
+    from office_feed_quality import assess_feed
+    from office_thesis_journal import _observed_at
+
+    now = datetime.now(timezone.utc)
+    obs = _observed_at(str(open_ts) if open_ts else None, _INTERVAL_TF.get(interval, "M5"), now)
+    res = assess_feed(
+        {"kind": "ohlcv", "source": source if source not in ("none", "") else "", "observed_at": obs, "complete": bool(obs)},
+        now_utc=now,
+    )
+    return {"quality": res["quality"], "usable_for_review": res["usable_for_review"],
+            "age_seconds": res["age_seconds"], "reasons": res["reasons"]}
+
+
 def overview_payload() -> Dict[str, Any]:
     from office_market_data import fetch_candles, fetch_top_movers
 
@@ -461,6 +624,8 @@ def overview_payload() -> Dict[str, Any]:
             row["price"] = last.get("close")
             row["as_of"] = last.get("ts")
             row["data_status"] = "DATA_OK"
+            if not _fixture_on() and not _feed_health(last.get("ts"), "1m", "binance_futures")["usable_for_review"]:
+                row["data_status"] = "STALE"
             if _fixture_on():
                 row["source"] = "fixture"
         marks.append(row)
@@ -487,8 +652,65 @@ def overview_payload() -> Dict[str, Any]:
     }
 
 
+AUDIT_TYPES = ("THESIS_VERSION", "RISK_SHADOW_REVIEW", "RISK_VETO")
+
+
+def audit_payload(days: int = 7) -> Dict[str, Any]:
+    """Аудит журналу рішень: лише лічильники фактичних записів, без WR/PnL."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        rows = _fetchall(
+            _db(),
+            """
+            SELECT event_type, payload_json FROM office_events
+            WHERE ts_utc >= ? AND event_type IN ('THESIS_VERSION', 'RISK_SHADOW_REVIEW', 'RISK_VETO')
+            ORDER BY id DESC LIMIT 5000
+            """,
+            (since,),
+        )
+    except Exception:
+        return {"ok": False, "readonly": True, "data_status": DATA_UNAVAILABLE, "reason": "журнал недоступний"}
+    counts = {t: 0 for t in AUDIT_TYPES}
+    reasons: Dict[str, int] = {}
+    would_veto = 0
+    thesis_incomplete = 0
+    regimes: Dict[str, int] = {}
+    for et, pj in rows or []:
+        counts[et] = counts.get(et, 0) + 1
+        try:
+            pl = json.loads(pj or "{}")
+        except Exception:
+            pl = {}
+        if et in ("RISK_SHADOW_REVIEW", "RISK_VETO"):
+            if pl.get("would_veto") or et == "RISK_VETO":
+                would_veto += 1
+            for r in pl.get("reasons") or []:
+                reasons[str(r)] = reasons.get(str(r), 0) + 1
+        elif et == "THESIS_VERSION":
+            if not (pl.get("check") or {}).get("valid_for_analyst_review"):
+                thesis_incomplete += 1
+            reg = str(pl.get("regime") or "UNKNOWN")
+            regimes[reg] = regimes.get(reg, 0) + 1
+    reviews = counts["RISK_SHADOW_REVIEW"] + counts["RISK_VETO"]
+    return {
+        "ok": True,
+        "readonly": True,
+        "days": days,
+        "data_status": "DATA_OK" if rows else "EMPTY",
+        "counts": counts,
+        "risk_reviews": reviews,
+        "would_veto": would_veto,
+        "top_veto_reasons": sorted(reasons.items(), key=lambda x: -x[1])[:6],
+        "thesis_incomplete": thesis_incomplete,
+        "regimes": sorted(regimes.items(), key=lambda x: -x[1]),
+        "note": "Лічильники записів журналу, не результативність стратегії.",
+    }
+
+
 def journal_payload(*, kind: str = "scenarios") -> Dict[str, Any]:
     k = str(kind or "scenarios").lower()
+    if k == "audit":
+        return audit_payload()
     if k == "stats":
         st = v1_stats()
         n = int(st.get("n") or 0)
@@ -559,9 +781,51 @@ def positions_v2() -> Dict[str, Any]:
     }
 
 
+SCAN_STALE_SEC = 2 * 3600
+
+
+def radar_reasons(c: Dict[str, Any]) -> List[str]:
+    """«Чому в радарі» лише зі збережених полів market_state. Не сигнал."""
+    out: List[str] = []
+    for key, label in (("pump", "pump-score"), ("dump", "dump-score"), ("score", "score")):
+        v = _f(c.get(key))
+        if v is not None and not (key == "score" and (c.get("pump") is not None or c.get("dump") is not None)):
+            out.append(f"{label} {v:g}")
+    rsi = c.get("rsi")
+    try:
+        r = float(rsi)
+        out.append(f"RSI {r:.0f}" + (" — перекупленість" if r >= 70 else (" — перепроданість" if r <= 30 else "")))
+    except (TypeError, ValueError):
+        pass
+    if c.get("regime"):
+        out.append(f"режим {c['regime']}")
+    if c.get("decision"):
+        out.append(f"рішення офісу: {c['decision']}")
+    return out
+
+
+def _age_sec(ts: Any) -> Optional[float]:
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        return None
+    return (datetime.now(timezone.utc) - dt).total_seconds()
+
+
 def scanner_v2() -> Dict[str, Any]:
     sc = v1_scanner()
-    cands = sc.get("candidates") or []
+    cands = []
+    for c in sc.get("candidates") or []:
+        age = _age_sec(c.get("as_of"))
+        cands.append({
+            **c,
+            "reasons": radar_reasons(c),
+            "stale": age is None or age > SCAN_STALE_SEC,
+            "is_signal": False,
+        })
+    sc = {**sc, "candidates": cands}
     if cands:
         return {**sc, "empty_kind": None, "universe_note": "shortlist зі збереженого market_state Worker"}
     return {
@@ -609,6 +873,263 @@ def settings_payload() -> Dict[str, Any]:
             "tp1_alts_pct": ALTS_TP1_PCT,
         },
     }
+
+
+def session_payload(symbol: str = "BTCUSDT") -> Dict[str, Any]:
+    """План сесії з M15. Лише спостереження; ціни через tick-форматер."""
+    from office_session_desk import session_brief
+
+    import re
+
+    sym = str(symbol or "BTCUSDT").upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", sym):
+        return {"ok": False, "readonly": True, "data_status": DATA_UNAVAILABLE, "reason": "некоректний символ",
+                "order_authorized": False, "is_signal": False}
+    if _fixture_on():
+        raw = synth_candles(sym, "15m", 200)
+    else:
+        from office_market_data import fetch_candles
+
+        raw = fetch_candles(sym, "15m", 200)
+    brief = session_brief(raw if isinstance(raw, list) else [], symbol=sym)
+    for k in ("previous", "current"):
+        blk = brief.get(k)
+        if isinstance(blk, dict):
+            for f in ("high", "low", "close"):
+                if blk.get(f) is not None:
+                    blk[f + "_display"] = format_px(blk[f], sym)
+    sp = brief.get("since_previous")
+    if isinstance(sp, dict):
+        for t in ("high_test", "low_test"):
+            if isinstance(sp.get(t), dict) and sp[t].get("extreme") is not None:
+                sp[t]["extreme_display"] = format_px(sp[t]["extreme"], sym)
+    brief["fixture"] = bool(_fixture_on())
+    brief["readonly"] = True
+    brief["ok"] = brief.get("data_status") == "DATA_OK"
+    return brief
+
+
+def _exposure_block(confirmed: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ризик відкритих позицій із ручного обліку. «Нічого не внесено» ≠ «ризику немає»."""
+    try:
+        import office_positions as P
+
+        if P.schema_present(_db()):
+            ex = P.exposure(_db())
+            if ex["status"] == "OK":
+                return {"value": ex["risk_now_usdt"], "status": "OK", "unit": "USDT", "open": ex["n_open"],
+                        "notional_usdt": ex.get("notional_usdt"),
+                        "text": f"{ex['text']} Ризик до поточних стопів: {ex['risk_now_usdt']} USDT."}
+            return {"value": None, "status": "NONE_RECORDED", "text": ex["text"]}
+    except Exception:
+        pass
+    return {"value": None, "status": DATA_UNAVAILABLE,
+            "text": "Дані про відкриті позиції не підтверджені (облік угод не активовано)."}
+
+
+def risk_payload() -> Dict[str, Any]:
+    """Екран «Ризик». Невідоме ≠ нуль: без перевіреного джерела — «Дані недоступні»."""
+    pos = positions_v2()
+    confirmed = pos.get("positions") or []
+    vetoes: List[Dict[str, Any]] = []
+    shadow: List[Dict[str, Any]] = []
+    try:
+        rows = _fetchall(
+            _db(),
+            """
+            SELECT ts_utc, event_type, signal_id, payload_json
+            FROM office_events
+            WHERE event_type IN ('RISK_VETO', 'RISK_SHADOW_REVIEW')
+            ORDER BY ts_utc DESC
+            LIMIT 40
+            """,
+            (),
+        )
+        for r in rows or []:
+            try:
+                pl = json.loads(r[3] or "{}")
+            except Exception:
+                pl = {}
+            item = {
+                "ts": r[0],
+                "type": r[1],
+                "scenario_id": r[2],
+                "symbol": pl.get("symbol"),
+                "direction": pl.get("direction"),
+                "would_veto": bool(pl.get("would_veto")),
+                "reasons": [str(x) for x in (pl.get("reasons") or [])][:8],
+            }
+            (vetoes if r[1] == "RISK_VETO" else shadow).append(item)
+    except Exception:
+        vetoes, shadow = [], []
+    plans = []
+    for c in list_scenarios(include_watching=False):
+        if c.get("legacy_range") or (c.get("status") or {}).get("group") != "live":
+            continue
+        plans.append(
+            {
+                "scenario_id": c.get("scenario_id"),
+                "symbol": c.get("symbol"),
+                "direction": c.get("direction"),
+                "status": c.get("status"),
+                "rr": (c.get("display") or {}).get("rr"),
+                "risk_usdt": None,
+                "risk_note": "Плановий ризик не розраховано: немає перевіреного капіталу",
+            }
+        )
+    return {
+        "ok": True,
+        "readonly": True,
+        "orders": False,
+        "order_authorized": False,
+        "equity": {"value": None, "status": DATA_UNAVAILABLE, "text": "Дані недоступні: капітал не підключено"},
+        "exposure": _exposure_block(confirmed),
+        "budget": {"value": None, "status": DATA_UNAVAILABLE, "text": "Ризиковий бюджет дня не затверджено"},
+        "positions": confirmed,
+        "plans": plans[:20],
+        "vetoes": vetoes,
+        "vetoes_note": None if vetoes else "Записів veto Risk Officer у журналі ще немає",
+        "shadow": shadow[:20],
+        "risk_mode": "enforce" if os.getenv("OFFICE_RISK_OFFICER_ENFORCE", "").strip() == "1" else "shadow",
+        "limits": settings_payload().get("gates"),
+        "note": "Схвалення аналітичного плану не створює ордер.",
+    }
+
+
+_DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
+DB_FREE_PATHS = ("/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
+
+
+def db_alive(*, ttl: float = 5.0) -> bool:
+    """Одне легке SELECT 1 (кеш 5 с). Без нього збій БД виглядав би як «немає сценаріїв»."""
+    now = time.time()
+    if now - float(_DB_PROBE["ts"]) < ttl:
+        return bool(_DB_PROBE["ok"])
+    try:
+        _fetchall(_db(), "SELECT 1", ())
+        ok = True
+    except Exception:
+        ok = False
+    _DB_PROBE.update(ts=now, ok=ok)
+    return ok
+
+
+_PRICE_CACHE: Dict[str, Any] = {}
+
+
+def _live_price(symbol: str) -> Dict[str, Any]:
+    """Остання ціна M1 і чи вона свіжа (feed quality). Fixture/недоступно → не свіжа. Кеш 10 с."""
+    sym = str(symbol or "").upper()
+    now = time.time()
+    hit = _PRICE_CACHE.get(sym)
+    if hit and now - hit["t"] < 10:
+        return hit["v"]
+    pack = candles_payload(sym, "M1", 3)
+    last = (pack.get("candles") or [None])[-1]
+    fresh = bool(last) and pack.get("data_status") == "DATA_OK" and not pack.get("fixture")
+    v = {"price": _f(last.get("close")) if last else None, "fresh": fresh, "as_of": pack.get("as_of"),
+         "data_status": pack.get("data_status")}
+    _PRICE_CACHE[sym] = {"t": now, "v": v}
+    return v
+
+
+def _scenario_status(sid: Optional[str]) -> Optional[str]:
+    if not sid:
+        return None
+    try:
+        r = _fetchall(_db(), "SELECT status FROM office_signals WHERE signal_id = ?", (str(sid),))
+        return str(r[0][0]) if r else None
+    except Exception:
+        return None
+
+
+def _with_display(pos: Dict[str, Any]) -> Dict[str, Any]:
+    sym, side = pos["symbol"], pos["direction"]
+    pos["display"] = {
+        "entry": format_px(pos["entry"], sym),
+        "sl": format_px(pos.get("sl"), sym, side=side, kind="SL") if pos.get("sl") else "",
+        "tp1": format_px(pos.get("tp1"), sym, side=side, kind="TP1") if pos.get("tp1") else "",
+        "tp2": format_px(pos.get("tp2"), sym, side=side, kind="TP2") if pos.get("tp2") else "",
+        "exit": format_px(pos.get("exit_price"), sym) if pos.get("exit_price") else "",
+    }
+    return pos
+
+
+def trades_payload(state: str = "open") -> Dict[str, Any]:
+    import office_positions as P
+
+    if not P.schema_present(_db()):
+        return {"ok": True, "readonly": True, "schema_missing": True, "positions": [],
+                "note": "Облік угод ще не активовано (потрібна міграція бази).", "order_authorized": False}
+    rows = P.list_positions(_db(), state if state in ("open", "closed", "all") else "open", 100)
+    out = []
+    for p in rows:
+        _with_display(p)
+        if p["status"] == "OPEN":
+            px = _live_price(p["symbol"])
+            p["tracking"] = P.tracking(p, price=px["price"], price_fresh=px["fresh"],
+                                       scenario_status=_scenario_status(p.get("scenario_id")))
+            p["tracking"]["price_display"] = format_px(px["price"], p["symbol"]) if px["price"] else ""
+            p["tracking"]["price_as_of"] = px["as_of"]
+        out.append(p)
+    return {"ok": True, "readonly": True, "positions": out, "exposure": P.exposure(_db()),
+            "stats": P.stats(_db()), "order_authorized": False, "orders": False,
+            "note": "Це ваші фактичні угоди, внесені вручну. Офіс не торгує і не змінює ордери на біржі."}
+
+
+def trade_detail(trade_id: str) -> Dict[str, Any]:
+    import office_positions as P
+
+    try:
+        pos = _with_display(P.get_position(_db(), trade_id))
+    except P.PositionError as e:
+        return {"ok": False, "error": e.code, "message": e.message}
+    if pos["status"] == "OPEN":
+        px = _live_price(pos["symbol"])
+        pos["tracking"] = P.tracking(pos, price=px["price"], price_fresh=px["fresh"],
+                                     scenario_status=_scenario_status(pos.get("scenario_id")))
+    return {"ok": True, "position": pos, "order_authorized": False}
+
+
+TRADE_ACTIONS = ("open", "partial", "move_sl", "move_tp", "close", "void", "note")
+
+
+def trade_action(action: str, body: Dict[str, Any]) -> tuple:
+    """Виконує ручний запис. Повертає (HTTP-код, JSON). Ордерів не створює."""
+    import office_positions as P
+
+    if action not in TRADE_ACTIONS:
+        return 404, {"ok": False, "error": "unknown_action"}
+    idem = str(body.get("idem_key") or "")[:80]
+    tid = str(body.get("trade_id") or "")
+    try:
+        if action == "open":
+            pos = P.open_position(
+                _db(), symbol=body.get("symbol"), direction=body.get("direction"), entry=body.get("entry"),
+                qty=body.get("qty"), sl=body.get("sl"), tp1=body.get("tp1"), tp2=body.get("tp2"),
+                fee_usdt=body.get("fee_usdt"), opened_at=body.get("opened_at"),
+                scenario_id=str(body.get("scenario_id") or "")[:200], note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "partial":
+            pos = P.partial_exit(_db(), tid, price=body.get("price"), qty=body.get("qty"),
+                                 fee_usdt=body.get("fee_usdt"), note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "move_sl":
+            pos = P.move_sl(_db(), tid, sl=body.get("sl"), note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "move_tp":
+            pos = P.move_tp(_db(), tid, tp1=body.get("tp1"), tp2=body.get("tp2"), note=str(body.get("note") or ""),
+                            idem_key=idem)
+        elif action == "close":
+            pos = P.close_position(_db(), tid, price=body.get("price"), fee_usdt=body.get("fee_usdt"),
+                                   note=str(body.get("note") or ""), exit_reason=str(body.get("exit_reason") or ""),
+                                   idem_key=idem)
+        elif action == "void":
+            pos = P.void_position(_db(), tid, reason=str(body.get("reason") or ""), idem_key=idem)
+        else:
+            pos = P.add_note(_db(), tid, note=str(body.get("note") or ""), idem_key=idem)
+    except P.PositionError as e:
+        code = 409 if e.code in ("duplicate", "not_open") else (503 if e.code == "schema_missing" else
+                                                              (404 if e.code == "not_found" else 422))
+        return code, {"ok": False, "error": e.code, "message": e.message}
+    return 200, {"ok": True, "position": _with_display(pos), "order_authorized": False, "orders": False}
 
 
 def html_v2() -> str:

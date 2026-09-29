@@ -28,3 +28,17 @@ except ValueError:
 else:
     raise AssertionError("naive timestamp must be rejected")
 print("OK session DST: UK/US transitions, overlap, next open, no orders")
+
+from office_session_radar import session_at_utc, session_clock
+
+# Fixed-UTC default is unchanged for replay; dst=True follows local time.
+assert session_at_utc(datetime(2026, 7, 15, 7, 30, tzinfo=timezone.utc)) == "asia"
+assert session_at_utc(datetime(2026, 7, 15, 7, 30, tzinfo=timezone.utc), dst=True) == "london"
+assert session_at_utc(datetime(2026, 1, 15, 7, 30, tzinfo=timezone.utc), dst=True) == "asia"
+assert session_at_utc(datetime(2026, 7, 15, 12, 30, tzinfo=timezone.utc), dst=True) == "london_ny_overlap"
+assert session_at_utc(datetime(2026, 7, 15, 20, 30, tzinfo=timezone.utc), dst=True) == "off_session"
+summer = session_clock(datetime(2026, 7, 15, 11, 0, tzinfo=timezone.utc))
+assert summer["active"] == "LONDON" and summer["next"] == "NY" and summer["next_in_min"] == 60, summer
+winter = session_clock(datetime(2026, 1, 15, 11, 0, tzinfo=timezone.utc))
+assert winter["next"] == "NY" and winter["next_in_min"] == 120, winter
+print("OK Mini App session_clock uses DST; session_at_utc default stays fixed UTC")

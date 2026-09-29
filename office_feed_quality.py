@@ -64,3 +64,55 @@ def assess_feed(
         "source": source or None,
         "kind": kind,
     }
+
+
+FEED_GATE_ENV = "OFFICE_FEED_GATE"
+TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+
+
+def last_candle_observed_at(candles: Any, interval: str, now_utc: datetime) -> str | None:
+    """min(відкриття + інтервал, now): формована свічка свіжа, завислий фід старіє."""
+    if not isinstance(candles, list) or not candles or not isinstance(candles[-1], Mapping):
+        return None
+    opened = _parse_utc(candles[-1].get("ts"))
+    if opened is None:
+        return None
+    from datetime import timedelta
+
+    close = opened + timedelta(seconds=TF_SECONDS.get(interval, 300))
+    return min(close, now_utc.astimezone(timezone.utc)).isoformat()
+
+
+def gate_send_on_fresh_data(
+    cycle: Mapping[str, Any],
+    candles_ltf: Any,
+    *,
+    interval: str = "15m",
+    now_utc: datetime | None = None,
+    source: str = "binance_futures",
+) -> Dict[str, Any]:
+    """Без свіжих LTF-даних новий SEND не створюється (SEND → WAIT). Інші рішення не змінює.
+
+    Вимикається лише явно: OFFICE_FEED_GATE=0 (відкат).
+    """
+    import os
+
+    out = dict(cycle)
+    if not out.get("send") or os.getenv(FEED_GATE_ENV, "1").strip() == "0":
+        return out
+    now = now_utc or datetime.now(timezone.utc)
+    res = assess_feed(
+        {"kind": "ohlcv", "source": source,
+         "observed_at": last_candle_observed_at(candles_ltf, interval, now),
+         "complete": bool(isinstance(candles_ltf, list) and candles_ltf)},
+        now_utc=now,
+    )
+    out["feed_check"] = res
+    if not res["usable_for_review"]:
+        out.update({
+            "action": "WAIT",
+            "send": False,
+            "reason": "дані не підтверджені (" + ", ".join(res["reasons"]) + ") — новий вхід не формую",
+            "recheck": "після відновлення свіжих свічок",
+        })
+    return out

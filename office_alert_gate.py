@@ -7,6 +7,7 @@ FOUND → WATCHING → ZONE_REACHED → CONFIRMATION_PENDING → CONFIRMED | INV
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional, Tuple
 
 from office_price_format import format_level_span, format_px
@@ -354,7 +355,7 @@ def position_verified(*, in_position: bool, position_id: str, position_open: boo
     return bool(in_position) and bool(str(position_id or "").strip()) and bool(position_open)
 
 
-def gate_outbound_telegram(
+def _gate_outbound_core(
     *,
     intent: str = "",
     text: str = "",
@@ -485,6 +486,18 @@ def gate_outbound_telegram(
         return {"send": True, "reason": "аналітичне/звичайне повідомлення", "opens_position": False}
 
     return {**deny, "reason": f"невідомий intent {intent_u}"}
+
+
+def position_support_enabled() -> bool:
+    return os.getenv("OFFICE_TG_POSITION_SUPPORT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def gate_outbound_telegram(**kw: Any) -> Dict[str, Any]:
+    """Шлюз + прапорець: супровід позицій у Telegram за замовчуванням вимкнено (окремий дозвіл власниці)."""
+    res = _gate_outbound_core(**kw)
+    if res.get("send") and str(res.get("reason") or "").startswith("супровід verified OPEN") and not position_support_enabled():
+        return {**res, "send": False, "reason": "супровід позицій у Telegram вимкнено (OFFICE_TG_POSITION_SUPPORT не задано)"}
+    return res
 
 
 def chase_blocks_entry(*, direction: str, price: Any, zone_lo: Any, zone_hi: Any) -> bool:

@@ -278,7 +278,9 @@ def build_review_draft(trade_id: str | None) -> dict[str, object]:
 
     def fmtp(label: str, v: object) -> str:
         x = _f_or_none(v)
-        return f"{label}: {x:.6g}" if x is not None else f"{label}: —"
+        from office_price_format import format_px
+
+        return f"{label}: {format_px(x) or x}" if x is not None else f"{label}: —"
 
     try:
         pnl_s = f"{float(pnl_pct or 0):+.2f}%"
@@ -1157,8 +1159,62 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _send_json(self, code: int, data: dict) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _client_ip(self) -> str:
+        # Render (як і більшість проксі) ДОДАЄ реальну адресу клієнта в кінець X-Forwarded-For;
+        # початок ланцюжка клієнт може підробити, тому беремо останній елемент.
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return (fwd.split(",")[-1].strip() if fwd else self.client_address[0]) or "?"
+
+    def _post_trade(self, u) -> None:
+        """Ручний облік угод. Авторизація fail-closed; лише JSON; ордерів не створює."""
+        from office_mini_v2 import TRADE_ACTIONS, db_alive, trade_action
+        from office_write_auth import MAX_BODY, authorize
+
+        action = u.path.rsplit("/", 1)[-1]
+        if action not in TRADE_ACTIONS:
+            return self._send_json(404, {"ok": False, "error": "unknown_action"})
+        ok, why = authorize(dict(self.headers.items()), client_ip=self._client_ip())
+        if not ok:
+            code = {"write_disabled": 403, "rate_limited": 429}.get(why, 401)
+            return self._send_json(code, {"ok": False, "error": why})
+        if "application/json" not in (self.headers.get("Content-Type", "") or "").lower():
+            return self._send_json(415, {"ok": False, "error": "json_required"})
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY:
+            return self._send_json(413, {"ok": False, "error": "bad_body_size"})
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        if not isinstance(body, dict):
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        if not db_alive():
+            return self._send_json(503, {"ok": False, "error": "db_unavailable", "data_status": "DB_UNAVAILABLE"})
+        code, data = trade_action(action, body)
+        self._send_json(code, data)
+
     def do_POST(self) -> None:
         u = urlparse(self.path)
+        if u.path.startswith("/api/v2/trade/"):
+            try:
+                return self._post_trade(u)
+            except (BrokenPipeError, ConnectionResetError):
+                raise
+            except Exception as exc:  # noqa: BLE001
+                print(f"[mini] POST {u.path[:80]} failed: {type(exc).__name__}: {exc}")
+                return self._send_json(500, {"ok": False, "error": "internal_error"})
         if u.path != "/api/webhook/tradingview":
             self.send_response(404)
             self.end_headers()
@@ -1233,6 +1289,26 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        """Будь-яка непередбачена помилка → JSON 500 з чесним станом, а не обірване з'єднання."""
+        try:
+            self._do_get()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mini] GET {getattr(self, 'path', '')[:120]} failed: {type(exc).__name__}: {exc}")
+            try:
+                body = json.dumps({"ok": False, "error": "internal_error", "data_status": "DATA_UNAVAILABLE",
+                                   "order_authorized": False}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+    def _do_get(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/review_draft":
             qs = parse_qs(u.query)
@@ -1296,10 +1372,14 @@ class Handler(BaseHTTPRequestHandler):
                 journal_payload,
                 overview_payload,
                 positions_v2,
+                risk_payload,
                 scanner_v2,
+                session_payload,
                 scenario_detail,
                 scenarios_payload,
                 settings_payload,
+                trade_detail,
+                trades_payload,
             )
 
             qs = parse_qs(u.query)
@@ -1307,7 +1387,14 @@ class Handler(BaseHTTPRequestHandler):
                 v = qs.get(name)
                 return (v[0] if v else default).strip()
 
-            if u.path == "/api/v2/home":
+            from office_mini_v2 import DB_FREE_PATHS, db_alive
+
+            status_code = 200
+            if u.path not in DB_FREE_PATHS and not db_alive():
+                status_code = 503
+                data = {"ok": False, "error": "db_unavailable", "data_status": "DB_UNAVAILABLE",
+                        "order_authorized": False}
+            elif u.path == "/api/v2/home":
                 data = home_v2()
             elif u.path == "/api/v2/scenarios":
                 data = scenarios_payload(watching=_q("watching") in ("1", "true"))
@@ -1331,10 +1418,22 @@ class Handler(BaseHTTPRequestHandler):
                 data = positions_v2()
             elif u.path == "/api/v2/settings":
                 data = settings_payload()
+            elif u.path == "/api/v2/risk":
+                data = risk_payload()
+            elif u.path == "/api/v2/trades":
+                data = trades_payload(_q("state") or "open")
+            elif u.path == "/api/v2/trade":
+                data = trade_detail(_q("id"))
+            elif u.path == "/api/v2/auth":
+                from office_write_auth import config_status
+
+                data = {"ok": True, **config_status()}
+            elif u.path == "/api/v2/session":
+                data = session_payload(_q("symbol") or "BTCUSDT")
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))

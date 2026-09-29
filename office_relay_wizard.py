@@ -189,7 +189,10 @@ from office_telegram_policy import (
     finish_trade_telegram,
     trade_update_streams,
 )
-from office_telegram_delivery_ledger import reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain
+from office_telegram_delivery_ledger import (
+    reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain,
+    get_scenario_root, remember_scenario_root,
+)
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
 from office_atr_policy import classify_atr_day_used
@@ -674,6 +677,7 @@ async def send_via_bot_photo(
     caption: str = "",
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -686,6 +690,8 @@ async def send_via_bot_photo(
         data.add_field("reply_to_message_id", str(int(reply_to_message_id)))
     if message_thread_id:
         data.add_field("message_thread_id", str(int(message_thread_id)))
+    if reply_markup:
+        data.add_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
     try:
         with open(photo_path, "rb") as fh:
             data.add_field("photo", fh, filename=os.path.basename(photo_path), content_type="image/png")
@@ -1913,6 +1919,12 @@ async def full_auto_analysis(
                 if not correlation.get("safe"):
                     await agent_say(sender, "daryna", correlation["message"])
                     return False
+                from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
+
+                manual_cycle: Dict[str, Any] = {}
+                if legacy_requires_lev():
+                    manual_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, None)
+                legacy = legacy_scenario_status(manual_cycle, direction=direction, enforce=legacy_requires_lev())
                 signal_id = f"manual-{symbol}-{int(time.time())}"
                 signal_upsert(
                     db_path,
@@ -1925,9 +1937,11 @@ async def full_auto_analysis(
                     tp1=parsed.get("tp1"),
                     tp2=parsed.get("tp2"),
                     rr=parsed.get("rr"),
-                    status="ACTIVE",
-                    analysis_note=response_for_parse,
+                    status=legacy["status"],
+                    analysis_note=(legacy["note_prefix"] + response_for_parse)[:4000],
                 )
+                if legacy["status"] != "ACTIVE":
+                    print(f"[signal] {symbol} manual LLM levels → WATCHING: {legacy['reason']}")
             print(f"[signal] saved {symbol} {direction} (Olesya journal silent)")
         else:
             await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
@@ -2633,6 +2647,43 @@ async def run() -> None:
             return tech_thread_id or general_thread_id
         return general_thread_id
 
+    def _lev_risk_review(cycle: Dict[str, Any], sym: str, *, candles_ltf: Any, market_context: Any) -> Dict[str, Any]:
+        """Risk Officer після Лева. Shadow: лише журнал. Enforce: помилка = WAIT (fail closed)."""
+        from office_feed_quality import gate_send_on_fresh_data
+        from office_risk_context import apply_risk_officer, enforce_enabled
+
+        cycle = gate_send_on_fresh_data(cycle, candles_ltf, interval=_ltf_interval(candles_ltf))
+        try:
+            return apply_risk_officer(
+                cycle, db_path=db_path, symbol=sym,
+                candles_ltf=candles_ltf, market_context=market_context,
+            )
+        except Exception as exc:
+            print(f"[risk] review error {sym}: {type(exc).__name__}: {exc}")
+            if enforce_enabled() and cycle.get("send"):
+                return {**cycle, "action": "WAIT", "send": False,
+                        "reason": "ризик-контроль недоступний — план не передається"}
+            return cycle
+
+    def _ltf_interval(candles: Any) -> str:
+        """Інтервал LTF за кроком часу двох останніх свічок (5m або 15m у викликах Лева)."""
+        try:
+            a = datetime.fromisoformat(str(candles[-2]["ts"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(candles[-1]["ts"]).replace("Z", "+00:00"))
+            step = int((b - a).total_seconds())
+            return {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}.get(step, "15m")
+        except Exception:
+            return "15m"
+
+    def _lev_record_thesis(cycle: Dict[str, Any], candles_by_tf: Dict[str, Any]) -> None:
+        """Версія тези Лева в журнал. Помилка журналу не змінює рішення."""
+        try:
+            from office_thesis_journal import record_thesis
+
+            record_thesis(db_path, cycle, candles_by_tf=candles_by_tf)
+        except Exception as exc:
+            print(f"[thesis] journal error: {type(exc).__name__}: {exc}")
+
     async def send_office(
         message: str,
         reply_to_message_id: Optional[int] = None,
@@ -2644,6 +2695,7 @@ async def run() -> None:
         symbol: str = "",
         direction: str = "",
         skip_gate: bool = False,
+        scenario_id: str = "",
     ) -> Optional[int]:
         if not skip_gate:
             tg = gate_outbound_telegram(
@@ -2670,11 +2722,13 @@ async def run() -> None:
             thread_id = _thread_for_stream(stream)
             btn_markup: Optional[Dict[str, Any]] = None
             if use_markup:
-                sym_for_btn = _extract_first_usdt_symbol(text_part)
-                if sym_for_btn and sym_for_btn != "BTCUSDT":
-                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
-                    mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
-                    btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
+                from office_telegram_policy import mini_app_button
+
+                btn_markup = mini_app_button(
+                    symbol=_extract_first_usdt_symbol(text_part) or "",
+                    scenario_id=scenario_id,
+                    base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+                )
             token = agent_bot_tokens.get(agent_key or "")
             # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
             # для desk лише sendMessage + thread_id «Загальний».
@@ -2768,6 +2822,8 @@ async def run() -> None:
         caption: str,
         stream: str = "general",
         *,
+        reply_to_message_id: Optional[int] = None,
+        scenario_id: str = "",
         intent: str = "",
         event_type: str = "",
         symbol: str = "",
@@ -2792,6 +2848,13 @@ async def run() -> None:
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
         token = agent_bot_tokens.get("lev") or tg_bot_token
+        from office_telegram_policy import mini_app_button
+
+        photo_btn = mini_app_button(
+            symbol=symbol or _extract_first_usdt_symbol(cap) or "",
+            scenario_id=scenario_id,
+            base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+        )
         if token:
             ok, reason, msg_id = await send_via_bot_photo(
                 bot_http,
@@ -2799,17 +2862,32 @@ async def run() -> None:
                 office_chat_id,
                 photo_path,
                 caption=cap,
+                reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
+                reply_markup=photo_btn,
             )
             if ok:
                 return msg_id
+            if reply_to_message_id and "message to be replied not found" in str(reason).lower():
+                ok, reason, msg_id = await send_via_bot_photo(
+                    bot_http,
+                    token,
+                    office_chat_id,
+                    photo_path,
+                    caption=cap,
+                    message_thread_id=thread_id,
+                    reply_markup=photo_btn,
+                )
+                if ok:
+                    print("[relay][WARN] photo reply root missing: sent without reply_to")
+                    return msg_id
             print(f"[relay][WARN] photo send failed: {reason}")
         try:
             sent = await client.send_file(
                 office_entity,
                 photo_path,
                 caption=cap,
-                reply_to=thread_id,
+                reply_to=reply_to_message_id or thread_id,
             )
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
@@ -3031,6 +3109,15 @@ async def run() -> None:
                             ledger_sender_task.cancel()
                         return
             ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
+        # One chain per canonical scenario: later events reply to the first card.
+        thread_sid = str(canonical_id or "").strip() if ledger_enabled else ""
+        thread_starts = False
+        if thread_sid and reply_to_message_id is None:
+            try:
+                reply_to_message_id = get_scenario_root(db_path, thread_sid)
+                thread_starts = reply_to_message_id is None
+            except Exception as exc:
+                print(f"[relay] WARN scenario thread lookup: {type(exc).__name__}: {exc}")
         delivered_id = None
         send_attempted = False
         skip_text = False
@@ -3049,6 +3136,8 @@ async def run() -> None:
                         str(drawn["path"]),
                         message,
                         stream=st,
+                        reply_to_message_id=reply_to_message_id,
+                        scenario_id=str(canonical_id or ""),
                         intent=intent,
                         event_type=event_type,
                         symbol=sym,
@@ -3078,6 +3167,7 @@ async def run() -> None:
                     symbol=symbol,
                     direction=direction,
                     skip_gate=True,
+                    scenario_id=str(canonical_id or ""),
                 )
 
         finally:
@@ -3118,6 +3208,11 @@ async def run() -> None:
                 )
             if ledger_token and delivered_id and not ledger_committed:
                 print("[relay] BLOCKED lifecycle: delivery not committed in ledger")
+            if thread_starts and delivered_id and ledger_committed:
+                try:
+                    remember_scenario_root(db_path, thread_sid, int(delivered_id))
+                except Exception as exc:
+                    print(f"[relay] WARN scenario thread root not saved: {type(exc).__name__}: {exc}")
         return delivered_id if ledger_committed else None
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
@@ -4965,7 +5060,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                 print(f"[scanner] {symbol} → немає чіткого сетапу, мовчимо")
                 return
 
-            await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            # LLM-текст «entry/sl» не є висновком Лева: ACTIVE лише якщо lev_cycle дав SEND
+            # у тому самому напрямку. Інакше — тихий WATCHING (OFFICE_LEGACY_ACTIVE_REQUIRES_LEV=0
+            # повертає стару поведінку).
+            from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
+
+            legacy_cycle: Dict[str, Any] = {}
+            if legacy_requires_lev():
+                legacy_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, current_price)
+            legacy = legacy_scenario_status(legacy_cycle, direction=direction, enforce=legacy_requires_lev())
+            if legacy["status"] == "ACTIVE":
+                await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            else:
+                print(f"[scanner] {symbol} LLM-сетап без підтвердження Лева → WATCHING тихо: {legacy['reason']}")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
             signal_id = f"proactive-{symbol}-{int(time.time())}"
@@ -4980,9 +5087,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                 tp1=parsed.get("tp1"),
                 tp2=parsed.get("tp2"),
                 rr=parsed.get("rr"),
-                status="ACTIVE",
-                analysis_note=lev_final or "",
+                status=legacy["status"],
+                analysis_note=(legacy["note_prefix"] + (lev_final or ""))[:2000],
             )
+            if legacy["status"] != "ACTIVE":
+                return
             # ФІКС 4: Олеся автоматично заносить сигнал у бібліотеку угод.
             try:
                 rid = trade_journal_add(
@@ -5152,6 +5261,19 @@ EV позитивне: {prob.get('ev_positive', '')}
 
                         if status == "CONFIRMED":
                             # Повторна зона після підтвердження — не новий вхід.
+                            continue
+
+                        from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
+
+                        if watching_ttl_enabled() and watching_ttl_exceeded(status, created_dt, now_utc):
+                            signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="TTL")
+                            try:
+                                log_event(db_path, "SCENARIO_EXPIRED", {"symbol": symbol, "reason": "WATCHING TTL 4h",
+                                                                         "from": status}, signal_id)
+                                apply_setup_event(canonical_sid or signal_id, "EXPIRED", expired=True)
+                            except Exception as exc_ttl:
+                                print(f"[ttl] {symbol} expire bookkeeping: {exc_ttl}")
+                            print(f"[ttl] {symbol} {signal_id} WATCHING → EXPIRED (TTL)")
                             continue
 
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
@@ -5984,6 +6106,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                     now_ts=now_ts,
                     market_context={"data_status": "DATA_UNAVAILABLE"},
                 )
+                cycle = _lev_risk_review(
+                    cycle, sym, candles_ltf=m5_bars, market_context={"data_status": "DATA_UNAVAILABLE"},
+                )
+                _lev_record_thesis(cycle, {"H4": h4_bars, "H1": h1_bars, "M15": m15_bars, "LTF": m5_bars})
                 if str(cycle.get("action") or "") in (ACTION_SKIP, ACTION_WAIT):
                     print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('action')} {cycle.get('reason')}")
                     return False
@@ -6374,6 +6500,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 day_used_pct=r_used,
                                 market_context=mctx,
                             )
+                            cycle = _lev_risk_review(
+                                cycle, rsym,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
+                                market_context=mctx,
+                            )
+                            _lev_record_thesis(cycle, {"H1": rh1, "M15": rm15, "M5": rm5})
                             print(
                                 f"[lev] {rsym} {cycle.get('action')} {cycle.get('direction')} "
                                 f"{cycle.get('reason')}"
