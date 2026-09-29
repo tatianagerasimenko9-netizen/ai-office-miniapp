@@ -5305,6 +5305,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                             # годинна свічка закрилась за рівнем скасування — це подія надісланого сигналу, повідомляємо один раз.
                             try:
                                 sl_c = float(sl) if sl is not None else None
+                                _tf_c = str(scenario_meta.get("timeframe") or "H1")
+                                _conf_ts = _lc._ts(row.get("ts_updated")) or 0.0
+                                if _conf_ts and time.time() > _lc.valid_until_ts(_conf_ts, _tf_c) and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
+                                    signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED",
+                                                  analysis_note="EXPIRED after confirm: plan validity window passed without entry")
+                                    await send_proactive(
+                                        EVENT_TRADE_UPDATE, _msgs.expired_plan_card(symbol=symbol, direction=direction),
+                                        stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
+                                        kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="EXPIRED",
+                                    )
+                                    continue
                                 if sl_c is not None and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
                                     _h1x = fetch_candles(symbol, "1h", 8)
                                     if _lc.closed_h1_beyond(_h1x, side=direction, level=sl_c,
@@ -6824,7 +6835,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         try:
                             tgt = _targets.structural_targets(
                                 direction=str(st.get("direction") or ""), entry=plan_px, tp1=st.get("tp1"),
-                                lv=_targets.levels(m15=fetch_candles(sym_f, "15m", 96), daily=fetch_candles(sym_f, "1d", 5),
+                                lv=_targets.levels(m15=fetch_candles(sym_f, "15m", 96), daily=fetch_candles(sym_f, "1d", 20),
                                                    weekly=fetch_candles(sym_f, "1w", 4)))
                         except Exception as exc_t:
                             print(f"[confluence] targets {sym_f}: {type(exc_t).__name__}: {exc_t}")
@@ -6846,6 +6857,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 symbol=sym_f, direction=str(st.get("direction") or ""), entry=plan_px, sl=st.get("sl"),
                                 tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), cancel=st.get("sl"),
                                 why=(_msgs.plain_confirms(list(fu.get("confirms") or [])) or str(fu.get("reason") or "")),
+                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(time.time(), st.get("timeframe"))),
                                 bad=plan_bad),
                             symbol=sym_f,
                             kind="CONFIRM",

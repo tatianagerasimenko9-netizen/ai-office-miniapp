@@ -514,6 +514,29 @@ def chase_blocks_entry(*, direction: str, price: Any, zone_lo: Any, zone_hi: Any
     return False
 
 
+def fee_round_trip_pct() -> float:
+    import os
+
+    try:
+        v = float(os.getenv("OFFICE_DEFAULT_FEE_PCT", "0.04"))
+    except ValueError:
+        v = 0.04
+    return (v if 0 <= v < 1 else 0.04) * 2.0
+
+
+def net_rr(entry: Any, sl: Any, tp1: Any) -> Optional[Dict[str, float]]:
+    """RR від ФАКТИЧНОЇ ціни входу з урахуванням комісій (кругла): вигода мінус комісія / ризик плюс комісія. None — немає даних."""
+    e, s_, t = _f(entry), _f(sl), _f(tp1)
+    if not e or e <= 0 or s_ is None or t is None:
+        return None
+    fee = fee_round_trip_pct()
+    reward = abs(t - e) / e * 100.0
+    risk = abs(e - s_) / e * 100.0
+    if risk <= 0:
+        return None
+    return {"reward_pct": reward, "risk_pct": risk, "fee_pct": fee, "rr_gross": reward / risk, "rr_net": max(reward - fee, 0.0) / (risk + fee)}
+
+
 def validate_trade_geometry(
     *,
     direction: str,

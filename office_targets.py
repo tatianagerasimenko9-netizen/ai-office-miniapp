@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 MIN_GAP_FRAC = 0.25
+MAX_ATR_D1 = 3.0   # ціна TP2/TP3 не далі за 3×ATR(D1) від входу: далі — орієнтир, а не ціль угоди від H1/M15
 WHY = {"asia": "межа азійської сесії", "pd": "рівень попереднього дня", "week": "рівень попереднього тижня"}
 
 
@@ -33,8 +34,11 @@ def levels(*, m15: Any, daily: Any, weekly: Any) -> Dict[str, Optional[float]]:
     from office_trade_steer import _bars
 
     ar = _asia_range(_bars(m15)) if m15 else {"high": None, "low": None}
+    from office_patterns import atr
+
+    d_rows = [r for r in daily if isinstance(r, dict)][:-1] if isinstance(daily, list) else []  # без поточної, що формується
     return {"asia_high": ar.get("high"), "asia_low": ar.get("low"), "pdh": _prev(daily, "high", "max"), "pdl": _prev(daily, "low", "min"),
-            "w_high": _prev(weekly, "high", "max"), "w_low": _prev(weekly, "low", "min")}
+            "w_high": _prev(weekly, "high", "max"), "w_low": _prev(weekly, "low", "min"), "atr_d1": atr(d_rows) if len(d_rows) >= 4 else None}
 
 
 def structural_targets(*, direction: str, entry: Any, tp1: Any, lv: Dict[str, Optional[float]]) -> Dict[str, Any]:
@@ -47,8 +51,12 @@ def structural_targets(*, direction: str, entry: Any, tp1: Any, lv: Dict[str, Op
     gap = abs(t1 - e) * MIN_GAP_FRAC
     sign = 1.0 if long_ else -1.0
 
+    atr_d1 = _f(lv.get("atr_d1"))
+    reach = MAX_ATR_D1 * atr_d1 if atr_d1 else None   # немає ATR(D1) — далекі рівні не показуємо взагалі
+
     def beyond(price: Optional[float], base: float) -> bool:
-        return price is not None and sign * (price - base) >= gap
+        return (price is not None and reach is not None and sign * (price - base) >= gap
+                and sign * (price - e) <= reach)
 
     a, pd_, w = (lv.get("asia_high"), lv.get("pdh"), lv.get("w_high")) if long_ else (lv.get("asia_low"), lv.get("pdl"), lv.get("w_low"))
     cands2: List[tuple] = [("asia", a), ("pd", pd_)]

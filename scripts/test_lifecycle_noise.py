@@ -109,3 +109,20 @@ import office_desk_card as _dc  # noqa: E402
 
 assert '"tp1": tp1' in inspect.getsource(_dc.prepare_desk_send), "mark_live у prepare_desk_send має нести tp1"
 print("OK live setups carry TP1")
+
+# 7) картка «План готовий»: одне застереження наприкінці, «Діє до», без хибного RR
+import office_user_messages as M  # noqa: E402
+
+card = M.confirm_card(symbol="LSKUSDT", direction="LONG", entry=0.3035, sl=0.2953, tp1=0.3180, tp2={"price": 0.326, "why": "межа азійської сесії"},
+                      tp3=None, cancel=0.2953, why="розворот", valid_until="23:40")
+assert "ДІЄ ДО: 23:40 (Київ)" in card and card.count("Рішення") == 1 and "Це аналіз" not in card and card.strip().endswith("Офіс ордерів не ставить."), card
+assert L.plan_valid_sec("H1") == 4 * 3600 and L.plan_valid_sec("M15") == 3600
+exp = M.expired_plan_card(symbol="LSKUSDT", direction="LONG")
+assert "ЧАС ДІЇ ПЛАНУ ЗАКІНЧИВСЯ" in exp and exp.count("Рішення") == 1, exp
+# підтверджений план знімається за часом (стан сценарію)
+import office_scenario_state as SS  # noqa: E402
+
+old_row = {"status": "CONFIRMED", "ts_updated": iso(NOW - 5 * H), "analysis_note": "tf=H1"}
+assert SS._too_old(old_row, datetime.fromtimestamp(NOW, tz=timezone.utc)) is True
+assert SS._too_old(dict(old_row, ts_updated=iso(NOW - 1 * H)), datetime.fromtimestamp(NOW, tz=timezone.utc)) is False
+print("OK ready card: one caveat, valid-until, expiry")

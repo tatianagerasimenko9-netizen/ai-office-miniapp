@@ -521,7 +521,7 @@ function drawFallback(el, candles, lv){
   ctx.fillStyle='#0E141D'; ctx.fillRect(0,0,w,h);
   if(lv.zone_lo!=null && lv.zone_hi!=null){ctx.fillStyle='rgba(93,169,255,.16)'; ctx.fillRect(pad,y(lv.zone_hi),w-2*pad,y(lv.zone_lo)-y(lv.zone_hi));}
   ctx.lineWidth=2;
-  [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A']].forEach(([k,col])=>{
+  [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A'],['tp3','#27C99A'],['entry','#E8EDF4']].forEach(([k,col])=>{
     if(lv[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(lv[k])); ctx.lineTo(w-pad,y(lv[k])); ctx.stroke();});
   xs.forEach((b,i)=>{const up=b.close>=b.open; ctx.strokeStyle=ctx.fillStyle=up?'#27C99A':'#F36B78';
     ctx.beginPath(); ctx.moveTo(x(i),y(b.high)); ctx.lineTo(x(i),y(b.low)); ctx.stroke();
@@ -531,7 +531,8 @@ function chartLevels(s){
   const L=S.layers, o={};
   if(L.zone){o.zone_lo=s.zone_lo; o.zone_hi=s.zone_hi;}
   if(L.sl) o.sl=s.sl;
-  if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2;}
+  if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2; o.tp3=s.tp3;}
+  if(L.tp&&s.entry_px!=null) o.entry=s.entry_px;
   return o;
 }
 async function paintChart(el, s){
@@ -559,7 +560,7 @@ async function paintChart(el, s){
     vol.setData(candles.map(c=>({time:c.time,value:c.volume||0,color:'#243244'})));
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
-    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2);
+    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2); line(lv.tp3,'#27C99A','TP3',2); line(lv.entry,'#E8EDF4','вхід',1);
     if(S.ch){
       try{const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
       if(chp&&chp.ok){
@@ -617,6 +618,7 @@ async function openSc(id){
   const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
   const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
   const hm=d.human;
+  if(hm&&hm.levels){ s.tp1=hm.levels.tp1; s.tp2=hm.levels.tp2; s.tp3=hm.levels.tp3; s.entry_px=hm.levels.entry; if(hm.levels.sl!=null) s.sl=hm.levels.sl; }
   const humanHtml=hm?`<div class="card">
       <div class="top"><span class="sym">${esc(hm.ticker)}</span><span class="side ${side(s.direction)}">${esc(hm.action_ua)}</span></div>
       <div class="st ${esc(hm.tone)}">${esc(hm.icon)} ${esc(hm.state_ua)}</div>
@@ -628,7 +630,7 @@ async function openSc(id){
     ${hm.wait?`<div class="sec"><h3>Чого чекаємо</h3><p>${esc(hm.wait)}</p></div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
     ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry)}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
-      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div></div>`:''}
+      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Діє до ${esc(hm.plan.valid_until)} (Київ). Якщо входу не буде — план знімається.</div>`:''}</div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
     ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}

@@ -86,10 +86,23 @@ def _confirmed_px(row: Dict[str, Any]) -> Optional[float]:
     return _f(m.group(1)) if m else None
 
 
+def _tf_from_row(row: Dict[str, Any]) -> str:
+    m = re.search(r"(?:tf|timeframe)=([A-Za-z0-9]+)", str(row.get("analysis_note") or ""))
+    return (m.group(1) if m else "H1").upper()
+
+
 def _too_old(row: Dict[str, Any], now: Optional[datetime]) -> bool:
     """Картка Лева живе TTL її таймфрейму (H1 — 12 год, M15 — 3 год); підтверджений план не застарює за часом."""
     if str(row.get("status") or "").upper() == "CONFIRMED":
-        return False
+        # підтверджений план діє обмежений час (див. office_scenario_lifecycle.plan_valid_sec), далі знімається
+        try:
+            from office_scenario_lifecycle import _ts, plan_valid_sec
+
+            m = re.search(r"(?:tf|timeframe)=([A-Za-z0-9]+)", str(row.get("analysis_note") or ""))
+            t0 = _ts(row.get("ts_updated"))
+            return bool(t0 and (now or datetime.now(timezone.utc)).timestamp() > t0 + plan_valid_sec(m.group(1) if m else "H1"))
+        except Exception:  # noqa: BLE001
+            return False
     try:
         from office_confluence import ttl_sec
 
@@ -180,6 +193,15 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 fee = float(os.getenv("OFFICE_DEFAULT_FEE_PCT", "0.04") or 0.04) * 2
                 to_tp1 = abs(tp1 - entry) / entry * 100.0
                 to_sl = abs(entry - sl) / entry * 100.0
+                v["levels"] = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": (tg.get("tp2") or {}).get("price"), "tp3": (tg.get("tp3") or {}).get("price"), "cancel": cancel}
+                try:
+                    from office_scenario_lifecycle import kyiv_hhmm, plan_valid_sec, _ts as _lts
+
+                    t_conf = _lts(row.get("ts_updated"))
+                    if t_conf:
+                        v["plan"]["valid_until"] = kyiv_hhmm(t_conf + plan_valid_sec(_tf_from_row(row)))
+                except Exception:  # noqa: BLE001
+                    pass
                 v["plan"]["potential"] = f"до цілі 1 ≈ {to_tp1:.2f}% (≈ {max(to_tp1 - fee, 0):.2f}% після комісій), до стопа ≈ {to_sl:.2f}%".replace(".", ",")
         elif missing:
             state = "NOT_READY"
