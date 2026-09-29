@@ -263,8 +263,11 @@ def scenario_card(row: Dict[str, Any], *, has_position: bool = False) -> Dict[st
         "potential": None if pot.get("pct") is None else f"{pot['pct']:.1f}%",
         "tick": format(tick_size_for(sym, mid if mid is not None else row.get("sl")), "f"),
     }
+    from office_scenario_state import list_label
+
     return {
         "scenario_id": row.get("signal_id"),
+        "human": list_label(row),
         "symbol": row.get("symbol"),
         "direction": row.get("direction"),
         "status_raw": row.get("status"),
@@ -413,17 +416,58 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         thesis = latest_thesis(_db(), sid)
     except Exception:
         thesis = None
+    human = None
+    try:
+        human = _human_view(row, thesis, events)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mini] human view failed {sid}: {type(exc).__name__}: {exc}")
     return {
         "ok": True,
         "readonly": True,
         "data_status": "DATA_OK",
         "scenario": card,
+        "human": human,
         "events": events,
         "thesis": thesis,
         "execution": execution,
         "has_position": pos,
         "hypothetical": not pos,
     }
+
+
+def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Людський стан сценарію (єдина логіка зі Telegram): свіжа ціна + цілі за рівнями + суворі умови готовності."""
+    from office_lev_watch import check_plan
+    from office_scenario_state import build
+    from office_targets import levels, structural_targets
+    from office_market_data import fetch_candles
+
+    sym = str(row.get("symbol") or "").upper()
+    price = _live_price(sym)
+    targets = None
+    lo, hi, tp1 = _f(row.get("entry_low")), _f(row.get("entry_high")), _f(row.get("tp1"))
+    if not _fixture_on() and tp1 is not None and lo is not None and hi is not None:
+        try:
+            lv = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 5), weekly=fetch_candles(sym, "1w", 4))
+            targets = structural_targets(direction=str(row.get("direction") or ""), entry=(lo + hi) / 2.0, tp1=tp1, lv=lv)
+        except Exception:  # noqa: BLE001
+            targets = None
+    v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=check_plan)
+    if v.get("state") == "READY":
+        try:  # цілі 2/3 від фактичного входу, а не від середини зони
+            entry = float(v_entry(row))
+            lv2 = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 5), weekly=fetch_candles(sym, "1w", 4))
+            tg = structural_targets(direction=str(row.get("direction") or ""), entry=entry, tp1=tp1, lv=lv2)
+            v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=check_plan)
+        except Exception:  # noqa: BLE001
+            pass
+    return v
+
+
+def v_entry(row: Dict[str, Any]) -> float:
+    from office_scenario_state import _confirmed_px
+
+    return float(_confirmed_px(row))
 
 
 def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:

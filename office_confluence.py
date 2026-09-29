@@ -989,6 +989,7 @@ def follow_setup(
             "price": retest_px,
             "detail": f"{names} + ретест у зоні після пробою",
             "need_retest": False,
+            "confirms": confirms,
         }
     if inside and confirms:
         from office_telegram_filter import format_level_span
@@ -1000,6 +1001,7 @@ def follow_setup(
             "price": cl,
             "detail": f"{names} + закриття в зоні {format_level_span(lo, hi)}",
             "need_retest": False,
+            "confirms": confirms,
         }
     return {"action": "hold", "reason": "чекаємо"}
 

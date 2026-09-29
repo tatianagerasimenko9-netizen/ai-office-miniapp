@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 import math
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 from urllib.parse import urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -31,7 +33,39 @@ def _px(value: Any, symbol: str) -> str:
     return format_px(value, symbol) or str(value)
 
 
+class RateLimited(Exception):
+    """Binance відповів 418/429: тимчасово не б'ємо в джерело."""
+
+    def __init__(self, retry_after: float):
+        super().__init__(f"rate limited, retry after {retry_after:.0f}s")
+        self.retry_after = float(retry_after)
+
+
+_BACKOFF_UNTIL = 0.0
+_HEALTH: Dict[str, Any] = {"ok": 0, "errors": 0, "rate_limited": 0, "stale_served": 0, "last_429_at": None}
+_CANDLE_TTL = {"1m": 20, "3m": 30, "5m": 45, "15m": 60, "30m": 90, "1h": 180, "2h": 300, "4h": 600, "1d": 1800, "1w": 3600}
+_MAX_STALE_SEC = 20 * 60          # старіші за це закешовані свічки не віддаємо навіть при збої джерела
+_CANDLE_CACHE: Dict[tuple, tuple] = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def source_health() -> Dict[str, Any]:
+    """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
+    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1))}
+
+
+def reset_market_cache() -> None:
+    global _BACKOFF_UNTIL
+    with _CACHE_LOCK:
+        _CANDLE_CACHE.clear()
+    _BACKOFF_UNTIL = 0.0
+
+
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
+    global _BACKOFF_UNTIL
+    now = time.time()
+    if "binance" in url and now < _BACKOFF_UNTIL:
+        raise RateLimited(_BACKOFF_UNTIL - now)
     qs = urlencode(params)
     full_url = f"{url}?{qs}" if qs else url
     req = Request(
@@ -41,15 +75,45 @@ def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
             "Accept": "application/json,text/plain,*/*",
         },
     )
-    with urlopen(req, timeout=12) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        with urlopen(req, timeout=12) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        if exc.code in (418, 429):
+            try:
+                ra = float(exc.headers.get("Retry-After") or 30)
+            except (TypeError, ValueError):
+                ra = 30.0
+            ra = min(max(ra, 5.0), 300.0)
+            _BACKOFF_UNTIL = time.time() + ra
+            _HEALTH["rate_limited"] += 1
+            _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()
+            raise RateLimited(ra) from exc
+        raise
+    _HEALTH["ok"] += 1
     return json.loads(raw)
+
+
+def _parse_klines(data: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not isinstance(data, list):
+        return out
+    for row in data:
+        if not isinstance(row, list) or len(row) < 6:
+            continue
+        ts_ms = int(row[0])
+        out.append({"open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4]),
+                    "volume": float(row[5]), "ts": datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).isoformat()})
+    return out
 
 
 def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Fetch futures candles from Binance for any USDT symbol.
-    Returns list of candles or {} on failure.
+    Futures-свічки Binance для будь-якої USDT-пари. Список свічок або {} при збої.
+
+    Кеш за (монета, ТФ) з коротким TTL, один запит замість десятків; при 429/збої віддає останній
+    закешований набір (до 20 хв) — свіжість далі оцінюють споживачі за часом свічки, тож застарілі дані
+    не видаються за свіжі. OFFICE_CANDLE_CACHE=0 вимикає кеш.
     """
     try:
         sym = str(symbol or "").upper().strip()
@@ -57,30 +121,36 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
             return {}
         if not sym.endswith("USDT"):
             sym = f"{sym}USDT"
-        data = _http_get_json(
-            "https://fapi.binance.com/fapi/v1/klines",
-            {"symbol": sym, "interval": tf, "limit": int(limit)},
-        )
-        out: List[Dict[str, Any]] = []
-        if not isinstance(data, list):
+        lim = int(limit)
+        use_cache = os.getenv("OFFICE_CANDLE_CACHE", "1").strip() != "0"
+        key = (sym, str(tf))
+        now = time.time()
+        hit = None
+        if use_cache:
+            with _CACHE_LOCK:
+                hit = _CANDLE_CACHE.get(key)
+            ttl = _CANDLE_TTL.get(str(tf), 60)
+            if hit and now - hit[0] < ttl and hit[1] >= lim:
+                return hit[2][-lim:]
+        want = max(lim, hit[1] if hit else 0)
+        try:
+            data = _http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": sym, "interval": tf, "limit": want})
+            rows = _parse_klines(data)
+            if not rows:
+                raise ValueError("empty klines")
+        except Exception:  # noqa: BLE001
+            _HEALTH["errors"] += 1
+            if use_cache and hit and now - hit[0] <= _MAX_STALE_SEC and hit[2]:
+                _HEALTH["stale_served"] += 1
+                return hit[2][-lim:]
             return {}
-        for row in data:
-            if not isinstance(row, list) or len(row) < 6:
-                continue
-            ts_ms = int(row[0])
-            ts = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).isoformat()
-            out.append(
-                {
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "volume": float(row[5]),
-                    "ts": ts,
-                }
-            )
-        return out
-    except Exception:
+        if use_cache:
+            with _CACHE_LOCK:
+                if len(_CANDLE_CACHE) > 3000:
+                    _CANDLE_CACHE.clear()
+                _CANDLE_CACHE[key] = (now, want, rows)
+        return rows[-lim:]
+    except Exception:  # noqa: BLE001
         return {}
 
 

@@ -29,6 +29,16 @@ def _vol_sma(rows: List[Dict[str, Any]], n: int = 20) -> Optional[float]:
     return sum(vols) / float(n)
 
 
+def _vol_sma_at(rows: List[Dict[str, Any]], idx: int, n: int = 20) -> Optional[float]:
+    """SMA(volume, 20) на конкретній свічці (Pine: vol_sma[back]); недостатньо історії → None (умова хибна, як na в Pine)."""
+    if idx < n - 1 or idx >= len(rows):
+        return None
+    vols = [rows[k].get("volume") for k in range(idx - n + 1, idx + 1)]
+    if any(v is None for v in vols):
+        return None
+    return sum(float(v) for v in vols) / float(n)
+
+
 def _rsi(rows: List[Dict[str, Any]]) -> Optional[float]:
     from office_rsi_heat import rsi_from_candles
 
@@ -95,10 +105,11 @@ def evaluate_pump_dump(
     for back in range(1, min(16, len(rows))):
         b = rows[-1 - back]
         bv = b.get("volume")
-        if bv is None:
+        vs_b = _vol_sma_at(rows, len(rows) - 1 - back)   # як у Pine: vol_sma[back], а не поточне середнє
+        if bv is None or vs_b is None:
             continue
-        br = float(b["close"]) < float(b["open"]) and (float(b["open"]) - float(b["close"])) / float(b["open"]) > 0.015 and float(bv) > vsma * 1.8
-        wd = (float(b["open"]) - float(b["low"])) > (float(b["high"]) - float(b["close"])) * 1.5 and float(bv) > vsma * 1.3
+        br = float(b["close"]) < float(b["open"]) and (float(b["open"]) - float(b["close"])) / float(b["open"]) > 0.015 and float(bv) > vs_b * 1.8
+        wd = (float(b["open"]) - float(b["low"])) > (float(b["high"]) - float(b["close"])) * 1.5 and float(bv) > vs_b * 1.3
         if br or wd:
             conf = close > opn and close > float(rows[-2]["close"])
             if conf:
@@ -156,10 +167,11 @@ def evaluate_pump_dump(
     for back in range(1, min(16, len(rows))):
         b = rows[-1 - back]
         bv = b.get("volume")
-        if bv is None:
+        vs_b = _vol_sma_at(rows, len(rows) - 1 - back)
+        if bv is None or vs_b is None:
             continue
-        bg = float(b["close"]) > float(b["open"]) and (float(b["close"]) - float(b["open"])) / float(b["open"]) > 0.015 and float(bv) > vsma * 1.8
-        wu = (float(b["high"]) - float(b["close"])) > (float(b["close"]) - float(b["low"])) * 1.5 and float(bv) > vsma * 1.3
+        bg = float(b["close"]) > float(b["open"]) and (float(b["close"]) - float(b["open"])) / float(b["open"]) > 0.015 and float(bv) > vs_b * 1.8
+        wu = (float(b["high"]) - float(b["close"])) > (float(b["close"]) - float(b["low"])) * 1.5 and float(bv) > vs_b * 1.3
         if bg or wu:
             conf = close < opn and close < float(rows[-2]["close"])
             if conf:
@@ -216,6 +228,8 @@ def evaluate_pump_dump(
         "eq": lv.get("eq"),
         "ote_model": "pump_dump_0.786",
         "eq_model": "pump_dump_0.5",
+        "parts_l": {"vol": vol_score, "delev": delev, "acc": acc, "skviz": skviz, "structure": str_l, "levels": lvl_l},
+        "parts_s": {"vol": vol_score, "exhaust": exhaust, "acc": acc, "overbuy": overbuy, "structure": str_s, "levels": lvl_s},
         "watch_l": WATCH_MIN <= total_l < SIGNAL_MIN and bool(fresh_l),
         "watch_s": WATCH_MIN <= total_s < SIGNAL_MIN and bool(fresh_s),
     }

@@ -173,6 +173,8 @@ from office_rsi_heat import exhaustion_candle, rsi_from_candles
 from office_lev_verdict import lev_cycle
 import office_lev_dialog as _lev_dialog
 import office_lev_watch as _lev_watch
+import office_targets as _targets
+import office_user_messages as _msgs
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -6766,17 +6768,28 @@ EV позитивне: {prob.get('ev_positive', '')}
                         if not cg.get("send"):
                             print(f"[confluence] confirm hold {key}: {cg.get('reason')}")
                             continue
+                        plan_px = fu.get("price") or px_f
+                        try:
+                            tgt = _targets.structural_targets(
+                                direction=str(st.get("direction") or ""), entry=plan_px, tp1=st.get("tp1"),
+                                lv=_targets.levels(m15=fetch_candles(sym_f, "15m", 96), daily=fetch_candles(sym_f, "1d", 5),
+                                                   weekly=fetch_candles(sym_f, "1w", 4)))
+                        except Exception as exc_t:
+                            print(f"[confluence] targets {sym_f}: {type(exc_t).__name__}: {exc_t}")
+                            tgt = {}
+                        try:
+                            plan_bad = _lev_watch.check_plan(sym_f, str(st.get("direction") or ""),
+                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1")},
+                                                             st.get("zone_lo"), st.get("zone_hi"))
+                        except Exception as exc_p:
+                            plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
-                            fmt_agent_line(
-                                "lev",
-                                format_confirm_card(
-                                    symbol=sym_f,
-                                    direction=str(st.get("direction") or ""),
-                                    price=fu.get("price") or px_f,
-                                    detail=str(fu.get("detail") or fu.get("reason") or ""),
-                                ),
-                            ),
+                            _msgs.confirm_card(
+                                symbol=sym_f, direction=str(st.get("direction") or ""), entry=plan_px, sl=st.get("sl"),
+                                tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), cancel=st.get("sl"),
+                                why=(_msgs.plain_confirms(list(fu.get("confirms") or [])) or str(fu.get("reason") or "")),
+                                bad=plan_bad),
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
@@ -6809,14 +6822,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     elif act == "cancel":
                         await send_proactive(
                             EVENT_TRADE_UPDATE,
-                            fmt_agent_line(
-                                "lev",
-                                format_cancel_card(
-                                    symbol=sym_f,
-                                    direction=str(st.get("direction") or ""),
-                                    reason=str(fu.get("reason") or ""),
-                                ),
-                            ),
+                            _msgs.cancel_card(symbol=sym_f, direction=str(st.get("direction") or ""),
+                                              reason=str(fu.get("reason") or ""), level=st.get("sl")),
                             symbol=sym_f,
                             kind="CANCEL_BEFORE_ENTRY",
                             intent="ANALYTICAL",

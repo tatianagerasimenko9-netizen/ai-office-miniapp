@@ -38,7 +38,7 @@ def shifted(rows, sec, shift):
 NOW = END.timestamp()
 STATE = {"shift": timedelta(0)}
 def fake_fetch(sym, interval, n=100):
-    key = {"15m": ("15m", 900), "1h": ("1h", 3600), "4h": ("1h", 3600), "1d": ("1d", 86400)}[interval]
+    key = {"15m": ("15m", 900), "1h": ("1h", 3600), "4h": ("1h", 3600), "1d": ("1d", 86400), "1w": ("1d", 86400)}[interval]
     rows = shifted(syn[key[0]], key[1], STATE["shift"])
     return rows[-n:]
 MD.fetch_candles = fake_fetch
@@ -49,7 +49,7 @@ assert D.parse_command("Левада привіт") is None and D.parse_command(
 r = D.answer(db, "Лев, аналіз BTC", now=NOW)
 assert r["ok"] and r["symbol"] == "BTCUSDT" and r["verdict"] in ("PLAN", "WAIT", "NO_TRADE"), r
 assert r["text"].split("\n")[0].startswith(("🟡 BTC", "🟢 BTC", "⚪ BTC", "🔴 BTC")) and "не ордер" in r["text"] and not r["data_stale"], r["text"]
-assert "ЩО ЗАРАЗ" in r["text"] and "Risk Officer" not in r["text"] and "LONG" not in r["text"] and "WATCHING" not in r["text"], r["text"]
+assert "ЗАРАЗ" in r["text"] and "Risk Officer" not in r["text"] and "LONG" not in r["text"] and "WATCHING" not in r["text"], r["text"]
 assert r["order_authorized"] is False
 # уточнення: інвалідація і причина — окремі, змістовні відповіді
 inv = D.answer(db, "а де інвалідація?", symbol="BTCUSDT", now=NOW)

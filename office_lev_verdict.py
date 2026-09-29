@@ -375,13 +375,14 @@ def collect_indicator_stances(
     candles_h1: Any = None,
     candles_d1: Any = None,
     pine_alerts: Any = None,
+    candles_w: Any = None,
 ) -> Dict[str, Any]:
     m15 = candles_m15 if isinstance(candles_m15, list) else []
     m5 = candles_m5 if isinstance(candles_m5, list) else []
     h1 = candles_h1 if isinstance(candles_h1, list) else []
     d1 = candles_d1 if isinstance(candles_d1, list) else []
     pd_src = m15 if len(m15) >= 22 else (m5 if len(m5) >= 22 else m15)
-    pd = evaluate_pump_dump(candles=pd_src, daily=d1)
+    pd = evaluate_pump_dump(candles=pd_src, daily=d1, weekly=candles_w if isinstance(candles_w, list) else None)  # тижневі рівні з Pine (w_h/w_l)
     hunt_src = m15 if len(m15) >= 8 else h1
     hunt = evaluate_ict_hunter(candles=hunt_src, timeframe="M15", daily=d1)
     ch = regression_channel(h1 if len(h1) >= 12 else m15)
@@ -665,5 +666,6 @@ def lev_cycle(
             candles_h1=candles_h1,
             candles_d1=candles_d1,
             pine_alerts=pine_alerts,
+            candles_w=candles_w,
         )
     return finalize_lev(draft, st, risk_context=risk_context)

@@ -186,7 +186,7 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
             await page.focus("[data-id]")
             await page.keyboard.press("Enter")
             await page.wait_for_timeout(800)
-            if "Торговий план" not in await page.content():
+            if "Для перевірки" not in await page.content():
                 problems.append(f"{name}: Enter on a card did not open it")
             if await page.evaluate("document.querySelector('nav button.on')?.getAttribute('aria-current')") is None:
                 problems.append(f"{name}: active tab lacks aria-current")
