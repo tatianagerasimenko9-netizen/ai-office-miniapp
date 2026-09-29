@@ -6588,7 +6588,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             analysis_note=(
                                                 f"{cycle.get('action')} {cycle.get('reason') or ''} "
                                                 f"{cycle.get('recheck') or ''}"
-                                            )[:2000],
+                                            )[:1900]
+                                            + (f" cancel={cycle.get('sl')}" if cycle.get("sl") is not None else "")
+                                            + " confirm=M15",
                                         )
                         except Exception as exc_pd:
                             print(f"[lev] {rsym}: {type(exc_pd).__name__}: {exc_pd}")

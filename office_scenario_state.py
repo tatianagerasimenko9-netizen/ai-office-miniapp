@@ -71,7 +71,10 @@ def _cancel_level(row: Dict[str, Any], thesis: Optional[Dict[str, Any]]) -> Opti
     return None
 
 
-def _confirm_tf(thesis: Optional[Dict[str, Any]]) -> Optional[str]:
+def _confirm_tf(thesis: Optional[Dict[str, Any]], row: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    m0 = re.search(r"\bconfirm=(M5|M15|H1)\b", str((row or {}).get("analysis_note") or ""))
+    if m0:
+        return m0.group(1)
     c = (thesis or {}).get("confirmation")
     text = " ".join(str(x) for x in c) if isinstance(c, list) else str(c or "")
     m = re.search(r"\b(M5|M15|H1)\b", text)
@@ -122,7 +125,7 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         lo, hi = hi, lo
     tp1, sl = _f(row.get("tp1")), _f(row.get("sl"))
     cancel = _cancel_level(row, thesis)
-    ctf = _confirm_tf(thesis)
+    ctf = _confirm_tf(thesis, row)
     up = "вгору" if side != "SHORT" else "вниз"
     cross = "нижче" if side != "SHORT" else "вище"
     dont = "не купувати" if side != "SHORT" else "не продавати"

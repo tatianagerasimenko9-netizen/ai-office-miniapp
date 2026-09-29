@@ -104,3 +104,16 @@ assert T.structural_targets(direction="SHORT", entry=100, tp1=97, lv={"asia_low"
 assert T.structural_targets(direction="LONG", entry=100, tp1=103, lv={"asia_high": 103.1})["tp2"] is None
 assert T.structural_targets(direction="LONG", entry=100, tp1=103, lv={})["tp2"] is None
 print("OK scenario state: one truth for Telegram+Mini App, strict READY, no contradictions, structural TP2/TP3, plain language")
+
+# рядок «lev-watch-*» з новою приміткою: рівень скасування й умова підтвердження записані → сторінка не каже «не визначено»
+from datetime import datetime as _D, timezone as _Z
+import office_scenario_state as _S
+_row = {"signal_id": "lev-watch-BTCUSDT-1", "symbol": "BTCUSDT", "direction": "LONG", "entry_low": 100.0, "entry_high": 101.0, "sl": 98.0, "tp1": 106.0,
+        "status": "WATCHING", "ts_created": NOW.isoformat(), "ts_updated": NOW.isoformat(),
+        "analysis_note": "WAIT чекаю cancel=98.0 confirm=M15"}
+_v = _S.build(_row, thesis=None, price={**FRESH, "price": 103.0}, targets=None, events=[], plan_check=None)
+assert not any("скасування" in m or "підтвердження" in m for m in _v["missing"]), _v["missing"]
+_row2 = dict(_row, analysis_note="WAIT чекаю")
+_v2 = _S.build(_row2, thesis=None, price={**FRESH, "price": 103.0}, targets=None, events=[], plan_check=None)
+assert any("скасування" in m for m in _v2["missing"]) and any("підтвердження" in m for m in _v2["missing"])
+print("OK legacy watch rows: cancel/confirm from note; old rows stay honest")
