@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 os.environ["OFFICE_DEPO_USDT"] = "1000"
+os.environ["OFFICE_TG_POSITION_SUPPORT"] = "1"  # логіка шлюзу; прапорець за замовчуванням вимкнено — див. окремий тест
 
 from office_alert_gate import (  # noqa: E402
     apply_setup_event,
@@ -301,6 +302,14 @@ def main() -> int:
     if g_unk2.get("send"):
         return _fail("unknown/closed via lookup")
     print("OK закрита/невідома позиція не отримує інструкцій")
+    os.environ.pop("OFFICE_TG_POSITION_SUPPORT", None)
+    g_off = gate_outbound_telegram(
+        intent="POSITION_MANAGE", text=tp1, in_position=True, position_id=rec["trade_id"], position_open=True,
+        event_type="TRADE_UPDATE", db_path=db, symbol="MANTAUSDT", direction="SHORT",
+    )
+    if g_off.get("send"):
+        return _fail(f"position support must be off by default {g_off}")
+    print("OK супровід позицій у Telegram вимкнено за замовчуванням (OFFICE_TG_POSITION_SUPPORT)")
     print("OK: test_telegram_position_gate")
     return 0
 

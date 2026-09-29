@@ -36,6 +36,9 @@ def _seed(db: str) -> None:
     from office_bridge import init_office_db, log_event, signal_upsert
 
     init_office_db(db)
+    import office_positions as P
+
+    P.migrate_positions(db)
     signal_upsert(db, signal_id="xss-1", symbol="XSSUSDT" + XSS, direction="LONG", entry_low=1.0, entry_high=1.1,
                   sl=0.9, tp1=1.4, tp2=None, rr=None, status="ACTIVE",
                   analysis_note=f"Чекаю {XSS}\nЩо скасує: {XSS}\nЧому сценарій: {XSS}")
@@ -67,6 +70,63 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+KEY = "smoke-write-key-0123456789"
+
+
+async def _trades_flow(browser, base: str, name: str, vp: dict, lwc: str, posix: bool) -> list:
+    """Ручний облік у браузері: внесення, частковий вихід, перенесення стопа, закриття; без ключа — явна відмова."""
+    problems: list = []
+    page = await browser.new_page(viewport=vp)
+    await _prep(page, lwc, posix)
+    errs: list = []
+    page.on("pageerror", lambda e: errs.append(str(e)))
+    await page.goto(base + "/v2")
+    await page.click("nav button[data-r=journal]")
+    await page.wait_for_selector("#addpos")
+    if "Мої угоди" not in await page.content():
+        problems.append(f"{name}: journal does not default to «Мої угоди»")
+    await page.click("#addpos")
+    sym = "ETHUSDT" if name == "phone" else "SOLUSDT"
+    await page.fill("#f_symbol", sym)
+    await page.fill("#f_entry", "2000,5")
+    await page.fill("#f_qty", "0.5")
+    await page.fill("#f_sl", "1950")
+    await page.fill("#f_tp1", "2100")
+    await page.click("#fsend")
+    await page.wait_for_timeout(700)
+    if "Немає доступу" not in await page.inner_text("#fmsg"):
+        problems.append(f"{name}: write without key must be refused with a clear message")
+    await page.evaluate(f"localStorage.setItem('ao_wkey','{KEY}')")
+    await page.click("#fsend")
+    await page.wait_for_function("document.body.innerText.includes('Ризик зараз')")
+    txt = await page.inner_text("main")
+    if sym not in txt or "Ризик зараз" not in txt:
+        problems.append(f"{name}: opened position not shown with risk")
+    sw = await page.evaluate("document.documentElement.scrollWidth")
+    if sw > vp["width"] + 1:
+        problems.append(f"{name}/trades: horizontal scroll {sw}")
+    await page.click("[data-a=partial]")
+    await page.fill("#f_price", "2050")
+    await page.fill("#f_qty", "0.2")
+    await page.click("#fsend")
+    await page.wait_for_timeout(700)
+    await page.click("[data-a=move_sl]")
+    await page.fill("#f_sl", "2000.5")
+    await page.click("#fsend")
+    await page.wait_for_timeout(700)
+    await page.click("[data-a=close]")
+    await page.fill("#f_price", "2080")
+    await page.click("#fsend")
+    await page.wait_for_function("document.body.innerText.includes('Немає внесених відкритих')")
+    txt = await page.inner_text("main")
+    if "Немає внесених відкритих" not in txt or "Результат" not in txt:
+        problems.append(f"{name}: closed trade/result not shown")
+    if errs:
+        problems.append(f"{name}/trades: JS errors {errs[:3]}")
+    await page.close()
+    return problems
 
 
 async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "", posix: bool = False) -> list:
@@ -133,6 +193,7 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
             if errs:
                 problems.append(f"{name}: JS errors {errs[:3]}")
             await page.close()
+            problems += await _trades_flow(browser, base, name, vp, lwc, posix)
 
         # API failure -> explicit error state, no stale numbers.
         page = await browser.new_page(viewport={"width": 390, "height": 844})
@@ -174,7 +235,8 @@ def main() -> int:
     _seed(db)
     port = _free_port()
     env = {**os.environ, "OFFICE_DB_PATH": db, "OFFICE_MINI_FIXTURE": "1", "OFFICE_EXINFO_SEED": "1",
-           "OFFICE_MINI_PORT": str(port), "OFFICE_MINI_HOST": "127.0.0.1", "DATABASE_URL": ""}
+           "OFFICE_MINI_PORT": str(port), "OFFICE_MINI_HOST": "127.0.0.1", "DATABASE_URL": "",
+           "OFFICE_WRITE_KEY": KEY}
     proc = subprocess.Popen([sys.executable, "-u", str(ROOT / "office_mini_app.py")], env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -193,7 +255,7 @@ def main() -> int:
     if problems:
         print("FAIL UI smoke:\n  " + "\n  ".join(problems))
         return 1
-    print("OK UI smoke: 5 tabs x phone/desktop, no h-scroll, XSS inert, API error and loading states")
+    print("OK UI smoke: 5 tabs x phone/desktop, manual trade flow, no h-scroll, XSS inert, API error and loading states")
     return 0
 
 

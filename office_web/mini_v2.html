@@ -71,13 +71,21 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-
 .sk{height:14px;background:linear-gradient(90deg,#151D29,#1D2938,#151D29);background-size:200% 100%;animation:s 1.2s infinite;border-radius:6px;margin:10px 0}
 @keyframes s{to{background-position:-200% 0}}
 .err{border-color:var(--short)}
+.frm label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+.frm input,.frm select,.frm textarea{width:100%;box-sizing:border-box;background:var(--raise);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;min-height:44px}
+.frm .row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.btn{border:1px solid var(--acc);background:transparent;color:var(--acc);border-radius:12px;padding:10px 14px;font-size:14px;min-height:44px}
+.btn.pri{background:var(--acc);color:#0B1119;font-weight:600}
+.btn.warn{border-color:var(--short);color:var(--short)}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.msg{margin:8px 0;font-size:13px}.msg.bad{color:var(--short)}.msg.ok{color:var(--long)}
 </style>
 </head>
 <body>
 <header>
   <div style="min-width:0">
     <h1>AI Office</h1>
-    <div class="mut" id="sub">Лише читання · не ордер</div>
+    <div class="mut" id="sub">Ручний облік · не ордер</div>
   </div>
   <span class="pill" id="stale" role="status"><span class="dot"></span> дані</span>
 </header>
@@ -97,14 +105,18 @@ const NA='Не визначено';
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'scenarios',
+const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
   layers:{zone:true,sl:true,tp:true}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
+let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
 async function j(url){
+  const t=RT;
   const r=await fetch(url,{cache:'no-store'});
   if(!r.ok) throw new Error('HTTP '+r.status);
-  return r.json();
+  const d=await r.json();
+  if(t!==RT){const e=new Error('stale'); e.stale=true; throw e;}
+  return d;
 }
 function side(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'S':'L';}
 function sideTxt(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'▼ SHORT':(s==='LONG'?'▲ LONG':esc(s||'—'));}
@@ -117,6 +129,7 @@ function ago(ts){
 function hhmm(ts){const t=Date.parse(ts); if(!isFinite(t)) return esc(ts||''); return new Date(t).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function pill(st){st=st||{}; return `<span class="pill ${esc(st.group||'')}">${esc(st.icon||'•')} ${esc(st.short||st.code||'—')}</span>`;}
 function fail(e, what){
+  if(e&&e.stale) return;
   app.innerHTML=`<div class="card err"><b>Не вдалося завантажити ${esc(what)}</b>
     <div class="mut">${esc(e&&e.message||e)} · дані не показано, щоб не вводити в оману</div>
     <button class="back" id="retry">Спробувати ще раз</button></div>`;
@@ -153,13 +166,15 @@ function chips(items, curv, attr){
 
 /* ---------- Офіс ---------- */
 async function office(){
+  const T0=++RT;
   app.innerHTML='<div class="sk"></div><div class="sk"></div>';
   let d,ov,sc;
   let ses=null;
   try{[d,ov,sc]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview'), j('/api/v2/scenarios?watching=1')]);}
   catch(e){return fail(e,'огляд офісу');}
-  try{ses=await j('/api/v2/session');}catch(e){ses=null;}
-  $('sub').textContent=`${una(d.db_backend)} · git ${String(d.git_sha||'—').slice(0,7)} · лише читання`;
+  try{ses=await j('/api/v2/session');}catch(e){if(e.stale) return; ses=null;}
+  if(T0!==RT) return;
+  $('sub').textContent=`${una(d.db_backend)} · git ${String(d.git_sha||'—').slice(0,7)} · облік вручну · ордерів немає`;
   const b=d.btc||{}, se=d.sessions||{};
   const all=sc.scenarios||[];
   const live=all.filter(s=>(s.status||{}).group==='live');
@@ -211,6 +226,7 @@ function sessionHtml(b){
 
 /* ---------- Радар ---------- */
 async function radar(){
+  const T0=++RT;
   app.innerHTML='<div class="sk"></div>';
   let d,sc; try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
   const rows=d.candidates||[];
@@ -233,6 +249,7 @@ async function radar(){
 
 /* ---------- Сценарії ---------- */
 async function scenarios(){
+  const T0=++RT;
   app.innerHTML='<div class="sk"></div>';
   let d; try{d=await j('/api/v2/journal?kind=scenarios');}catch(e){return fail(e,'сценарії');}
   const all=d.rows||[];
@@ -249,7 +266,9 @@ async function scenarios(){
 
 /* ---------- Журнал ---------- */
 async function journal(){
-  const kind=S.jkind;
+  const T0=++RT;
+  const kind=S.jkind==='positions'?'trades':S.jkind;
+  if(kind==='trades') return trades();
   let d; try{d=await j('/api/v2/journal?kind='+kind);}catch(e){return fail(e,'журнал');}
   let body='';
   if(kind==='stats'){
@@ -278,9 +297,125 @@ async function journal(){
       ||'<div class="empty">Журнал сценаріїв порожній</div>';
   }
   app.innerHTML=`<div class="banner">Історія фактичних записів. Минуле не переписується.</div>
-    ${chips([['scenarios','Сценарії'],['audit','Аудит рішень'],['positions','Позиції /position'],['stats','Статистика']],kind,'k')}${body}`;
+    ${jchips(kind)}${kind==='stats'?'<div class="banner">Модельна статистика сценаріїв — це не ваші реальні угоди.</div>':''}${body}`;
   app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
   bindCards();
+}
+/* ---------- Мої угоди (ручний облік; ордерів немає) ---------- */
+function jchips(kind){
+  return chips([['trades','Мої угоди'],['scenarios','Сценарії (симуляція)'],['audit','Аудит рішень'],['stats','Модельна статистика']],kind,'k');
+}
+function tgInit(){
+  try{ if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData) return Telegram.WebApp.initData; }catch(e){}
+  try{ const m=/[#&]tgWebAppData=([^&]+)/.exec(location.hash||''); if(m) return decodeURIComponent(m[1]); }catch(e){}
+  return '';
+}
+function newKey(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+Math.random().toString(16).slice(2));}
+const ERR_UA={write_disabled:'Запис вимкнено на сервері (не задано OFFICE_OWNER_TG_IDS або OFFICE_WRITE_KEY).',
+  unauthorized:'Немає доступу: відкрийте застосунок із Telegram або введіть ключ запису.',
+  rate_limited:'Забагато невдалих спроб. Зачекайте кілька хвилин.',bad_signature:'Підпис Telegram недійсний.',
+  init_data_expired:'Сесія Telegram застаріла — перевідкрийте застосунок.',not_owner:'Цей акаунт не має права запису.',
+  db_unavailable:'База даних недоступна — запис не виконано.',schema_missing:'Облік угод ще не активовано (потрібна міграція).'};
+async function post(action, body){
+  const h={'Content-Type':'application/json'};
+  const ti=tgInit(); if(ti) h['X-Telegram-Init-Data']=ti;
+  const k=lsGet('ao_wkey',''); if(k) h['X-Office-Write-Key']=k;
+  let r,d;
+  try{ r=await fetch('/api/v2/trade/'+action,{method:'POST',headers:h,body:JSON.stringify(body)}); d=await r.json(); }
+  catch(e){ return {ok:false,message:'Немає зв’язку із сервером — запис не виконано.'}; }
+  if(!d.ok) d.message=d.message||ERR_UA[d.error]||('Помилка: '+(d.error||r.status));
+  return d;
+}
+function fld(n,l,v,o){o=o||{};
+  if(o.opts) return `<label for="f_${n}">${esc(l)}</label><select id="f_${n}" name="${n}">${o.opts.map(x=>`<option value="${esc(x)}"${x===v?' selected':''}>${esc(x)}</option>`).join('')}</select>`;
+  return `<label for="f_${n}">${esc(l)}</label><input id="f_${n}" name="${n}" type="text" inputmode="${o.im||'decimal'}" autocomplete="off" value="${esc(v??'')}" placeholder="${esc(o.ph||'')}">`;
+}
+function formVals(root){const o={}; root.querySelectorAll('[name]').forEach(e=>{if(String(e.value).trim()!=='') o[e.name]=e.value.trim();}); return o;}
+const T_=(n,l,v)=>fld(n,l,v,{im:'text'});
+function formSpec(action,pos,pre){
+  pre=pre||{}; pos=pos||{};
+  return {
+    open:['Внести угоду (фактичні дані з біржі)',
+      fld('symbol','Символ',pre.symbol||'',{im:'text',ph:'BTCUSDT'})+fld('direction','Напрям',pre.direction||'LONG',{opts:['LONG','SHORT']})+
+      '<div class="row2">'+fld('entry','Фактична ціна входу','')+fld('qty','Обсяг (монети)','')+'</div>'+
+      '<div class="row2">'+fld('sl','Стоп',pre.sl||'')+fld('tp1','TP1',pre.tp1||'')+'</div>'+
+      '<div class="row2">'+fld('tp2','TP2',pre.tp2||'')+fld('fee_usdt','Комісія, USDT (порожньо = оцінка)','')+'</div>'+
+      T_('opened_at','Час відкриття (порожньо = зараз, напр. 2026-09-29T10:30Z)','')+T_('note','Нотатка','')],
+    partial:['Частковий вихід',fld('price','Ціна виходу','')+fld('qty','Обсяг, що закрито','')+fld('fee_usdt','Комісія, USDT','')+T_('note','Нотатка','')],
+    move_sl:['Перенести стоп',fld('sl','Новий стоп','')+T_('note','Нотатка','')],
+    move_tp:['Змінити TP',fld('tp1','TP1',pos.tp1||'')+fld('tp2','TP2',pos.tp2||'')+T_('note','Нотатка','')],
+    close:['Закрити позицію',fld('price','Ціна закриття','')+fld('fee_usdt','Комісія, USDT','')+T_('exit_reason','Причина (TP / SL / вручну)','')+T_('note','Нотатка','')],
+    void:['Анулювати запис (внесено помилково)',T_('note','Причина','')],
+  }[action];
+}
+function openForm(action,pos,pre){
+  const box=$('frm'); if(!box) return;
+  const sp=formSpec(action,pos,pre); if(!sp) return;
+  const key=newKey();
+  box.innerHTML=`<form class="card frm" id="tf" novalidate><b>${esc(sp[0])}</b>${pos?`<div class="mut">${esc(pos.symbol)} ${esc(pos.direction)}</div>`:''}
+    ${sp[1]}<div id="fmsg" class="msg" role="alert"></div>
+    <div class="acts"><button type="submit" class="btn pri" id="fsend">Записати</button><button type="button" class="btn" id="fcancel">Скасувати</button></div>
+    <div class="mut" style="margin-top:8px">Це лише облік. Офіс не відкриває й не змінює ордери на біржі.</div></form>`;
+  $('fcancel').onclick=()=>{box.innerHTML='';};
+  $('tf').onsubmit=async ev=>{
+    ev.preventDefault();
+    const b=formVals($('tf')); b.idem_key=key; if(pos) b.trade_id=pos.trade_id; if(pre&&pre.scenario_id) b.scenario_id=pre.scenario_id;
+    $('fsend').disabled=true; $('fmsg').className='msg'; $('fmsg').textContent='Записую…';
+    const d=await post(action,b);
+    if(d.ok){ S.prefill=null; return trades(); }
+    $('fmsg').className='msg bad'; $('fmsg').textContent=d.message||'Не вдалося записати'; $('fsend').disabled=false;
+  };
+  box.scrollIntoView({block:'start'});
+  const f=box.querySelector('input,select'); if(f) f.focus();
+}
+function money(v){return v==null?'—':(Number(v)>0?'+':'')+Number(v).toFixed(2)+' USDT';}
+function tradeCard(p){
+  const dp=p.display||{}, t=p.tracking||{};
+  const flags=(t.flags||[]).map(f=>`<div class="msg ${/BEYOND|NO_FRESH/.test(f.code)?'bad':''}">${esc(f.text||f.code)}</div>`).join('');
+  const open=p.status==='OPEN';
+  return `<div class="card" data-trade="${esc(p.trade_id)}"><div class="top"><b>${esc(p.symbol)}</b><span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span>
+    <span class="pill ${open?'live':'done'}">${open?'відкрита':(p.status==='CLOSED'?'закрита':esc(p.status))}</span>${p.scenario_id?'<span class="pill">за сценарієм</span>':'<span class="pill">без сигналу Лева</span>'}</div>
+    <div class="lv"><div><span>Вхід</span><b>${esc(dp.entry||una(p.entry))}</b></div><div class="sl"><span>Стоп</span><b>${esc(dp.sl||una(p.sl))}</b></div>
+    <div class="tp"><span>TP1</span><b>${esc(dp.tp1||una(p.tp1))}</b></div><div><span>Обсяг</span><b>${esc(una(p.remaining_qty))}</b></div></div>
+    ${open?`<div class="kv"><span>Ризик зараз (до стопа)</span><b>${p.risk_now_usdt==null?'—':esc(Number(p.risk_now_usdt).toFixed(2))+' USDT'}</b></div>
+      <div class="kv"><span>Уже зафіксовано (після комісій)</span><b>${esc(money(p.realized_net_usdt))}</b></div>
+      ${t.unrealized_usdt!=null?`<div class="kv"><span>Нереалізовано (за поточною ціною)</span><b>${esc(money(t.unrealized_usdt))}${t.unrealized_r!=null?' · '+esc(Number(t.unrealized_r).toFixed(2))+' R':''}</b></div>`:''}
+      ${t.price_display?`<div class="kv"><span>Остання ціна</span><b>${esc(t.price_display)} · ${ago(t.price_as_of)}</b></div>`:''}${flags}
+      <div class="acts"><button class="btn" data-a="partial">Частковий вихід</button><button class="btn" data-a="move_sl">Перенести стоп</button>
+      <button class="btn" data-a="move_tp">TP</button><button class="btn warn" data-a="close">Закрити</button><button class="btn" data-a="void">Внесено помилково</button></div>`
+     :`<div class="kv"><span>Результат (з комісіями${p.fees_estimated?', оцінка':''})</span><b>${esc(money(p.realized_net_usdt))}</b></div>
+      <div class="kv"><span>R</span><b>${p.r_realized==null?'—':esc(Number(p.r_realized).toFixed(2))}</b></div>`}
+    <div class="mut">відкрито ${hhmm(p.opened_at)}${p.closed_at?' · закрито '+hhmm(p.closed_at):''}</div></div>`;
+}
+async function trades(){
+  const T0=++RT;
+  let d,au; 
+  try{[d,au]=await Promise.all([j('/api/v2/trades?state=all'),j('/api/v2/auth')]);}catch(e){return fail(e,'мої угоди');}
+  const ex=d.exposure||{}, st=d.stats||{};
+  const rows=d.positions||[];
+  const open=rows.filter(p=>p.status==='OPEN'), closed=rows.filter(p=>p.status!=='OPEN');
+  const canWrite=au&&au.write_enabled&&!d.schema_missing;
+  const authBox=d.schema_missing?`<div class="card err">${esc(d.note)}</div>`:(!au.write_enabled?
+    `<div class="card err"><b>Запис вимкнено</b><div class="mut">${esc(au.hint||'')}</div></div>`:
+    (!tgInit()&&au.write_key?`<div class="mut" style="margin-bottom:8px">Поза Telegram потрібен ключ запису: <button class="btn" id="setkey" style="min-height:36px;padding:4px 10px">${lsGet('ao_wkey','')?'змінити ключ':'ввести ключ'}</button></div>`:''));
+  app.innerHTML=`<div class="banner">Це ваші фактичні угоди, внесені вручну. Офіс не торгує; ордери — лише ви на біржі.</div>
+    ${jchips('trades')}${authBox}
+    <div id="frm"></div>
+    <div class="card"><div class="kv"><span>Відкритих позицій</span><b>${esc(open.length)}</b></div>
+      <div class="kv"><span>Сукупний ризик до стопів</span><b>${ex.risk_now_usdt==null?'—':esc(Number(ex.risk_now_usdt).toFixed(2))+' USDT'}</b></div>
+      ${ex.text?`<div class="mut">${esc(ex.text)}</div>`:''}</div>
+    ${canWrite?'<div class="acts" style="margin:0 0 10px"><button class="btn pri" id="addpos">＋ Внести позицію</button></div>':''}
+    <h2>Відкриті</h2>${open.map(tradeCard).join('')||'<div class="empty">Немає внесених відкритих позицій. Якщо на біржі позиція є — внесіть її, щоб ризик-контроль бачив повну експозицію.</div>'}
+    <h2>Закриті</h2>${closed.map(tradeCard).join('')||'<div class="empty">Закритих угод ще немає</div>'}
+    <h2>Підсумок реальних угод</h2><div class="card">${st.n?`<div class="kv"><span>Угод</span><b>${esc(st.n)}</b></div>
+      <div class="kv"><span>Результат після комісій</span><b>${esc(money(st.net_usdt))}</b></div>`:''}
+      <div class="mut">${esc(st.note||'Закритих ручних угод ще немає.')}</div></div>`;
+  app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
+  const sk=$('setkey'); if(sk) sk.onclick=()=>{const v=prompt('Ключ запису (OFFICE_WRITE_KEY)'); if(v!==null){lsSet('ao_wkey',v.trim()); trades();}};
+  const ap=$('addpos'); if(ap) ap.onclick=()=>openForm('open',null,null);
+  app.querySelectorAll('[data-trade] [data-a]').forEach(b=>b.onclick=()=>{
+    const id=b.closest('[data-trade]').dataset.trade; openForm(b.dataset.a, rows.find(p=>p.trade_id===id), null);});
+  if(S.prefill&&canWrite){const pre=S.prefill; S.prefill=null; openForm('open',null,pre);}
 }
 function posHtml(d){
   const rows=d.positions||[];
@@ -293,6 +428,7 @@ function posHtml(d){
 
 /* ---------- Ризик ---------- */
 async function risk(){
+  const T0=++RT;
   app.innerHTML='<div class="sk"></div>';
   let d,s; try{[d,s]=await Promise.all([j('/api/v2/risk'), j('/api/v2/settings')]);}catch(e){return fail(e,'ризик');}
   const kv=(k,o)=>`<div class="kv"><span>${esc(k)}</span><b>${o&&o.value!=null?esc(o.value):esc((o&&o.text)||'Дані недоступні')}</b></div>`;
@@ -324,7 +460,7 @@ async function risk(){
     <h2>Відображення</h2>
     <div class="card">
       <div class="mut">Таймфрейм графіка за замовчуванням</div>
-      ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
       <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
       <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
@@ -371,7 +507,7 @@ function chartLevels(s){
 async function paintChart(el, s){
   const symbol=s.symbol, tf=S.tf, lv=chartLevels(s);
   let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=180`);}
-  catch(e){el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
+  catch(e){if(e.stale) return null; el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
   const stamp=$('asof'); if(stamp) stamp.textContent=pack.as_of?`Остання свічка: ${hhmm(pack.as_of)} · ${pack.fixture?'FIXTURE, не ринок':pack.source}`:'';
   setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad',
     pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
@@ -441,6 +577,7 @@ function execHtml(x){
 
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
+  const T0=++RT;
   killPoll();
   app.innerHTML='<div class="sk"></div><div class="sk"></div>';
   let d; try{d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'сценарій');}
@@ -469,6 +606,7 @@ async function openSc(id){
       <div class="mut" style="margin-top:6px">Скасування до входу ≠ стоп після входу.</div></div>
     <div class="sec"><h3>Після підтвердження</h3><p>План передається на незалежний ризик-контроль. Ордер офіс не відкриває — рішення за трейдером.</p>
       ${d.hypothetical?'<div class="mut" style="margin-top:6px">Позиції немає. Будь-які TP/SL тут — модельні рівні, не PnL угоди.</div>':''}</div>
+    <div class="acts" style="margin:0 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
     <div class="chips" id="lay">
       <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
@@ -479,6 +617,8 @@ async function openSc(id){
     <div class="mut" id="asof" style="margin:6px 0 12px"></div>
     <div class="sec"><h3>Історія сценарію</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>'}</div>`;
   $('back').onclick=()=>{killPoll(); go('scenarios');};
+  $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
+    sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};
   const el=$('chart');
   await paintChart(el, s);
   app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=async()=>{
@@ -489,7 +629,7 @@ async function openSc(id){
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
-    let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){setHealth('bad','немає зв’язку'); return;}
+    let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){if(!e.stale) setHealth('bad','немає зв’язку'); return;}
     const last=(pack.candles||[]).slice(-1)[0];
     if(!last||!last.time) return;
     if(usingLW && series) series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});

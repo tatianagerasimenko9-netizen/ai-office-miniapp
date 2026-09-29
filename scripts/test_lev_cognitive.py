@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 os.environ["OFFICE_DEPO_USDT"] = "1000"
+os.environ["OFFICE_TG_POSITION_SUPPORT"] = "1"  # логіка шлюзу; прапорець за замовчуванням вимкнено — див. окремий тест
 
 from office_alert_gate import (  # noqa: E402
     gate_outbound_telegram,
