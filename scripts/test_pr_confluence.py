@@ -182,7 +182,7 @@ def main() -> int:
             timeframe="H1",
             entry=px_now,
             sl=85900.0,
-            tp1=82000.0,
+            tp1=80000.0,
             atr_h1=900.0,
             score=12,
             min_score=10,
@@ -244,17 +244,18 @@ def main() -> int:
         size={"size_usdt": 625, "depo": 1000, "risk_pct": 0.01},
     )
     for bit in (
-        "🔴 SHORT · BRUSDT · M15",
+        "🔴 SHORT · BRUSDT · сценарій M15",
         "Шорт на відкаті · сила A",
         "🎯 Вхід · 0.922–0.928",
-        "❌ Стоп · 0.940  (−1.6%)",
+        "❌ Стоп · 0.94  (−1.6%)",
         "✅ TP1 · 0.901  (+2.6%)",
-        "✅ TP2 · 0.890  (+3.8%)",
-        "Зона: сильна свічка M15 + OB H1 + Фібо 0.705 H4 + свіп хаю Азії",
+        "✅ TP2 · 0.89  (+3.8%)",
+        "Структура: сильна свічка M15 + OB H1 + Фібо 0.705 H4 + свіп хаю Азії",
         "Чекаю на M5: подвійна вершина або SFP у зоні",
-        "Зараз: поза угодою, чекаю відкат",
+        "WATCHING · ВХОДУ НЕМАЄ",
+        "План після підтвердження",
         "При TP1 — частина + стоп у беззбиток",
-        "Позиція 625 USDT · ризик 10$",
+        "Плановий обсяг 625 USDT · ризик 10$",
     ):
         if bit not in br_txt:
             return _fail(f"BR missing {bit!r} in {br_txt}")
@@ -282,7 +283,7 @@ def main() -> int:
     if not ake.get("send"):
         return _fail(f"AKE {ake.get('reason')} {ake}")
     ake_txt = str(ake.get("text") or "")
-    if "🟢 LONG · AKEUSDT · M15" not in ake_txt or "сила A" not in ake_txt:
+    if "🟢 LONG · AKEUSDT · сценарій M15" not in ake_txt or "сила A" not in ake_txt:
         return _fail(ake_txt)
     if "🎯 Вхід · " not in ake_txt:
         return _fail(ake_txt)
@@ -307,7 +308,7 @@ def main() -> int:
     if not lx.get("send"):
         return _fail(f"LONGXIA {lx.get('reason')}")
     lx_txt = str(lx.get("text") or "")
-    if "🟢 LONG · LONGXIAUSDT · M15" not in lx_txt or "Лонг на відкаті" not in lx_txt:
+    if "🟢 LONG · LONGXIAUSDT · сценарій M15" not in lx_txt or "Лонг на відкаті" not in lx_txt:
         return _fail(lx_txt)
     if "range" in lx_txt.lower():
         return _fail(lx_txt)
@@ -319,7 +320,7 @@ def main() -> int:
         price=0.924,
         detail="подвійна вершина M5 + закриття нижче 0.922",
     )
-    if conf_txt != "✅ BRUSDT SHORT · вхід підтверджено · 0.924\nПідтвердження: подвійна вершина M5 + закриття нижче 0.922":
+    if conf_txt != "✅ BRUSDT SHORT · сценарій підтверджено (не /position) · 0.924\nПідтвердження: подвійна вершина M5 + закриття нижче 0.922":
         return _fail(f"confirm {conf_txt!r}")
     canc = format_cancel_card(symbol="BRUSDT", direction="SHORT", reason="ціна за стопом до входу")
     if "❌ BRUSDT SHORT · скасовано — ціна за стопом до входу" not in canc:

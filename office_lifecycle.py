@@ -13,7 +13,16 @@ from office_session_radar import independent_flip_ok
 from office_topdown import ENTRY_WAITING_SWEEP, SWEEP_NEAR_PCT, sweep_near
 from office_zone_alert import ATR_DAY_USED_ENTRY_BLOCK_PCT, price_in_watching_zone
 
-STATES = ("WATCHING", "WAITING_SWEEP", "ZONE_REACHED", "CONFIRMED", "INVALIDATED", "EXPIRED")
+STATES = (
+    "FOUND",
+    "WATCHING",
+    "WAITING_SWEEP",
+    "ZONE_REACHED",
+    "CONFIRMATION_PENDING",
+    "CONFIRMED",
+    "INVALIDATED",
+    "EXPIRED",
+)
 WATCHING_EXPIRE_SEC = 4 * 3600
 KIND_LIFECYCLE = "lifecycle"
 
@@ -144,6 +153,8 @@ def next_lifecycle_state(
     """Один крок. CONFIRMED не означає ордер."""
     cur = str(current or "WATCHING").upper()
     if cur in ("CONFIRMED", "INVALIDATED", "EXPIRED"):
+        if cur == "CONFIRMED":
+            return {"state": "CONFIRMED", "reason": "повторна зона після CONFIRMED не дає новий вхід"}
         return {"state": cur, "reason": "термінал"}
     now = now_ts
     age = age_sec(created_ts, now)
@@ -180,7 +191,15 @@ def next_lifecycle_state(
             return {"state": "CONFIRMED", "reason": "підтвердження малого ТФ — картка, не ордер"}
         if not in_zone:
             return {"state": "WATCHING", "reason": "ціна вийшла з зони до підтвердження"}
-        return {"state": "ZONE_REACHED", "reason": "в зоні, підтвердження ще немає"}
+        return {"state": "CONFIRMATION_PENDING", "reason": "в зоні, підтвердження ще немає"}
+    if cur == "CONFIRMATION_PENDING":
+        if invalidated:
+            return {"state": "INVALIDATED", "reason": invalidate_reason or "тезу знято до LTF"}
+        if confirmed and not entry_blocked:
+            return {"state": "CONFIRMED", "reason": "підтвердження малого ТФ — картка, не ордер"}
+        if not in_zone:
+            return {"state": "WATCHING", "reason": "ціна вийшла з зони до підтвердження"}
+        return {"state": "CONFIRMATION_PENDING", "reason": "чекаю LTF — ціна в зоні не є входом"}
     return {"state": cur, "reason": "без зміни"}
 
 
@@ -294,3 +313,22 @@ def record_next_opportunity(
         "kind": KIND_LIFECYCLE,
         "opens_position": False,
     }
+
+
+WATCHING_TTL_ENV = "OFFICE_WATCHING_TTL_EXPIRE"
+
+
+def watching_ttl_enabled() -> bool:
+    """Авто-EXPIRED для WATCHING у живій БД — лише з явним прапорцем (за замовчуванням вимкнено)."""
+    import os
+
+    return os.getenv(WATCHING_TTL_ENV, "").strip() == "1"
+
+
+def watching_ttl_exceeded(status: Any, created: Any, now: Any) -> bool:
+    """WATCHING / *_WATCHING старший за WATCHING_EXPIRE_SEC від створення."""
+    st = str(status or "").upper()
+    if not st.endswith("WATCHING"):
+        return False
+    age = age_sec(created, now)
+    return age is not None and age > WATCHING_EXPIRE_SEC

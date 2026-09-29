@@ -1,0 +1,70 @@
+name: PR68 real OHLCV replay (non-production)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/office-unified-release-5134
+    paths:
+      - '.github/workflows/pr68-real-replay.yml'
+      - 'scripts/fetch_real_ohlcv.py'
+      - 'scripts/fetch_binance_archive.py'
+      - 'scripts/replay_real_manta_gate.py'
+      - 'office_t6_backtest.py'
+
+permissions:
+  contents: read
+
+jobs:
+  historical-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_DEPO_USDT: '1000'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Download real completed monthly BTC and MANTA archives
+        run: |
+          python scripts/fetch_binance_archive.py --symbol BTCUSDT --month 2026-07 --output /tmp/pr68-real/BTCUSDT.json
+          python scripts/fetch_binance_archive.py --symbol MANTAUSDT --month 2026-07 --output /tmp/pr68-real/MANTAUSDT.json
+      - name: Real BTC T6 replay and MANTA data-integrity gate
+        run: |
+          python - <<'PY'
+          import json
+          from office_t6_backtest import load_ohlcv_file, run_t6_backtest
+          btc = run_t6_backtest("/tmp/pr68-real/BTCUSDT.json", decision_stride=4)
+          manta = load_ohlcv_file("/tmp/pr68-real/MANTAUSDT.json")
+          assert manta["symbol"] == "MANTAUSDT"
+          assert all(len(manta["timeframes"][tf]) > 0 for tf in ("1d","1h","15m"))
+          print("REAL_BTC_T6", json.dumps(btc.as_dict(), ensure_ascii=False))
+          print("REAL_MANTA_DATA_VALIDATED", {tf:len(v) for tf,v in manta["timeframes"].items()})
+          print("MANTA archive validated; separate radar-only MANTA replay below, not full Lev cognition.")
+          PY
+      - name: Real MANTA T6 radar replay (historical, no orders)
+        run: |
+          python - <<'PY'
+          import json
+          from office_t6_backtest import run_t6_backtest
+          report = run_t6_backtest("/tmp/pr68-real/MANTAUSDT.json", decision_stride=4)
+          assert report.symbol == "MANTAUSDT" and report.n_decisions > 100
+          assert not report.data_error, report.data_error
+          print("REAL_MANTA_T6", json.dumps(report.as_dict(), ensure_ascii=False))
+          print("MANTA T6 is historical radar simulation, NOT full Lev cognition or live returns.")
+          PY
+      - name: Replay real MANTA WATCHING safety gates (no strategy PnL)
+        run: python scripts/replay_real_manta_gate.py /tmp/pr68-real/MANTAUSDT.json
+      - name: Upload non-sensitive replay inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr68-real-ohlcv
+          path: /tmp/pr68-real/*.json
+          if-no-files-found: ignore
+          retention-days: 7

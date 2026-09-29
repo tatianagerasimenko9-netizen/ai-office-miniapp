@@ -158,6 +158,10 @@ def card_levels(*, direction: str, entry: float, structure_sl: float, rr: float 
     side = str(direction or "").upper()
     if risk <= 0:
         return {"entry": entry, "sl": sl, "tp": None, "rr": 0.0}
+    if side == "LONG" and sl >= entry:
+        return {"entry": entry, "sl": sl, "tp": None, "rr": 0.0}
+    if side == "SHORT" and sl <= entry:
+        return {"entry": entry, "sl": sl, "tp": None, "rr": 0.0}
     if side == "LONG":
         tp = entry + risk * float(rr)
     else:
@@ -364,10 +368,24 @@ def evaluate_radar(
         pass
 
     try:
-        from office_position_size import plan_position_size
+        from office_alert_gate import validate_trade_geometry
         from office_ict_hunter import evaluate_ict_hunter
+        from office_position_size import plan_position_size
 
-        sized = plan_position_size(entry=px, sl=card.get("sl"), score=None, min_score=8)
+        geo = validate_trade_geometry(
+            direction=direction,
+            sl=card.get("sl"),
+            tp1=card.get("tp") or card.get("tp1"),
+            entry=px,
+            tp2=card.get("tp2"),
+        )
+        if not geo.get("ok"):
+            base.reason = str(geo.get("reason") or "геометрія")
+            base.card = card
+            return base
+        sized = plan_position_size(
+            entry=px, sl=card.get("sl"), score=None, min_score=8, direction=direction
+        )
         if sized.get("line"):
             card = dict(card)
             card["size_line"] = sized["line"]

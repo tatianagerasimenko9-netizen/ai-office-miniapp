@@ -1,0 +1,154 @@
+name: PR68 offline safety tests
+
+on:
+  push:
+    branches:
+      - cursor/office-unified-release-5134
+      - claude/eager-pascal-t9e1ac
+  pull_request:
+    paths:
+      - 'office_*.py'
+      - 'scripts/test_pr68_canonical.py'
+      - 'scripts/test_telegram_position_gate.py'
+      - 'scripts/test_*.py'
+      - '.github/workflows/pr68-offline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OFFICE_DEPO_USDT: '1000'
+      OFFICE_EXINFO_SEED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m compileall -q office_telegram_policy.py office_telegram_delivery_ledger.py office_relay_wizard.py office_bridge.py office_alert_gate.py scripts/test_pr68_canonical.py scripts/test_telegram_position_gate.py scripts/test_telegram_delivery_ledger.py scripts/test_telegram_ledger_integration.py scripts/test_telegram_scenario_thread.py
+      - name: Canonical scenario and delivery dedup (offline)
+        run: python scripts/test_pr68_canonical.py
+      - name: Position authorization (temporary SQLite, no Telegram)
+        run: python scripts/test_telegram_position_gate.py
+      - name: Lev cognitive and analyst-first rules (offline)
+        run: |
+          python scripts/test_lev_cognitive.py
+          python scripts/test_lev_analyst_first.py
+      - name: MANTA alert gates and desk regression (offline)
+        run: |
+          python scripts/test_manta_alert_gate.py
+          python scripts/test_pr51_desk.py
+      - name: Unified release and watching dedup (offline)
+        run: |
+          python scripts/test_unified_release.py
+          python scripts/test_watching_dedup.py
+      - name: T6 OHLCV fixture backtest (offline, no look-ahead)
+        run: python scripts/test_t6_backtest.py
+      - name: Position review and blocked bot actions (offline)
+        run: |
+          python scripts/test_review_position.py
+          python scripts/test_bot_action_blocked.py
+      - name: Persistent delivery ledger (temporary SQLite, no Telegram)
+        run: python scripts/test_telegram_delivery_ledger.py
+      - name: Telegram ledger integration guards (offline)
+        run: python scripts/test_telegram_ledger_integration.py
+      - name: Real relay behavior with fake Telegram and isolated SQLite
+        run: python scripts/test_telegram_relay_behavior.py
+      - name: Scenario Telegram reply chain, restart-safe (fake Telegram, SQLite)
+        run: python scripts/test_telegram_scenario_thread.py
+      - name: Independent risk officer veto (offline, no orders)
+        run: python scripts/test_risk_officer.py
+      - name: Evidence-backed market thesis contract (offline, no orders)
+        run: python scripts/test_market_thesis.py
+      - name: Market feed freshness and provenance veto (offline)
+        run: python scripts/test_feed_quality.py
+      - name: Lev independent risk veto integration (offline)
+        run: python scripts/test_lev_risk_integration.py
+      - name: Risk Officer in live Lev cycle, shadow/enforce (temporary SQLite)
+        run: python scripts/test_risk_context_cycle.py
+      - name: Lev thesis journal, append-only versions (temporary SQLite)
+        run: python scripts/test_thesis_journal.py
+      - name: Market regime v1 classifier (offline)
+        run: python scripts/test_market_regime.py
+      - name: Session Desk ranges, sweep vs acceptance, DST (offline)
+        run: python scripts/test_session_desk.py
+      - name: Execution Planner v1 pre-entry checks (offline)
+        run: python scripts/test_execution_check.py
+      - name: Legacy proactive path needs Lev SEND for ACTIVE (offline)
+        run: python scripts/test_legacy_guard.py
+      - name: Lev replay harness self-test (synthetic candles, pipeline only)
+        run: python scripts/test_replay_lev_history.py
+      - name: Full regression — every scripts/test_*.py (no network required)
+        run: |
+          fail=0
+          for t in scripts/test_*.py; do
+            if timeout 180 python "$t" </dev/null > /tmp/out.txt 2>&1; then
+              echo "ok  $t"
+            else
+              echo "FAIL $t"; tail -20 /tmp/out.txt; fail=1
+            fi
+          done
+          exit $fail
+      - name: London and NY DST desk clock (offline)
+        run: python scripts/test_session_dst.py
+      - name: Exchange tick display and no float tails (offline)
+        run: python scripts/test_price_format_ui.py
+      - name: Lev scenario card and Telegram card format (offline)
+        run: |
+          python scripts/test_lev_trader_card.py
+          python scripts/test_t8_telegram_filter.py
+      - name: Mini App five tabs, scenario card and honest Risk tab (offline)
+        run: |
+          python scripts/test_mini_v2.py
+          python scripts/test_mini_v2_cards.py
+
+  mini-app-ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OFFICE_EXINFO_SEED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime dependencies and Playwright Chromium
+        run: |
+          python -m pip install -r requirements.txt playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Mini App browser smoke (phone/desktop, XSS, error/loading states)
+        run: python scripts/ui_smoke_mini_v2.py
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: office
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      OFFICE_EXINFO_SEED: '1'
+      OFFICE_TEST_PG_URL: postgresql://postgres:ci@127.0.0.1:5432/office
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: PR68/69 schema, ledger, journals and Mini App queries on PostgreSQL 16
+        run: python scripts/test_pg_integration.py

@@ -1723,21 +1723,17 @@ def _journal_row_kyiv_date(raw: Any) -> str:
 
 
 def is_confirmed_position_row(entry_reason: Any = "", setup_name: Any = "", trade_id: Any = "") -> bool:
-    """Підтверджена угода Тетяни — лише явний /position, не Desk ENTER."""
+    """Only the explicit owner /position marker grants real-position privileges.
+
+    Legacy setup names and pos- IDs are not proof of owner confirmation.
+    Ambiguous historical rows remain in the journal but are not actionable.
+    """
     reason = str(entry_reason or "").strip().lower()
     setup = str(setup_name or "").strip().upper()
     tid = str(trade_id or "").strip().lower()
     if setup == OFFICE_SIGNAL_SETUP or tid.startswith("osig-") or "office signal card" in reason:
         return False
-    if POSITION_CONFIRM_REASON in reason:
-        return True
-    if setup == "T1_MY_POSITION":
-        return True
-    if tid.startswith("pos-"):
-        return True
-    if "office signal card" in reason:
-        return False
-    return False
+    return reason == POSITION_CONFIRM_REASON.lower()
 
 
 def _fmt_closed_stats(rows: List[tuple]) -> str:
@@ -2004,7 +2000,7 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
         SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
-        WHERE status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1', 'HIT_TP2')
+        WHERE status IN ('WATCHING', 'ACTIVE', 'HIT_ENTRY', 'HIT_TP1', 'HIT_TP2', 'CONFIRMED')
         ORDER BY ts_created DESC
         """,
         (),
@@ -2032,20 +2028,78 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
+    """Усі стани канонічних сценаріїв для hydrate/dedup, включно з terminal."""
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+               status, ts_created, ts_updated, outcome, analysis_note
+        FROM office_signals
+        WHERE analysis_note LIKE '%scenario_id=%'
+        ORDER BY COALESCE(NULLIF(ts_updated, ''), ts_created) DESC
+        """,
+        (),
+    )
+    return [
+        {
+            "signal_id": r[0],
+            "symbol": r[1],
+            "direction": r[2],
+            "entry_low": r[3],
+            "entry_high": r[4],
+            "sl": r[5],
+            "tp1": r[6],
+            "tp2": r[7],
+            "rr": r[8],
+            "status": r[9],
+            "ts_created": r[10],
+            "ts_updated": r[11],
+            "outcome": r[12],
+            "analysis_note": r[13],
+        }
+        for r in rows
+    ]
+
+
+def signal_refresh_scenario(
+    db_path: str,
+    *,
+    signal_id: str,
+    entry_low: Optional[float],
+    entry_high: Optional[float],
+) -> None:
+    """Оновити дрейф зони, не скидаючи lifecycle/status канонічного сценарію."""
+    _db_write(
+        db_path,
+        """
+        UPDATE office_signals
+        SET entry_low = ?, entry_high = ?, ts_updated = ?
+        WHERE signal_id = ?
+        """,
+        (entry_low, entry_high, _now_iso(), signal_id),
+    )
+
+
 def check_portfolio_correlation(db_path: str) -> Dict[str, Any]:
     """
-    Спрощений «кореляційний» фільтр: частка LONG/SHORT серед відкритих позицій.
-    WATCHING не враховується — це зони очікування, не позиції.
+    Кореляція лише явних /position у журналі.
+    WATCHING / ACTIVE / HIT_ENTRY / CONFIRMED — сценарії, не позиції.
     """
     try:
-        active = _fetchall(
+        rows = _fetchall(
             db_path,
-            """SELECT direction FROM office_signals
-               WHERE status IN (
-                   'ACTIVE', 'HIT_ENTRY', 'HIT_TP1')
+            """
+            SELECT trade_id, direction, entry_reason, setup_name
+            FROM trade_journal
+            WHERE status = 'OPEN'
             """,
             (),
         )
+        active = []
+        for tid, direction, reason, setup in rows or []:
+            if is_confirmed_position_row(reason, setup, tid):
+                active.append((direction,))
         if not active:
             return {
                 "safe": True,
@@ -2540,14 +2594,13 @@ def _level_pack(signal: OfficeSignal) -> Dict[str, Optional[float]]:
     }
 
 
-def _fmt_level(v: Optional[float]) -> str:
+def _fmt_level(v: Optional[float], symbol: str = "") -> str:
+    """Ціна для тексту журналу/позиції — через єдиний tick-форматер."""
     if v is None:
         return "—"
-    if abs(v) >= 1000:
-        return f"{v:.1f}"
-    if abs(v) >= 1:
-        return f"{v:.4f}".rstrip("0").rstrip(".")
-    return f"{v:.6f}".rstrip("0").rstrip(".")
+    from office_price_format import format_px
+
+    return format_px(v, symbol) or "—"
 
 
 def clean_self_naming(text: str, agent_key: str) -> str:

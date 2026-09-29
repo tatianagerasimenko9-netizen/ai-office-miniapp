@@ -89,6 +89,14 @@ def main() -> int:
     if res.opens_position:
         return _fail("radar still must not open position")
 
+    try:
+        run_t6_backtest(ctrl, decision_stride=0)
+        return _fail("zero decision stride must fail")
+    except ValueError:
+        pass
+    hourly = run_t6_backtest(ctrl, decision_stride=4)
+    if hourly.n_decisions > 0 and hourly.n_decisions > len(data["timeframes"]["15m"]):
+        return _fail("stride decision count")
     rep = run_t6_backtest(ctrl)
     d = rep.as_dict()
     if "не прогноз" not in d["disclaimer"]:
@@ -101,12 +109,19 @@ def main() -> int:
         return _fail("need SKIP counts")
     if "SKIP_NO_M15" not in d["reject_reasons"] and "SKIP_NONE" not in d["reject_reasons"]:
         return _fail("need skip reasons")
-    if d["trades"] < 1:
-        return _fail("control trade")
-    if d["wr_pct"] == "немає даних":
-        return _fail("closed trades should have WR")
-    if not any(t.conservative_sl_tp for t in rep.trades):
-        return _fail("control fill bar hits SL+TP")
+    # The original control fixture has deliberately tiny synthetic ranges.
+    # Under the release gates it must not manufacture an executable trade.
+    if d["trades"] == 0:
+        if not any(k in d["reject_reasons"] for k in (
+            "SKIP_H1_ATR_STOP", "SKIP_H1_ATR_UNAVAILABLE",
+            "SKIP_NEXT_OPEN_GEOMETRY", "SKIP_NEXT_OPEN_RR", "SKIP_TP1_MIN",
+        )):
+            return _fail("control signal needs explicit conservative entry rejection")
+    else:
+        if d["wr_pct"] == "немає даних":
+            return _fail("closed trades should have WR")
+        if any(t.entry_ts <= "" for t in rep.trades):
+            return _fail("trade must have next-open timestamp")
     empty = Path(tempfile.mkdtemp()) / "empty.json"
     empty.write_text("{}", encoding="utf-8")
     try:

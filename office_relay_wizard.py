@@ -95,7 +95,7 @@ from office_bridge import (
     ARTEM_RULE,
 )
 from office_llm_agent import ask_agent
-from office_market_state import market_state_get, scanner_blocked_notice, scanner_signal_blocked
+from office_market_state import market_state_get, record_scan_facts, scanner_blocked_notice, scanner_signal_blocked
 from office_review_position import (
     handle_position_command,
     handle_review_command,
@@ -110,6 +110,16 @@ from office_zone_alert import (
     format_zone_signal_entry,
     plan_watching_zone_hit,
     zone_reached_to_telegram,
+)
+from office_alert_gate import (
+    apply_setup_event,
+    get_explicit_open_position,
+    has_explicit_position,
+    mark_confirm_sent,
+    may_emit_telegram,
+    origin_key,
+    gate_outbound_telegram,
+    text_grants_entry,
 )
 from office_level_parse import apply_zone_sanity, parse_signal_levels_from_text
 from office_watching_dedup import (
@@ -138,6 +148,8 @@ from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
 from office_trader_plan import compose_trader_plan, format_trader_plan
 from office_telegram_filter import (
+    format_level_span,
+    format_px,
     level_book_to_alert,
     level_book_to_sweep_approach,
     level_book_to_watching,
@@ -157,9 +169,9 @@ from office_trade_steer import (
     signal_case_key,
     tp3_from_liquidity,
 )
-from office_pump_dump import evaluate_pump_dump, format_pump_card
-from office_rsi_heat import exhaustion_candle, rsi_from_candles, rsi_heat
-from office_ict_hunter import evaluate_ict_hunter
+from office_rsi_heat import exhaustion_candle, rsi_from_candles
+from office_lev_verdict import lev_cycle
+import office_lev_dialog as _lev_dialog
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -175,7 +187,12 @@ from office_telegram_policy import (
     may_send_proactive,
     preferred_scan_mode,
     should_send_trade_telegram,
+    finish_trade_telegram,
     trade_update_streams,
+)
+from office_telegram_delivery_ledger import (
+    reserve_delivery, finish_delivery, renew_delivery, mark_delivery_uncertain,
+    get_scenario_root, remember_scenario_root,
 )
 from office_lifecycle import db_status_for
 from office_news_agent import DATA_EMPTY, DATA_UNAVAILABLE, format_nazar_update
@@ -661,6 +678,7 @@ async def send_via_bot_photo(
     caption: str = "",
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -673,6 +691,8 @@ async def send_via_bot_photo(
         data.add_field("reply_to_message_id", str(int(reply_to_message_id)))
     if message_thread_id:
         data.add_field("message_thread_id", str(int(message_thread_id)))
+    if reply_markup:
+        data.add_field("reply_markup", json.dumps(reply_markup, ensure_ascii=False))
     try:
         with open(photo_path, "rb") as fh:
             data.add_field("photo", fh, filename=os.path.basename(photo_path), content_type="image/png")
@@ -1900,6 +1920,12 @@ async def full_auto_analysis(
                 if not correlation.get("safe"):
                     await agent_say(sender, "daryna", correlation["message"])
                     return False
+                from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
+
+                manual_cycle: Dict[str, Any] = {}
+                if legacy_requires_lev():
+                    manual_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, None)
+                legacy = legacy_scenario_status(manual_cycle, direction=direction, enforce=legacy_requires_lev())
                 signal_id = f"manual-{symbol}-{int(time.time())}"
                 signal_upsert(
                     db_path,
@@ -1912,9 +1938,11 @@ async def full_auto_analysis(
                     tp1=parsed.get("tp1"),
                     tp2=parsed.get("tp2"),
                     rr=parsed.get("rr"),
-                    status="ACTIVE",
-                    analysis_note=response_for_parse,
+                    status=legacy["status"],
+                    analysis_note=(legacy["note_prefix"] + response_for_parse)[:4000],
                 )
+                if legacy["status"] != "ACTIVE":
+                    print(f"[signal] {symbol} manual LLM levels → WATCHING: {legacy['reason']}")
             print(f"[signal] saved {symbol} {direction} (Olesya journal silent)")
         else:
             await agent_say(sender, "lev", f"По {symbol} зараз немає повної відповіді від LLM. Спробуй ще раз через хвилину.")
@@ -2620,12 +2648,71 @@ async def run() -> None:
             return tech_thread_id or general_thread_id
         return general_thread_id
 
+    def _lev_risk_review(cycle: Dict[str, Any], sym: str, *, candles_ltf: Any, market_context: Any) -> Dict[str, Any]:
+        """Risk Officer після Лева. Shadow: лише журнал. Enforce: помилка = WAIT (fail closed)."""
+        from office_feed_quality import gate_send_on_fresh_data
+        from office_risk_context import apply_risk_officer, enforce_enabled
+
+        cycle = gate_send_on_fresh_data(cycle, candles_ltf, interval=_ltf_interval(candles_ltf))
+        try:
+            return apply_risk_officer(
+                cycle, db_path=db_path, symbol=sym,
+                candles_ltf=candles_ltf, market_context=market_context,
+            )
+        except Exception as exc:
+            print(f"[risk] review error {sym}: {type(exc).__name__}: {exc}")
+            if enforce_enabled() and cycle.get("send"):
+                return {**cycle, "action": "WAIT", "send": False,
+                        "reason": "ризик-контроль недоступний — план не передається"}
+            return cycle
+
+    def _ltf_interval(candles: Any) -> str:
+        """Інтервал LTF за кроком часу двох останніх свічок (5m або 15m у викликах Лева)."""
+        try:
+            a = datetime.fromisoformat(str(candles[-2]["ts"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(candles[-1]["ts"]).replace("Z", "+00:00"))
+            step = int((b - a).total_seconds())
+            return {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}.get(step, "15m")
+        except Exception:
+            return "15m"
+
+    def _lev_record_thesis(cycle: Dict[str, Any], candles_by_tf: Dict[str, Any]) -> None:
+        """Версія тези Лева в журнал. Помилка журналу не змінює рішення."""
+        try:
+            from office_thesis_journal import record_thesis
+
+            record_thesis(db_path, cycle, candles_by_tf=candles_by_tf)
+        except Exception as exc:
+            print(f"[thesis] journal error: {type(exc).__name__}: {exc}")
+
     async def send_office(
         message: str,
         reply_to_message_id: Optional[int] = None,
         stream: str = "general",
         allow_draft: bool = False,
+        *,
+        intent: str = "",
+        event_type: str = "",
+        symbol: str = "",
+        direction: str = "",
+        skip_gate: bool = False,
+        scenario_id: str = "",
     ) -> Optional[int]:
+        if not skip_gate:
+            tg = gate_outbound_telegram(
+                intent=intent or "ANALYTICAL",
+                text=message,
+                event_type=event_type or EVENT_TRADE_UPDATE,
+                db_path=db_path,
+                symbol=symbol or _extract_first_usdt_symbol(_strip_agent_tag(message)),
+                direction=direction,
+            )
+            if not tg.get("send"):
+                print(
+                    f"[relay] blocked send_office {intent or 'ANALYTICAL'}: "
+                    f"{tg.get('reason')} {str(message or '')[:160]}"
+                )
+                return None
         async def _send_single(
             text_part: str,
             *,
@@ -2636,11 +2723,13 @@ async def run() -> None:
             thread_id = _thread_for_stream(stream)
             btn_markup: Optional[Dict[str, Any]] = None
             if use_markup:
-                sym_for_btn = _extract_first_usdt_symbol(text_part)
-                if sym_for_btn and sym_for_btn != "BTCUSDT":
-                    mini_base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").strip().rstrip("/")
-                    mini_url = f"{mini_base}/?symbol={sym_for_btn}&filterSymbol={sym_for_btn}"
-                    btn_markup = {"inline_keyboard": [[{"text": "📊 Графік", "url": mini_url}]]}
+                from office_telegram_policy import mini_app_button
+
+                btn_markup = mini_app_button(
+                    symbol=_extract_first_usdt_symbol(text_part) or "",
+                    scenario_id=scenario_id,
+                    base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+                )
             token = agent_bot_tokens.get(agent_key or "")
             # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
             # для desk лише sendMessage + thread_id «Загальний».
@@ -2733,10 +2822,40 @@ async def run() -> None:
         photo_path: str,
         caption: str,
         stream: str = "general",
+        *,
+        reply_to_message_id: Optional[int] = None,
+        scenario_id: str = "",
+        intent: str = "",
+        event_type: str = "",
+        symbol: str = "",
+        direction: str = "",
+        skip_gate: bool = False,
     ) -> Optional[int]:
+        if not skip_gate:
+            tg = gate_outbound_telegram(
+                intent=intent or "ANALYTICAL",
+                text=caption,
+                event_type=event_type or EVENT_TRADE_UPDATE,
+                db_path=db_path,
+                symbol=symbol or _extract_first_usdt_symbol(_strip_agent_tag(caption)),
+                direction=direction,
+            )
+            if not tg.get("send"):
+                print(
+                    f"[relay] blocked send_office_photo: {tg.get('reason')} "
+                    f"{str(caption or '')[:160]}"
+                )
+                return None
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
         token = agent_bot_tokens.get("lev") or tg_bot_token
+        from office_telegram_policy import mini_app_button
+
+        photo_btn = mini_app_button(
+            symbol=symbol or _extract_first_usdt_symbol(cap) or "",
+            scenario_id=scenario_id,
+            base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
+        )
         if token:
             ok, reason, msg_id = await send_via_bot_photo(
                 bot_http,
@@ -2744,28 +2863,84 @@ async def run() -> None:
                 office_chat_id,
                 photo_path,
                 caption=cap,
+                reply_to_message_id=reply_to_message_id,
                 message_thread_id=thread_id,
+                reply_markup=photo_btn,
             )
             if ok:
                 return msg_id
+            if reply_to_message_id and "message to be replied not found" in str(reason).lower():
+                ok, reason, msg_id = await send_via_bot_photo(
+                    bot_http,
+                    token,
+                    office_chat_id,
+                    photo_path,
+                    caption=cap,
+                    message_thread_id=thread_id,
+                    reply_markup=photo_btn,
+                )
+                if ok:
+                    print("[relay][WARN] photo reply root missing: sent without reply_to")
+                    return msg_id
             print(f"[relay][WARN] photo send failed: {reason}")
         try:
             sent = await client.send_file(
                 office_entity,
                 photo_path,
                 caption=cap,
-                reply_to=thread_id,
+                reply_to=reply_to_message_id or thread_id,
             )
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
             print(f"[relay][WARN] photo telethon failed: {exc}")
-            return await send_office(caption, stream=stream)
+            return await send_office(
+                caption,
+                stream=stream,
+                intent=intent,
+                event_type=event_type,
+                symbol=symbol,
+                direction=direction,
+                skip_gate=skip_gate,
+            )
 
     def _render_entry_chart(sym: str, direction: str, message: str) -> Dict[str, Any]:
+        import re
+
         from office_chart_png import chart_levels, render_signal_chart
         from office_market_data import fetch_candles
         from office_topdown import asian_session_range
         from office_trade_steer import midnight_open_price, plan_strong_candle_ote, parse_sc_zone_note
+
+        def _scenario_tf_from_text(text: str) -> str:
+            m = re.search(r"сценарій\s+(M\d+|H\d+|D1)", str(text or ""), flags=re.I)
+            return str(m.group(1)).upper() if m else ""
+
+        def _line_roles(text: str, side: str) -> Dict[str, str]:
+            wait = (
+                "Чекаю відкату в зону. Входу ще немає."
+                if "LONG" in str(side or "").upper()
+                else "Чекаю реакції M5 у зоні. Входу ще немає."
+            )
+            why = cancel = prev = ""
+            for line in str(text or "").splitlines():
+                raw = line.strip()
+                low = raw.lower()
+                if not raw:
+                    continue
+                if low.startswith("попередній") and "скасовано" in low:
+                    prev = raw
+                    continue
+                if "чекаю" in low:
+                    wait = raw
+                    continue
+                if low.startswith("що скасує") or "інвалідац" in low and "не визначено" in low:
+                    cancel = raw
+                    continue
+                if low.startswith("конкретну умову m5"):
+                    continue
+                if low.startswith("це зона") or "місце спостереження" in low or "окрема зона" in low:
+                    why = raw
+            return {"wait": wait, "why": why, "cancel": cancel, "prev": prev}
 
         m15 = fetch_candles(sym, "15m", 96)
         h1 = fetch_candles(sym, "1h", 48)
@@ -2794,13 +2969,21 @@ async def run() -> None:
                 b60 = b.get("price")
             if int(b.get("pct") or 0) == 40:
                 b40 = b.get("price")
+        from office_chart_png import _f as _pxf
+        from office_desk_card import _calc_entry_px
+
+        roles = _line_roles(message, direction)
+        elo = parsed.get("entry_low") or parsed.get("entry") or sc.get("ote_lo")
+        ehi = parsed.get("entry_high") or parsed.get("entry") or sc.get("ote_hi")
+        side = str(direction or parsed.get("direction") or "").upper()
+        calc = _calc_entry_px(direction=side, elo=_pxf(elo), ehi=_pxf(ehi), entry=_pxf(parsed.get("entry")))
         lv = chart_levels(
             sl=parsed.get("sl") or sc.get("sl"),
             tp1=parsed.get("tp1") or parsed.get("tp"),
             tp2=parsed.get("tp2"),
             tp3=parsed.get("tp3"),
-            entry_low=parsed.get("entry_low") or parsed.get("entry") or sc.get("ote_lo"),
-            entry_high=parsed.get("entry_high") or parsed.get("entry") or sc.get("ote_hi"),
+            entry_low=elo,
+            entry_high=ehi,
             sc_low=sc_lo,
             sc_high=sc_hi,
             sweep=parsed.get("sweep"),
@@ -2810,14 +2993,22 @@ async def run() -> None:
             bucket_60=b60,
             bucket_40=b40,
             last_price=(m15[-1] or {}).get("close") if m15 else ((h1[-1] or {}).get("close") if h1 else None),
-            status="сила A" if "сила A" in str(message or "") else ("сила B" if "сила B" in str(message or "") else "чекаю"),
+            status="WATCHING" if "чекаю" in str(message or "").lower() or "входу немає" in str(message or "").lower() else "",
+            scenario_tf=_scenario_tf_from_text(message),
+            chart_tf="M15",
+            wait_line=roles["wait"],
+            why_line=roles["why"],
+            cancel_line=roles["cancel"],
+            prev_line=roles["prev"],
+            calc_entry=calc,
+            demo="DEMO" in str(message or "").upper() or "OFFLINE" in str(message or "").upper(),
         )
         return render_signal_chart(
             symbol=sym,
             candles_m15=m15,
             candles_h1=h1,
             levels=lv,
-            direction=direction or str(parsed.get("direction") or ""),
+            direction=side,
         )
 
     async def send_proactive(
@@ -2830,12 +3021,33 @@ async def run() -> None:
         symbol: str = "",
         sl: Any = None,
         direction: str = "",
+        intent: str = "",
+        confirmed_position: bool = False,
+        position_id: str = "",
+        position_open: bool = False,
+        canonical_id: str = "",
+        scenario_event: str = "",
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
             return None
+        tg = gate_outbound_telegram(
+            intent=intent,
+            text=message,
+            in_position=confirmed_position,
+            position_id=position_id,
+            position_open=position_open,
+            event_type=event_type,
+            db_path=db_path,
+            symbol=symbol,
+            direction=direction,
+        )
+        if not tg.get("send"):
+            print(f"[relay] blocked outbound {intent or event_type}: {tg.get('reason')} {str(message or '')[:160]}")
+            return None
         ev = str(event_type or "").strip().upper()
         st = str(stream or "general").strip().lower() or "general"
+        dedup_key = ""
         if ev in (EVENT_TRADE_UPDATE, EVENT_TRADE_CLOSED, EVENT_SIGNAL_ENTRY):
             st = TRADE_UPDATE_STREAM
             if len(trade_update_streams()) != 1:
@@ -2846,32 +3058,163 @@ async def run() -> None:
                 symbol=symbol,
                 sl=sl,
                 stream=st,
+                canonical_id=canonical_id,
+                event=scenario_event or ev,
             )
             if not gate.get("send"):
                 print(f"[relay] silent dup {ev} {kind}: {gate.get('reason')} {str(message or '')[:160]}")
                 return None
-        if ev == EVENT_SIGNAL_ENTRY:
-            sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
+            dedup_key = str(gate.get("key") or "")
+        # Opt-in only after an explicit, owner-approved DB migration. A missing
+        # ledger table/error fails closed rather than sending an untracked event.
+        ledger_enabled = os.environ.get("OFFICE_TG_PERSISTENT_DEDUP", "").strip() == "1"
+        ledger_token = None
+        ledger_stable = bool(str(canonical_id or "").strip() and str(scenario_event or ev).strip())
+        if dedup_key and ledger_enabled:
             try:
-                drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
-            except Exception as exc_ch:
-                print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
-                drawn = {}
-            if drawn.get("ok") and drawn.get("path"):
-                msg_id = await send_office_photo(str(drawn["path"]), message, stream=st)
-                if msg_id:
-                    print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
-                    return msg_id
-                print(f"[chart] photo failed {sym}, fallback text")
-            else:
-                print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
-        return await send_office(
-            message,
-            reply_to_message_id=reply_to_message_id,
-            stream=st,
-            allow_draft=False,
-        )
+                ledger_token = reserve_delivery(db_path, dedup_key, stable=ledger_stable)
+            except Exception as exc:
+                finish_trade_telegram(key=dedup_key, delivered=False)
+                print(f"[relay] BLOCKED ledger unavailable: {type(exc).__name__}: {exc}")
+                return None
+            if ledger_token is None:
+                finish_trade_telegram(key=dedup_key, delivered=False)
+                print(f"[relay] silent persistent duplicate {ev} {kind}")
+                return None
+        ledger_heartbeat = None
+        ledger_heartbeat_stop = asyncio.Event()
+        ledger_lease_lost = asyncio.Event()
+        ledger_sender_task = asyncio.current_task()
+        if ledger_token:
+            async def _renew_telegram_lease() -> None:
+                while not ledger_heartbeat_stop.is_set():
+                    try:
+                        await asyncio.wait_for(ledger_heartbeat_stop.wait(), timeout=30.0)
+                        return
+                    except asyncio.TimeoutError:
+                        pass
+                    try:
+                        renewed = await asyncio.to_thread(
+                            renew_delivery, db_path, dedup_key, ledger_token,
+                        )
+                        if not renewed:
+                            print("[relay] ERROR Telegram lease lost during send")
+                            ledger_lease_lost.set()
+                            if ledger_sender_task is not None:
+                                ledger_sender_task.cancel()
+                            return
+                    except Exception as exc:
+                        print(f"[relay] ERROR Telegram lease renewal: {type(exc).__name__}: {exc}")
+                        ledger_lease_lost.set()
+                        if ledger_sender_task is not None:
+                            ledger_sender_task.cancel()
+                        return
+            ledger_heartbeat = asyncio.create_task(_renew_telegram_lease())
+        # One chain per canonical scenario: later events reply to the first card.
+        thread_sid = str(canonical_id or "").strip() if ledger_enabled else ""
+        thread_starts = False
+        if thread_sid and reply_to_message_id is None:
+            try:
+                reply_to_message_id = get_scenario_root(db_path, thread_sid)
+                thread_starts = reply_to_message_id is None
+            except Exception as exc:
+                print(f"[relay] WARN scenario thread lookup: {type(exc).__name__}: {exc}")
+        delivered_id = None
+        send_attempted = False
+        skip_text = False
+        ledger_committed = not ledger_enabled or not dedup_key
+        try:
+            if ev == EVENT_SIGNAL_ENTRY:
+                sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
+                try:
+                    drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
+                except Exception as exc_ch:
+                    print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
+                    drawn = {}
+                if drawn.get("ok") and drawn.get("path"):
+                    send_attempted = True
+                    msg_id = await send_office_photo(
+                        str(drawn["path"]),
+                        message,
+                        stream=st,
+                        reply_to_message_id=reply_to_message_id,
+                        scenario_id=str(canonical_id or ""),
+                        intent=intent,
+                        event_type=event_type,
+                        symbol=sym,
+                        direction=direction,
+                        skip_gate=True,
+                    )
+                    if msg_id:
+                        print(f"[chart] SIGNAL_ENTRY photo {sym} {drawn['path']}")
+                        delivered_id = msg_id
+                        skip_text = True
+                    else:
+                        # A None response is not proof that Telegram rejected
+                        # the photo. Never send a second text copy.
+                        print(f"[chart] photo outcome ambiguous {sym}; no fallback text")
+                        skip_text = True
+                else:
+                    print(f"[chart] DATA_UNAVAILABLE {sym}: {drawn.get('reason')}")
+            if not skip_text:
+                send_attempted = True
+                delivered_id = await send_office(
+                    message,
+                    reply_to_message_id=reply_to_message_id,
+                    stream=st,
+                    allow_draft=False,
+                    intent=intent,
+                    event_type=event_type,
+                    symbol=symbol,
+                    direction=direction,
+                    skip_gate=True,
+                    scenario_id=str(canonical_id or ""),
+                )
 
+        finally:
+            ledger_heartbeat_stop.set()
+            if ledger_heartbeat is not None:
+                try:
+                    await ledger_heartbeat
+                except Exception as exc:
+                    print(f"[relay] ERROR Telegram heartbeat shutdown: {type(exc).__name__}: {exc}")
+            ledger_committed = not ledger_enabled or not dedup_key
+            if ledger_token:
+                try:
+                    if ledger_lease_lost.is_set() or (send_attempted and not delivered_id):
+                        quarantined = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                        print(f"[relay] ambiguous Telegram send quarantined={quarantined}")
+                        ledger_committed = False
+                    else:
+                        ledger_committed = finish_delivery(
+                        db_path, dedup_key, ledger_token,
+                        delivered=bool(delivered_id), stable=ledger_stable,
+                    )
+                except Exception as exc:
+                    ledger_committed = False
+                    print(f"[relay] ERROR ledger commit: {type(exc).__name__}: {exc}")
+                    if send_attempted:
+                        try:
+                            quarantined = mark_delivery_uncertain(db_path, dedup_key, ledger_token)
+                            print(f"[relay] ambiguous delivery quarantined={quarantined}")
+                        except Exception as quarantine_exc:
+                            print(
+                                "[relay] CRITICAL ambiguous Telegram delivery: "
+                                f"ledger and quarantine unavailable: {type(quarantine_exc).__name__}: {quarantine_exc}"
+                            )
+            if dedup_key:
+                finish_trade_telegram(
+                    key=dedup_key,
+                    delivered=bool(delivered_id) and bool(ledger_committed),
+                )
+            if ledger_token and delivered_id and not ledger_committed:
+                print("[relay] BLOCKED lifecycle: delivery not committed in ledger")
+            if thread_starts and delivered_id and ledger_committed:
+                try:
+                    remember_scenario_root(db_path, thread_sid, int(delivered_id))
+                except Exception as exc:
+                    print(f"[relay] WARN scenario thread root not saved: {type(exc).__name__}: {exc}")
+        return delivered_id if ledger_committed else None
     try:
         if not _RELAY_OFFICE_STARTUP_PING_SENT:
             _RELAY_OFFICE_STARTUP_PING_SENT = True
@@ -3044,6 +3387,16 @@ async def run() -> None:
                             f"{sym}: графік DATA_UNAVAILABLE ({drawn.get('reason') or 'немає свічок'}).",
                         )
                     )
+                    return
+                lev_q = _lev_dialog.parse_command(text)
+                if lev_q is not None:
+                    # Лев відповідає лише з фактичного циклу на свіжих свічках і з БД (без LLM); NO TRADE — нормальна відповідь.
+                    try:
+                        ans = await asyncio.to_thread(_lev_dialog.ask, db_path, lev_q)
+                        await send_office(fmt_agent_line("lev", ans["text"][:3800]), stream="general")
+                    except Exception as exc_l:
+                        print(f"[lev-dialog] error: {type(exc_l).__name__}: {exc_l}")
+                        await send_office(fmt_agent_line("lev", "Не вдалося отримати аналіз: NO TRADE, доки не буде свіжих даних."), stream="tech")
                     return
                 scenario_key = _parse_scenario_command(text)
                 if scenario_key is not None:
@@ -4718,7 +5071,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                 print(f"[scanner] {symbol} → немає чіткого сетапу, мовчимо")
                 return
 
-            await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            # LLM-текст «entry/sl» не є висновком Лева: ACTIVE лише якщо lev_cycle дав SEND
+            # у тому самому напрямку. Інакше — тихий WATCHING (OFFICE_LEGACY_ACTIVE_REQUIRES_LEV=0
+            # повертає стару поведінку).
+            from office_legacy_guard import legacy_requires_lev, legacy_scenario_status, lev_cycle_for_symbol
+
+            legacy_cycle: Dict[str, Any] = {}
+            if legacy_requires_lev():
+                legacy_cycle = await asyncio.to_thread(lev_cycle_for_symbol, db_path, symbol, current_price)
+            legacy = legacy_scenario_status(legacy_cycle, direction=direction, enforce=legacy_requires_lev())
+            if legacy["status"] == "ACTIVE":
+                await _send_agent_turn("lev", lev_final or "Рішення: чекаємо відкату в Entry-зону. Якщо не дійде — пропускаємо.")
+            else:
+                print(f"[scanner] {symbol} LLM-сетап без підтвердження Лева → WATCHING тихо: {legacy['reason']}")
 
             parsed = _parse_signal_levels_from_text(marko_msg or lev_final or "")
             signal_id = f"proactive-{symbol}-{int(time.time())}"
@@ -4733,9 +5098,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                 tp1=parsed.get("tp1"),
                 tp2=parsed.get("tp2"),
                 rr=parsed.get("rr"),
-                status="ACTIVE",
-                analysis_note=lev_final or "",
+                status=legacy["status"],
+                analysis_note=(legacy["note_prefix"] + (lev_final or ""))[:2000],
             )
+            if legacy["status"] != "ACTIVE":
+                return
             # ФІКС 4: Олеся автоматично заносить сигнал у бібліотеку угод.
             try:
                 rid = trade_journal_add(
@@ -4859,10 +5226,11 @@ EV позитивне: {prob.get('ev_positive', '')}
         WATCHING_COOLDOWN_SEC = 4 * 3600
 
         def _lev_msg(sym: str, happened: str, action_now: str, sl_after: str) -> str:
+            sls = format_px(sl_after, sym) or str(sl_after or "")
             return (
                 f"Тетяно, {sym}: {happened}\n"
                 f"Що робити зараз: {action_now}\n"
-                f"SL після дії: {sl_after}"
+                f"SL після дії: {sls}"
             )
         _win_streak_celebrated_at = 0
         while True:
@@ -4887,6 +5255,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp1 = row.get("tp1")
                         tp2 = row.get("tp2")
                         ts_created = str(row.get("ts_created") or "")
+                        from office_scenario_memory import parse_note_meta
+
+                        scenario_meta = parse_note_meta(row.get("analysis_note"))
+                        canonical_sid = str(scenario_meta.get("scenario_id") or "")
                         if not signal_id or not symbol:
                             continue
 
@@ -4898,6 +5270,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                         except Exception:
                             created_dt = now_utc
 
+                        if status == "CONFIRMED":
+                            # Повторна зона після підтвердження — не новий вхід.
+                            continue
+
+                        from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
+
+                        if watching_ttl_enabled() and watching_ttl_exceeded(status, created_dt, now_utc):
+                            signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="TTL")
+                            try:
+                                log_event(db_path, "SCENARIO_EXPIRED", {"symbol": symbol, "reason": "WATCHING TTL 4h",
+                                                                         "from": status}, signal_id)
+                                apply_setup_event(canonical_sid or signal_id, "EXPIRED", expired=True)
+                            except Exception as exc_ttl:
+                                print(f"[ttl] {symbol} expire bookkeeping: {exc_ttl}")
+                            print(f"[ttl] {symbol} {signal_id} WATCHING → EXPIRED (TTL)")
+                            continue
+
                         if status == "ACTIVE" and (now_utc - created_dt).total_seconds() > 4 * 3600:
                             signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED")
                             continue
@@ -4906,6 +5295,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                         current_price = float((liq_now or {}).get("current_price") or 0.0) if isinstance(liq_now, dict) else 0.0
                         if current_price <= 0:
                             continue
+                        pos_info = get_explicit_open_position(db_path, symbol, direction)
+                        in_pos_row = bool(pos_info.get("ok"))
+                        pos_tid = str(pos_info.get("trade_id") or "")
 
                         e_low = float(entry_low) if entry_low is not None else None
                         e_high = float(entry_high) if entry_high is not None else None
@@ -4943,6 +5335,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 symbol=symbol,
                             )
                             if plan.in_zone:
+                                zkey = canonical_sid or origin_key(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    zone_lo=e_low,
+                                    zone_hi=e_high if e_high is not None else e_low,
+                                    origin="t0",
+                                )
+                                apply_setup_event(zkey, "ZONE_IN", in_zone=True)
+                                zg = may_emit_telegram(
+                                    key=zkey,
+                                    intent="ZONE_IN",
+                                    in_zone=True,
+                                )
                                 if _allow_notify(signal_id, "ZONE_REACHED"):
                                     log_event(
                                         db_path,
@@ -4951,12 +5356,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             "symbol": symbol,
                                             "price": current_price,
                                             "signal": "YES" if plan.signal_ok else "NO",
-                                            "reason": plan.block_reason,
+                                            "reason": plan.block_reason or zg.get("reason"),
                                         },
                                         signal_id,
                                     )
-                                    if zone_reached_to_telegram(plan):
-                                        card = format_zone_signal_entry(
+                                    # Навіть SIGNAL=YES: зона ≠ «можна входити». Telegram тихий.
+                                    if zone_reached_to_telegram(plan) and not text_grants_entry(
+                                        format_zone_signal_entry(
                                             symbol=symbol,
                                             current_price=current_price,
                                             entry_low=e_low,
@@ -4965,28 +5371,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             tp1=tp1_v,
                                             tp2=tp2_v,
                                         )
-                                        await send_proactive(
-                                            EVENT_SIGNAL_ENTRY,
-                                            fmt_agent_line("lev", card),
-                                            stream="general",
-                                        )
-                                        try:
-                                            journal_open_office_signal(
-                                                db_path,
-                                                signal_id=signal_id,
-                                                symbol=symbol,
-                                                direction=str(row.get("direction") or "LONG"),
-                                                entry_price=float(current_price),
-                                                stop_loss=sl_v,
-                                                take_profit=tp1_v,
-                                                tp2=tp2_v,
-                                                timeframe="M15",
-                                                setup_note="ZONE_REACHED",
-                                            )
-                                        except Exception as exc_j:
-                                            print(f"[steer] journal zone signal failed: {exc_j}")
-                                    else:
-                                        print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
+                                    ):
+                                        pass
+                                    print(f"[t0] ZONE_REACHED silent {symbol}: {plan.message[:200]}")
                                 post = after_zone_reached_action(
                                     analysis_note=row.get("analysis_note"),
                                     plan=plan,
@@ -5011,7 +5398,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     )
                                     continue
                                 if plan.promote_active:
-                                    signal_update(db_path, signal_id=signal_id, status="ACTIVE")
+                                    # Не піднімаємо ACTIVE з факту «ціна в зоні».
+                                    print(f"[t0] skip promote_active {symbol} (zone ≠ entry)")
                                     continue
                                 if plan.run_reanalyze:
                                     print(
@@ -5070,16 +5458,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             if missing_levels_active:
                                 print(f"[t0] ACTIVE incomplete SL/TP {symbol}: silent, no desk LLM")
                                 continue
-                            signal_update(db_path, signal_id=signal_id, status="HIT_ENTRY")
-                            if _allow_notify(symbol, "HIT_ENTRY"):
-                                _kyiv_hm = _now_kyiv_hm()
-                                await send_proactive(
-                                    EVENT_SIGNAL_ENTRY,
-                                    f"Тетяно, {symbol} досяг зони входу {e_low}-{e_high}. "
-                                    f"Зараз {current_price}. Можна входити. SL: {sl_v} TP1: {tp1_v}\n"
-                                    f"🕐 Зараз за Києвом: {_kyiv_hm}",
-                                    stream="general",
-                                )
+                            hkey = canonical_sid or origin_key(
+                                symbol=symbol,
+                                direction=direction,
+                                zone_lo=e_low,
+                                zone_hi=e_high,
+                                origin="t0",
+                            )
+                            apply_setup_event(hkey, "HIT_ENTRY", in_zone=True)
+                            hg = may_emit_telegram(key=hkey, intent="HIT_ENTRY_PRICE", in_zone=True)
+                            print(
+                                f"[t0] HIT_ENTRY blocked {symbol}: {hg.get('reason')} "
+                                f"zone={format_level_span(e_low, e_high)} px={format_px(current_price)}"
+                            )
                             continue
 
                         if status in ("ACTIVE", "HIT_ENTRY") and tp1_v is not None:
@@ -5091,7 +5482,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 be_level = None
                                 if e_high is not None:
                                     be_level = e_high * (1.001 if direction == "LONG" else 0.999)
-                                if _allow_notify(symbol, "HIT_TP1"):
+                                if in_pos_row and _allow_notify(symbol, "HIT_TP1"):
                                     entry_px = e_high if e_high is not None else e_low
                                     if direction == "SHORT" and e_low is not None:
                                         entry_px = e_low
@@ -5102,7 +5493,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         tp1=tp1_v,
                                         tp2=tp2_v,
                                     )
-                                    await send_proactive(EVENT_TRADE_UPDATE, lev_note, stream="general")
+                                    await send_proactive(
+                                        EVENT_TRADE_UPDATE,
+                                        lev_note,
+                                        stream="general",
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
+                                        symbol=symbol,
+                                        kind="TP1",
+                                    )
                                 continue
 
                         if (
@@ -5112,14 +5513,24 @@ EV позитивне: {prob.get('ev_positive', '')}
                             and sl_v is not None
                             and e_low <= current_price <= e_high
                         ):
-                            if _allow_notify(symbol, "ADD_ON"):
-                                add_note = _lev_msg(
-                                    symbol,
-                                    f"ціна повернулась в entry-зону {e_low}-{e_high}",
-                                    "можливий добір позиції малим обсягом у зоні",
-                                    f"{sl_v}",
-                                )
-                                await send_proactive(EVENT_TRADE_UPDATE, add_note, stream="general")
+                            in_pos = has_explicit_position(db_path, symbol, direction)
+                            ag = may_emit_telegram(
+                                key=origin_key(
+                                    symbol=symbol,
+                                    direction=direction,
+                                    zone_lo=e_low,
+                                    zone_hi=e_high,
+                                    origin="t0",
+                                ),
+                                intent="ADD_ON",
+                                in_position=in_pos,
+                                in_zone=True,
+                            )
+                            print(
+                                f"[t0] ADD_ON blocked {symbol}: {ag.get('reason')} "
+                                f"zone={format_level_span(e_low, e_high, symbol)} "
+                                f"px={format_px(current_price, symbol)} pos={in_pos}"
+                            )
 
                         if status == "HIT_TP1" and tp2_v is not None:
                             try:
@@ -5137,14 +5548,24 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     change_pct = (last_close - prev_close) / prev_close * 100.0
                                     rev_long = direction == "LONG" and change_pct <= -0.5 and current_price < tp2_v
                                     rev_short = direction == "SHORT" and change_pct >= 0.5 and current_price > tp2_v
-                                    if (rev_long or rev_short) and _allow_notify(symbol, "REVERSAL_WARN"):
+                                    if (rev_long or rev_short) and in_pos_row and _allow_notify(symbol, "REVERSAL_WARN"):
                                         rev_note = _lev_msg(
                                             symbol,
                                             f"4H свічка дала розворот {change_pct:+.2f}% після TP1",
                                             "розглянь фіксацію ще 50% поки в плюсі",
                                             f"{sl_v}",
                                         )
-                                        await send_proactive(EVENT_TRADE_UPDATE, rev_note, stream="general")
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            rev_note,
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            kind="REVERSAL_WARN",
+                                        )
 
                         # ФІКС 3: попередження про наближення до SL / TP1 (до фактичного спрацювання).
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1"):
@@ -5165,7 +5586,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     near_tp1 = current_price < tp1_v and (tp1_v - current_price) / tp1_v * 100.0 < near_pct
                                 else:
                                     near_tp1 = current_price > tp1_v and (current_price - tp1_v) / tp1_v * 100.0 < near_pct
-                                if near_tp1 and _allow_notify(symbol, "TP1_NEAR"):
+                                if near_tp1 and in_pos_row and _allow_notify(symbol, "TP1_NEAR"):
                                     await send_proactive(
                                         EVENT_TRADE_UPDATE,
                                         format_manage_update(
@@ -5176,6 +5597,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             sl=sl_v,
                                         ),
                                         stream="general",
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
+                                        symbol=symbol,
+                                        kind="TP1_NEAR",
                                     )
 
                         if status in ("ACTIVE", "HIT_ENTRY", "HIT_TP1") and sl_v is not None:
@@ -5183,28 +5610,103 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 direction == "SHORT" and current_price >= sl_v
                             )
                             if hit_sl:
+                                from office_confluence import format_cancel_card
+                                from office_lev_authority import (
+                                    had_confirmed_entry,
+                                    recommend_close_text,
+                                )
+
                                 analysis_note = f"HIT_SL {symbol} @ {current_price} sl={sl_v}"
-                                signal_update(db_path, signal_id=signal_id, status="HIT_SL", outcome="LOSS", analysis_note=analysis_note)
-                                if _allow_notify(symbol, "HIT_SL"):
-                                    stop_note = _lev_msg(
-                                        symbol,
-                                        f"SL перебитий на {sl_v}, структура зламана",
-                                        "повний вихід з позиції зараз",
-                                        "позиція закрита",
-                                    )
-                                    await send_proactive(EVENT_TRADE_CLOSED, stop_note, stream="general")
+                                signal_update(
+                                    db_path,
+                                    signal_id=signal_id,
+                                    status="HIT_SL",
+                                    outcome="LOSS",
+                                    analysis_note=analysis_note,
+                                )
+                                pos_sl = None
                                 try:
-                                    journal_close_trade(
-                                        db_path,
-                                        trade_id=office_signal_trade_id(signal_id),
-                                        outcome="LOSS",
-                                        exit_price=float(current_price),
-                                        pnl_pct=0.0,
-                                        exit_reason="SL",
-                                        context_patch={"result": "SL"},
+                                    pos_sl = float(pos_info.get("sl")) if pos_info.get("sl") is not None else None
+                                except (TypeError, ValueError):
+                                    pos_sl = None
+                                hit_pos_sl = False
+                                if in_pos_row and pos_sl is not None:
+                                    hit_pos_sl = (direction == "LONG" and current_price <= pos_sl) or (
+                                        direction == "SHORT" and current_price >= pos_sl
                                     )
-                                except Exception as exc_js:
-                                    print(f"[steer] journal SL failed: {exc_js}")
+                                entered = had_confirmed_entry(status) or bool(in_pos_row)
+                                if _allow_notify(symbol, "HIT_SL"):
+                                    if in_pos_row and hit_pos_sl and pos_tid:
+                                        stop_note = recommend_close_text(
+                                            symbol=symbol, price=current_price, sl=pos_sl
+                                        )
+                                        await send_proactive(
+                                            EVENT_TRADE_CLOSED,
+                                            stop_note,
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            direction=direction,
+                                            kind="SL",
+                                        )
+                                    elif in_pos_row and not hit_pos_sl:
+                                        print(
+                                            f"[signals] {symbol} scenario SL {sl_v} ≠ position SL {pos_sl} "
+                                            "— сценарій скасовано, позицію не чіпаємо"
+                                        )
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            format_cancel_card(
+                                                symbol=symbol,
+                                                direction=direction,
+                                                reason="ціна за стопом сценарію до/без удару SL позиції",
+                                            ),
+                                            stream="general",
+                                            intent="ANALYTICAL",
+                                            symbol=symbol,
+                                            direction=direction,
+                                            kind="CANCEL_SCENARIO",
+                                        )
+                                    else:
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            format_cancel_card(
+                                                symbol=symbol,
+                                                direction=direction,
+                                                reason="ціна за стопом до входу",
+                                            ),
+                                            stream="general",
+                                            intent="ANALYTICAL",
+                                            symbol=symbol,
+                                            direction=direction,
+                                            kind="CANCEL_BEFORE_ENTRY",
+                                        )
+                                        print(
+                                            f"[signals] {symbol} CANCELLED_BEFORE_ENTRY "
+                                            f"@ {current_price} sl={sl_v} (не /position)"
+                                        )
+                                if in_pos_row and hit_pos_sl and pos_tid:
+                                    try:
+                                        journal_close_trade(
+                                            db_path,
+                                            trade_id=pos_tid,
+                                            outcome="LOSS",
+                                            exit_price=float(current_price),
+                                            pnl_pct=0.0,
+                                            exit_reason="SL",
+                                            context_patch={"result": "SL"},
+                                        )
+                                    except Exception as exc_js:
+                                        print(f"[steer] journal SL failed: {exc_js}")
+                                if not entered:
+                                    print(
+                                        f"[steer] no reentry after CANCELLED_BEFORE_ENTRY {symbol} "
+                                        f"{signal_id} — потрібен новий цикл Лева"
+                                    )
+                                    continue
                                 try:
                                     m15_sl = fetch_candles(symbol, "15m", 16)
                                     h1_sl = fetch_candles(symbol, "1h", 12)
@@ -5277,28 +5779,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             tp1=tp1_v,
                                             tp2=tp2_v,
                                             rr=planned.get("rr"),
-                                            status="ACTIVE",
-                                            analysis_note=f"PR42 reentry {ck}",
+                                            status="WATCHING",
+                                            analysis_note=f"origin=desk tf=H1 new-after-stop {ck}",
                                         )
-                                        journal_open_office_signal(
-                                            db_path,
-                                            signal_id=new_id,
-                                            symbol=symbol,
-                                            direction=direction,
-                                            entry_price=float(current_price),
-                                            stop_loss=float(new_sl),
-                                            take_profit=tp1_v,
-                                            tp2=tp2_v,
-                                            timeframe="H1",
-                                            setup_note="SWEEP_REENTRY",
+                                        print(
+                                            f"[steer] новий WATCHING {new_id} після SL /position "
+                                            f"{symbol} — без автоматичного SIGNAL_ENTRY"
                                         )
-                                        if _allow_notify(symbol, "REENTRY"):
-                                            await send_proactive(
-                                                EVENT_SIGNAL_ENTRY,
-                                                fmt_agent_line("lev", card),
-                                                stream="general",
-                                            )
-                                        print(f"[steer] reentry SIGNAL_ENTRY {symbol} {ck}")
                                     else:
                                         print(f"[steer] reentry skip {symbol}: {planned.get('reason')}")
                                 else:
@@ -5316,15 +5803,27 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     trail_lv = e_high if direction == "LONG" else e_low
                                     if direction == "LONG" and e_low is not None:
                                         trail_lv = e_low
-                                    await send_proactive(
-                                        EVENT_TRADE_UPDATE,
-                                        (
-                                            f"✅ TP2 · {symbol} {direction}\n"
-                                            "Закрий ще частину\n"
-                                            f"SL на {tp1_v if tp1_v is not None else trail_lv}"
-                                        ),
-                                        stream="general",
-                                    )
+                                    if in_pos_row and pos_tid:
+                                        await send_proactive(
+                                            EVENT_TRADE_UPDATE,
+                                            (
+                                                f"✅ TP2 · {symbol} {direction}\n"
+                                                "Закрий ще частину\n"
+                                                f"SL на {tp1_v if tp1_v is not None else trail_lv}"
+                                            ),
+                                            stream="general",
+                                            intent="POSITION_MANAGE",
+                                            confirmed_position=True,
+                                            position_id=pos_tid,
+                                            position_open=True,
+                                            symbol=symbol,
+                                            kind="TP2",
+                                        )
+                                    else:
+                                        print(
+                                            f"[t0] HIT_TP2 scenario (не /position) {symbol} "
+                                            "без інструкції змінити ордер"
+                                        )
                                 try:
                                     ent = float(e_low or e_high or current_price)
                                     sl_b = float(sl_v or ent)
@@ -5399,6 +5898,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     rsi_h1=rsi1,
                                     rsi_h4=rsi4,
                                     exhaustion=exh,
+                                    confirmed_position=in_pos_row,
                                 )
                                 peak = None
                                 if rsi1 is not None or rsi4 is not None:
@@ -5422,6 +5922,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                         kind=str(ev.get("kind") or ""),
                                         symbol=symbol,
                                         sl=ev.get("trail_sl"),
+                                        intent="POSITION_MANAGE",
+                                        confirmed_position=True,
+                                        position_id=pos_tid,
+                                        position_open=True,
                                     )
                                     if str(ev.get("event")) == EVENT_TRADE_CLOSED:
                                         signal_update(
@@ -5432,9 +5936,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             analysis_note=str(ev.get("kind") or ""),
                                         )
                                         try:
-                                            journal_close_trade(
-                                                db_path,
-                                                trade_id=office_signal_trade_id(signal_id),
+                                            if pos_tid:
+                                                journal_close_trade(
+                                                    db_path,
+                                                    trade_id=pos_tid,
                                                 outcome="LOSS" if str(ev.get("kind")) == "SL" else "WIN",
                                                 exit_price=float(current_price),
                                                 pnl_pct=float(book.mfe if str(ev.get("kind")) != "SL" else -book.mae),
@@ -5490,6 +5995,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                             EVENT_TRADE_UPDATE,
                             format_near_stop(symbol=psym, price=px, sl=slp),
                             stream="general",
+                            intent="POSITION_MANAGE",
+                            confirmed_position=True,
+                            position_id=str(pos.get("trade_id") or ""),
+                            position_open=True,
+                            symbol=psym,
+                            kind="NEAR_STOP",
                         )
             except Exception as exc:
                 print(f"[signals] monitor failed: {exc}")
@@ -5500,6 +6011,15 @@ EV позитивне: {prob.get('ev_positive', '')}
     async def monitor_trade_radar() -> None:
         """T6: радар BTC. T8: боковик + всесвіт альтів/золота без копіювання BTC."""
         from office_market_data import fetch_atr_context, fetch_candles, fetch_liquidations_proxy
+        from office_confluence import hydrate_live_from_db
+        from office_alert_gate import hydrate_alert_gate_from_db
+
+        try:
+            n_h = hydrate_live_from_db(db_path)
+            n_g = hydrate_alert_gate_from_db(db_path)
+            print(f"[confluence] hydrated live keys={n_h} alert_gate={n_g}")
+        except Exception as exc_h:
+            print(f"[confluence] hydrate failed: {type(exc_h).__name__}: {exc_h}")
 
         _range_fp: Dict[str, str] = {}
         _level_fp: Dict[str, str] = {}
@@ -5525,6 +6045,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                 m15_close: Any = None,
                 candle: Any = None,
                 cancel_level: Any = None,
+                confluence: Any = None,
+                lev_note: str = "",
             ) -> bool:
                 from office_desk_card import prepare_desk_send
                 from office_trade_steer import atr_from_candles
@@ -5578,6 +6100,34 @@ EV позитивне: {prob.get('ev_positive', '')}
                         last_px = float((src[-1] or {}).get("close") or entry or 0) or entry
                 except Exception:
                     last_px = entry
+                from office_lev_verdict import ACTION_SKIP, ACTION_WAIT, lev_cycle
+
+                cycle = lev_cycle(
+                    symbol=sym,
+                    price=last_px,
+                    timeframe=timeframe,
+                    candles_m5=m5_bars,
+                    candles_m15=m15_bars,
+                    candles_h1=h1_bars,
+                    candles_h4=h4_bars,
+                    candles_d1=d1_bars,
+                    candles_w=w_bars,
+                    candles_ltf=m5_bars,
+                    atr_h1=atr_v,
+                    now_ts=now_ts,
+                    market_context={"data_status": "DATA_UNAVAILABLE"},
+                )
+                cycle = _lev_risk_review(
+                    cycle, sym, candles_ltf=m5_bars, market_context={"data_status": "DATA_UNAVAILABLE"},
+                )
+                _lev_record_thesis(cycle, {"H4": h4_bars, "H1": h1_bars, "M15": m15_bars, "LTF": m5_bars})
+                if str(cycle.get("action") or "") in (ACTION_SKIP, ACTION_WAIT):
+                    print(f"[{tag}] {sym} hold lev_cycle: {cycle.get('action')} {cycle.get('reason')}")
+                    return False
+                if lev_note:
+                    lev_note = f"{lev_note} · {cycle.get('reason') or ''}".strip(" ·")
+                else:
+                    lev_note = str(cycle.get("reason") or cycle.get("note") or "")
                 prep = prepare_desk_send(
                     db_path=db_path,
                     symbol=sym,
@@ -5603,6 +6153,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     candles_ltf=m5_bars,
                     price=last_px,
                     now_ts=now_ts,
+                    confluence=confluence,
+                    lev_note=lev_note,
                 )
                 if not prep.get("send"):
                     conf_hold = prep.get("confluence") if isinstance(prep.get("confluence"), dict) else {}
@@ -5628,17 +6180,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 pass
                     print(f"[{tag}] {sym} hold: {prep.get('reason')}")
                     return False
-                _last_notified["__FEED_COOLDOWN__"] = now_ts
-                mark_cycle_sent(sent_this_cycle, sym)
-                await send_proactive(
+                sent_signal_id = await send_proactive(
                     EVENT_SIGNAL_ENTRY,
                     fmt_agent_line("lev", str(prep.get("text") or "")),
                     symbol=sym,
                     direction=str(direction or ""),
                     sl=prep.get("sl"),
                     kind=KIND_SIGNAL,
+                    intent="SIGNAL",
+                    canonical_id=str(prep.get("scenario_id") or prep.get("setup_key") or ""),
+                    scenario_event=EVENT_SIGNAL_ENTRY,
                 )
-                sid = f"desk-{tag}-{sym}-{int(now_ts)}"
+                if not sent_signal_id:
+                    print(f"[{tag}] {sym} SIGNAL_ENTRY delivery not verified: no ACTIVE journal")
+                    return False
+                _last_notified["__FEED_COOLDOWN__"] = now_ts
+                mark_cycle_sent(sent_this_cycle, sym)
+                sid = str(prep.get("scenario_id") or prep.get("setup_key") or f"desk-{tag}-{sym}-{int(now_ts)}")
                 e_px = prep.get("entry")
                 try:
                     e_px = float(e_px) if e_px is not None else (float(entry) if entry is not None else None)
@@ -5655,6 +6213,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                     "zone_hi": conf.get("zone_hi"),
                 }
                 try:
+                    from office_scenario_memory import stamp_scenario_note
+
+                    scenario_note = stamp_scenario_note(
+                        (
+                            f"{setup_type or tag}"
+                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
+                            + (f" ckey={conf.get('zone_key')}" if conf.get("zone_key") else "")
+                        ),
+                        origin="desk",
+                        timeframe=timeframe,
+                        scenario_id=sid,
+                        basis=str(prep.get("market_basis") or conf.get("market_basis") or ""),
+                    )
                     signal_upsert(
                         db_path,
                         signal_id=sid,
@@ -5667,12 +6238,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                         tp2=tp2,
                         rr=None,
                         status="ACTIVE",
-                        analysis_note=(
-                            f"{setup_type or tag}"
-                            + (f" cancel={cancel_level}" if cancel_level is not None else "")
-                            + (f" ckey={prep.get('setup_key')}" if prep.get("setup_key") else "")
-                        )[:2000],
+                        analysis_note=scenario_note[:2000],
                     )
+                    apply_setup_event(sid, "FOUND")
                     journal_open_office_signal(
                         db_path,
                         signal_id=sid,
@@ -5889,91 +6457,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             rprice = float((rh1[-1] or {}).get("close") or 0.0)
                         except Exception:
                             rprice = 0.0
+                        rsi1 = rsi_from_candles(rh1 if isinstance(rh1, list) else [])
+                        rsi4 = rsi_from_candles(rh4 if isinstance(rh4, list) else [])
                         try:
-                            for tf_name, bars in (
-                                ("M5", rm5 if isinstance(rm5, list) else []),
-                                ("M15", rm15 if isinstance(rm15, list) else []),
-                            ):
-                                if len(bars) < 22:
-                                    continue
-                                pd = evaluate_pump_dump(
-                                    candles=bars,
-                                    daily=rd1 if isinstance(rd1, list) else None,
-                                )
-                                if not pd.get("signal"):
-                                    continue
-                                rsi1 = rsi_from_candles(rh1 if isinstance(rh1, list) else [])
-                                rsi4 = rsi_from_candles(rh4 if isinstance(rh4, list) else [])
-                                heat = rsi_heat(
-                                    direction=str(pd.get("direction") or ""),
-                                    rsi_h1=rsi1,
-                                    rsi_h4=rsi4,
-                                )
-                                if not heat.get("allow_market"):
-                                    print(
-                                        f"[pump] {rsym} {pd.get('signal')} blocked RSI "
-                                        f"{heat.get('kind')} {heat.get('message')}"
-                                    )
-                                    continue
-                                from office_trade_steer import atr_from_candles as _atr_h1
-
-                                tps = pd.get("tps") or {}
-                                sc = pd.get("total_l") if pd.get("signal") == "PUMP" else pd.get("total_s")
-                                m15_cl = None
-                                try:
-                                    if isinstance(rm15, list) and rm15:
-                                        m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
-                                except Exception:
-                                    m15_cl = None
-                                if await _desk_send(
-                                    rsym,
-                                    f"pump-{tf_name.lower()}",
-                                    direction=str(pd.get("direction") or ""),
-                                    timeframe=tf_name,
-                                    entry=pd.get("entry"),
-                                    sl=pd.get("sl"),
-                                    tp1=tps.get("tp1"),
-                                    tp2=tps.get("tp2"),
-                                    tp3=tps.get("tp3"),
-                                    add_px=tps.get("add"),
-                                    atr_h1=_atr_h1(rh1),
-                                    score=sc,
-                                    min_score=10,
-                                    setup_type=str(pd.get("signal") or "PUMP"),
-                                    m15_close=m15_cl,
-                                    candle=(bars[-1] if bars else None),
-                                    cancel_level=pd.get("cancel"),
-                                ):
-                                    print(f"[pump] {rsym} {pd.get('signal')} {tf_name}")
-                                    break
-                            hunt = evaluate_ict_hunter(
-                                candles=rm15 if isinstance(rm15, list) else rh1,
-                                timeframe="M15",
-                                daily=rd1 if isinstance(rd1, list) else None,
+                            record_scan_facts(
+                                db_path,
+                                rsym,
+                                rsi_h1=rsi1,
+                                rsi_h4=rsi4,
+                                decision="WATCH",
+                                data_quality="OK" if rsi1 is not None else "UNAVAILABLE",
                             )
-                            if hunt.get("signal"):
-                                htxt = format_signal_steer_card(
-                                    symbol=rsym,
-                                    direction=str(hunt.get("direction") or ""),
-                                    timeframe="M15",
-                                    entry=hunt.get("close"),
-                                    sl=None,
-                                    tp1=None,
-                                    setup_type="HUNTER",
-                                    score=hunt.get("score"),
-                                    min_score=hunt.get("min_score"),
-                                    score_max=20,
-                                    ote_model="Hunter OTE 0.5 / EQ 0.786",
-                                    patterns=hunt.get("patterns"),
-                                )
-                                # Без стопа Hunter-картку не шлемо як вхід — лише якщо є патерни в pump/radar.
-                                if hunt.get("patterns"):
-                                    print(
-                                        f"[hunter] {rsym} score {hunt.get('score')}/{hunt.get('min_score')} "
-                                        f"{hunt.get('patterns')}"
-                                    )
-                        except Exception as exc_pd:
-                            print(f"[pump] {rsym}: {type(exc_pd).__name__}: {exc_pd}")
+                        except Exception as exc_ms:
+                            print(f"[scout] market_state {rsym}: {type(exc_ms).__name__}")
                         r_used = None
                         try:
                             r_atr = fetch_atr_context(rsym) or {}
@@ -5981,6 +6477,104 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 r_used = float(r_atr.get("day_used_pct"))
                         except Exception:
                             r_used = None
+                        try:
+                            from office_trade_steer import atr_from_candles as _atr_h1
+
+                            m15_cl = None
+                            try:
+                                if isinstance(rm15, list) and rm15:
+                                    m15_cl = float((rm15[-1] or {}).get("close") or 0.0) or None
+                            except Exception:
+                                m15_cl = None
+                            from office_scenario_memory import btc_context_usable
+
+                            btc_ctx = btc_context_only(screen)
+                            mctx = (
+                                btc_ctx
+                                if btc_context_usable(btc_ctx)
+                                else {
+                                    "data_status": "DATA_UNAVAILABLE",
+                                    "note": "BTC-контекст не підтверджений даними — не вигадую",
+                                }
+                            )
+                            cycle = lev_cycle(
+                                symbol=rsym,
+                                price=rprice,
+                                timeframe="H1",
+                                candles_m5=rm5 if isinstance(rm5, list) else None,
+                                candles_m15=rm15 if isinstance(rm15, list) else None,
+                                candles_h1=rh1,
+                                candles_h4=rh4 if isinstance(rh4, list) else None,
+                                candles_d1=rd1 if isinstance(rd1, list) else None,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
+                                atr_h1=_atr_h1(rh1),
+                                day_used_pct=r_used,
+                                market_context=mctx,
+                            )
+                            cycle = _lev_risk_review(
+                                cycle, rsym,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
+                                market_context=mctx,
+                            )
+                            _lev_record_thesis(cycle, {"H1": rh1, "M15": rm15, "M5": rm5})
+                            print(
+                                f"[lev] {rsym} {cycle.get('action')} {cycle.get('direction')} "
+                                f"{cycle.get('reason')}"
+                            )
+                            if cycle.get("send"):
+                                if await _desk_send(
+                                    rsym,
+                                    "lev",
+                                    direction=str(cycle.get("direction") or ""),
+                                    timeframe="H1",
+                                    entry=cycle.get("entry"),
+                                    sl=cycle.get("sl"),
+                                    tp1=cycle.get("tp1"),
+                                    atr_h1=_atr_h1(rh1),
+                                    score=12,
+                                    min_score=10,
+                                    setup_type="ЛЕВ",
+                                    m15_close=m15_cl,
+                                    candle=(rm15[-1] if isinstance(rm15, list) and rm15 else None),
+                                    cancel_level=cycle.get("sl"),
+                                    confluence=cycle.get("confluence"),
+                                    lev_note=str(cycle.get("lev_note") or ""),
+                                ):
+                                    print(f"[lev] {rsym} SEND {cycle.get('direction')}")
+                            elif str(cycle.get("action") or "") in ("WAIT", "WATCHING"):
+                                zlo = (cycle.get("confluence") or {}).get("zone_lo")
+                                zhi = (cycle.get("confluence") or {}).get("zone_hi")
+                                if zlo is not None and zhi is not None:
+                                    gate_w = apply_skip_watching_gate(
+                                        db_path,
+                                        symbol=rsym,
+                                        direction=str(cycle.get("direction") or "LONG"),
+                                        entry_low=float(zlo),
+                                        entry_high=float(zhi),
+                                        timeframe="1h",
+                                        now_ts=time.time(),
+                                        current_price=rprice,
+                                    )
+                                    if gate_w.get("create"):
+                                        signal_upsert(
+                                            db_path,
+                                            signal_id=f"lev-watch-{rsym}-{int(time.time())}",
+                                            symbol=rsym,
+                                            direction=str(cycle.get("direction") or "LONG"),
+                                            entry_low=float(zlo),
+                                            entry_high=float(zhi),
+                                            sl=cycle.get("sl"),
+                                            tp1=cycle.get("tp1"),
+                                            tp2=None,
+                                            rr=None,
+                                            status="WATCHING",
+                                            analysis_note=(
+                                                f"{cycle.get('action')} {cycle.get('reason') or ''} "
+                                                f"{cycle.get('recheck') or ''}"
+                                            )[:2000],
+                                        )
+                        except Exception as exc_pd:
+                            print(f"[lev] {rsym}: {type(exc_pd).__name__}: {exc_pd}")
                         rres = evaluate_range_radar(
                             symbol=rsym,
                             candles=rh1,
@@ -6020,7 +6614,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             quote_stale=r_stale,
                         )
                         if rng_txt:
-                            if await _try_signal_feed(rsym, rng_txt, "range"):
+                            if await _try_signal_feed(rsym, rng_txt, "боковик"):
                                 print(f"[range] {rsym} ALERT {rres.status}")
                         elif rres.should_notify:
                             print(f"[range] {rsym} hold {rres.status} {rres.event} (not telegram)")
@@ -6143,6 +6737,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                     sym_f = str(st.get("symbol") or "")
                     if not sym_f:
                         continue
+                    if str(st.get("status") or "WATCHING").upper() not in ("WATCHING", "ACTIVE", "ZONE_REACHED"):
+                        continue
                     tf_wait = "5m" if str(st.get("timeframe") or "M15").upper() in ("M15", "M5", "M1") else "15m"
                     try:
                         ltf = fetch_candles(sym_f, tf_wait, 40)
@@ -6157,7 +6753,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                     fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf)
                     act = str(fu.get("action") or "")
                     if act == "confirm":
-                        await send_proactive(
+                        okey = str(st.get("scenario_id") or key)
+                        cg = may_emit_telegram(
+                            key=okey,
+                            intent="CONFIRM",
+                            ltf_confirmed=True,
+                            chase=bool(fu.get("need_retest")),
+                        )
+                        if not cg.get("send"):
+                            print(f"[confluence] confirm hold {key}: {cg.get('reason')}")
+                            continue
+                        confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             fmt_agent_line(
                                 "lev",
@@ -6168,7 +6774,33 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     detail=str(fu.get("detail") or fu.get("reason") or ""),
                                 ),
                             ),
+                            symbol=sym_f,
+                            kind="CONFIRM",
+                            intent="CONFIRM",
+                            canonical_id=okey,
+                            scenario_event="CONFIRM",
                         )
+                        if not confirm_msg_id:
+                            print(f"[confluence] CONFIRM delivery not verified {okey}: keep pending for retry")
+                            continue
+                        mark_confirm_sent(okey)
+                        apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
+                        try:
+                            from office_scenario_memory import apply_confirmed_status
+
+                            apply_confirmed_status(
+                                db_path,
+                                symbol=sym_f,
+                                direction=str(st.get("direction") or ""),
+                                timeframe=str(st.get("timeframe") or ""),
+                                origin=str(st.get("origin") or "desk"),
+                                zone_lo=st.get("zone_lo"),
+                                zone_hi=st.get("zone_hi"),
+                                signal_id=str(st.get("signal_id") or ""),
+                                price=fu.get("price"),
+                            )
+                        except Exception as exc_cu:
+                            print(f"[confluence] status CONFIRMED {sym_f}: {exc_cu}")
                         live_drop(key)
                         print(f"[confluence] confirmed {key}")
                     elif act == "cancel":
@@ -6182,7 +6814,25 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     reason=str(fu.get("reason") or ""),
                                 ),
                             ),
+                            symbol=sym_f,
+                            kind="CANCEL_BEFORE_ENTRY",
+                            intent="ANALYTICAL",
+                            canonical_id=str(st.get("scenario_id") or key),
+                            scenario_event="CANCELLED",
                         )
+                        ckey = str(st.get("scenario_id") or key)
+                        apply_setup_event(ckey, "CANCELLED")
+                        try:
+                            from office_bridge import signal_update
+
+                            signal_update(
+                                db_path,
+                                signal_id=str(st.get("signal_id") or ckey),
+                                status="CANCELLED",
+                                outcome="CANCELLED",
+                            )
+                        except Exception as exc_cancel:
+                            print(f"[confluence] status CANCELLED {sym_f}: {exc_cancel}")
                         live_drop(key)
                         print(f"[confluence] cancelled {key}")
             except Exception as exc_fu:

@@ -79,10 +79,16 @@ def _parse_ts_close(s: object) -> datetime | None:
 
 
 def _tv_webhook_secret_ok(handler: BaseHTTPRequestHandler, u) -> bool:
-    """Якщо TRADINGVIEW_WEBHOOK_SECRET задано — перевір query (?secret= / ?token=) або X-TradingView-Secret."""
+    """Секрет обов'язковий для не-localhost. Не логуємо секрет."""
+    import hmac
+
     want = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "").strip()
-    if not want:
-        return True
+    host = ""
+    try:
+        host = str((handler.client_address or ("", 0))[0] or "")
+    except Exception:
+        host = ""
+    loopback = host in ("127.0.0.1", "::1", "localhost")
     qs = parse_qs(u.query)
     qtok = (qs.get("secret") or qs.get("token") or [""])[0].strip()
     hdr = (handler.headers.get("X-TradingView-Secret") or "").strip()
@@ -90,7 +96,12 @@ def _tv_webhook_secret_ok(handler: BaseHTTPRequestHandler, u) -> bool:
         auth = (handler.headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
             hdr = auth[7:].strip()
-    return qtok == want or hdr == want
+    provided = qtok or hdr
+    if not want:
+        return bool(loopback)
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, want)
 
 
 def _parse_json_body(raw: bytes) -> dict:
@@ -267,7 +278,9 @@ def build_review_draft(trade_id: str | None) -> dict[str, object]:
 
     def fmtp(label: str, v: object) -> str:
         x = _f_or_none(v)
-        return f"{label}: {x:.6g}" if x is not None else f"{label}: —"
+        from office_price_format import format_px
+
+        return f"{label}: {format_px(x) or x}" if x is not None else f"{label}: —"
 
     try:
         pnl_s = f"{float(pnl_pct or 0):+.2f}%"
@@ -560,6 +573,7 @@ def get_data(
         "now_utc": datetime.now(timezone.utc).isoformat(),
         "filters": {"symbol": sym_f, "action": act_f, "agent": ag_f, "chart": chart_symbol.strip().upper()},
         "db_identity": office_db_identity(_db_target_for_identity()),
+        "git_sha": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "")[:40],
         "kpi": {
             "total": total,
             "wins": wins,
@@ -1145,8 +1159,62 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _send_json(self, code: int, data: dict) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _client_ip(self) -> str:
+        # Render (як і більшість проксі) ДОДАЄ реальну адресу клієнта в кінець X-Forwarded-For;
+        # початок ланцюжка клієнт може підробити, тому беремо останній елемент.
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return (fwd.split(",")[-1].strip() if fwd else self.client_address[0]) or "?"
+
+    def _post_trade(self, u) -> None:
+        """Ручний облік угод. Авторизація fail-closed; лише JSON; ордерів не створює."""
+        from office_mini_v2 import TRADE_ACTIONS, db_alive, trade_action
+        from office_write_auth import MAX_BODY, authorize
+
+        action = u.path.rsplit("/", 1)[-1]
+        if action not in TRADE_ACTIONS:
+            return self._send_json(404, {"ok": False, "error": "unknown_action"})
+        ok, why = authorize(dict(self.headers.items()), client_ip=self._client_ip())
+        if not ok:
+            code = {"write_disabled": 403, "rate_limited": 429}.get(why, 401)
+            return self._send_json(code, {"ok": False, "error": why})
+        if "application/json" not in (self.headers.get("Content-Type", "") or "").lower():
+            return self._send_json(415, {"ok": False, "error": "json_required"})
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY:
+            return self._send_json(413, {"ok": False, "error": "bad_body_size"})
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        if not isinstance(body, dict):
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        if not db_alive():
+            return self._send_json(503, {"ok": False, "error": "db_unavailable", "data_status": "DB_UNAVAILABLE"})
+        code, data = trade_action(action, body)
+        self._send_json(code, data)
+
     def do_POST(self) -> None:
         u = urlparse(self.path)
+        if u.path.startswith("/api/v2/trade/"):
+            try:
+                return self._post_trade(u)
+            except (BrokenPipeError, ConnectionResetError):
+                raise
+            except Exception as exc:  # noqa: BLE001
+                print(f"[mini] POST {u.path[:80]} failed: {type(exc).__name__}: {exc}")
+                return self._send_json(500, {"ok": False, "error": "internal_error"})
         if u.path != "/api/webhook/tradingview":
             self.send_response(404)
             self.end_headers()
@@ -1221,6 +1289,26 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        """Будь-яка непередбачена помилка → JSON 500 з чесним станом, а не обірване з'єднання."""
+        try:
+            self._do_get()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mini] GET {getattr(self, 'path', '')[:120]} failed: {type(exc).__name__}: {exc}")
+            try:
+                body = json.dumps({"ok": False, "error": "internal_error", "data_status": "DATA_UNAVAILABLE",
+                                   "order_authorized": False}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+    def _do_get(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/review_draft":
             qs = parse_qs(u.query)
@@ -1266,12 +1354,92 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if u.path == "/v1" or u.path == "/mini":
-            from office_mini_v1 import html_v1
+        if u.path in ("/v1", "/v2", "/mini"):
+            from office_mini_v2 import html_v2
 
-            body = html_v1().encode("utf-8")
+            body = html_v2().encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path.startswith("/api/v2/"):
+            from office_mini_v2 import (
+                candles_payload,
+                channel_payload,
+                home_v2,
+                journal_payload,
+                overview_payload,
+                positions_v2,
+                risk_payload,
+                scanner_v2,
+                session_payload,
+                scenario_detail,
+                scenarios_payload,
+                settings_payload,
+                trade_detail,
+                trades_payload,
+            )
+
+            qs = parse_qs(u.query)
+            def _q(name: str, default: str = "") -> str:
+                v = qs.get(name)
+                return (v[0] if v else default).strip()
+
+            from office_mini_v2 import DB_FREE_PATHS, db_alive
+
+            status_code = 200
+            if u.path not in DB_FREE_PATHS and not db_alive():
+                status_code = 503
+                data = {"ok": False, "error": "db_unavailable", "data_status": "DB_UNAVAILABLE",
+                        "order_authorized": False}
+            elif u.path == "/api/v2/home":
+                data = home_v2()
+            elif u.path == "/api/v2/scenarios":
+                data = scenarios_payload(watching=_q("watching") in ("1", "true"))
+            elif u.path == "/api/v2/scenario":
+                data = scenario_detail(_q("id"))
+            elif u.path == "/api/v2/candles":
+                try:
+                    lim = int(_q("limit") or "180")
+                except ValueError:
+                    lim = 180
+                data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim)
+            elif u.path == "/api/v2/channel":
+                data = channel_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
+            elif u.path == "/api/v2/overview":
+                data = overview_payload()
+            elif u.path == "/api/v2/scanner":
+                data = scanner_v2()
+            elif u.path == "/api/v2/journal":
+                data = journal_payload(kind=_q("kind") or "scenarios")
+            elif u.path == "/api/v2/positions":
+                data = positions_v2()
+            elif u.path == "/api/v2/settings":
+                data = settings_payload()
+            elif u.path == "/api/v2/risk":
+                data = risk_payload()
+            elif u.path == "/api/v2/trades":
+                data = trades_payload(_q("state") or "open")
+            elif u.path == "/api/v2/trade":
+                data = trade_detail(_q("id"))
+            elif u.path == "/api/v2/auth":
+                from office_write_auth import config_status
+
+                data = {"ok": True, **config_status()}
+            elif u.path == "/api/v2/lev":
+                from office_mini_v2 import lev_payload
+
+                data = lev_payload(_q("q"), _q("symbol"))
+            elif u.path == "/api/v2/session":
+                data = session_payload(_q("symbol") or "BTCUSDT")
+            else:
+                data = {"ok": False, "error": "unknown v2 endpoint"}
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1298,7 +1466,8 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v1/chart.png":
                 qs = parse_qs(u.query)
                 sym = (qs.get("symbol") or ["BTCUSDT"])[0]
-                drawn = render_chart_png(sym)
+                sid = (qs.get("signal_id") or [""])[0]
+                drawn = render_chart_png(sym, sid)
                 if drawn.get("ok") and drawn.get("path") and os.path.isfile(drawn["path"]):
                     with open(drawn["path"], "rb") as fh:
                         raw = fh.read()
@@ -1339,11 +1508,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def auto_migrate_if_enabled(db_target: str) -> str:
+    """Адитивна міграція релізу (CREATE TABLE IF NOT EXISTS) при старті web — лише за OFFICE_AUTO_MIGRATE=1.
+
+    Нічого не змінює й не видаляє; ті самі кроки, що `scripts/migrate_release.py --apply`.
+    """
+    if os.getenv("OFFICE_AUTO_MIGRATE", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return "disabled"
+    try:
+        from office_positions import migrate_positions
+        from office_telegram_delivery_ledger import migrate_delivery_ledger
+
+        migrate_delivery_ledger(db_target)
+        migrate_positions(db_target)
+        print("[migrate] release tables ensured (additive, idempotent)")
+        return "applied"
+    except Exception as exc:  # noqa: BLE001
+        print(f"[migrate] FAILED: {type(exc).__name__}: {exc}")
+        return "failed"
+
+
 def main() -> None:
     try:
         init_office_db(_db_target_for_identity())
     except Exception as exc:
         print(f"[warn] init_office_db: {exc}")
+    auto_migrate_if_enabled(_db_target_for_identity())
     if (not _is_pg()) and (not os.path.exists(DB_PATH)):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)

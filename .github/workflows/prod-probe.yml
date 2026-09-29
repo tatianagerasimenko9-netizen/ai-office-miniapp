@@ -1,0 +1,39 @@
+name: Production probe (read-only)
+
+# Лише GET-запити до публічного Mini App. Жодних записів, Telegram чи ордерів.
+# Cron працює, коли файл є в гілці за замовчуванням (main); вручну — Actions → Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Base URL'
+        default: 'https://ai-office-miniapp.onrender.com'
+  schedule:
+    - cron: '7 */2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Playwright Chromium
+        run: |
+          python -m pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Probe production (GET only)
+        env:
+          BASE: ${{ github.event.inputs.base || 'https://ai-office-miniapp.onrender.com' }}
+        run: python scripts/prod_probe.py --base "$BASE" --browser --out probe_out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prod-probe-${{ github.run_id }}
+          path: probe_out
+          retention-days: 30

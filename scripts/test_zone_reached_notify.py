@@ -62,7 +62,7 @@ def main() -> int:
     if away.in_zone or away.message or away.expire_after_alert:
         return _fail("price outside zone must be silent")
 
-    # Готовий вхід: ATR ок, є SL — SIGNAL=YES і «входь».
+    # Готовий план рівнів: ATR ок, є SL — SIGNAL=YES у БД, але не «входь» і не promote.
     ready = plan_watching_zone_hit(
         current_price=100.0,
         entry_low=99.0,
@@ -73,12 +73,16 @@ def main() -> int:
         tp2=104.0,
         symbol="SOLUSDT",
     )
-    if not ready.signal_ok or not ready.promote_active:
-        return _fail("ready setup must allow entry")
+    if not ready.signal_ok or ready.promote_active:
+        return _fail("ready levels must not promote/telegram entry")
     if ready.expire_after_alert:
         return _fail("ready setup must not ATR-expire")
-    if "входь!" not in ready.message or "SIGNAL=YES" not in ready.message:
-        return _fail("ready setup message")
+    if "входь" in ready.message.lower() or "можна входити" in ready.message.lower():
+        return _fail("ready must not say enter")
+    if "SIGNAL=YES" not in ready.message:
+        return _fail("ready SIGNAL=YES internal")
+    if "чекаю підтвердження" not in ready.message.lower():
+        return _fail(f"ready wait text {ready.message}")
 
     # ATR рівно 90 не блокує (було `> 90`, не `>=`).
     edge = plan_watching_zone_hit(

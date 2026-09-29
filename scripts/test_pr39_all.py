@@ -325,11 +325,11 @@ def main() -> int:
         ],
     )
     sig = level_book_to_alert(done_book)
-    if sig is None or "🔴 SHORT · DEMOUSDT · H1" not in sig or "🎯 Вхід · 0.1306" not in sig:
+    if sig is None or "🔴 SHORT · DEMOUSDT · сценарій H1" not in sig or "🎯 Вхід · 0.1306" not in sig:
         return _fail(f"signal {sig}")
     if "Позиція: немає" in sig or "Entry:" in sig or "BSL знято" in sig:
         return _fail("signal extras")
-    if "після закриття" not in sig:
+    if "🎯 Вхід" not in sig or "RR 1:" in sig:
         return _fail(f"entry unexplained {sig}")
 
     impulse_up = [

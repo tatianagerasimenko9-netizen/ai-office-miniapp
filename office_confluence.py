@@ -83,6 +83,8 @@ def kind_ua(setup_type: str, direction: str) -> str:
     ul = raw.upper()
     if "СИЛЬН" in raw or "HUNTER" in ul or "SC-OTE" in ul or "SC_OTE" in ul:
         return "Відкат у сильну свічку"
+    if ul in ("ЛЕВ", "LEV", "LEV_ANALYST"):
+        return f"{side} Лева"
     if ul in ("DUMP", "PUMP") or "PUMP" in ul or "DUMP" in ul:
         return f"{side} на відкаті"
     if "РАДАР" in ul or ul == "RADAR":
@@ -111,7 +113,16 @@ def _overlap(a_lo: float, a_hi: float, b_lo: float, b_hi: float) -> bool:
     return abs(ca - cb) / mid * 100.0 <= OVERLAP_PCT
 
 
-def _cand(tag: str, lo: Any, hi: Any, *, tf: str, label: str) -> Optional[Dict[str, Any]]:
+def _cand(
+    tag: str,
+    lo: Any,
+    hi: Any,
+    *,
+    tf: str,
+    label: str,
+    origin_ts: str = "",
+    why: str = "",
+) -> Optional[Dict[str, Any]]:
     a, b = _f(lo), _f(hi)
     if a is None and b is None:
         return None
@@ -123,13 +134,18 @@ def _cand(tag: str, lo: Any, hi: Any, *, tf: str, label: str) -> Optional[Dict[s
         return None
     if a > b:
         a, b = b, a
-    return {
+    out = {
         "tag": tag,
         "lo": float(a),
         "hi": float(b),
         "tf": tf,
         "label": label,
+        "why": why or label,
+        "fresh": True,
     }
+    if origin_ts:
+        out["origin_ts"] = origin_ts
+    return out
 
 
 def _fvgs(rows: List[Dict[str, Any]]) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
@@ -147,7 +163,7 @@ def _fvgs(rows: List[Dict[str, Any]]) -> Tuple[List[Tuple[float, float]], List[T
     return bull, bear
 
 
-def _last_ob(rows: List[Dict[str, Any]], *, direction: str) -> Optional[Tuple[float, float]]:
+def _last_ob(rows: List[Dict[str, Any]], *, direction: str) -> Optional[Tuple[float, float, str]]:
     """Останній ордер-блок / брейкер: свічка проти імпульсу, яку пробили."""
     side = str(direction or "").upper()
     if len(rows) < 4:
@@ -155,12 +171,13 @@ def _last_ob(rows: List[Dict[str, Any]], *, direction: str) -> Optional[Tuple[fl
     for i in range(len(rows) - 2, 1, -1):
         b = rows[i]
         nxt = rows[i + 1]
+        ts = str(b.get("ts") or "")
         if side == "LONG":
             if float(b["close"]) < float(b["open"]) and float(nxt["close"]) > float(b["high"]):
-                return float(b["low"]), float(b["high"])
+                return float(b["low"]), float(b["high"]), ts
         else:
             if float(b["close"]) > float(b["open"]) and float(nxt["close"]) < float(b["low"]):
-                return float(b["low"]), float(b["high"])
+                return float(b["low"]), float(b["high"]), ts
     return None
 
 
@@ -201,17 +218,34 @@ def collect_zone_candidates(
 
     sc_src = m15 if len(m15) >= 22 else h1
     sc_tf = "M15" if len(m15) >= 22 else "H1"
-    if last_strong_candle(sc_src, direction=side):
+    sc = last_strong_candle(sc_src, direction=side)
+    if sc:
         plan = plan_strong_candle_ote(direction=side, candles=sc_src)
         if plan.get("data_status") == "DATA_OK":
-            c = _cand("sc_ote", plan.get("ote_lo"), plan.get("ote_hi"), tf=sc_tf, label=f"сильна свічка {sc_tf}")
+            c = _cand(
+                "sc_ote",
+                plan.get("ote_lo"),
+                plan.get("ote_hi"),
+                tf=sc_tf,
+                label=f"сильна свічка {sc_tf}",
+                origin_ts=str(sc.get("ts") or ""),
+                why="імпульс: обсяг×2 SMA і діапазон > ATR×1.2, тіло в бік сетапу",
+            )
             if c:
                 out.append(c)
 
     ob_src = h1 if len(h1) >= 6 else m15
     ob = _last_ob(ob_src, direction=side)
     if ob:
-        c = _cand("ob", ob[0], ob[1], tf="H1" if len(h1) >= 6 else "M15", label="OB H1" if len(h1) >= 6 else "OB")
+        c = _cand(
+            "ob",
+            ob[0],
+            ob[1],
+            tf="H1" if len(h1) >= 6 else "M15",
+            label="OB H1" if len(h1) >= 6 else "OB",
+            origin_ts=ob[2],
+            why="свічка проти імпульсу, яку наступна пробила",
+        )
         if c:
             out.append(c)
 
@@ -219,12 +253,15 @@ def collect_zone_candidates(
     if hi_lo:
         fz = _fib_zone(hi_lo[0], hi_lo[1], direction=side)
         if fz:
+            src = h4 if len(h4) >= 8 else h1
             c = _cand(
                 "fib_h4",
                 fz[0],
                 fz[1],
                 tf="H4" if len(h4) >= 8 else "H1",
                 label="Фібо 0.618–0.786 H4",
+                origin_ts=str((src[-1] or {}).get("ts") or "") if src else "",
+                why="OTE 0.618–0.786 від swing H4, не від поточної ціни",
             )
             if c:
                 out.append(c)
@@ -422,12 +459,47 @@ def detect_ltf_confirms(
             if side == "SHORT" and float(last["high"]) > rh and float(last["close"]) < rh:
                 hits.append("upthrust")
 
-    # Унікальний порядок.
+    # Унікальний порядок. Triple з тих самих свінгів замінює double.
     seen = []
     for h in hits:
         if h not in seen:
             seen.append(h)
+    if "triple_top" in seen and "double_top" in seen:
+        seen = [h for h in seen if h != "double_top"]
+    if "triple_bottom" in seen and "double_bottom" in seen:
+        seen = [h for h in seen if h != "double_bottom"]
     return seen
+
+
+def _retest_close_after_break(
+    rows: List[Dict[str, Any]],
+    *,
+    side: str,
+    zone_lo: float,
+    zone_hi: float,
+) -> Optional[float]:
+    """Після пробою потрібна пізніша свічка із закриттям знову в зоні. Не вигадуємо ціну."""
+    if len(rows) < 2:
+        return None
+    lo, hi = float(zone_lo), float(zone_hi)
+    broke_i = None
+    for i, r in enumerate(rows):
+        c = _f(r.get("close"))
+        if c is None:
+            continue
+        if side == "SHORT" and c <= lo:
+            broke_i = i
+        if side == "LONG" and c >= hi:
+            broke_i = i
+    if broke_i is None or broke_i >= len(rows) - 1:
+        return None
+    for r in rows[broke_i + 1 :]:
+        c = _f(r.get("close"))
+        if c is None:
+            continue
+        if lo <= c <= hi:
+            return float(c)
+    return None
 
 
 def range_break_is_event(
@@ -483,20 +555,100 @@ def confirm_line(confirms: List[str], wait_tf: str, *, direction: str = "") -> s
     return f"Чекаю на {wait_tf}: подвійна вершина або SFP у зоні"
 
 
-def now_status_line(*, price: Any, zone_lo: Any, zone_hi: Any, direction: str) -> str:
+def now_status_line(*, price: Any, zone_lo: Any, zone_hi: Any, direction: str, symbol: str = "") -> str:
+    from office_price_format import format_level_span
+
     px, lo, hi = _f(price), _f(zone_lo), _f(zone_hi)
-    if px is None or lo is None or hi is None:
-        return "Зараз: поза угодою, чекаю відкат"
+    if lo is None or hi is None:
+        return "Немає підтверджених меж зони"
     if lo > hi:
         lo, hi = hi, lo
+    span = format_level_span(lo, hi, symbol)
+    if px is None:
+        return f"Зараз: межі {span}, ціна невідома"
     if lo <= px <= hi:
-        return "Зараз: у зоні, чекаю підтвердження"
+        return f"Зараз: ціна в зоні {span}, чекаю підтвердження"
     side = str(direction or "").upper()
     if side == "SHORT" and px < lo:
-        return "Зараз: ціна вже нижче зони — не ганяю"
+        return f"Зараз: ціна вже нижче зони {span} — не ганяю"
     if side == "LONG" and px > hi:
-        return "Зараз: ціна вже вище зони — не ганяю"
-    return "Зараз: поза угодою, чекаю відкат"
+        return f"Зараз: ціна вже вище зони {span} — не ганяю"
+    return f"Зараз: поза зоною {span}, чекаємо відкат у ці межі"
+
+
+def scenario_story(
+    *,
+    timeframe: str,
+    zone_lo: Any,
+    zone_hi: Any,
+    tags: Any = None,
+    labels: Any = None,
+    wait_tf: str = "",
+    confirms: Any = None,
+    direction: str = "",
+    symbol: str = "",
+) -> Dict[str, Any]:
+    """Людською мовою. Без меж — не пишемо «чекаємо відкат/зону».
+
+    Ціни — через єдиний tick-форматер (не :g, що дає 1.23e-05 / 1.23457e+08).
+    """
+    lo, hi = _f(zone_lo), _f(zone_hi)
+    kinds = [str(x) for x in (labels or []) if str(x).strip()]
+    if not kinds:
+        kinds = [TAG_UA.get(str(t), str(t)) for t in (tags or []) if t]
+    if lo is None or hi is None:
+        return {
+            "ok": False,
+            "missing": ["межі зони"],
+            "text": "Немає підтверджених меж зони — не чекаємо вигаданий відкат.",
+        }
+    ztype = kinds[0] if kinds else "зону"
+    reasons = f"тут збігаються {' · '.join(kinds[:3])}" if kinds else "незалежних збігів немає"
+    from office_price_format import format_level_span
+
+    wt = wait_tf or confirm_timeframe(timeframe)
+    conf_names = [CONFIRM_UA.get(x, x) for x in (confirms or []) if x]
+    if conf_names:
+        need = " або ".join(conf_names[:3])
+    elif str(direction or "").upper() == "LONG":
+        need = "подвійне дно або SFP"
+    else:
+        need = "подвійна вершина або SFP"
+    return {
+        "ok": True,
+        "missing": [],
+        "zone_type": ztype,
+        "text": (
+            f"Чекаємо відкат у {ztype} {format_level_span(lo, hi, symbol)} на {timeframe or 'H1'}; "
+            f"{reasons}; на {wt} потрібне підтвердження: {need}."
+        ),
+    }
+
+
+def lifecycle_from_status(
+    status: Any,
+    *,
+    confirms: Any = None,
+    has_position: bool = False,
+    ttl_done: bool = False,
+) -> Dict[str, str]:
+    """Мапінг backend → екран. ENTERED лише при явному /position."""
+    if has_position:
+        return {"key": "entered", "ua": "У позиції (/position)"}
+    st = str(status or "").upper()
+    if ttl_done or st in ("EXPIRED",):
+        return {"key": "ttl", "ua": "TTL вичерпано"}
+    if st in ("CANCELLED", "STOPPED", "HIT_SL"):
+        return {"key": "cancelled", "ua": "Скасовано"}
+    if st in ("WATCHING", "WAIT"):
+        return {"key": "waiting_zone", "ua": "Чекаємо зону"}
+    if st in ("CONFIRMED", "CONFIRMATION_PENDING"):
+        return {"key": "confirmed", "ua": "Підтверджено (не позиція)"}
+    if st in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "HIT_TP2"):
+        if confirms:
+            return {"key": "confirmed", "ua": "Підтверджено (не позиція)"}
+        return {"key": "found", "ua": "Знайдено"}
+    return {"key": "found", "ua": str(status or "Знайдено")}
 
 
 def evaluate_confluence(
@@ -558,16 +710,56 @@ def evaluate_confluence(
         range_bounds=bounds,
     )
     grade = grade_for(n_zone=n, confirms=confirms)
-    key = setup_key(symbol=symbol, direction=side, zone_lo=best["lo"], zone_hi=best["hi"])
+    zone_key = setup_key(symbol=symbol, direction=side, zone_lo=best["lo"], zone_hi=best["hi"])
+    from office_scenario_memory import (
+        canonical_scenario_id,
+        market_basis_key,
+        scenario_identity_matches,
+    )
+
+    basis = market_basis_key(best)
+    key = canonical_scenario_id(
+        symbol=symbol,
+        direction=side,
+        timeframe=timeframe,
+        basis=basis,
+        zone_lo=best["lo"],
+        zone_hi=best["hi"],
+    )
     ts = float(now_ts if now_ts is not None else time.time())
     live = _LIVE.get(key)
-    if live and str(live.get("status")) == "WATCHING":
+    if not live:
+        for existing_key, existing in _LIVE.items():
+            if scenario_identity_matches(
+                existing,
+                symbol=symbol,
+                direction=side,
+                timeframe=timeframe,
+                basis=basis,
+                zone_lo=best["lo"],
+                zone_hi=best["hi"],
+            ):
+                key, live = existing_key, existing
+                break
+    if live:
         born = float(live.get("ts") or 0)
         if ts - born < ttl_sec(timeframe):
+            live.update(
+                {
+                    "zone_lo": float(best["lo"]),
+                    "zone_hi": float(best["hi"]),
+                    "entry_low": float(best["lo"]),
+                    "entry_high": float(best["hi"]),
+                    "zone_key": zone_key,
+                }
+            )
             return {
                 **empty,
-                "reason": "сетап живий",
+                "reason": f"сетап живий: {str(live.get('status') or 'WATCHING').upper()}",
                 "setup_key": key,
+                "scenario_id": key,
+                "market_basis": basis,
+                "zone_key": zone_key,
                 "cluster": best,
                 "grade": live.get("grade") or grade,
                 "zone_lo": best["lo"],
@@ -586,6 +778,9 @@ def evaluate_confluence(
             "n": n,
             "tags": best["tags"],
             "setup_key": key,
+            "scenario_id": key,
+            "market_basis": basis,
+            "zone_key": zone_key,
             "zone_lo": best["lo"],
             "zone_hi": best["hi"],
             "entry": float(best["mid"]),
@@ -602,6 +797,9 @@ def evaluate_confluence(
         "cluster": best,
         "confirms": confirms,
         "setup_key": key,
+        "scenario_id": key,
+        "market_basis": basis,
+        "zone_key": zone_key,
         "zone_lo": float(best["lo"]),
         "zone_hi": float(best["hi"]),
         "entry": entry_mid,
@@ -610,16 +808,33 @@ def evaluate_confluence(
         "wait_tf": wait_tf,
         "zone_line": zone_line(best),
         "confirm_wait": confirm_line(confirms, wait_tf, direction=side),
-        "now_line": now_status_line(price=px, zone_lo=best["lo"], zone_hi=best["hi"], direction=side),
+        "now_line": now_status_line(price=px, zone_lo=best["lo"], zone_hi=best["hi"], direction=side, symbol=symbol),
         "price": px,
         "ttl_sec": ttl_sec(timeframe),
+        "story": scenario_story(
+            timeframe=timeframe,
+            zone_lo=best["lo"],
+            zone_hi=best["hi"],
+            tags=best["tags"],
+            labels=best.get("labels") or [],
+            wait_tf=wait_tf,
+            confirms=confirms,
+            direction=side,
+            symbol=symbol,
+        ),
+        "lifecycle": lifecycle_from_status("ACTIVE", confirms=confirms),
+        "zones": best.get("members") or [],
     }
 
 
 def mark_live(key: str, payload: Dict[str, Any]) -> None:
     if not key:
         return
-    _LIVE[key] = {**payload, "status": "WATCHING", "ts": float(payload.get("ts") or time.time())}
+    _LIVE[key] = {
+        **payload,
+        "status": str(payload.get("status") or "WATCHING").upper(),
+        "ts": float(payload.get("ts") or time.time()),
+    }
 
 
 def live_items() -> List[Tuple[str, Dict[str, Any]]]:
@@ -642,6 +857,66 @@ def note_db_only(key: str) -> bool:
         return False
     _DB_ONLY[key] = time.time()
     return True
+
+
+def hydrate_live_from_db(db_path: str) -> int:
+    """Після рестарту Worker: канонічний ID і lifecycle з БД."""
+    import re
+
+    from office_bridge import signal_get_active, signal_get_scenarios
+    from office_desk_card import is_legacy_desk_range
+    from office_scenario_memory import parse_note_meta
+
+    n = 0
+    try:
+        canonical_rows = signal_get_scenarios(db_path) or []
+        canonical_ids = {str(x.get("signal_id") or "") for x in canonical_rows}
+        rows = canonical_rows + [
+            x for x in (signal_get_active(db_path) or []) if str(x.get("signal_id") or "") not in canonical_ids
+        ]
+    except Exception:
+        return 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if is_legacy_desk_range(r):
+            continue
+        st = str(r.get("status") or "").upper()
+        if st not in ("ACTIVE", "HIT_ENTRY", "WATCHING", "ZONE_REACHED", "CONFIRMED", "CANCELLED"):
+            continue
+        note = str(r.get("analysis_note") or "")
+        meta = parse_note_meta(note)
+        m = re.search(r"ckey=([^\s]+)", note)
+        key = str(meta.get("scenario_id") or "")
+        if not key:
+            key = m.group(1) if m else setup_key(
+                symbol=str(r.get("symbol") or ""),
+                direction=str(r.get("direction") or ""),
+                zone_lo=r.get("entry_low"),
+                zone_hi=r.get("entry_high"),
+            )
+        if not key or key in _LIVE:
+            continue
+        mark_live(
+            key,
+            {
+                "symbol": r.get("symbol"),
+                "direction": r.get("direction"),
+                "timeframe": parse_note_meta(note).get("timeframe") or "H1",
+                "origin": parse_note_meta(note).get("origin") or "desk",
+                "signal_id": r.get("signal_id"),
+                "sl": r.get("sl"),
+                "zone_lo": r.get("entry_low"),
+                "zone_hi": r.get("entry_high"),
+                "entry_low": r.get("entry_low"),
+                "entry_high": r.get("entry_high"),
+                "basis": meta.get("basis") or "",
+                "grade": "",
+                "status": st,
+            },
+        )
+        n += 1
+    return n
 
 
 def follow_setup(
@@ -674,33 +949,67 @@ def follow_setup(
     )
     rows = _bars(candles_ltf)
     cl = float(rows[-1]["close"]) if rows else px
-    entered = False
+    broke = False
+    inside = False
     if cl is not None and lo is not None and hi is not None:
-        if side == "SHORT" and cl <= lo:
-            entered = True
-        if side == "LONG" and cl >= hi:
-            entered = True
-        if lo <= cl <= hi and confirms:
-            entered = True
-    if entered and confirms:
+        broke = (side == "SHORT" and cl <= lo) or (side == "LONG" and cl >= hi)
+        inside = lo <= cl <= hi
+    if sl is not None and lo is not None and hi is not None:
+        from office_alert_gate import validate_trade_geometry
+
+        geo = validate_trade_geometry(
+            direction=side,
+            sl=sl,
+            tp1=setup.get("tp1"),
+            entry_low=lo,
+            entry_high=hi,
+            tp2=setup.get("tp2"),
+            require_tp=setup.get("tp1") is not None,
+        )
+        if not geo.get("ok"):
+            return {
+                "action": "hold",
+                "reason": str(geo.get("reason") or "геометрія"),
+                "geometry_invalid": True,
+                "price": cl,
+            }
+    if broke:
+        retest_px = _retest_close_after_break(rows, side=side, zone_lo=lo, zone_hi=hi)
+        if retest_px is None:
+            return {
+                "action": "hold",
+                "reason": "пробій зони — чекаю ретест окремими свічками",
+                "need_retest": True,
+                "price": cl,
+            }
+        names = " + ".join(CONFIRM_UA.get(x, x) for x in confirms[:3]) if confirms else "ретест"
+        return {
+            "action": "confirm",
+            "reason": names,
+            "price": retest_px,
+            "detail": f"{names} + ретест у зоні після пробою",
+            "need_retest": False,
+        }
+    if inside and confirms:
+        from office_telegram_filter import format_level_span
+
         names = " + ".join(CONFIRM_UA.get(x, x) for x in confirms[:3])
-        below = "нижче" if side == "SHORT" else "вище"
-        edge = lo if side == "SHORT" else hi
         return {
             "action": "confirm",
             "reason": names,
             "price": cl,
-            "detail": f"{names} + закриття {below} {edge}",
+            "detail": f"{names} + закриття в зоні {format_level_span(lo, hi)}",
+            "need_retest": False,
         }
     return {"action": "hold", "reason": "чекаємо"}
 
 
 def format_confirm_card(*, symbol: str, direction: str, price: Any, detail: str) -> str:
-    from office_desk_card import _px
+    from office_telegram_filter import format_px
 
     side = str(direction or "").upper()
     return (
-        f"✅ {str(symbol).upper()} {side} · вхід підтверджено · {_px(price)}\n"
+        f"✅ {str(symbol).upper()} {side} · сценарій підтверджено (не /position) · {format_px(price, symbol)}\n"
         f"Підтвердження: {detail}"
     )
 

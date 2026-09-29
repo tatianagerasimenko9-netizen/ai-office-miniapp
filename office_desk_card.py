@@ -7,7 +7,7 @@ TP1: альти ≥3%, BTC/ETH/XAU ≥1.2%.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from office_position_size import depo_usdt, plan_position_size
 
@@ -44,33 +44,11 @@ def _f(v: Any) -> Optional[float]:
     return x
 
 
-def _px(v: Any) -> str:
-    """Ціна як у картці: 84 069; альти <1 — однакова точність (0.940, не 0.94)."""
-    from office_telegram_filter import format_px
+def _px(v: Any, symbol: str = "") -> str:
+    """Відображення ціни. Розрахунок SL/TP не чіпає."""
+    from office_price_format import format_px
 
-    x = _f(v)
-    if x is None:
-        return ""
-    if x < 0.1:
-        s = f"{x:.6f}".rstrip("0").rstrip(".")
-        return s
-    if x < 1:
-        return f"{x:.3f}"
-    s = format_px(v)
-    if not s:
-        return s
-    if "." in s:
-        whole, frac = s.split(".", 1)
-    else:
-        whole, frac = s, ""
-    try:
-        n = int(whole)
-    except ValueError:
-        return s
-    if abs(n) >= 1000:
-        grouped = f"{n:,}".replace(",", " ")
-        return f"{grouped}.{frac}" if frac else grouped
-    return s
+    return format_px(v, symbol)
 
 
 def parse_cancel_level(note: Any) -> Optional[float]:
@@ -131,6 +109,10 @@ def widen_sl_to_atr_h1(
     need = float(atr) * MIN_SL_ATR_H1
     dist = abs(e - s)
     side = str(direction or "").upper()
+    if side == "LONG" and s >= e:
+        return {"ok": False, "sl": s, "reason": "SL для LONG не нижче entry"}
+    if side == "SHORT" and s <= e:
+        return {"ok": False, "sl": s, "reason": "SL для SHORT не вище entry"}
     if dist + 1e-12 >= need:
         return {"ok": True, "sl": s, "widened": False, "atr_h1": atr}
     if side == "SHORT":
@@ -140,8 +122,18 @@ def widen_sl_to_atr_h1(
     return {"ok": True, "sl": ns, "widened": True, "atr_h1": atr}
 
 
-def size_over_leverage(*, entry: Any, sl: Any, score: Any = None, min_score: Any = 10) -> Dict[str, Any]:
-    sized = plan_position_size(entry=entry, sl=sl, score=score, min_score=min_score)
+def size_over_leverage(
+    *,
+    entry: Any,
+    sl: Any,
+    score: Any = None,
+    min_score: Any = 10,
+    direction: str = "",
+    symbol: str = "",
+) -> Dict[str, Any]:
+    sized = plan_position_size(
+        entry=entry, sl=sl, score=score, min_score=min_score, direction=direction, symbol=symbol
+    )
     dep = _f(sized.get("depo")) or depo_usdt()
     sz = _f(sized.get("size_usdt"))
     if dep is None or sz is None:
@@ -254,14 +246,52 @@ def desk_entry_gate(
     prev: Optional[Dict[str, Any]] = None,
     m15_close: Any = None,
     candle: Any = None,
+    entry_low: Any = None,
+    entry_high: Any = None,
+    tp2: Any = None,
+    db_path: str = "",
+    timeframe: str = "",
 ) -> Dict[str, Any]:
-    """Фільтр стрічки. Не вигадує TP, щоб натягнути %."""
+    """Фільтр стрічки. Не вигадує TP, щоб натягнути %. Стоп з неправильного боку — стоп."""
+    from office_alert_gate import validate_trade_geometry
     from office_telegram_filter import move_pct_to_tp
+    from office_exchange_info import get_symbol_filters
+    from office_bridge import signal_get_active
+    from office_scenario_memory import gate_entry_vs_memory
 
     e, s, t = _f(entry), _f(sl), _f(tp1)
     empty = {"send": False, "sl": s, "size": None, "reversal": False, "reason": "", "message": ""}
     if e is None or s is None or t is None:
         return {**empty, "reason": "немає entry/SL/TP1"}
+    geo = validate_trade_geometry(
+        direction=direction,
+        sl=s,
+        tp1=t,
+        entry=e,
+        entry_low=entry_low,
+        entry_high=entry_high,
+        tp2=tp2,
+    )
+    if not geo.get("ok"):
+        return {**empty, "reason": str(geo.get("reason") or "геометрія"), "geometry": geo}
+    flt = get_symbol_filters(symbol)
+    if not flt.get("ok"):
+        return {**empty, "reason": "EXCHANGE_INFO_UNAVAILABLE", "filters": flt}
+    if db_path:
+        try:
+            mem = gate_entry_vs_memory(
+                signal_get_active(db_path) or [],
+                symbol=symbol,
+                direction=str(direction or ""),
+                timeframe=timeframe,
+            )
+        except Exception as exc:
+            return {
+                **empty,
+                "reason": f"DATA_UNAVAILABLE пам'ять сценарію: {type(exc).__name__}",
+            }
+        if not mem.get("allow_entry"):
+            return {**empty, "reason": str(mem.get("reason") or "пам'ять сценарію"), "memory": mem}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)
     if not wide.get("ok"):
         return {**empty, "reason": str(wide.get("reason") or "стоп/ATR")}
@@ -274,7 +304,9 @@ def desk_entry_gate(
             "sl": s2,
             "reason": f"TP1 {move if move is not None else 'н/д'}% < {need:g}%",
         }
-    sized = size_over_leverage(entry=e, sl=s2, score=score, min_score=min_score)
+    sized = size_over_leverage(
+        entry=e, sl=s2, score=score, min_score=min_score, direction=direction, symbol=symbol
+    )
     if sized.get("over_lev"):
         return {
             **empty,
@@ -304,11 +336,20 @@ def desk_entry_gate(
     }
 
 
-def _kind_line(setup_type: str, *, reentry: bool = False, direction: str = "", grade: str = "") -> str:
+def _kind_line(
+    setup_type: str,
+    *,
+    reentry: bool = False,
+    direction: str = "",
+    grade: str = "",
+    had_confirmed_entry: bool = False,
+) -> str:
     from office_confluence import kind_ua
 
-    if reentry:
+    if reentry and had_confirmed_entry:
         base = "Повторний вхід"
+    elif reentry:
+        base = "Новий сценарій"
     else:
         base = kind_ua(setup_type, direction)
     g = str(grade or "").strip().upper()
@@ -322,10 +363,57 @@ def _pct_txt(pct: float) -> str:
     return f"({sign}{abs(pct):.1f}%)"
 
 
-def _lvl(prefix: str, px: Any, pct: Optional[float] = None) -> str:
+def plan_ok_slice(
+    *,
+    direction: str,
+    zone_lo: Any,
+    zone_hi: Any,
+    tp1: Any,
+    symbol: str,
+) -> Optional[Tuple[float, float]]:
+    """Частина зони, де TP1% ≥ поріг символу. Поріг не змінює — лише показує зріз."""
+    lo, hi, t = _f(zone_lo), _f(zone_hi), _f(tp1)
+    if lo is None or hi is None or t is None:
+        return None
+    if lo > hi:
+        lo, hi = hi, lo
+    need = min_tp1_pct(symbol) / 100.0
+    side = str(direction or "").upper()
+    if side == "SHORT":
+        if need >= 1:
+            return None
+        min_e = t / (1.0 - need)
+        vlo, vhi = max(lo, min_e), hi
+    elif side == "LONG":
+        max_e = t / (1.0 + need)
+        vlo, vhi = lo, min(hi, max_e)
+    else:
+        return None
+    if vlo > vhi + 1e-12:
+        return None
+    return vlo, vhi
+
+
+def _calc_entry_px(*, direction: str, elo: Optional[float], ehi: Optional[float], entry: Optional[float]) -> Optional[float]:
+    """Для широкої зони — найгірший край. Інакше заявлений entry."""
+    side = str(direction or "").upper()
+    if elo is None or ehi is None:
+        return entry
+    lo, hi = (elo, ehi) if elo <= ehi else (ehi, elo)
+    span = hi - lo
+    ref = abs(entry or ((lo + hi) / 2.0) or 0.0) or 1.0
+    wide = span / ref >= 0.008
+    if wide and side == "LONG":
+        return lo
+    if wide and side == "SHORT":
+        return hi
+    return entry if entry is not None else (lo + hi) / 2.0
+
+
+def _lvl(prefix: str, px: Any, pct: Optional[float] = None, symbol: str = "") -> str:
     if pct is None:
-        return f"{prefix} · {_px(px)}"
-    return f"{prefix} · {_px(px)}  {_pct_txt(pct)}"
+        return f"{prefix} · {_px(px, symbol)}"
+    return f"{prefix} · {_px(px, symbol)}  {_pct_txt(pct)}"
 
 
 def format_desk_card(
@@ -347,15 +435,23 @@ def format_desk_card(
     prev: Optional[Dict[str, Any]] = None,
     rev_reason: str = "",
     reentry: bool = False,
+    had_confirmed_entry: bool = False,
+    previous_link: str = "",
     entry_low: Any = None,
     entry_high: Any = None,
     grade: str = "",
     zone_line: str = "",
     confirm_wait: str = "",
     now_line: str = "",
+    lev_note: str = "",
+    chart_tf: str = "",
+    why_line: str = "",
+    invalidate_line: str = "",
+    confluence: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Універсальна картка LONG/SHORT. Без RR, range, балів."""
-    from office_telegram_filter import format_level_span
+    """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
+    from office_alert_gate import validate_trade_geometry
+    from office_price_format import format_level_span
 
     side = str(direction or "").upper()
     mark = "🟢" if side == "LONG" else "🔴"
@@ -368,12 +464,33 @@ def format_desk_card(
     mid = e
     if mid is None and elo is not None and ehi is not None:
         mid = (elo + ehi) / 2.0
+    calc = _calc_entry_px(direction=side, elo=elo, ehi=ehi, entry=mid)
+    geo = validate_trade_geometry(
+        direction=side,
+        sl=s,
+        tp1=t1,
+        entry=calc,
+        entry_low=elo,
+        entry_high=ehi,
+        tp2=tp2,
+    )
+    if not geo.get("ok"):
+        return ""
     tf = str(timeframe or "M15").upper()
-    kind = _kind_line(setup_type, reentry=reentry, direction=side, grade=grade)
+    kind = _kind_line(
+        setup_type,
+        reentry=reentry,
+        direction=side,
+        grade=grade,
+        had_confirmed_entry=had_confirmed_entry,
+    )
     lines: List[str] = []
+    plink = str(previous_link or "").strip()
+    if plink:
+        lines.append(plink)
     if reversal and prev:
         pdir = str(prev.get("direction") or "").upper()
-        pe = _px(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"))
+        pe = _px(prev.get("entry") or prev.get("entry_low") or prev.get("entry_high") or prev.get("entry_price"), symbol)
         why = str(rev_reason or "").strip()
         if why.lower().startswith("причина:"):
             why = why.split(":", 1)[-1].strip()
@@ -381,39 +498,108 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано — {why}")
         else:
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
-    lines.append(f"{mark} {side} · {str(symbol).upper()} · {tf}")
+    ctf = str(chart_tf or "").upper()
+    head = f"{mark} {side} · {str(symbol).upper()} · сценарій {tf}"
+    if ctf and ctf != tf:
+        head += f" · графік {ctf}"
+    lines.append(head)
     lines.append(kind)
-    span = format_level_span(elo, ehi) if elo is not None else _px(mid)
+    lines.append("WATCHING · ВХОДУ НЕМАЄ")
+    span = format_level_span(elo, ehi, symbol) if elo is not None else _px(calc, symbol)
     lines.append(f"🎯 Вхід · {span}")
-    if mid is not None and s is not None:
-        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(mid, s)))
-    else:
-        lines.append(_lvl("❌ Стоп", s))
-    if t1 is not None:
-        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(mid, t1) if mid else None))
-    if tp2 is not None:
-        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(mid, _f(tp2)) if mid and _f(tp2) else None))
-    if tp3 is not None:
-        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(mid, _f(tp3)) if mid and _f(tp3) else None))
-    z = str(zone_line or "").strip()
-    if z:
-        lines.append(f"Зона: {z}")
+    lines.append("Це зона спостереження, не дозвіл на вхід.")
     w = str(confirm_wait or "").strip()
     if w:
-        lines.append(w if w.lower().startswith("чекаю") else f"Чекаю на {tf}: {w}")
-    lines.append(str(now_line or "Зараз: поза угодою, чекаю відкат"))
-    lines.append("При TP1 — частина + стоп у беззбиток")
-    sz = size if isinstance(size, dict) else plan_position_size(
-        entry=mid, sl=s, score=score, min_score=min_score
-    )
-    usdt = _f(sz.get("size_usdt"))
-    dep = _f(sz.get("depo")) or depo_usdt()
-    rp = _f(sz.get("risk_pct")) or 0.01
-    if usdt is not None and dep is not None:
-        risk_usd = dep * rp
-        lines.append(f"Позиція {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " "))
+        lines.append(w if w.lower().startswith("чекаю") else f"Чекаю: {w}")
     else:
-        lines.append(f"Ризик {rp * 100:.0f}% депо")
+        wait_default = "Чекаю відкату в зону. Входу ще немає." if side == "LONG" else "Чекаю реакції M5 у зоні. Входу ще немає."
+        lines.append(wait_default)
+    yw = str(why_line or "").strip()
+    if yw:
+        lines.append(yw if yw.lower().startswith("чому") else f"Чому сценарій: {yw}")
+    inv = str(invalidate_line or "").strip()
+    if not inv:
+        if s is not None:
+            inv = f"закриття за рівнем інвалідації {_px(s, symbol)}"
+        else:
+            inv = "Умову інвалідації не визначено; торговий дозвіл заблокований."
+    lines.append(inv if inv.lower().startswith("що скасує") else f"Що скасує: {inv}")
+    now = str(now_line or "").strip()
+    if now and "входу ще немає" not in "\n".join(lines).lower():
+        lines.append(now)
+    ln = str(lev_note or "").strip()
+    if ln:
+        lines.append(ln)
+    z = str(zone_line or "").strip()
+    if z:
+        lines.append(f"Структура: {z}")
+    from office_lev_verdict import scenario_ready_to_present
+
+    pack = dict(confluence or {})
+    if z and not pack.get("zone_line"):
+        pack["zone_line"] = z
+    ready = scenario_ready_to_present(
+        confluence=pack,
+        sl=s,
+        invalidate_line=inv,
+        lev_note=ln,
+        why_line=yw,
+    )
+    plan_title = "План після підтвердження"
+    if not ready.get("ready"):
+        plan_title = "Приклад розрахунку, не валідований торговий план"
+    lines.append(plan_title)
+    if calc is not None:
+        lines.append(f"Розрахунок від {_px(calc, symbol)}")
+        if elo is not None and ehi is not None:
+            zlo, zhi = (elo, ehi) if elo <= ehi else (ehi, elo)
+            ref = abs(calc) or 1.0
+            if (zhi - zlo) / ref >= 0.008:
+                other = zlo if side == "SHORT" else zhi
+                lines.append(
+                    f"На протилежному краї зони {_px(other, symbol)} стоп% і обсяг інші — не одна цифра на всю зону."
+                )
+                slc = plan_ok_slice(direction=side, zone_lo=zlo, zone_hi=zhi, tp1=t1, symbol=symbol)
+                need = min_tp1_pct(symbol)
+                obs = format_level_span(zlo, zhi, symbol)
+                if slc is None:
+                    lines.append(
+                        f"Спостереження {obs}: жоден край не дає TP1 ≥ {need:g}%. Після M5 валідного плану немає."
+                    )
+                else:
+                    vlo, vhi = slc
+                    if abs(vlo - zlo) / ref > 1e-6 or abs(vhi - zhi) / ref > 1e-6:
+                        lines.append(
+                            f"Спостереження {obs}. Після M5 план лише з {format_level_span(vlo, vhi, symbol)} (TP1 ≥ {need:g}%)."
+                        )
+    if calc is not None and s is not None:
+        lines.append(_lvl("❌ Стоп", s, _pct_signed_risk(calc, s), symbol))
+    else:
+        lines.append(_lvl("❌ Стоп", s, None, symbol))
+    if t1 is not None:
+        lines.append(_lvl("✅ TP1", t1, _pct_signed_reward(calc, t1) if calc else None, symbol))
+    if tp2 is not None:
+        lines.append(_lvl("✅ TP2", tp2, _pct_signed_reward(calc, _f(tp2)) if calc and _f(tp2) else None, symbol))
+    if tp3 is not None:
+        lines.append(_lvl("✅ TP3", tp3, _pct_signed_reward(calc, _f(tp3)) if calc and _f(tp3) else None, symbol))
+    lines.append("При TP1 — частина + стоп у беззбиток")
+    sz = None
+    if geo.get("size_allowed"):
+        sz = size if isinstance(size, dict) else plan_position_size(
+            entry=calc, sl=s, score=score, min_score=min_score, direction=side
+        )
+    if isinstance(sz, dict):
+        usdt = _f(sz.get("size_usdt"))
+        dep = _f(sz.get("depo")) or depo_usdt()
+        rp = _f(sz.get("risk_pct")) or 0.01
+        if usdt is not None and dep is not None:
+            risk_usd = dep * rp
+            prefix = "Приклад обсягу" if not ready.get("ready") else "Плановий обсяг"
+            lines.append(
+                f"{prefix} {int(round(usdt)):,} USDT · ризик {risk_usd:.0f}$".replace(",", " ")
+            )
+        else:
+            lines.append(f"Ризик {rp * 100:.0f}% депо")
     text = "\n".join(lines)
     if "range" in text.lower():
         text = text.replace("range", "межа").replace("Range", "Межа").replace("RANGE", "межа")
@@ -455,6 +641,19 @@ def _row_entry(row: Dict[str, Any]) -> Any:
     return row.get("entry") or row.get("entry_price") or row.get("entry_low") or row.get("entry_high")
 
 
+def is_legacy_desk_range(row: Any, note: Any = "") -> bool:
+    """Старі chase-картки `desk-range` до рушія збігів — не живий сетап."""
+    sid = ""
+    blob_note = str(note or "")
+    if isinstance(row, dict):
+        sid = str(row.get("signal_id") or row.get("trade_id") or "")
+        blob_note = str(row.get("analysis_note") or row.get("note") or blob_note)
+    else:
+        sid = str(row or "")
+    blob = f"{sid} {blob_note}".lower()
+    return "desk-range-" in blob or "osig-desk-range-" in blob
+
+
 def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
     from office_bridge import _fetchall, is_confirmed_position_row, signal_get_active
 
@@ -467,6 +666,8 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
         if not isinstance(r, dict):
             continue
         if str(r.get("symbol") or "").upper() != sym:
+            continue
+        if is_legacy_desk_range(r):
             continue
         if str(r.get("status") or "").upper() in OPEN_STATUSES:
             out = dict(r)
@@ -491,6 +692,8 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
         jrows = []
     for tid, jsym, direction, status, entry, sl, tp, reason, setup in jrows:
         if str(jsym or "").upper() != sym:
+            continue
+        if is_legacy_desk_range(tid, reason or setup):
             continue
         # І офісний сигнал, і /position — попередній напрямок для перевороту.
         _ = is_confirmed_position_row(reason, setup, tid)
@@ -572,7 +775,12 @@ def close_desk_reversal(
     exit_price: Any = None,
 ) -> None:
     """Попередній сигнал у журналі — «переворот»."""
-    from office_bridge import journal_close_trade, office_signal_trade_id, signal_update
+    from office_bridge import (
+        is_confirmed_position_row,
+        journal_close_trade,
+        office_signal_trade_id,
+        signal_update,
+    )
 
     if not prev:
         return
@@ -585,13 +793,15 @@ def close_desk_reversal(
                 signal_id=sid,
                 status="CANCELLED",
                 outcome="REVERSAL",
-                analysis_note="переворот",
+                analysis_note="переворот сценарію",
             )
         except Exception:
             pass
         if not tid:
             tid = office_signal_trade_id(sid)
     if not tid:
+        return
+    if not is_confirmed_position_row(prev.get("entry_reason"), prev.get("setup_name"), tid):
         return
     px = _f(exit_price) or _f(_row_entry(prev))
     try:
@@ -606,6 +816,39 @@ def close_desk_reversal(
         )
     except Exception:
         pass
+
+
+def _previous_link_line(prev: Optional[Dict[str, Any]], *, timeframe: str, confirm_wait: str) -> str:
+    if not isinstance(prev, dict) or not prev:
+        return ""
+    from office_lev_authority import had_confirmed_entry, previous_to_new_link
+
+    st = str(prev.get("status") or "")
+    note = str(prev.get("analysis_note") or prev.get("outcome") or "")
+    why = ""
+    if "HIT_SL" in st or "стоп" in note.lower() or "до входу" in note.lower():
+        why = "ціна зайшла за стоп сценарію до підтвердженого входу"
+    elif st in ("EXPIRED", "INVALIDATED", "CANCELLED"):
+        why = st
+    else:
+        return ""
+    import re
+
+    wait = str(confirm_wait or "").strip()
+    m = re.search(r"чекаю[:\s]+(.+)", wait, flags=re.I)
+    if m:
+        wait = m.group(1).strip()
+    wait = wait.split(".")[0].strip()
+    if not wait or len(wait) > 72:
+        wait = "відкат і LTF-підтвердження"
+    return previous_to_new_link(
+        prev_direction=str(prev.get("direction") or ""),
+        prev_status=st,
+        reason=why,
+        new_tf=timeframe,
+        wait_for=wait,
+        had_entry=had_confirmed_entry(st),
+    )
 
 
 def prepare_desk_send(
@@ -638,6 +881,7 @@ def prepare_desk_send(
     confluence: Optional[Dict[str, Any]] = None,
     candidates: Optional[List[Dict[str, Any]]] = None,
     now_ts: Any = None,
+    lev_note: str = "",
 ) -> Dict[str, Any]:
     """Gate + збіги + текст картки. Закриває попередній сигнал лише якщо send і reversal."""
     from office_confluence import evaluate_confluence, mark_live
@@ -683,9 +927,95 @@ def prepare_desk_send(
             "confluence": conf,
             "message": "",
         }
+    if db_path and conf is not None:
+        from office_bridge import signal_get_scenarios, signal_refresh_scenario
+        from office_scenario_memory import find_canonical_scenario, market_basis_key, parse_note_meta
+
+        basis = str(conf.get("market_basis") or market_basis_key(conf))
+        existing = find_canonical_scenario(
+            signal_get_scenarios(db_path),
+            symbol=symbol,
+            direction=direction,
+            timeframe=timeframe,
+            basis=basis,
+            zone_lo=conf.get("zone_lo"),
+            zone_hi=conf.get("zone_hi"),
+        )
+        if existing:
+            canonical_id = str(
+                parse_note_meta(existing.get("analysis_note")).get("scenario_id")
+                or existing.get("signal_id")
+                or ""
+            )
+            signal_refresh_scenario(
+                db_path,
+                signal_id=str(existing.get("signal_id") or canonical_id),
+                entry_low=conf.get("zone_lo"),
+                entry_high=conf.get("zone_hi"),
+            )
+            mark_live(
+                canonical_id,
+                {
+                    "symbol": symbol,
+                    "direction": direction,
+                    "timeframe": timeframe,
+                    "origin": "desk",
+                    "signal_id": existing.get("signal_id"),
+                    "sl": existing.get("sl"),
+                    "zone_lo": conf.get("zone_lo"),
+                    "zone_hi": conf.get("zone_hi"),
+                    "entry_low": conf.get("zone_lo"),
+                    "entry_high": conf.get("zone_hi"),
+                    "basis": basis,
+                    "status": existing.get("status") or "WATCHING",
+                    "ts": now_ts,
+                },
+            )
+            return {
+                "send": False,
+                "sl": existing.get("sl"),
+                "size": None,
+                "reversal": False,
+                "reason": f"канонічний сценарій живий: {existing.get('status')}",
+                "confluence": {**conf, "setup_key": canonical_id, "scenario_id": canonical_id},
+                "setup_key": canonical_id,
+                "scenario_id": canonical_id,
+                "market_basis": basis,
+                "canonical_match": True,
+                "message": "",
+            }
+    from office_alert_gate import chase_blocks_entry, validate_trade_geometry
+
     zone_lo = (conf or {}).get("zone_lo")
     zone_hi = (conf or {}).get("zone_hi")
     entry_use = (conf or {}).get("entry") if conf and conf.get("entry") is not None else entry
+    elo = zone_lo if zone_lo is not None else entry_use
+    ehi = zone_hi if zone_hi is not None else (add_px if add_px is not None else entry_use)
+    geo = validate_trade_geometry(
+        direction=direction,
+        sl=sl,
+        tp1=tp1,
+        entry=entry_use,
+        entry_low=elo,
+        entry_high=ehi,
+        tp2=tp2,
+    )
+    if not geo.get("ok"):
+        print(f"[desk] geometry fail {symbol}: {geo.get('reason')}")
+        return {
+            "send": False,
+            "sl": sl,
+            "size": None,
+            "reversal": False,
+            "reason": str(geo.get("reason") or "геометрія"),
+            "geometry": geo,
+            "confluence": conf,
+            "message": "",
+        }
+    px_now = price if price is not None else m15_close
+    chasing = chase_blocks_entry(
+        direction=direction, price=px_now, zone_lo=elo, zone_hi=ehi
+    )
     gate = desk_entry_gate(
         symbol=symbol,
         direction=direction,
@@ -698,10 +1028,23 @@ def prepare_desk_send(
         prev=prev,
         m15_close=m15_close,
         candle=candle,
+        entry_low=elo,
+        entry_high=ehi,
+        tp2=tp2,
+        db_path=db_path,
+        timeframe=timeframe,
     )
     if not gate.get("send"):
         return {**gate, "confluence": conf}
-    if gate.get("reversal") and db_path:
+    from office_lev_verdict import scenario_ready_to_present
+
+    ready = scenario_ready_to_present(
+        confluence=conf,
+        sl=gate.get("sl"),
+        lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
+        why_line=str((conf or {}).get("zone_line") or ""),
+    )
+    if gate.get("reversal") and db_path and (ready.get("ready") or not require_confluence):
         close_desk_reversal(db_path, gate.get("prev") or prev, exit_price=entry_use)
     text = format_desk_card(
         symbol=symbol,
@@ -720,26 +1063,64 @@ def prepare_desk_send(
         reversal=bool(gate.get("reversal")),
         prev=gate.get("prev") or prev,
         rev_reason=str(gate.get("rev_reason") or ""),
+        reentry=False,
+        had_confirmed_entry=False,
+        previous_link=_previous_link_line(prev, timeframe=timeframe, confirm_wait=str((conf or {}).get("confirm_wait") or "")),
         entry_low=zone_lo if zone_lo is not None else entry_use,
         entry_high=zone_hi if zone_hi is not None else (add_px if add_px is not None else entry_use),
         grade=str((conf or {}).get("grade") or ""),
         zone_line=str((conf or {}).get("zone_line") or ""),
         confirm_wait=str((conf or {}).get("confirm_wait") or ""),
         now_line=str((conf or {}).get("now_line") or ""),
+        lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
+        chart_tf="M15",
+        confluence=conf,
     )
     key = str((conf or {}).get("setup_key") or "")
-    if key:
+    if key and (ready.get("ready") or not require_confluence):
         mark_live(
             key,
             {
                 "symbol": symbol,
                 "direction": direction,
                 "timeframe": timeframe,
+                "origin": "desk",
                 "sl": gate.get("sl"),
                 "zone_lo": zone_lo,
                 "zone_hi": zone_hi,
+                "entry_low": zone_lo,
+                "entry_high": zone_hi,
+                "basis": (conf or {}).get("market_basis") or "",
+                "scenario_id": key,
                 "grade": (conf or {}).get("grade"),
                 "ts": now_ts,
             },
         )
-    return {**gate, "text": text, "confluence": conf, "setup_key": key, "entry": entry_use}
+    if not str(text or "").strip():
+        return {
+            **gate,
+            "send": False,
+            "text": "",
+            "confluence": conf,
+            "setup_key": key,
+            "entry": entry_use,
+            "reason": "порожня картка після gate геометрії",
+            "chasing": chasing,
+        }
+    out = {
+        **gate,
+        "text": text,
+        "confluence": conf,
+        "setup_key": key,
+        "scenario_id": key,
+        "market_basis": (conf or {}).get("market_basis") or "",
+        "entry": entry_use,
+        "chasing": chasing,
+        "opens_position": False,
+        "execution_ready": bool(ready.get("ready")),
+    }
+    if require_confluence and not ready.get("ready"):
+        out["send"] = False
+        out["reason"] = str(ready.get("reason") or "сценарій не готовий до виконання")
+        out["watching_only"] = True
+    return out

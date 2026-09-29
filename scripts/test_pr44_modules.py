@@ -168,7 +168,7 @@ def main() -> int:
     if abs(float(ev["tps"]["add"]) - (float(ev["entry"]) - risk * 0.4)) > 1e-9:
         return _fail("add 40%")
     card = format_pump_card("AKEUSDT", "M15", ev)
-    if "PUMP" not in card or "🎯 Вхід" not in card:
+    if "на відкаті" not in card or "🎯 Вхід" not in card:
         return _fail(f"pump card {card}")
     if "Entry:" in card or "SL:" in card or "Балі" in card or "Модель рівнів" in card:
         return _fail(f"pump card banned {card}")
@@ -253,10 +253,8 @@ def main() -> int:
     if not pump_add_retest(direction="LONG", entry=1.0, candle=add_c, candles=add_rows):
         return _fail("add retest")
     ev_add = next_manage_event(book2, price=1.001, candles_m15=add_rows)
-    if ev_add is None or ev_add.get("kind") not in ("ADD", "CONT", "HOLD"):
-        # CONT/ADD depend on EMA; ADD should fire
-        if ev_add is None:
-            return _fail("expected add/cont")
+    if ev_add is not None and ev_add.get("kind") == "ADD":
+        return _fail("ADD telegram без /position")
     ev_add2 = next_manage_event(book2, price=1.001, candles_m15=add_rows)
     if ev_add2 is not None and ev_add is not None and ev_add2.get("kind") == ev_add.get("kind"):
         return _fail("manage spam")
@@ -303,6 +301,7 @@ def main() -> int:
         m15_candles=[_c(9.9, 10.2, 9.9, 10.2)],
         day_used_pct=40.0,
         in_kill_zone=True,
+        utc_now=datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc),
     )
     if ok.status != "SIGNAL" or ok.opens_position:
         return _fail(f"radar regression {ok.status} {ok.reason}")
@@ -311,7 +310,7 @@ def main() -> int:
         direction="LONG",
         timeframe="H1",
         entry=0.13063,
-        sl=0.134543,
+        sl=0.1265,
         tp1=0.1377,
         setup_type="HUNTER",
         score=12,

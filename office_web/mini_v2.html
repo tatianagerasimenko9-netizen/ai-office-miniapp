@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>AI Office</title>
+<style>
+:root{
+  --bg:#0B1018;--card:#151D29;--raise:#1D2938;--line:#243244;--txt:#F3F6FA;--mut:#94A3B8;
+  --acc:#5DA9FF;--long:#27C99A;--short:#F36B78;--watch:#F2B65D;--neu:#8392A5;--pad:16px;
+  --navh:calc(60px + env(safe-area-inset-bottom));
+}
+*{box-sizing:border-box}:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{min-height:36px}html,body{margin:0;background:var(--bg);color:var(--txt);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}
+body{padding:env(safe-area-inset-top) 0 var(--navh) 0;min-height:100vh;overflow-x:hidden}
+header{padding:12px var(--pad) 0;display:flex;justify-content:space-between;align-items:center;gap:8px;max-width:600px;margin:0 auto}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.02em}
+main{padding:10px var(--pad) 18px;max-width:600px;margin:0 auto}
+h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.05em}
+.mut{color:var(--mut);font-size:12px;line-height:1.45}
+.num{font-variant-numeric:tabular-nums}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 10px;min-width:0;overflow-wrap:anywhere}
+.card.tap{cursor:pointer}.card.tap:active{background:var(--raise)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px;min-width:0}
+.kpi b{display:block;font-size:15px;margin-top:3px;overflow-wrap:anywhere;line-height:1.25}
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.sym{font-size:17px;font-weight:700;overflow-wrap:anywhere;min-width:0;max-width:100%}
+.side{font-weight:700;font-size:13px;letter-spacing:.03em}
+.L{color:var(--long)}.S{color:var(--short)}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--mut);white-space:nowrap}
+.pill.watch{border-color:var(--watch);color:var(--watch)}
+.pill.live{border-color:var(--acc);color:var(--acc)}
+.pill.done{border-color:var(--neu);color:var(--neu)}
+.pill.unknown{border-color:var(--short);color:var(--short)}
+.pill.ok{border-color:var(--long);color:var(--long)}.pill.bad{border-color:var(--short);color:var(--short)}
+.lv{display:grid;grid-template-columns:minmax(0,1.6fr) repeat(2,minmax(0,1fr)) minmax(0,.8fr);gap:6px;margin-top:10px}
+.lv div{background:var(--raise);border-radius:10px;padding:7px 8px;min-width:0}
+.lv span{display:block;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.lv b{display:block;font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media (max-width:420px){.lv{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lv div:first-child b{white-space:normal;overflow-wrap:anywhere}
+.lv .sl b{color:var(--short)}.lv .tp b{color:var(--long)}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 14px;margin:0 0 10px}
+.sec h3{margin:0 0 6px;font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.sec p{margin:0;font-size:14px;line-height:1.5}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:0}.kv span{color:var(--mut)}.kv b{font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere;min-width:0}
+.chips{display:flex;gap:6px;overflow-x:auto;margin:4px 0 10px;padding-bottom:2px;scrollbar-width:none}
+.chips button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:999px;padding:7px 12px;font-size:12px}
+.chips button.on{background:var(--raise);color:var(--txt);border-color:var(--acc)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#0F1621;border-top:1px solid var(--line);
+  padding:6px 4px env(safe-area-inset-bottom);z-index:20}
+nav button{min-height:48px;flex:1;border:0;background:transparent;padding:6px 2px;font-size:11px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button i{font-style:normal;font-size:17px;line-height:1}
+nav button.on{color:var(--txt);font-weight:600}nav button.on i{filter:none}
+.chart{height:320px;width:100%;border-radius:14px;background:#0E141D;border:1px solid var(--line);overflow:hidden}
+.chart.full{position:fixed;inset:env(safe-area-inset-top) 0 var(--navh) 0;height:auto;z-index:15;border-radius:0}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:11px}
+.empty{padding:26px 10px;text-align:center;color:var(--mut);font-size:13px}
+.banner{font-size:12px;color:var(--mut);margin:2px 0 10px}
+.back{border:0;background:transparent;color:var(--acc);font-size:14px;padding:4px 0;margin-bottom:6px}
+.tl{border-left:2px solid var(--line);margin-left:4px;padding-left:12px}
+.tl div{position:relative;padding:4px 0;font-size:13px}
+.tl div:before{content:"";position:absolute;left:-17px;top:10px;width:8px;height:8px;border-radius:50%;background:var(--acc)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--neu)}
+.dot.ok{background:var(--long)}.dot.bad{background:var(--short)}.dot.warn{background:var(--watch)}
+.sk{height:14px;background:linear-gradient(90deg,#151D29,#1D2938,#151D29);background-size:200% 100%;animation:s 1.2s infinite;border-radius:6px;margin:10px 0}
+@keyframes s{to{background-position:-200% 0}}
+.err{border-color:var(--short)}
+.frm label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+.frm input,.frm select,.frm textarea{width:100%;box-sizing:border-box;background:var(--raise);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;min-height:44px}
+.frm .row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.btn{border:1px solid var(--acc);background:transparent;color:var(--acc);border-radius:12px;padding:10px 14px;font-size:14px;min-height:44px}
+.btn.pri{background:var(--acc);color:#0B1119;font-weight:600}
+.btn.warn{border-color:var(--short);color:var(--short)}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.msg{margin:8px 0;font-size:13px}.msg.bad{color:var(--short)}.msg.ok{color:var(--long)}
+</style>
+</head>
+<body>
+<header>
+  <div style="min-width:0">
+    <h1>AI Office</h1>
+    <div class="mut" id="sub">Ручний облік · не ордер</div>
+  </div>
+  <span class="pill" id="stale" role="status"><span class="dot"></span> дані</span>
+</header>
+<main id="app" aria-live="polite"><div class="sk"></div><div class="sk"></div></main>
+<nav aria-label="Основна навігація">
+  <button data-r="office" class="on"><i>◎</i>Офіс</button>
+  <button data-r="radar"><i>⌖</i>Радар</button>
+  <button data-r="scenarios"><i>◧</i>Сценарії</button>
+  <button data-r="journal"><i>≡</i>Журнал</button>
+  <button data-r="risk"><i>⛨</i>Ризик</button>
+</nav>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js" integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK" crossorigin="anonymous"></script>
+<script>
+const $=id=>document.getElementById(id);
+const app=$('app');
+const NA='Не визначено';
+const una=v=>(v===null||v===undefined||v==='')?'—':v;
+function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
+  layers:{zone:true,sl:true,tp:true}};
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
+let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
+async function j(url){
+  const t=RT;
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  if(t!==RT){const e=new Error('stale'); e.stale=true; throw e;}
+  return d;
+}
+function side(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'S':'L';}
+function sideTxt(d){const s=String(d||'').toUpperCase(); return s==='SHORT'?'▼ SHORT':(s==='LONG'?'▲ LONG':esc(s||'—'));}
+function ago(ts){
+  if(!ts) return '—'; const t=Date.parse(ts); if(!isFinite(t)) return esc(ts);
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<1) return 'щойно'; if(m<60) return m+' хв тому'; if(m<1440) return Math.round(m/60)+' год тому';
+  return new Date(t).toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'});
+}
+function hhmm(ts){const t=Date.parse(ts); if(!isFinite(t)) return esc(ts||''); return new Date(t).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function pill(st){st=st||{}; return `<span class="pill ${esc(st.group||'')}">${esc(st.icon||'•')} ${esc(st.short||st.code||'—')}</span>`;}
+function fail(e, what){
+  if(e&&e.stale) return;
+  app.innerHTML=`<div class="card err"><b>Не вдалося завантажити ${esc(what)}</b>
+    <div class="mut">${esc(e&&e.message||e)} · дані не показано, щоб не вводити в оману</div>
+    <button class="back" id="retry">Спробувати ще раз</button></div>`;
+  $('retry').onclick=()=>routes[cur]();
+  setHealth('bad','немає зв’язку');
+}
+function setHealth(kind,text){$('stale').innerHTML=`<span class="dot ${kind}"></span> ${esc(text)}`;}
+function levels(s){
+  const d=s.display||{};
+  return `<div class="lv">
+    <div><span>Вхід</span><b>${esc(d.zone||d.entry||NA)}</b></div>
+    <div class="sl"><span>Стоп</span><b>${esc(d.sl||NA)}</b></div>
+    <div class="tp"><span>TP1</span><b>${esc(d.tp1||NA)}</b></div>
+    <div><span>RR</span><b>${esc(d.rr||NA)}</b></div></div>`;
+}
+function scCard(s){
+  const st=s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони';
+  return `<div class="card tap" role="button" tabindex="0" aria-label="Відкрити сценарій ${esc(s.symbol||'')} ${esc(s.direction||'')}" data-id="${esc(sid(s.scenario_id))}">
+    <div class="top"><span class="sym">${esc(s.symbol||'')}</span>
+      <span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}
+      </div>
+    <div class="mut" style="margin-top:4px">${esc(s.timeframe||'')} · оновлено ${ago(s.as_of)}</div>
+    <div class="mut" style="margin-top:6px">${esc((s.status||{}).text||'')}. ${esc(st)}</div>
+    ${levels(s)}</div>`;
+}
+function bindCards(){app.querySelectorAll('[data-id]').forEach(el=>{
+  el.onclick=()=>openSc(el.dataset.id);
+  el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault(); openSc(el.dataset.id);}};
+  if(!el.hasAttribute('role')){el.setAttribute('role','button'); el.setAttribute('tabindex','0');}
+});}
+function chips(items, curv, attr){
+  return `<div class="chips" role="group">${items.map(([k,t])=>`<button data-${attr}="${k}" class="${k===curv?'on':''}" aria-pressed="${k===curv}">${t}</button>`).join('')}</div>`;
+}
+
+/* ---------- Офіс ---------- */
+async function office(){
+  const T0=++RT;
+  app.innerHTML='<div class="sk"></div><div class="sk"></div>';
+  let d,ov,sc;
+  let ses=null;
+  try{[d,ov,sc]=await Promise.all([j('/api/v2/home'), j('/api/v2/overview'), j('/api/v2/scenarios?watching=1')]);}
+  catch(e){return fail(e,'огляд офісу');}
+  try{ses=await j('/api/v2/session');}catch(e){if(e.stale) return; ses=null;}
+  if(T0!==RT) return;
+  $('sub').textContent=`${una(d.db_backend)} · git ${String(d.git_sha||'—').slice(0,7)} · облік вручну · ордерів немає`;
+  const b=d.btc||{}, se=d.sessions||{};
+  const all=sc.scenarios||[];
+  const live=all.filter(s=>(s.status||{}).group==='live');
+  const watch=all.filter(s=>(s.status||{}).group==='watch');
+  const odd=all.filter(s=>(s.status||{}).group==='unknown');
+  const marks=(ov.marks||[]);
+  const okFeeds=marks.filter(m=>m.data_status==='DATA_OK').length;
+  setHealth(okFeeds===marks.length&&marks.length?'ok':(okFeeds?'warn':'bad'), okFeeds===marks.length&&marks.length?'дані актуальні':(okFeeds?'дані частково':'дані недоступні'));
+  const ch=b.change_24h; const chTxt=(ch==null)?'—':((ch>0?'+':'')+Number(ch).toFixed(2)+'%');
+  app.innerHTML=`
+    <div class="card">
+      <div class="mut">Що зараз важливо</div>
+      <p style="margin:6px 0 0;font-size:15px;line-height:1.5">${live.length?`${live.length} ${live.length===1?'сценарій потребує':'сценарії потребують'} уваги.`:'Підтверджених планів немає — «сьогодні без входу» теж рішення.'}
+      ${watch.length?` Під спостереженням: ${watch.length}.`:''}</p>
+      <div class="mut" style="margin-top:6px">Сценарій ≠ позиція. Ордерів офіс не відкриває.</div>
+    </div>
+    <div class="grid">
+      <div class="kpi"><div class="mut">BTC</div><b class="num">${esc(una(b.price))}</b><div class="mut num ${ch>0?'L':(ch<0?'S':'')}">${esc(chTxt)} · 24h</div></div>
+      <div class="kpi"><div class="mut">Сесія</div><b>${esc(una(se.active))}</b><div class="mut">далі ${esc(una(se.next))}${se.next_in_min!=null?` · ${esc(se.next_in_min)} хв`:''}</div></div>
+      <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
+    </div>
+    ${sessionHtml(ses)}
+    <h2>Запитати Лева</h2>
+    <div class="card frm" id="levbox">
+      <div class="mut">Відповідь — лише з живого аналізу Лева й журналу. «NO TRADE» — нормальна відповідь.</div>
+      <label for="levsym">Символ (порожньо = BTCUSDT)</label>
+      <input id="levsym" type="text" inputmode="text" autocomplete="off" placeholder="BTC, SOL, ETHUSDT" value="${esc(S.levsym||'')}">
+      <div class="chips" id="levq" style="margin-top:8px">
+        <button data-q="аналіз">Аналіз</button><button data-q="план">План і рівні</button><button data-q="що чекаєш">Що чекає</button>
+        <button data-q="інвалідація">Скасування</button><button data-q="що змінилось">Що змінилось</button></div>
+      <pre id="levout" class="mut" style="white-space:pre-wrap;font:inherit;font-size:13px;margin:8px 0 0" aria-live="polite"></pre>
+    </div>
+    <h2>Активні сценарії</h2>
+    ${live.map(scCard).join('')||'<div class="empty">Немає активних планів Лева</div>'}
+    ${watch.length?`<h2>Спостереження</h2>${watch.slice(0,4).map(scCard).join('')}`:''}
+    ${odd.length?`<h2>Невідомий стан</h2>${odd.map(scCard).join('')}`:''}
+    <h2>Стан даних</h2>
+    <div class="card">${marks.map(m=>`<div class="kv"><span><span class="dot ${m.data_status==='DATA_OK'?'ok':'bad'}"></span> ${esc(m.symbol)}</span>
+      <b>${m.data_status==='DATA_OK'?ago(m.as_of):(m.data_status==='STALE'?'застаріло · '+ago(m.as_of):'недоступно')}</b></div>`).join('')}
+      ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
+    </div>`;
+  bindCards();
+  const lq=$('levq');
+  if(lq) lq.querySelectorAll('[data-q]').forEach(b=>b.onclick=async()=>{
+    const sym=($('levsym').value||'').trim(); S.levsym=sym; const out=$('levout'); out.textContent='Лев рахує на свіжих свічках…';
+    try{ const r=await j('/api/v2/lev?q='+encodeURIComponent(b.dataset.q)+'&symbol='+encodeURIComponent(sym));
+      out.textContent=r.ok?r.text:('Лев не відповів: '+(r.reason||'помилка')+'. Це NO TRADE, доки немає даних.'); }
+    catch(e){ if(!e.stale) out.textContent='Немає зв’язку із сервером. Це NO TRADE, доки немає даних.'; }
+  });
+}
+
+const TEST_UA={SWEEP:'свіп — вийшли й повернулись',ACCEPTED:'прийняття за рівнем',NOT_TESTED:'не тестували'};
+function sessionHtml(b){
+  if(!b) return '';
+  if(b.data_status!=='DATA_OK') return `<h2>План сесії · BTC</h2><div class="card mut">Дані для плану сесії недоступні${b.reason?': '+esc(b.reason):''}</div>`;
+  const p=b.previous||{}, c=b.current, sp=b.since_previous||{};
+  const t=(x,lvl)=>x?`<div class="kv"><span>${lvl}</span><b>${esc(TEST_UA[x.state]||x.state)}${x.at?` · ${hhmm(x.at)}`:''}</b></div>`:'';
+  return `<h2>План сесії · BTC${b.fixture?' · FIXTURE':''}</h2>
+    <div class="card">
+      <div class="kv"><span>Попередня: ${esc(p.name)}</span><b class="num">${esc(p.low_display)}–${esc(p.high_display)}</b></div>
+      ${c&&c.high_display?`<div class="kv"><span>Поточна: ${esc(c.name)}</span><b class="num">${esc(c.low_display)}–${esc(c.high_display)}</b></div>`:''}
+      ${t(sp.high_test,'High попередньої')}${t(sp.low_test,'Low попередньої')}
+      <div class="mut" style="margin-top:6px">Спостереження, не сигнал. Свіп ≠ автоматичний розворот.</div>
+    </div>`;
+}
+
+/* ---------- Радар ---------- */
+async function radar(){
+  const T0=++RT;
+  app.innerHTML='<div class="sk"></div>';
+  let d,sc; try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
+  const rows=d.candidates||[];
+  const watch=(sc.scenarios||[]).filter(s=>(s.status||{}).group==='watch');
+  const f=S.rf;
+  const body=rows.map(c=>`<div class="card"><div class="top"><b class="sym" style="font-size:15px">${esc(c.symbol)}</b>
+      ${c.stale?'<span class="pill watch">⌛ застаріло</span>':'<span class="pill">кандидат</span>'}
+      <span class="mut" style="margin-left:auto">${ago(c.as_of)}</span></div>
+      <div class="mut" style="margin-top:6px">${esc((c.reasons||[]).join(' · ')||'причину не записано')}</div></div>`).join('');
+  const shortlist=`<div class="mut" style="margin-bottom:8px">Shortlist сканера — кандидати на аналіз Лева, не сигнали.</div>
+    ${rows.length?body:`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}`;
+  const wl=watch.map(scCard).join('')||'<div class="empty">Лев зараз ні за чим не спостерігає</div>';
+  app.innerHTML=`<div class="banner">Радар показує, чому монета в полі зору. Готовий сигнал дає лише Лев.</div>
+    ${chips([['all','Усе'],['short','Shortlist'],['watch','WATCHING']],f,'rf')}
+    ${f!=='watch'?`<h2>Shortlist</h2>${shortlist}`:''}
+    ${f!=='short'?`<h2>Під спостереженням Лева</h2>${wl}`:''}`;
+  app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
+  bindCards();
+}
+
+/* ---------- Сценарії ---------- */
+async function scenarios(){
+  const T0=++RT;
+  app.innerHTML='<div class="sk"></div>';
+  let d; try{d=await j('/api/v2/journal?kind=scenarios');}catch(e){return fail(e,'сценарії');}
+  const all=d.rows||[];
+  const f=S.sf;
+  const pick=s=>{const g=(s.status||{}).group, dir=String(s.direction||'').toUpperCase();
+    if(f==='live') return g==='live'; if(f==='watch') return g==='watch'; if(f==='done') return g==='done';
+    if(f==='LONG'||f==='SHORT') return dir===f && g!=='done'; return g!=='done';};
+  const rows=all.filter(pick);
+  app.innerHTML=`${chips([['all','Актуальні'],['live','Плани'],['watch','WATCHING'],['LONG','▲ LONG'],['SHORT','▼ SHORT'],['done','Архів']],f,'sf')}
+    ${rows.map(scCard).join('')||'<div class="empty">Немає сценаріїв за цим фільтром</div>'}`;
+  app.querySelectorAll('[data-sf]').forEach(b=>b.onclick=()=>{S.sf=b.dataset.sf; scenarios();});
+  bindCards();
+}
+
+/* ---------- Журнал ---------- */
+async function journal(){
+  const T0=++RT;
+  const kind=S.jkind==='positions'?'trades':S.jkind;
+  if(kind==='trades') return trades();
+  let d; try{d=await j('/api/v2/journal?kind='+kind);}catch(e){return fail(e,'журнал');}
+  let body='';
+  if(kind==='stats'){
+    body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(d.message||d.note||'мало даних')}</pre>
+      <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
+  } else if(kind==='positions'){
+    body=posHtml(d);
+  } else if(kind==='audit'){
+    const c=d.counts||{};
+    const RU={EXECUTION_NOT_VERIFIED:'виконання не перевірено',DATA_NOT_VERIFIED:'дані не перевірені',CONTEXT_NOT_VERIFIED:'контекст не перевірено',
+      INCOMPLETE_PLAN:'неповний план (немає кількості)',INVALID_EXISTING_RISK:'ризик відкритих позицій невідомий',TRADE_RISK_LIMIT:'ліміт ризику угоди',
+      PORTFOLIO_RISK_LIMIT:'ліміт ризику портфеля',INVALID_RISK_LIMIT:'капітал не задано'};
+    body=d.ok===false?`<div class="empty">${esc(d.reason||'журнал недоступний')}</div>`:`<div class="card">
+      <div class="kv"><span>Версій тез за ${esc(d.days)} дн.</span><b>${esc(c.THESIS_VERSION||0)}</b></div>
+      <div class="kv"><span>…з них неповних</span><b>${esc(d.thesis_incomplete||0)}</b></div>
+      <div class="kv"><span>Перевірок Risk Officer</span><b>${esc(d.risk_reviews||0)}</b></div>
+      <div class="kv"><span>…заблокував би / заблокував</span><b>${esc(d.would_veto||0)}</b></div>
+      <div class="kv"><span>Реальних veto</span><b>${esc(c.RISK_VETO||0)}</b></div></div>
+      <h2>Причини veto</h2><div class="card">${(d.top_veto_reasons||[]).map(([r,n])=>`<div class="kv"><span>${esc(RU[r]||r)}</span><b>${esc(n)}</b></div>`).join('')||'<div class="mut">Записів немає</div>'}</div>
+      <h2>Режими в тезах</h2><div class="card">${(d.regimes||[]).map(([r,n])=>`<div class="kv"><span>${esc(r==='UNKNOWN'?'Не визначено':r)}</span><b>${esc(n)}</b></div>`).join('')||'<div class="mut">Записів немає</div>'}</div>
+      <div class="mut">${esc(d.note||'')}</div>`;
+  } else {
+    const rows=d.rows||[];
+    body=rows.map(s=>`<div class="card tap" data-id="${esc(sid(s.scenario_id))}"><div class="top">
+      <span class="mut num">${hhmm(s.created_at)}</span><b>${esc(s.symbol)}</b><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}</div></div>`).join('')
+      ||'<div class="empty">Журнал сценаріїв порожній</div>';
+  }
+  app.innerHTML=`<div class="banner">Історія фактичних записів. Минуле не переписується.</div>
+    ${jchips(kind)}${kind==='stats'?'<div class="banner">Модельна статистика сценаріїв — це не ваші реальні угоди.</div>':''}${body}`;
+  app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
+  bindCards();
+}
+/* ---------- Мої угоди (ручний облік; ордерів немає) ---------- */
+function jchips(kind){
+  return chips([['trades','Мої угоди'],['scenarios','Сценарії (симуляція)'],['audit','Аудит рішень'],['stats','Модельна статистика']],kind,'k');
+}
+function tgInit(){
+  try{ if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData) return Telegram.WebApp.initData; }catch(e){}
+  try{ const m=/[#&]tgWebAppData=([^&]+)/.exec(location.hash||''); if(m) return decodeURIComponent(m[1]); }catch(e){}
+  return '';
+}
+function newKey(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():('k'+Date.now()+Math.random().toString(16).slice(2));}
+const ERR_UA={write_disabled:'Запис вимкнено на сервері (не задано OFFICE_OWNER_TG_IDS або OFFICE_WRITE_KEY).',
+  unauthorized:'Немає доступу: відкрийте застосунок із Telegram або введіть ключ запису.',
+  rate_limited:'Забагато невдалих спроб. Зачекайте кілька хвилин.',bad_signature:'Підпис Telegram недійсний.',
+  init_data_expired:'Сесія Telegram застаріла — перевідкрийте застосунок.',not_owner:'Цей акаунт не має права запису.',
+  db_unavailable:'База даних недоступна — запис не виконано.',schema_missing:'Облік угод ще не активовано (потрібна міграція).'};
+async function post(action, body){
+  const h={'Content-Type':'application/json'};
+  const ti=tgInit(); if(ti) h['X-Telegram-Init-Data']=ti;
+  const k=lsGet('ao_wkey',''); if(k) h['X-Office-Write-Key']=k;
+  let r,d;
+  try{ r=await fetch('/api/v2/trade/'+action,{method:'POST',headers:h,body:JSON.stringify(body)}); d=await r.json(); }
+  catch(e){ return {ok:false,message:'Немає зв’язку із сервером — запис не виконано.'}; }
+  if(!d.ok) d.message=d.message||ERR_UA[d.error]||('Помилка: '+(d.error||r.status));
+  return d;
+}
+function fld(n,l,v,o){o=o||{};
+  if(o.opts) return `<label for="f_${n}">${esc(l)}</label><select id="f_${n}" name="${n}">${o.opts.map(x=>`<option value="${esc(x)}"${x===v?' selected':''}>${esc(x)}</option>`).join('')}</select>`;
+  return `<label for="f_${n}">${esc(l)}</label><input id="f_${n}" name="${n}" type="text" inputmode="${o.im||'decimal'}" autocomplete="off" value="${esc(v??'')}" placeholder="${esc(o.ph||'')}">`;
+}
+function formVals(root){const o={}; root.querySelectorAll('[name]').forEach(e=>{if(String(e.value).trim()!=='') o[e.name]=e.value.trim();}); return o;}
+const T_=(n,l,v)=>fld(n,l,v,{im:'text'});
+function formSpec(action,pos,pre){
+  pre=pre||{}; pos=pos||{};
+  return {
+    open:['Внести угоду (фактичні дані з біржі)',
+      fld('symbol','Символ',pre.symbol||'',{im:'text',ph:'BTCUSDT'})+fld('direction','Напрям',pre.direction||'LONG',{opts:['LONG','SHORT']})+
+      '<div class="row2">'+fld('entry','Фактична ціна входу','')+fld('qty','Обсяг (монети)','')+'</div>'+
+      '<div class="row2">'+fld('sl','Стоп',pre.sl||'')+fld('tp1','TP1',pre.tp1||'')+'</div>'+
+      '<div class="row2">'+fld('tp2','TP2',pre.tp2||'')+fld('fee_usdt','Комісія, USDT (порожньо = оцінка)','')+'</div>'+
+      T_('opened_at','Час відкриття (порожньо = зараз, напр. 2026-09-29T10:30Z)','')+T_('note','Нотатка','')],
+    partial:['Частковий вихід',fld('price','Ціна виходу','')+fld('qty','Обсяг, що закрито','')+fld('fee_usdt','Комісія, USDT','')+T_('note','Нотатка','')],
+    move_sl:['Перенести стоп',fld('sl','Новий стоп','')+T_('note','Нотатка','')],
+    move_tp:['Змінити TP',fld('tp1','TP1',pos.tp1||'')+fld('tp2','TP2',pos.tp2||'')+T_('note','Нотатка','')],
+    close:['Закрити позицію',fld('price','Ціна закриття','')+fld('fee_usdt','Комісія, USDT','')+T_('exit_reason','Причина (TP / SL / вручну)','')+T_('note','Нотатка','')],
+    void:['Анулювати запис (внесено помилково)',T_('note','Причина','')],
+  }[action];
+}
+function openForm(action,pos,pre){
+  const box=$('frm'); if(!box) return;
+  const sp=formSpec(action,pos,pre); if(!sp) return;
+  const key=newKey();
+  box.innerHTML=`<form class="card frm" id="tf" novalidate><b>${esc(sp[0])}</b>${pos?`<div class="mut">${esc(pos.symbol)} ${esc(pos.direction)}</div>`:''}
+    ${sp[1]}<div id="fmsg" class="msg" role="alert"></div>
+    <div class="acts"><button type="submit" class="btn pri" id="fsend">Записати</button><button type="button" class="btn" id="fcancel">Скасувати</button></div>
+    <div class="mut" style="margin-top:8px">Це лише облік. Офіс не відкриває й не змінює ордери на біржі.</div></form>`;
+  $('fcancel').onclick=()=>{box.innerHTML='';};
+  $('tf').onsubmit=async ev=>{
+    ev.preventDefault();
+    const b=formVals($('tf')); b.idem_key=key; if(pos) b.trade_id=pos.trade_id; if(pre&&pre.scenario_id) b.scenario_id=pre.scenario_id;
+    $('fsend').disabled=true; $('fmsg').className='msg'; $('fmsg').textContent='Записую…';
+    const d=await post(action,b);
+    if(d.ok){ S.prefill=null; return trades(); }
+    $('fmsg').className='msg bad'; $('fmsg').textContent=d.message||'Не вдалося записати'; $('fsend').disabled=false;
+  };
+  box.scrollIntoView({block:'start'});
+  const f=box.querySelector('input,select'); if(f) f.focus();
+}
+function money(v){return v==null?'—':(Number(v)>0?'+':'')+Number(v).toFixed(2)+' USDT';}
+function tradeCard(p){
+  const dp=p.display||{}, t=p.tracking||{};
+  const flags=(t.flags||[]).map(f=>`<div class="msg ${/BEYOND|NO_FRESH/.test(f.code)?'bad':''}">${esc(f.text||f.code)}</div>`).join('');
+  const open=p.status==='OPEN';
+  return `<div class="card" data-trade="${esc(p.trade_id)}"><div class="top"><b>${esc(p.symbol)}</b><span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span>
+    <span class="pill ${open?'live':'done'}">${open?'відкрита':(p.status==='CLOSED'?'закрита':esc(p.status))}</span>${p.scenario_id?'<span class="pill">за сценарієм</span>':'<span class="pill">без сигналу Лева</span>'}</div>
+    <div class="lv"><div><span>Вхід</span><b>${esc(dp.entry||una(p.entry))}</b></div><div class="sl"><span>Стоп</span><b>${esc(dp.sl||una(p.sl))}</b></div>
+    <div class="tp"><span>TP1</span><b>${esc(dp.tp1||una(p.tp1))}</b></div><div><span>Обсяг</span><b>${esc(una(p.remaining_qty))}</b></div></div>
+    ${open?`<div class="kv"><span>Ризик зараз (до стопа)</span><b>${p.risk_now_usdt==null?'—':esc(Number(p.risk_now_usdt).toFixed(2))+' USDT'}</b></div>
+      <div class="kv"><span>Уже зафіксовано (після комісій)</span><b>${esc(money(p.realized_net_usdt))}</b></div>
+      ${t.unrealized_usdt!=null?`<div class="kv"><span>Нереалізовано (за поточною ціною)</span><b>${esc(money(t.unrealized_usdt))}${t.unrealized_r!=null?' · '+esc(Number(t.unrealized_r).toFixed(2))+' R':''}</b></div>`:''}
+      ${t.price_display?`<div class="kv"><span>Остання ціна</span><b>${esc(t.price_display)} · ${ago(t.price_as_of)}</b></div>`:''}${flags}
+      <div class="acts"><button class="btn" data-a="partial">Частковий вихід</button><button class="btn" data-a="move_sl">Перенести стоп</button>
+      <button class="btn" data-a="move_tp">TP</button><button class="btn warn" data-a="close">Закрити</button><button class="btn" data-a="void">Внесено помилково</button></div>`
+     :`<div class="kv"><span>Результат (з комісіями${p.fees_estimated?', оцінка':''})</span><b>${esc(money(p.realized_net_usdt))}</b></div>
+      <div class="kv"><span>R</span><b>${p.r_realized==null?'—':esc(Number(p.r_realized).toFixed(2))}</b></div>`}
+    <div class="mut">відкрито ${hhmm(p.opened_at)}${p.closed_at?' · закрито '+hhmm(p.closed_at):''}</div></div>`;
+}
+async function trades(){
+  const T0=++RT;
+  let d,au; 
+  try{[d,au]=await Promise.all([j('/api/v2/trades?state=all'),j('/api/v2/auth')]);}catch(e){return fail(e,'мої угоди');}
+  const ex=d.exposure||{}, st=d.stats||{};
+  const rows=d.positions||[];
+  const open=rows.filter(p=>p.status==='OPEN'), closed=rows.filter(p=>p.status!=='OPEN');
+  const canWrite=au&&au.write_enabled&&!d.schema_missing;
+  const authBox=d.schema_missing?`<div class="card err">${esc(d.note)}</div>`:(!au.write_enabled?
+    `<div class="mut" style="margin-bottom:8px">Запис власних угод вимкнено на сервері — необов’язкова функція; журнал сценаріїв і аналітика працюють.</div>`:
+    (!tgInit()&&au.write_key?`<div class="mut" style="margin-bottom:8px">Поза Telegram потрібен ключ запису: <button class="btn" id="setkey" style="min-height:36px;padding:4px 10px">${lsGet('ao_wkey','')?'змінити ключ':'ввести ключ'}</button></div>`:''));
+  app.innerHTML=`<div class="banner">Це ваші фактичні угоди, внесені вручну. Офіс не торгує; ордери — лише ви на біржі.</div>
+    ${jchips('trades')}${authBox}
+    <div id="frm"></div>
+    <div class="card"><div class="kv"><span>Відкритих позицій</span><b>${esc(open.length)}</b></div>
+      <div class="kv"><span>Сукупний ризик до стопів</span><b>${ex.risk_now_usdt==null?'—':esc(Number(ex.risk_now_usdt).toFixed(2))+' USDT'}</b></div>
+      ${ex.text?`<div class="mut">${esc(ex.text)}</div>`:''}</div>
+    ${canWrite?'<div class="acts" style="margin:0 0 10px"><button class="btn pri" id="addpos">＋ Внести позицію</button></div>':''}
+    <h2>Відкриті</h2>${open.map(tradeCard).join('')||'<div class="empty">Немає внесених відкритих позицій. Якщо на біржі позиція є — внесіть її, щоб ризик-контроль бачив повну експозицію.</div>'}
+    <h2>Закриті</h2>${closed.map(tradeCard).join('')||'<div class="empty">Закритих угод ще немає</div>'}
+    <h2>Підсумок реальних угод</h2><div class="card">${st.n?`<div class="kv"><span>Угод</span><b>${esc(st.n)}</b></div>
+      <div class="kv"><span>Результат після комісій</span><b>${esc(money(st.net_usdt))}</b></div>`:''}
+      <div class="mut">${esc(st.note||'Закритих ручних угод ще немає.')}</div></div>`;
+  app.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{S.jkind=b.dataset.k; journal();});
+  const sk=$('setkey'); if(sk) sk.onclick=()=>{const v=prompt('Ключ запису (OFFICE_WRITE_KEY)'); if(v!==null){lsSet('ao_wkey',v.trim()); trades();}};
+  const ap=$('addpos'); if(ap) ap.onclick=()=>openForm('open',null,null);
+  app.querySelectorAll('[data-trade] [data-a]').forEach(b=>b.onclick=()=>{
+    const id=b.closest('[data-trade]').dataset.trade; openForm(b.dataset.a, rows.find(p=>p.trade_id===id), null);});
+  if(S.prefill&&canWrite){const pre=S.prefill; S.prefill=null; openForm('open',null,pre);}
+}
+function posHtml(d){
+  const rows=d.positions||[];
+  if(!rows.length) return `<div class="empty">${esc(d.empty_reason||'Немає підтверджених позицій')}</div>`;
+  return rows.map(p=>`<div class="card"><div class="top"><b>${esc(p.symbol)}</b><span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span><span class="pill">${esc(p.status)}</span></div>
+    <div class="lv"><div><span>Вхід</span><b>${esc(una(p.entry))}</b></div><div class="sl"><span>Стоп</span><b>${esc(una(p.sl))}</b></div>
+    <div class="tp"><span>TP</span><b>${esc(una(p.tp))}</b></div><div><span>PnL</span><b>${p.pnl_pct==null?'—':esc(p.pnl_pct)}</b></div></div>
+    <div class="mut" style="margin-top:6px">Джерело: /position</div></div>`).join('');
+}
+
+/* ---------- Ризик ---------- */
+async function risk(){
+  const T0=++RT;
+  app.innerHTML='<div class="sk"></div>';
+  let d,s; try{[d,s]=await Promise.all([j('/api/v2/risk'), j('/api/v2/settings')]);}catch(e){return fail(e,'ризик');}
+  const kv=(k,o)=>`<div class="kv"><span>${esc(k)}</span><b>${o&&o.value!=null?esc(o.value):esc((o&&o.text)||'Дані недоступні')}</b></div>`;
+  const g=d.limits||{};
+  app.innerHTML=`<div class="banner">${esc(d.note||'')}</div>
+    <div class="card">${kv('Капітал',d.equity)}${kv('Відкрита експозиція',d.exposure)}${kv('Ризиковий бюджет дня',d.budget)}</div>
+    <h2>Плани на розгляді</h2>
+    ${(d.plans||[]).map(p=>`<div class="card tap" data-id="${esc(sid(p.scenario_id))}"><div class="top"><b>${esc(p.symbol)}</b>
+      <span class="side ${side(p.direction)}">${sideTxt(p.direction)}</span>${pill(p.status)}<span class="mut num" style="margin-left:auto">RR ${esc(p.rr||NA)}</span></div>
+      <div class="mut" style="margin-top:4px">${esc(p.risk_note)}</div></div>`).join('')||'<div class="empty">Немає планів, що чекають ризик-контролю</div>'}
+    <h2>Veto Risk Officer</h2>
+    ${(d.vetoes||[]).map(v=>`<div class="card"><span class="pill bad">⛔ ${esc(v.type)}</span> <span class="mut">${hhmm(v.ts)} · ${esc(v.scenario_id||'')}</span></div>`).join('')
+      ||`<div class="empty">${esc(d.vetoes_note||'')}</div>`}
+    <h2>Тіньові перевірки</h2>
+    <div class="mut" style="margin:-4px 0 8px">Режим Risk Officer: ${d.risk_mode==='enforce'?'veto увімкнено':'shadow — рішення Лева не змінюються, лише запис'}</div>
+    ${(d.shadow||[]).map(v=>`<div class="card"><div class="top"><b>${esc(v.symbol||'')}</b><span class="side ${side(v.direction)}">${sideTxt(v.direction)}</span>
+      <span class="pill ${v.would_veto?'bad':'ok'}">${v.would_veto?'⛔ заблокував би':'✓ пройшов би'}</span><span class="mut" style="margin-left:auto">${hhmm(v.ts)}</span></div>
+      ${(v.reasons||[]).length?`<div class="mut" style="margin-top:4px">${esc(v.reasons.join(' · '))}</div>`:''}</div>`).join('')
+      ||'<div class="empty">Тіньових перевірок ще немає</div>'}
+    <h2>Підтверджені позиції</h2>${posHtml(d)}
+    <h2>Правила (заморожені)</h2>
+    <div class="card">
+      <div class="kv"><span>ATR: блок входу / T0</span><b>${esc(g.atr_entry_block)}% / ${esc(g.atr_t0)}%</b></div>
+      <div class="kv"><span>Edge</span><b>${esc(g.edge)}</b></div>
+      <div class="kv"><span>Мінімальний RR</span><b>1:${esc(g.min_rr)}</b></div>
+      <div class="kv"><span>TP1 мінімум BTC/ETH · альти</span><b>${esc(g.tp1_majors_pct)}% · ${esc(g.tp1_alts_pct)}%</b></div>
+      <div class="kv"><span>Автоторгівля / ордери</span><b>вимкнено</b></div>
+    </div>
+    <h2>Відображення</h2>
+    <div class="card">
+      <div class="mut">Таймфрейм графіка за замовчуванням</div>
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+      <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
+      <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
+    </div>`;
+  $('chov').checked=S.ch;
+  $('chov').onchange=e=>{S.ch=e.target.checked; lsSet('ao_ch', S.ch?'1':'0');};
+  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
+  bindCards();
+}
+
+/* ---------- Графік ---------- */
+let poll=null, chart=null, series=null, usingLW=false;
+function killPoll(){ if(poll){clearInterval(poll); poll=null;} }
+function priceFormat(tick){
+  const t=Number(tick); if(!(t>0)) return {type:'price',precision:6,minMove:0.000001};
+  const p=Math.max(0,Math.min(10,(String(tick).split('.')[1]||'').replace(/0+$/,'').length));
+  return {type:'price',precision:p,minMove:t};
+}
+function drawFallback(el, candles, lv){
+  const c=document.createElement('canvas'); c.width=(el.clientWidth||320)*2; c.height=(el.clientHeight||320)*2;
+  c.style.width='100%'; c.style.height='100%'; el.innerHTML=''; el.appendChild(c);
+  const ctx=c.getContext('2d'); const w=c.width,h=c.height, pad=40;
+  const xs=candles.filter(x=>x.time);
+  if(!xs.length){ctx.fillStyle='#94A3B8'; ctx.fillText('немає свічок',20,40); return;}
+  let mn=Math.min(...xs.map(x=>x.low)), mx=Math.max(...xs.map(x=>x.high));
+  Object.values(lv).forEach(v=>{if(v!=null){mn=Math.min(mn,v); mx=Math.max(mx,v);}});
+  const x=i=>pad+(w-2*pad)*i/Math.max(xs.length-1,1);
+  const y=v=>h-pad-(h-2*pad)*(v-mn)/Math.max(mx-mn,1e-9);
+  ctx.fillStyle='#0E141D'; ctx.fillRect(0,0,w,h);
+  if(lv.zone_lo!=null && lv.zone_hi!=null){ctx.fillStyle='rgba(93,169,255,.16)'; ctx.fillRect(pad,y(lv.zone_hi),w-2*pad,y(lv.zone_lo)-y(lv.zone_hi));}
+  ctx.lineWidth=2;
+  [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A']].forEach(([k,col])=>{
+    if(lv[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(lv[k])); ctx.lineTo(w-pad,y(lv[k])); ctx.stroke();});
+  xs.forEach((b,i)=>{const up=b.close>=b.open; ctx.strokeStyle=ctx.fillStyle=up?'#27C99A':'#F36B78';
+    ctx.beginPath(); ctx.moveTo(x(i),y(b.high)); ctx.lineTo(x(i),y(b.low)); ctx.stroke();
+    const top=y(Math.max(b.open,b.close)), bot=y(Math.min(b.open,b.close)); ctx.fillRect(x(i)-2,top,4,Math.max(2,bot-top));});
+}
+function chartLevels(s){
+  const L=S.layers, o={};
+  if(L.zone){o.zone_lo=s.zone_lo; o.zone_hi=s.zone_hi;}
+  if(L.sl) o.sl=s.sl;
+  if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2;}
+  return o;
+}
+async function paintChart(el, s){
+  const symbol=s.symbol, tf=S.tf, lv=chartLevels(s);
+  let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=180`);}
+  catch(e){if(e.stale) return null; el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
+  const stamp=$('asof'); if(stamp) stamp.textContent=pack.as_of?`Остання свічка: ${hhmm(pack.as_of)} · ${pack.fixture?'FIXTURE, не ринок':pack.source}`:'';
+  setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad',
+    pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
+  if(stamp && pack.data_status==='STALE') stamp.textContent+=' · фід застарів — рівні не підтверджують вхід';
+  const candles=(pack.candles||[]).filter(c=>c.time);
+  if(chart){try{chart.remove();}catch(e){} chart=null; series=null;}
+  el.innerHTML='';
+  if(!candles.length){ el.innerHTML='<div class="empty">Свічки недоступні — графік не live</div>'; return pack; }
+  if(window.LightweightCharts){
+    usingLW=true;
+    chart=LightweightCharts.createChart(el,{layout:{background:{color:'#0E141D'},textColor:'#94A3B8'},
+      grid:{vertLines:{color:'#18212E'},horzLines:{color:'#18212E'}},rightPriceScale:{borderColor:'#243244'},
+      timeScale:{borderColor:'#243244',timeVisible:true},crosshair:{mode:0},localization:{locale:'uk-UA'},height:el.clientHeight||320,width:el.clientWidth||320});
+    series=chart.addCandlestickSeries({upColor:'#27C99A',downColor:'#F36B78',borderVisible:false,wickUpColor:'#27C99A',wickDownColor:'#F36B78',
+      priceFormat:priceFormat((s.display||{}).tick)});
+    series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
+    const vol=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:''});
+    vol.priceScale().applyOptions({scaleMargins:{top:.85,bottom:0}});
+    vol.setData(candles.map(c=>({time:c.time,value:c.volume||0,color:'#243244'})));
+    const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
+    line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
+    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2);
+    if(S.ch){
+      try{const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      if(chp&&chp.ok){
+        const mk=o=>chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false},o));
+        const mid=mk({}), up=mk({lineStyle:2}), dn=mk({lineStyle:2});
+        const t0=candles[Math.max(0,candles.length-(chp.length||100))].time, t1=candles[candles.length-1].time;
+        mid.setData([{time:t0,value:chp.mid_start},{time:t1,value:chp.mid_end}]);
+        up.setData([{time:t0,value:chp.upper_start},{time:t1,value:chp.upper_end}]);
+        dn.setData([{time:t0,value:chp.lower_start},{time:t1,value:chp.lower_end}]);
+      }}catch(e){}
+    }
+    chart.timeScale().fitContent();
+  } else { usingLW=false; drawFallback(el,candles,lv); }
+  return pack;
+}
+
+const REASON_UA={REGIME_NOT_VERIFIED:'режим ринку не підтверджено даними',MISSING_ALTERNATIVE:'немає альтернативи',
+  MISSING_INVALIDATION:'немає інвалідації',MISSING_EVIDENCE:'немає доказів',EVIDENCE_STALE_OR_FUTURE:'докази застарілі',
+  EVIDENCE_PROVENANCE_MISSING:'у доказу немає джерела/часу',EXPIRED_OR_INVALID_EXPIRY:'теза прострочена',THESIS_NOT_ACTIVE:'теза не активна'};
+function thesisHtml(t){
+  if(!t) return '<div class="sec"><h3>Теза Лева</h3><p class="mut">Версії тези в журналі ще немає — не реконструюємо.</p></div>';
+  const ch=t.check||{}, ok=!!ch.valid_for_analyst_review;
+  const why=(ch.reasons||[]).map(r=>REASON_UA[r]||r).join(' · ');
+  return `<div class="sec"><h3>Теза Лева</h3>
+    <div class="kv"><span>Режим</span><b>${esc(t.regime==='UNKNOWN'?'Не визначено':t.regime)}</b></div>
+    <div class="kv"><span>Гіпотеза</span><b>${esc(t.hypothesis)}</b></div>
+    <div class="kv"><span>Альтернатива</span><b>${esc(t.alternative)}</b></div>
+    <div class="kv"><span>Інвалідація</span><b>${esc(t.invalidation||NA)}</b></div>
+    <div class="kv"><span>Актуальна до</span><b>${hhmm(t.expires_at)}</b></div>
+    <div style="margin-top:8px"><span class="pill ${ok?'ok':'watch'}">${ok?'✓ контракт тези виконано':'⚠ теза неповна'}</span>
+      <span class="mut"> версія ${esc(t.version_hash||'')} · ${hhmm(t.recorded_at)}</span></div>
+    ${why?`<div class="mut" style="margin-top:6px">${esc(why)}</div>`:''}</div>`;
+}
+
+const CHK={OK:['ok','✓'],FAIL:['bad','✗'],UNAVAILABLE:['watch','?']};
+function execHtml(x){
+  if(!x) return '';
+  const v={CHECKED:['ok','Перевірено'],NOT_VERIFIED:['watch','Не все перевірено'],BLOCKED:['bad','Вхід зараз не розглядати']}[x.verdict]||['','—'];
+  return `<div class="sec"><h3>Перевірки перед входом</h3>
+    <div style="margin-bottom:6px"><span class="pill ${v[0]}">${esc(v[1])}</span>
+      <span class="mut">${x.price_display?`ціна ${esc(x.price_display)} · ${esc(x.price_source||'')}`:'ціни немає'}</span></div>
+    ${(x.checks||[]).map(c=>{const k=CHK[c.state]||['','•']; return `<div class="kv"><span><span class="pill ${k[0]}">${k[1]}</span> ${esc(c.title)}</span><b class="mut" style="font-weight:500">${esc(c.detail)}</b></div>`;}).join('')}
+    <div class="mut" style="margin-top:6px">${esc(x.text)}</div></div>`;
+}
+
+/* ---------- Картка сценарію ---------- */
+async function openSc(id){
+  const T0=++RT;
+  killPoll();
+  app.innerHTML='<div class="sk"></div><div class="sk"></div>';
+  let d; try{d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'сценарій');}
+  if(!d.ok){ app.innerHTML='<button class="back" id="back">← Сценарії</button><div class="empty">Сценарій недоступний</div>'; $('back').onclick=()=>go('scenarios'); return; }
+  const s=d.scenario||{}, dp=s.display||{}, st=s.status||{};
+  const story=s.story&&s.story.ok?s.story.text:'';
+  const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
+  const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
+  app.innerHTML=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
+    <div class="card">
+      <div class="top"><span class="sym">${esc(s.symbol)}</span><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(st)}</div>
+      <div style="margin-top:6px;font-size:14px">${esc(st.text||'')}</div>
+      <div class="mut" style="margin-top:4px">${esc(s.timeframe||'')} · оновлено ${ago(s.as_of)} · ID ${esc(s.scenario_id)}</div>
+    </div>
+    <div class="sec"><h3>Висновок Лева</h3><p>${esc(s.why||story||'Лев не залишив пояснення в записі сценарію.')}</p>
+      ${s.why&&story?`<div class="mut" style="margin-top:6px">${esc(story)}</div>`:''}</div>
+    ${thesisHtml(d.thesis)}
+    <div class="sec"><h3>Торговий план</h3>
+      ${kv('Зона входу',dp.zone||dp.entry)}${kv('Стоп',dp.sl,'S')}${kv('TP1',dp.tp1,'L')}${dp.tp2?kv('TP2',dp.tp2,'L'):''}
+      ${kv('RR',dp.rr?`${dp.rr} (${dp.rr_basis})`:'')}${kv('Потенціал до TP1',dp.potential)}
+      ${kv('Плановий ризик','Очікує перевірки Risk Officer')}
+    </div>
+    ${execHtml(d.execution)}
+    <div class="sec"><h3>Що чекаємо</h3><p>${esc(s.wait||'Конкретну умову підтвердження не записано — вхід не розглядати.')}</p></div>
+    <div class="sec"><h3>Коли сценарій скасовується</h3><p>${esc(s.cancel||NA)}</p>
+      <div class="mut" style="margin-top:6px">Скасування до входу ≠ стоп після входу.</div></div>
+    <div class="sec"><h3>Після підтвердження</h3><p>План передається на незалежний ризик-контроль. Ордер офіс не відкриває — рішення за трейдером.</p>
+      ${d.hypothetical?'<div class="mut" style="margin-top:6px">Позиції немає. Будь-які TP/SL тут — модельні рівні, не PnL угоди.</div>':''}</div>
+    <div class="acts" style="margin:0 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+    <div class="chips" id="lay">
+      <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
+      <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
+      <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
+    <div id="chart" class="chart"></div>
+    <div class="mut" id="asof" style="margin:6px 0 12px"></div>
+    <div class="sec"><h3>Історія сценарію</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>'}</div>`;
+  $('back').onclick=()=>{killPoll(); go('scenarios');};
+  $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
+    sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};
+  const el=$('chart');
+  await paintChart(el, s);
+  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=async()=>{
+    S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
+    app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+  $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
+  poll=setInterval(async()=>{
+    if(document.hidden) return;
+    let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){if(!e.stale) setHealth('bad','немає зв’язку'); return;}
+    const last=(pack.candles||[]).slice(-1)[0];
+    if(!last||!last.time) return;
+    if(usingLW && series) series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
+    else paintChart(el,s);
+  }, 8000);
+}
+
+const routes={office,radar,scenarios,journal,risk};
+let cur='office';
+function go(r){
+  killPoll(); cur=r;
+  document.querySelectorAll('nav button').forEach(x=>{const on=x.dataset.r===r; x.classList.toggle('on',on); if(on) x.setAttribute('aria-current','page'); else x.removeAttribute('aria-current');});
+  routes[r]();
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.r));
+const qs=new URLSearchParams(location.search);
+if(qs.get('scenario')) openSc(qs.get('scenario')); else go('office');
+</script>
+</body>
+</html>
