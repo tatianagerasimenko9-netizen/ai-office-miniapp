@@ -999,7 +999,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:
@@ -1157,3 +1157,29 @@ def lev_payload(question: str = "", symbol: str = "") -> Dict[str, Any]:
         return {**D.answer(_db(), text, symbol=sym or None), "readonly": True}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "readonly": True, "reason": f"{type(exc).__name__}", "order_authorized": False}
+
+
+WATCH_STATE_UA = {"WAIT": "чекаємо", "IN_ZONE": "ціна в зоні, чекаємо підтвердження", "CONFIRMED": "умови підтверджено"}
+
+
+def watches_payload() -> Dict[str, Any]:
+    """Що Лев зараз відстежує і що вже повідомляв — людською мовою. Лише читання."""
+    import office_lev_watch as W
+    from office_user_messages import ticker, _px
+
+    try:
+        act = W.active_watches(_db())
+        notes = W.recent_notes(_db(), limit=8)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "readonly": True, "reason": type(exc).__name__, "order_authorized": False}
+    items = []
+    for w in act:
+        sym = w["symbol"]
+        items.append({"symbol": sym, "ticker": ticker(sym), "state": w["state"], "state_ua": WATCH_STATE_UA.get(w["state"], w["state"]),
+                      "action_ua": "купівля" if w["direction"] == "LONG" else "продаж",
+                      "zone": f"{_px(w['zone_lo'], sym).replace(' $', '')}–{_px(w['zone_hi'], sym)}",
+                      "invalidation": _px(w["invalidation"], sym), "until": w.get("expires_at"), "since": w.get("created_at")})
+    return {"ok": True, "readonly": True, "notify_enabled": W.notify_enabled(), "watches": items,
+            "recent": [{"ts": n.get("ts"), "ticker": ticker(str(n.get("symbol"))), "event": n.get("event"),
+                        "headline": str(n.get("text") or "").split("\n", 1)[0], "sent": bool(n.get("sent"))} for n in notes],
+            "order_authorized": False}
