@@ -119,6 +119,15 @@ try:
     assert trades_payload("closed")["positions"][0]["trade_id"] == pos["trade_id"]
     log_event(DB, "PG_PROBE", {"x": 1}, "p")
     assert json.loads(_fetchall(DB, "SELECT payload_json FROM office_events ORDER BY id DESC LIMIT 1", ())[0][0]) == {"x": 1}
+    # 9. Regression (production 2026-09-29): літерал «%» у SQL (LIKE '%scenario_id=%') ламав кожен SEND на PostgreSQL
+    #    («only '%s', '%b', '%t' are allowed as placeholders»). Обидва шляхи — без параметрів і з параметрами.
+    from office_bridge import _fetchone, signal_get_scenarios
+    signal_upsert(DB, signal_id="pct-1", symbol="PCTUSDT", direction="LONG", entry_low=1.0, entry_high=1.1, sl=0.9, tp1=1.4,
+                  tp2=None, rr=None, status="WATCHING", analysis_note="x\nscenario_id=SCN|PCT|LONG|H1|abc")
+    assert [r["signal_id"] for r in signal_get_scenarios(DB)] == ["pct-1"]
+    assert _fetchone(DB, "SELECT COUNT(*) FROM office_signals WHERE analysis_note LIKE '%scenario_id=%' AND symbol = ?", ("PCTUSDT",))[0] == 1
+    from office_thesis_journal import canonical_scenario_id  # шлях, що падав після SEND
+    canonical_scenario_id(DB, {"draft": {"symbol": "PCTUSDT", "direction": "LONG", "timeframe": "H1", "zone_lo": 1.0, "zone_hi": 1.1, "confluence": {}}})
 finally:
     with psycopg.connect(URL, autocommit=True) as c:
         c.execute(f"DROP SCHEMA {SCHEMA} CASCADE")

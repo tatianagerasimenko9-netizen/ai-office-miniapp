@@ -43,7 +43,7 @@ def _connect(db_path: str):
 
 
 def _sql(db_path: str, query: str) -> str:
-    return query.replace("?", "%s") if _is_pg(db_path) else query
+    return query.replace("%", "%%").replace("?", "%s") if _is_pg(db_path) else query
 
 
 def migrate_delivery_ledger(db_path: str) -> None:
