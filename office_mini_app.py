@@ -1428,6 +1428,10 @@ class Handler(BaseHTTPRequestHandler):
                 from office_write_auth import config_status
 
                 data = {"ok": True, **config_status()}
+            elif u.path == "/api/v2/lev":
+                from office_mini_v2 import lev_payload
+
+                data = lev_payload(_q("q"), _q("symbol"))
             elif u.path == "/api/v2/session":
                 data = session_payload(_q("symbol") or "BTCUSDT")
             else:
@@ -1504,11 +1508,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def auto_migrate_if_enabled(db_target: str) -> str:
+    """Адитивна міграція релізу (CREATE TABLE IF NOT EXISTS) при старті web — лише за OFFICE_AUTO_MIGRATE=1.
+
+    Нічого не змінює й не видаляє; ті самі кроки, що `scripts/migrate_release.py --apply`.
+    """
+    if os.getenv("OFFICE_AUTO_MIGRATE", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return "disabled"
+    try:
+        from office_positions import migrate_positions
+        from office_telegram_delivery_ledger import migrate_delivery_ledger
+
+        migrate_delivery_ledger(db_target)
+        migrate_positions(db_target)
+        print("[migrate] release tables ensured (additive, idempotent)")
+        return "applied"
+    except Exception as exc:  # noqa: BLE001
+        print(f"[migrate] FAILED: {type(exc).__name__}: {exc}")
+        return "failed"
+
+
 def main() -> None:
     try:
         init_office_db(_db_target_for_identity())
     except Exception as exc:
         print(f"[warn] init_office_db: {exc}")
+    auto_migrate_if_enabled(_db_target_for_identity())
     if (not _is_pg()) and (not os.path.exists(DB_PATH)):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)

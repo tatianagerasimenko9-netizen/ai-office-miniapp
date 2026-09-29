@@ -171,6 +171,7 @@ from office_trade_steer import (
 )
 from office_rsi_heat import exhaustion_candle, rsi_from_candles
 from office_lev_verdict import lev_cycle
+import office_lev_dialog as _lev_dialog
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -3386,6 +3387,16 @@ async def run() -> None:
                             f"{sym}: графік DATA_UNAVAILABLE ({drawn.get('reason') or 'немає свічок'}).",
                         )
                     )
+                    return
+                lev_q = _lev_dialog.parse_command(text)
+                if lev_q is not None:
+                    # Лев відповідає лише з фактичного циклу на свіжих свічках і з БД (без LLM); NO TRADE — нормальна відповідь.
+                    try:
+                        ans = await asyncio.to_thread(_lev_dialog.ask, db_path, lev_q)
+                        await send_office(fmt_agent_line("lev", ans["text"][:3800]), stream="general")
+                    except Exception as exc_l:
+                        print(f"[lev-dialog] error: {type(exc_l).__name__}: {exc_l}")
+                        await send_office(fmt_agent_line("lev", "Не вдалося отримати аналіз: NO TRADE, доки не буде свіжих даних."), stream="tech")
                     return
                 scenario_key = _parse_scenario_command(text)
                 if scenario_key is not None:

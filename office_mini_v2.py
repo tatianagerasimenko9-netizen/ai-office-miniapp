@@ -5,6 +5,8 @@ PNG лишається для Telegram; у Mini App — інтерактивни
 """
 from __future__ import annotations
 
+import re
+
 import json
 import math
 import os
@@ -997,7 +999,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:
@@ -1136,3 +1138,22 @@ def html_v2() -> str:
     if WEB.is_file():
         return WEB.read_text(encoding="utf-8")
     return "<!doctype html><p>Mini App 2.0 файл відсутній</p>"
+
+
+def lev_payload(question: str = "", symbol: str = "") -> Dict[str, Any]:
+    """«Запитати Лева» у Mini App: той самий грунтований діалог, що й у Telegram. Лише читання, БД не пишеться."""
+    import office_lev_dialog as D
+
+    q = str(question or "")[:200]
+    sym = str(symbol or "").strip().upper()[:20]
+    if sym and not re.fullmatch(r"[A-Z0-9]{2,20}", sym):
+        return {"ok": False, "readonly": True, "reason": "некоректний символ", "order_authorized": False}
+    text = (q + " " + sym).strip() or "аналіз"
+    if _fixture_on():
+        return {"ok": True, "readonly": True, "fixture": True, "symbol": sym or "BTCUSDT", "verdict": "NO_TRADE",
+                "intent": D.detect_intent(q), "data_stale": True, "data_age_min": None, "order_authorized": False,
+                "text": "FIXTURE: діалог із Левом вимкнено в тестовому режимі — це не ринок."}
+    try:
+        return {**D.answer(_db(), text, symbol=sym or None), "readonly": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "readonly": True, "reason": f"{type(exc).__name__}", "order_authorized": False}

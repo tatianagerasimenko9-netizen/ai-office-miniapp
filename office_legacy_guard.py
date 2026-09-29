@@ -35,10 +35,11 @@ def legacy_scenario_status(cycle: Dict[str, Any], *, direction: str, enforce: bo
     }
 
 
-def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None) -> Dict[str, Any]:
+def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None, *, record: bool = True) -> Dict[str, Any]:
     """Повний lev_cycle + shadow Risk Officer + журнал тези для legacy-шляхів (sync).
 
-    Помилка або відсутність даних ніколи не дає SEND.
+    Помилка або відсутність даних ніколи не дає SEND. record=False — лише розрахунок, без запису в БД
+    (для запитів «спитати Лева»: Risk Officer/теза не пишуться).
     """
     from office_lev_verdict import lev_cycle
     from office_market_data import fetch_candles
@@ -63,7 +64,9 @@ def lev_cycle_for_symbol(db_path: str, symbol: str, price: Any = None) -> Dict[s
     from office_feed_quality import gate_send_on_fresh_data
 
     cyc = gate_send_on_fresh_data(cyc, bars["M15"], interval="15m")
-    if db_path:
+    if bars.get("M15"):
+        cyc = {**cyc, "data_as_of": (bars["M15"][-1] or {}).get("ts")}
+    if db_path and record:
         try:
             from office_risk_context import apply_risk_officer
 
