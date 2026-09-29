@@ -1,0 +1,49 @@
+name: PR68 Lev historical replay (real candles, non-production)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/eager-pascal-t9e1ac
+    paths:
+      - '.github/workflows/pr68-lev-replay.yml'
+      - 'scripts/replay_lev_history.py'
+      - 'scripts/fetch_binance_archive.py'
+      - 'office_lev_verdict.py'
+      - 'office_confluence.py'
+      - 'office_market_regime.py'
+
+permissions:
+  contents: read
+
+jobs:
+  lev-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Replay harness self-test (synthetic candles, pipeline only)
+        run: python scripts/test_replay_lev_history.py
+      - name: Download real Binance Vision USD-M archives (public, read-only)
+        run: |
+          for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT MANTAUSDT; do
+            python scripts/fetch_binance_archive.py --symbol $S --months 2026-04,2026-05,2026-06,2026-07,2026-08 --output /tmp/lev-real/$S.json
+          done
+      - name: Point-in-time replay of the full Lev cycle (May-Aug 2026; April is warm-up only)
+        run: |
+          python scripts/replay_lev_history.py /tmp/lev-real/*.json --stride 4 --eval-from 2026-05-01 \
+            --out /tmp/lev-real/report.json --summary
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lev-replay-report
+          path: /tmp/lev-real/report.json
+          if-no-files-found: ignore
+          retention-days: 14

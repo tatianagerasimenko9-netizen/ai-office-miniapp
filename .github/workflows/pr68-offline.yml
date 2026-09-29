@@ -83,6 +83,8 @@ jobs:
         run: python scripts/test_execution_check.py
       - name: Legacy proactive path needs Lev SEND for ACTIVE (offline)
         run: python scripts/test_legacy_guard.py
+      - name: Lev replay harness self-test (synthetic candles, pipeline only)
+        run: python scripts/test_replay_lev_history.py
       - name: Full regression — every scripts/test_*.py (no network required)
         run: |
           fail=0
