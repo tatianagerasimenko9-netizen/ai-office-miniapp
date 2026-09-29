@@ -104,6 +104,26 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
                     problems.append(f"{name}/card {sid}: horizontal scroll {sw}")
                 if shots:
                     await page.screenshot(path=str(shots / f"{name}_card_{sid}.png"), full_page=True)
+            # Accessibility basics: every control has a name, cards are keyboard-reachable.
+            unnamed = await page.evaluate(
+                "[...document.querySelectorAll('button')].filter(b=>!(b.innerText||b.getAttribute('aria-label')||'').trim()).length")
+            if unnamed:
+                problems.append(f"{name}: {unnamed} button(s) without an accessible name")
+            await page.goto(base + "/v2")
+            await page.wait_for_timeout(1000)
+            await page.click("nav button[data-r=scenarios]")
+            await page.wait_for_timeout(600)
+            bad_cards = await page.evaluate(
+                "[...document.querySelectorAll('[data-id]')].filter(e=>e.getAttribute('role')!=='button'||e.tabIndex!==0).length")
+            if bad_cards:
+                problems.append(f"{name}: {bad_cards} scenario card(s) not keyboard-accessible")
+            await page.focus("[data-id]")
+            await page.keyboard.press("Enter")
+            await page.wait_for_timeout(800)
+            if "Торговий план" not in await page.content():
+                problems.append(f"{name}: Enter on a card did not open it")
+            if await page.evaluate("document.querySelector('nav button.on')?.getAttribute('aria-current')") is None:
+                problems.append(f"{name}: active tab lacks aria-current")
             if lwc and await page.locator("#chart canvas").count() == 0:
                 problems.append(f"{name}: interactive chart canvas missing on scenario card")
             if await page.evaluate("window.__xss === 1"):

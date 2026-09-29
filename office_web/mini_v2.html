@@ -10,7 +10,8 @@
   --acc:#5DA9FF;--long:#27C99A;--short:#F36B78;--watch:#F2B65D;--neu:#8392A5;--pad:16px;
   --navh:calc(60px + env(safe-area-inset-bottom));
 }
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);
+*{box-sizing:border-box}:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{min-height:36px}html,body{margin:0;background:var(--bg);color:var(--txt);
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}
 body{padding:env(safe-area-inset-top) 0 var(--navh) 0;min-height:100vh;overflow-x:hidden}
 header{padding:12px var(--pad) 0;display:flex;justify-content:space-between;align-items:center;gap:8px;max-width:600px;margin:0 auto}
@@ -52,7 +53,7 @@ h2{font-size:14px;font-weight:600;color:var(--mut);margin:18px 0 8px;text-transf
 .chips button.on{background:var(--raise);color:var(--txt);border-color:var(--acc)}
 nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#0F1621;border-top:1px solid var(--line);
   padding:6px 4px env(safe-area-inset-bottom);z-index:20}
-nav button{flex:1;border:0;background:transparent;padding:6px 2px;font-size:11px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button{min-height:48px;flex:1;border:0;background:transparent;padding:6px 2px;font-size:11px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px}
 nav button i{font-style:normal;font-size:17px;line-height:1}
 nav button.on{color:var(--txt);font-weight:600}nav button.on i{filter:none}
 .chart{height:320px;width:100%;border-radius:14px;background:#0E141D;border:1px solid var(--line);overflow:hidden}
@@ -78,10 +79,10 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-
     <h1>AI Office</h1>
     <div class="mut" id="sub">Лише читання · не ордер</div>
   </div>
-  <span class="pill" id="stale"><span class="dot"></span> дані</span>
+  <span class="pill" id="stale" role="status"><span class="dot"></span> дані</span>
 </header>
-<main id="app"><div class="sk"></div><div class="sk"></div></main>
-<nav>
+<main id="app" aria-live="polite"><div class="sk"></div><div class="sk"></div></main>
+<nav aria-label="Основна навігація">
   <button data-r="office" class="on"><i>◎</i>Офіс</button>
   <button data-r="radar"><i>⌖</i>Радар</button>
   <button data-r="scenarios"><i>◧</i>Сценарії</button>
@@ -133,7 +134,7 @@ function levels(s){
 }
 function scCard(s){
   const st=s.story&&s.story.ok?s.story.text:'Немає підтверджених меж зони';
-  return `<div class="card tap" data-id="${esc(sid(s.scenario_id))}">
+  return `<div class="card tap" role="button" tabindex="0" aria-label="Відкрити сценарій ${esc(s.symbol||'')} ${esc(s.direction||'')}" data-id="${esc(sid(s.scenario_id))}">
     <div class="top"><span class="sym">${esc(s.symbol||'')}</span>
       <span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(s.status)}
       </div>
@@ -141,9 +142,13 @@ function scCard(s){
     <div class="mut" style="margin-top:6px">${esc((s.status||{}).text||'')}. ${esc(st)}</div>
     ${levels(s)}</div>`;
 }
-function bindCards(){app.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openSc(el.dataset.id));}
+function bindCards(){app.querySelectorAll('[data-id]').forEach(el=>{
+  el.onclick=()=>openSc(el.dataset.id);
+  el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault(); openSc(el.dataset.id);}};
+  if(!el.hasAttribute('role')){el.setAttribute('role','button'); el.setAttribute('tabindex','0');}
+});}
 function chips(items, curv, attr){
-  return `<div class="chips">${items.map(([k,t])=>`<button data-${attr}="${k}" class="${k===curv?'on':''}">${t}</button>`).join('')}</div>`;
+  return `<div class="chips" role="group">${items.map(([k,t])=>`<button data-${attr}="${k}" class="${k===curv?'on':''}" aria-pressed="${k===curv}">${t}</button>`).join('')}</div>`;
 }
 
 /* ---------- Офіс ---------- */
@@ -444,7 +449,7 @@ async function openSc(id){
   const story=s.story&&s.story.ok?s.story.text:'';
   const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
   const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
-  app.innerHTML=`<button class="back" id="back">← Сценарії</button>
+  app.innerHTML=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
     <div class="card">
       <div class="top"><span class="sym">${esc(s.symbol)}</span><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(st)}</div>
       <div style="margin-top:6px;font-size:14px">${esc(st.text||'')}</div>
@@ -466,10 +471,10 @@ async function openSc(id){
       ${d.hypothetical?'<div class="mut" style="margin-top:6px">Позиції немає. Будь-які TP/SL тут — модельні рівні, не PnL угоди.</div>':''}</div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
     <div class="chips" id="lay">
-      <button data-l="zone" class="${S.layers.zone?'on':''}">Зона</button>
-      <button data-l="sl" class="${S.layers.sl?'on':''}">SL</button>
-      <button data-l="tp" class="${S.layers.tp?'on':''}">TP</button>
-      <button id="fs">⤢ Повний екран</button></div>
+      <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
+      <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
+      <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
     <div id="chart" class="chart"></div>
     <div class="mut" id="asof" style="margin:6px 0 12px"></div>
     <div class="sec"><h3>Історія сценарію</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає — не реконструюємо.</div>'}</div>`;
@@ -480,7 +485,7 @@ async function openSc(id){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; b.classList.toggle('on',S.layers[b.dataset.l]); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
@@ -496,7 +501,7 @@ const routes={office,radar,scenarios,journal,risk};
 let cur='office';
 function go(r){
   killPoll(); cur=r;
-  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.r===r));
+  document.querySelectorAll('nav button').forEach(x=>{const on=x.dataset.r===r; x.classList.toggle('on',on); if(on) x.setAttribute('aria-current','page'); else x.removeAttribute('aria-current');});
   routes[r]();
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.r));
