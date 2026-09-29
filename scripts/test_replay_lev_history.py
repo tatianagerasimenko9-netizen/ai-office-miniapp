@@ -72,6 +72,9 @@ for m in ("model_a_next_open_immediate", "model_b_zone_limit_no_ltf_confirm"):
     assert tr["n"] == tr["wins"] + tr["losses"], m
 assert sum(r1["model_b_zone_limit_no_ltf_confirm"]["scenario_fates"].values()) >= 1
 assert r1["send_decisions"] == r1["actions"].get("SEND", 0)
+g = r1["send_geometry"]
+assert g["n"] == r1["send_decisions"] and g["median_stop_pct"] > 0 and g["median_tp1_pct"] > 0
+assert 0 <= g["share_tp1_below_rule"] <= 1 and g["unique_setup_keys"] <= g["n"]
 
 # No look-ahead: stopping the full data at T equals data that never contained the future.
 T = datetime(2026, 6, 12, 6, 0, tzinfo=timezone.utc)

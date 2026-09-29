@@ -339,6 +339,23 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
     bars_ctx = {"m15": m15_all, "simulate_exit_on_bar": simulate_exit_on_bar,
                 "atr_h1_at": lambda j: atr_from_candles([c for c in h1_all if close_time(c, "1h") <= close_time(m15_all[j], "15m")][-48:]),
                 "close_time": close_time, "parse_ts": parse_ts, "symbol": symbol}
+    def _median(xs: List[float]) -> Optional[float]:
+        xs = sorted(xs)
+        if not xs:
+            return None
+        m = len(xs) // 2
+        return round(xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2, 3)
+
+    min_tp1 = 1.2 if symbol in ("BTCUSDT", "ETHUSDT") else 3.0
+    stop_pcts = [abs(x["entry"] - x["sl"]) / x["entry"] * 100 for x in sends]
+    tp_pcts = [abs(x["tp"] - x["entry"]) / x["entry"] * 100 for x in sends]
+    send_geometry = {
+        "n": len(sends), "median_stop_pct": _median(stop_pcts), "median_tp1_pct": _median(tp_pcts),
+        "median_rr": _median([t / s_ for t, s_ in zip(tp_pcts, stop_pcts) if s_ > 0]),
+        "min_tp1_pct_rule": min_tp1,
+        "share_tp1_below_rule": round(sum(1 for t in tp_pcts if t < min_tp1) / len(tp_pcts), 3) if tp_pcts else None,
+        "unique_setup_keys": len({x["key"] for x in sends}),
+    }
     model_a = simulate_immediate(sends, bars_ctx)
     model_b = simulate_zone_limit(sends, bars_ctx)
     rejects = model_a["rejects"]
@@ -402,6 +419,7 @@ def replay_file(path: Path, *, stride: int, eval_from: Optional[datetime],
         "actions_by_regime": {k: dict(v) for k, v in by_regime_action.items()},
         "top_reasons": [{"action": a_, "reason": r_, "n": n_} for (a_, r_), n_ in reasons.most_common(12)],
         "send_decisions": len(sends),
+        "send_geometry": send_geometry,
         "model_a_next_open_immediate": model_report(model_a),
         "model_b_zone_limit_no_ltf_confirm": model_report(model_b),
         "regime_validation": {"h1_window": 48, "forward_h1": FWD_H1,
@@ -460,6 +478,7 @@ def summarize(rep: Dict[str, Any]) -> str:
         L.append("   by_regime=" + json.dumps(x["actions_by_regime"], ensure_ascii=False))
         for r in x["top_reasons"][:5]:
             L.append(f"   reason {r['action']:8} n={r['n']:4} {r['reason']}")
+        L.append("   send_geometry=" + json.dumps(x["send_geometry"], ensure_ascii=False))
         for name in ("model_a_next_open_immediate", "model_b_zone_limit_no_ltf_confirm"):
             m = x[name]
             t = m["trades"]
