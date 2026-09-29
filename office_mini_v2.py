@@ -905,6 +905,7 @@ def session_payload(symbol: str = "BTCUSDT") -> Dict[str, Any]:
                 sp[t]["extreme_display"] = format_px(sp[t]["extreme"], sym)
     brief["fixture"] = bool(_fixture_on())
     brief["readonly"] = True
+    brief["ok"] = brief.get("data_status") == "DATA_OK"
     return brief
 
 

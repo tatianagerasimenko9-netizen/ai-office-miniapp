@@ -1235,6 +1235,26 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        """Будь-яка непередбачена помилка → JSON 500 з чесним станом, а не обірване з'єднання."""
+        try:
+            self._do_get()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mini] GET {getattr(self, 'path', '')[:120]} failed: {type(exc).__name__}: {exc}")
+            try:
+                body = json.dumps({"ok": False, "error": "internal_error", "data_status": "DATA_UNAVAILABLE",
+                                   "order_authorized": False}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+    def _do_get(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/review_draft":
             qs = parse_qs(u.query)
