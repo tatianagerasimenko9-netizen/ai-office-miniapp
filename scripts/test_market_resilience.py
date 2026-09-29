@@ -85,6 +85,7 @@ def urlopen_429(req, timeout=12):
     raise HTTPError(req.full_url, 429, "Too Many Requests", {"Retry-After": "40"}, io.BytesIO(b""))
 
 
+os.environ["OFFICE_CANDLE_FALLBACK"] = "0"  # тут перевіряємо саме паузу основного джерела
 MD.urlopen = urlopen_429
 try:
     assert MD.fetch_candles("ETHUSDT", "15m", 10) == {}
