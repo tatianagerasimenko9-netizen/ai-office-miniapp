@@ -1331,7 +1331,14 @@ class Handler(BaseHTTPRequestHandler):
                 v = qs.get(name)
                 return (v[0] if v else default).strip()
 
-            if u.path == "/api/v2/home":
+            from office_mini_v2 import DB_FREE_PATHS, db_alive
+
+            status_code = 200
+            if u.path not in DB_FREE_PATHS and not db_alive():
+                status_code = 503
+                data = {"ok": False, "error": "db_unavailable", "data_status": "DB_UNAVAILABLE",
+                        "order_authorized": False}
+            elif u.path == "/api/v2/home":
                 data = home_v2()
             elif u.path == "/api/v2/scenarios":
                 data = scenarios_payload(watching=_q("watching") in ("1", "true"))
@@ -1362,7 +1369,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))

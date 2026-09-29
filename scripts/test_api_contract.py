@@ -116,6 +116,32 @@ def main():
         assert tables == "2", "database must be untouched by hostile params"
     finally:
         proc.terminate()
+    # Database outage: DB-backed endpoints answer 503 (UI shows an error state, not "no scenarios");
+    # candles/session/settings do not need the database and keep working.
+    bad_db = str(Path(tmp) / "missing-dir" / "x.db")
+    s2 = socket.socket(); s2.bind(("127.0.0.1", 0)); port2 = s2.getsockname()[1]; s2.close()
+    env2 = {**env, "OFFICE_DB_PATH": bad_db, "OFFICE_MINI_PORT": str(port2)}
+    proc2 = subprocess.Popen([sys.executable, "-u", str(ROOT / "office_mini_app.py")], env=env2,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(50):
+            try:
+                socket.create_connection(("127.0.0.1", port2), 0.2).close(); break
+            except OSError:
+                time.sleep(0.2)
+        for path in ("/api/v2/scenarios", "/api/v2/journal?kind=scenarios", "/api/v2/risk", "/api/v2/home"):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port2}{path}", timeout=20)
+                raise AssertionError(f"{path}: expected 503 when the database is down")
+            except urllib.error.HTTPError as e:
+                assert e.code == 503, (path, e.code)
+                body = json.loads(e.read())
+                assert body["data_status"] == "DB_UNAVAILABLE" and body["ok"] is False, body
+        for path in ("/api/v2/settings", "/api/v2/candles?symbol=ETHUSDT&tf=H1&limit=30"):
+            with urllib.request.urlopen(f"http://127.0.0.1:{port2}{path}", timeout=20) as r:
+                assert r.status == 200, path
+    finally:
+        proc2.terminate()
     print("OK API contract: every /api/v2 endpoint, no truthy order flags, no float tails, hostile input survives")
 
 

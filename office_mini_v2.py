@@ -986,6 +986,24 @@ def risk_payload() -> Dict[str, Any]:
     }
 
 
+_DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
+DB_FREE_PATHS = ("/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
+
+
+def db_alive(*, ttl: float = 5.0) -> bool:
+    """Одне легке SELECT 1 (кеш 5 с). Без нього збій БД виглядав би як «немає сценаріїв»."""
+    now = time.time()
+    if now - float(_DB_PROBE["ts"]) < ttl:
+        return bool(_DB_PROBE["ok"])
+    try:
+        _fetchall(_db(), "SELECT 1", ())
+        ok = True
+    except Exception:
+        ok = False
+    _DB_PROBE.update(ts=now, ok=ok)
+    return ok
+
+
 def html_v2() -> str:
     if WEB.is_file():
         return WEB.read_text(encoding="utf-8")
