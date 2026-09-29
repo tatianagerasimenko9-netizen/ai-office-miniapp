@@ -714,6 +714,15 @@ def _feed_health(open_ts: Any, interval: str, source: str) -> Dict[str, Any]:
             "age_seconds": res["age_seconds"], "reasons": res["reasons"]}
 
 
+def _source_health() -> Dict[str, Any]:
+    try:
+        from office_market_data import source_health
+
+        return source_health()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def overview_payload() -> Dict[str, Any]:
     from office_market_data import fetch_candles, fetch_top_movers
 
@@ -743,6 +752,7 @@ def overview_payload() -> Dict[str, Any]:
         "ok": True,
         "readonly": True,
         "as_of": datetime.now(timezone.utc).isoformat(),
+        "source_health": _source_health(),
         "marks": marks,
         "gainers": gainers,
         "losers": losers,

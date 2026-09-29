@@ -44,8 +44,15 @@ try:
     MD._CANDLE_CACHE[key] = (time.time() - 300, lim, rows)   # TTL 60 с минув, але ще < 20 хв
     got = MD.fetch_candles("SOLUSDT", "15m", 10)
     assert len(got) == 10 and MD.source_health()["stale_served"] == 1
-    MD._CANDLE_CACHE[key] = (time.time() - 3600, lim, rows)  # старіше 20 хв — не віддаємо застаріле
+    MD._CANDLE_CACHE[key] = (time.time() - 3600, lim, rows)  # M15: старіше 30 хв — не віддаємо застаріле
     assert MD.fetch_candles("SOLUSDT", "15m", 10) == {}
+    # повільні таймфрейми переживають довше: H1 із кешу 2 год тому ще віддається, D1 — 30 год тому теж
+    MD._CANDLE_CACHE[("SOLUSDT", "1h")] = (time.time() - 2 * 3600, 5, rows)
+    assert len(MD.fetch_candles("SOLUSDT", "1h", 5)) == 5
+    MD._CANDLE_CACHE[("SOLUSDT", "1d")] = (time.time() - 30 * 3600, 5, rows)
+    assert len(MD.fetch_candles("SOLUSDT", "1d", 5)) == 5
+    MD._CANDLE_CACHE[("SOLUSDT", "1h")] = (time.time() - 5 * 3600, 5, rows)
+    assert MD.fetch_candles("SOLUSDT", "1h", 5) == {}
     # монети без кешу при збої → {} (не вигадуємо)
     assert MD.fetch_candles("NEWCOINUSDT", "1h", 5) == {}
     # порожня відповідь не кешується

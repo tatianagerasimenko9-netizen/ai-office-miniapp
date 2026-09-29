@@ -7167,8 +7167,14 @@ EV позитивне: {prob.get('ev_positive', '')}
         """Лев відстежує умови, які сам оголосив (чекаємо → в зоні → підтверджено/скасовано/час минув/дані застаріли).
         Події пишуться завжди; у Telegram (OFFICE-чат) — лише за OFFICE_LEV_WATCH_NOTIFY=1, по одному повідомленню на зміну."""
         await asyncio.sleep(45)
+        _n = 0
         while True:
             try:
+                _n += 1
+                if _n % 3 == 1:   # раз на ~15 хв: чесна статистика джерела даних (429, віддача зі старого кешу)
+                    from office_market_data import source_health
+
+                    print(f"[data] binance {source_health()}")
                 items = await asyncio.to_thread(_lev_watch.tick, db_path)
                 for it in items:
                     # той самий безпечний маршрут, що й картки Лева: політика, дедуп за (умова, подія), журнал доставки

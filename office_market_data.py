@@ -44,7 +44,9 @@ class RateLimited(Exception):
 _BACKOFF_UNTIL = 0.0
 _HEALTH: Dict[str, Any] = {"ok": 0, "errors": 0, "rate_limited": 0, "stale_served": 0, "last_429_at": None}
 _CANDLE_TTL = {"1m": 20, "3m": 30, "5m": 45, "15m": 60, "30m": 90, "1h": 180, "2h": 300, "4h": 600, "1d": 1800, "1w": 3600}
-_MAX_STALE_SEC = 20 * 60          # старіші за це закешовані свічки не віддаємо навіть при збої джерела
+_MAX_STALE = {"1m": 20 * 60, "3m": 20 * 60, "5m": 20 * 60, "15m": 30 * 60, "30m": 60 * 60, "1h": 3 * 3600, "2h": 6 * 3600,
+              "4h": 12 * 3600, "1d": 48 * 3600, "1w": 14 * 86400}   # скільки віддаємо закешоване при збої/429 (свіжість судять за часом свічки)
+_MAX_STALE_DEFAULT = 20 * 60
 _CANDLE_CACHE: Dict[tuple, tuple] = {}
 _CACHE_LOCK = threading.Lock()
 
@@ -156,7 +158,7 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 raise ValueError("empty klines")
         except Exception:  # noqa: BLE001
             _HEALTH["errors"] += 1
-            if use_cache and hit and now - hit[0] <= _MAX_STALE_SEC and hit[2]:
+            if use_cache and hit and now - hit[0] <= _MAX_STALE.get(str(tf), _MAX_STALE_DEFAULT) and hit[2]:
                 _HEALTH["stale_served"] += 1
                 return hit[2][-lim:]
             return {}
