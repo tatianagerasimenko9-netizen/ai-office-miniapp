@@ -629,6 +629,10 @@ async function openSc(id){
     ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry)}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
       <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div></div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
+    ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
+      ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}
+      <div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>
+      <div class="mut" style="margin-top:6px">${esc(hm.context.rule_note||'')}</div></div>`:''}
     ${hm.next?`<div class="sec"><h3>Що Лев зробить далі</h3><p>${esc(hm.next)}</p></div>`:''}
     ${(hm.history||[]).length?`<div class="sec"><h3>Що було</h3><div class="tl">${hm.history.map(x=>`<div><span class="mut num">${hhmm(x.ts)}</span> — ${esc(x.text)}</div>`).join('')}</div></div>`:''}`
     :`<div class="card err"><b>Не вдалося скласти зрозумілий висновок</b><div class="mut">Технічні дані нижче, у розділі «Для перевірки». Не вважай цей сценарій готовим планом.</div></div>`;
