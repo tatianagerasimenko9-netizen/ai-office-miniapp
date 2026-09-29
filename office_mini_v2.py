@@ -455,6 +455,13 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
     human = None
     try:
         human = _human_view(row, thesis, events)
+        if human and not _fixture_on():
+            try:  # довідковий контекст: не впливає на стан і рішення
+                from office_market_context import context_for
+
+                human["context"] = context_for(str(row.get("symbol") or ""), str(row.get("direction") or ""))
+            except Exception:  # noqa: BLE001
+                human["context"] = None
     except Exception as exc:  # noqa: BLE001
         print(f"[mini] human view failed {sid}: {type(exc).__name__}: {exc}")
     return {
