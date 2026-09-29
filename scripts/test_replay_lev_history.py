@@ -143,4 +143,25 @@ rows = [(100, 100.5, 99.5, 100), (100.2, 100.4, 99.9, 100.1), (100.1, 110, 100, 
 a = rp.simulate_immediate([{**send, "entry": 90.0}], ctx_for(rows))
 assert a["trades"] and abs(a["trades"][0]["entry"] - 100.2 * 1.0005) < 1e-9, a
 
+# --- what-if variants (offline, never enabled) ---
+sd = {"side": "LONG", "entry": 100.0, "sl": 98.0, "pivots": {"high": [101.0, 103.5, 104.0], "low": []}}
+assert rp._r_tp(1.5)(sd) == 103.0 and rp._r_tp(1.0)(sd) == 102.0 and rp._r_tp(2.0)(sd) == 104.0
+assert rp._structure_tp(sd) == 103.5  # 101 is < 1R away, 103.5 is the nearest swing >= 1R
+assert rp._structure_tp({**sd, "pivots": {"high": [101.0], "low": []}}) is None  # no level -> no target, not invented
+ss = {"side": "SHORT", "entry": 100.0, "sl": 102.0, "pivots": {"high": [], "low": [99.0, 96.5, 90.0]}}
+assert rp._structure_tp(ss) == 96.5
+# pivots need k confirmed bars on each side: a peak in the last two bars is NOT a pivot yet (no look-ahead)
+bars = [{"high": h, "low": h - 1} for h in (1, 2, 3, 9, 3, 2, 1, 2, 3, 10)]
+assert rp._pivots(bars)["high"] == [9.0], rp._pivots(bars)
+# current rules reproduce the production gate; relaxed rules only relax
+assert rp._fill_checks("LONG", 100.0, 98.5, 102.5, "SOLUSDT", None) == "TP1_MIN"
+assert rp._fill_checks("LONG", 100.0, 98.5, 102.5, "SOLUSDT", None, {"min_tp1": False, "min_rr": 1.5}) is None
+assert rp._fill_checks("LONG", 100.0, 98.0, 101.0, "SOLUSDT", None, {"min_tp1": False, "min_rr": 1.5}) == "RR_AT_FILL"
+fr = rp.frequency_report([{**send, "n_tags": 3}, {**send, "asof": send["asof"] + timedelta(hours=1), "n_tags": 1}], 10, 2.0)
+assert fr["send_all"]["n"] == 2 and fr["send_unique_scenario_24h"]["n"] == 1 and fr["unique_and_confluences_ge_3"]["n"] == 1, fr
+d = write(synth())
+rep = rp.replay_file(d, stride=4, eval_from=None)
+assert set(rep["variants_what_if"]) == {v[0] for v in rp.VARIANTS} and "send_frequency" in rep
+assert rep["variants_what_if"]["V0_current"]["trades"] == rep["model_b_zone_limit_no_ltf_confirm"]["trades"], "V0 must equal the current model"
+
 print("OK Lev replay harness: deterministic, no look-ahead, closed-only H4, forming day, Wilson CI (synthetic)")
