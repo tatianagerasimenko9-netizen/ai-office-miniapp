@@ -859,6 +859,12 @@ def note_db_only(key: str) -> bool:
     return True
 
 
+def _iso_ts(v: Any) -> float:
+    from office_scenario_lifecycle import _ts
+
+    return _ts(v) or 0.0
+
+
 def hydrate_live_from_db(db_path: str) -> int:
     """Після рестарту Worker: канонічний ID і lifecycle з БД."""
     import re
@@ -897,6 +903,13 @@ def hydrate_live_from_db(db_path: str) -> int:
             )
         if not key or key in _LIVE:
             continue
+        sid = str(r.get("signal_id") or "")
+        if sid.startswith(("lev-watch-", "watch-")):
+            continue  # службові спостереження: картки не було, повідомляти про їх «скасування» не можна
+        tf_h = str(parse_note_meta(note).get("timeframe") or "H1")
+        born = _iso_ts(r.get("ts_created"))
+        if st != "CANCELLED" and born and time.time() - born >= ttl_sec(tf_h):
+            continue  # протермінований до перезапуску — не воскрешаємо (завершені лишаємо: цикл їх не чіпає, а стан переживає рестарт)
         mark_live(
             key,
             {
@@ -913,6 +926,7 @@ def hydrate_live_from_db(db_path: str) -> int:
                 "basis": meta.get("basis") or "",
                 "grade": "",
                 "status": st,
+                "ts": born or time.time(),
             },
         )
         n += 1
@@ -925,8 +939,9 @@ def follow_setup(
     price: Any,
     candles_ltf: Any,
     now_ts: Any = None,
+    candles_h1: Any = None,
 ) -> Dict[str, Any]:
-    """Після картки: підтвердження входу / скасування."""
+    """Після картки: підтвердження входу / скасування (скасування за рівнем — лише за закриттям H1: потрібні `candles_h1`)."""
     side = str(setup.get("direction") or "").upper()
     sl = _f(setup.get("sl"))
     lo, hi = _f(setup.get("zone_lo")), _f(setup.get("zone_hi"))
@@ -936,11 +951,13 @@ def follow_setup(
     tf = str(setup.get("timeframe") or "M15")
     if born and ts - born >= ttl_sec(tf):
         return {"action": "cancel", "reason": f"таймаут {ttl_sec(tf)//3600} год без входу"}
-    if px is not None and sl is not None:
-        if side == "LONG" and px <= sl:
-            return {"action": "cancel", "reason": "ціна за стопом до входу"}
-        if side == "SHORT" and px >= sl:
-            return {"action": "cancel", "reason": "ціна за стопом до входу"}
+    if sl is not None and candles_h1 is not None:
+        # рівень скасування — за ЗАКРИТТЯМ годинної свічки, а не за проколом ціни (на картці так і написано)
+        from office_scenario_lifecycle import cancel_reason_h1, closed_h1_beyond
+
+        hit = closed_h1_beyond(candles_h1, side=side, level=sl, since_ts=born, now_ts=ts)
+        if hit:
+            return {"action": "cancel", "reason": cancel_reason_h1(side, sl, str(setup.get("symbol") or "")), "closed_h1": hit["close"]}
     confirms = detect_ltf_confirms(
         direction=side,
         candles_ltf=candles_ltf,

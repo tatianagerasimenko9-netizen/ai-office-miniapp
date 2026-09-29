@@ -378,10 +378,21 @@ def main() -> int:
         },
         price=0.935,
         candles_ltf=[_c(0.93, 0.936, 0.929, 0.935)],
-        now_ts=10.0,
+        now_ts=10.0 + 2 * 3600,
+        candles_h1=[{"ts": "1970-01-01T01:00:00+00:00", "open": 0.93, "high": 0.937, "low": 0.929, "close": 0.935}],
     )
-    if sl_hit.get("action") != "cancel":
+    if sl_hit.get("action") != "cancel" or "годинна свічка" not in str(sl_hit.get("reason")):
         return _fail(f"sl cancel {sl_hit}")
+    # прокол за рівнем без закриття H1 за ним — НЕ скасування
+    wick = follow_setup(
+        setup={"direction": "SHORT", "sl": 0.930, "zone_lo": 0.922, "zone_hi": 0.928, "ts": 1.0, "timeframe": "M15"},
+        price=0.935,
+        candles_ltf=[_c(0.93, 0.936, 0.929, 0.935)],
+        now_ts=10.0 + 2 * 3600,
+        candles_h1=[{"ts": "1970-01-01T01:00:00+00:00", "open": 0.925, "high": 0.937, "low": 0.924, "close": 0.926}],
+    )
+    if wick.get("action") == "cancel":
+        return _fail(f"wick must not cancel {wick}")
     print("OK follow confirm/timeout/SL")
 
     clus = cluster_zones(_btc_cands())

@@ -192,7 +192,7 @@ def main() -> int:
     banned = card_has_banned(txt)
     if banned:
         return _fail(f"banned {banned} in {txt}")
-    if "🎯 Вхід" not in txt or "❌ Стоп" not in txt:
+    if "ЧОГО ЧЕКАЄМО" not in txt or "КОЛИ СКАСУЄМО" not in txt or "❌ Стоп" in txt:
         return _fail("ukrainian labels")
     tid = office_signal_trade_id("pump-btc-1842")
     closed = _fetchone(

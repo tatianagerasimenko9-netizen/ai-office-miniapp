@@ -448,6 +448,7 @@ def format_desk_card(
     why_line: str = "",
     invalidate_line: str = "",
     confluence: Optional[Dict[str, Any]] = None,
+    compact: bool = False,
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
     from office_alert_gate import validate_trade_geometry
@@ -498,6 +499,7 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано — {why}")
         else:
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
+    pre_lines = list(lines)
     ctf = str(chart_tf or "").upper()
     head = f"{mark} {side} · {str(symbol).upper()} · сценарій {tf}"
     if ctf and ctf != tf:
@@ -545,6 +547,21 @@ def format_desk_card(
         lev_note=ln,
         why_line=yw,
     )
+    if compact and not ready.get("ready"):
+        # Картка-сценарій без підтвердження: коротко й без «плану» — стоп, обсяг і %-и з'являються лише коли план готовий
+        long_ = side != "SHORT"
+        short_lines: List[str] = [x for x in pre_lines if x == plink or x.startswith("🔄")]
+        short_lines.append(f"🟡 {str(symbol).upper()} · {'КУПІВЛЯ' if long_ else 'ПРОДАЖ'} · ЧЕКАЄМО")
+        short_lines.append("ЗАРАЗ: входу немає. Це план, а не сигнал.")
+        short_lines.append(f"ЧОГО ЧЕКАЄМО: повернення ціни в зону {span} і розвороту {'вгору' if long_ else 'вниз'} на 15-хвилинному графіку.")
+        if s is not None:
+            short_lines.append(f"КОЛИ СКАСУЄМО: годинна свічка закриється {'нижче' if long_ else 'вище'} {_px(s, symbol)}.")
+        else:
+            short_lines.append("КОЛИ СКАСУЄМО: рівень ще не визначено — входити не можна.")
+        if t1 is not None:
+            short_lines.append(f"Орієнтир, не для входу: ціль 1 — {_px(t1, symbol)}.")
+        short_lines.append("Готовий вхід, стоп і цілі надішлю окремо, коли з'явиться підтвердження.")
+        return "\n".join(short_lines)
     plan_title = "План після підтвердження"
     if not ready.get("ready"):
         plan_title = "Приклад розрахунку, не валідований торговий план"
@@ -1075,6 +1092,7 @@ def prepare_desk_send(
         lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
         chart_tf="M15",
         confluence=conf,
+        compact=True,
     )
     key = str((conf or {}).get("setup_key") or "")
     if key and (ready.get("ready") or not require_confluence):
