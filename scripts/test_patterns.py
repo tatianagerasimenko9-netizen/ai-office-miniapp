@@ -72,3 +72,11 @@ srows = mk(inv, highs_at={5: 201.0, 11: 200.95, 17: 201.02}, lows_at={8: 198.8})
 sp = P.find_multi(srows, direction="SHORT", n=3, zone_lo=200.5, zone_hi=201.5, now_ts=NOW)
 assert sp and sp["kind"] == "triple_top" and sp["confirmed"], sp
 print("OK patterns: triple/double bottom/top with tolerance, spacing, neckline close, invalidation, zone, closed candles")
+
+# шлях сесії Telethon береться з env (постійний диск), дефолт — старий
+import inspect  # noqa: E402
+import re  # noqa: E402
+
+_src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "office_relay_wizard.py"), encoding="utf-8").read()
+assert 'os.getenv("OFFICE_RELAY_SESSION_PATH"' in _src and '"office_relay_wizard"' in _src
+print("OK session path via OFFICE_RELAY_SESSION_PATH, default unchanged")

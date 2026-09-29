@@ -2466,7 +2466,17 @@ async def run() -> None:
         api_hash = _prompt("TG_API_HASH: ")
 
     api_id = int(api_id_raw)
-    session_name = "office_relay_wizard"
+    # Файл сесії Telethon: за замовчуванням поруч із кодом (як було). На Render там тимчасова ФС — сесія зникає при кожному
+    # deploy і worker логіниться заново (FloodWait). OFFICE_RELAY_SESSION_PATH=/var/data/office_relay_wizard — постійний диск.
+    session_name = os.getenv("OFFICE_RELAY_SESSION_PATH", "").strip() or "office_relay_wizard"
+    try:
+        _sdir = os.path.dirname(session_name)
+        if _sdir:
+            os.makedirs(_sdir, exist_ok=True)
+        print(f"[relay] session file: {session_name}.session")
+    except OSError as exc_sess:
+        print(f"[relay] session dir {session_name}: {exc_sess} — беру стандартний шлях")
+        session_name = "office_relay_wizard"
     db_path = (
         os.getenv("DATABASE_URL", "").strip()
         or os.getenv("OFFICE_DB_PATH", "office_bridge.db").strip()
