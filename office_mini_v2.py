@@ -369,8 +369,40 @@ def home_v2() -> Dict[str, Any]:
     }
 
 
+def dedupe_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Один сценарій — один рядок. Службові `lev-watch-*` та `watch-*` рядки, що дублюють відправлену картку Лева (той самий
+    символ і напрям, зона перетинається), ховаємо: правду про стан веде картка. Умови з діалогу (`W-…`) теж не дублюємо."""
+    strong = [c for c in cards if str(c.get("scenario_id") or "").startswith("SCN|") or str(c.get("status_raw") or "").upper() in ("ACTIVE", "CONFIRMED", "HIT_ENTRY")
+              and not str(c.get("scenario_id") or "").startswith(("lev-watch-", "watch-"))]
+    out = []
+    seen_radar = set()
+    for c in cards:
+        sid = str(c.get("scenario_id") or "")
+        if sid.startswith(("lev-watch-", "watch-")) or sid.startswith("W-"):
+            lo, hi = _f(c.get("zone_lo")), _f(c.get("zone_hi"))
+            shadowed = False
+            for st in strong:
+                if st is c or st.get("symbol") != c.get("symbol") or str(st.get("direction")).upper() != str(c.get("direction")).upper():
+                    continue
+                slo, shi = _f(st.get("zone_lo")), _f(st.get("zone_hi"))
+                if sid.startswith("watch-") or lo is None or hi is None or slo is None or shi is None:
+                    shadowed = True   # радарний рядок / без власної зони: той самий символ і напрям уже покрито карткою
+                elif min(hi, shi) - max(lo, slo) >= 0:
+                    shadowed = True
+                if shadowed:
+                    break
+            if shadowed:
+                continue
+            key = (c.get("symbol"), str(c.get("direction")).upper(), sid.split("-")[0])
+            if key in seen_radar:      # радарні рядки near/sweep × scalp/intraday — один на монету й напрям
+                continue
+            seen_radar.add(key)
+        out.append(c)
+    return out
+
+
 def scenarios_payload(*, watching: bool = False) -> Dict[str, Any]:
-    cards = list_scenarios(include_watching=watching)
+    cards = dedupe_cards(list_scenarios(include_watching=watching))
     live = [c for c in cards if str(c.get("status_raw") or "").upper() in ("ACTIVE", "HIT_ENTRY", "HIT_TP1", "CONFIRMED", "WATCHING")]
     return {
         "ok": True,
@@ -386,7 +418,10 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
     if not sid:
         return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["scenario_id"]}
     row = None
-    for r in _signal_rows(200, all_status=True):
+    watch_thesis = None
+    if sid.startswith("W-"):
+        row, watch_thesis = _watch_as_row(sid)   # умова, яку Лев зберіг у діалозі: та сама сторінка й той самий стан
+    for r in ([] if row is not None else _signal_rows(200, all_status=True)):
         if str(r.get("signal_id")) == sid:
             row = r
             break
@@ -409,13 +444,14 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
     if (card.get("status") or {}).get("group") != "done":
         execution = execution_payload(card, has_open_position=pos_known)
     events = scenario_events(sid)
-    thesis = None
-    try:
-        from office_thesis_journal import latest_thesis
+    thesis = watch_thesis
+    if thesis is None:
+        try:
+            from office_thesis_journal import latest_thesis
 
-        thesis = latest_thesis(_db(), sid)
-    except Exception:
-        thesis = None
+            thesis = latest_thesis(_db(), sid)
+        except Exception:
+            thesis = None
     human = None
     try:
         human = _human_view(row, thesis, events)
@@ -433,6 +469,26 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         "has_position": pos,
         "hypothetical": not pos,
     }
+
+
+def _watch_as_row(sid: str):
+    """Умову з LEV_WATCH подаємо як рядок сценарію (щоб Mini App і Telegram показували той самий стан)."""
+    import office_lev_watch as W
+
+    w = W._latest(_db()).get(sid)
+    if not w:
+        return None, None
+    plan = w.get("plan") or {}
+    state = str(w.get("state") or "WAIT")
+    status = {"CONFIRMED": "CONFIRMED", "CANCELLED": "CANCELLED", "EXPIRED": "EXPIRED", "REJECTED": "CANCELLED", "HANDOFF": "ACTIVE"}.get(state, "ACTIVE")
+    note = f"cancel={w.get('invalidation')}"
+    if state == "CONFIRMED" and plan.get("entry") is not None:
+        note += f" confirm_sent=1 confirmed_px={plan['entry']}"
+    row = {"signal_id": sid, "symbol": w["symbol"], "direction": w["direction"], "entry_low": w["zone_lo"], "entry_high": w["zone_hi"],
+           "sl": plan.get("sl"), "tp1": plan.get("tp1"), "tp2": plan.get("tp2"), "rr": None, "status": status,
+           "ts_created": w.get("created_at"), "ts_updated": w.get("created_at"), "analysis_note": note}
+    thesis = {"invalidation": f"закриття за {w.get('invalidation')}", "confirmation": f"Чекаю на {w.get('wait_tf') or 'M15'}: розворот у зоні"}
+    return row, thesis
 
 
 def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: List[Dict[str, Any]]) -> Dict[str, Any]:

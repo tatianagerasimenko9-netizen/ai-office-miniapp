@@ -9,7 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("OFFICE_DEPO_USDT", "1000")
 os.environ.setdefault("OFFICE_EXINFO_SEED", "1")
+from datetime import datetime, timezone  # noqa: E402
 import office_scenario_state as S  # noqa: E402
+_build = S.build
+NOW = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+S.build = lambda *a, **k: _build(*a, now=NOW, **k)  # час фіксований: тест не залежить від годинника
 import office_targets as T  # noqa: E402
 from office_lev_watch import check_plan  # noqa: E402
 
@@ -78,6 +82,11 @@ assert S.build({**ROW, "status": "CANCELLED"}, thesis=THESIS, price=STALE)["stat
 assert S.build({**ROW, "status": "EXPIRED"}, thesis=THESIS, price=FRESH)["state"] == "EXPIRED"
 w = S.build({**ROW, "signal_id": "watch-near-LSKUSDT-scalp", "sl": None, "tp1": None}, thesis=None, price=FRESH)
 assert w["state"] == "OBSERVE" and "Входити не можна" in w["headline"]
+
+# 7b. Строк дії картки (H1 = 12 год) минув, а статус у базі ще ACTIVE → «Час очікування минув», не «Чекаємо»
+old = _build({**ROW, "ts_created": "2026-09-28T20:00:00+00:00"}, thesis=THESIS, price=FRESH, now=NOW)
+assert old["state"] == "EXPIRED", old["state"]
+assert _build({**row5, "ts_created": "2026-09-28T20:00:00+00:00"}, thesis=THESIS, price=FRESH, plan_check=check_plan, now=NOW)["state"] == "READY", "підтверджений план за часом не застарює"
 
 # 8. Список без ціни ніколи не каже «готовий»
 for st in ("ACTIVE", "WATCHING", "CONFIRMED", "HIT_ENTRY"):

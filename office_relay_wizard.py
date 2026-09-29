@@ -794,9 +794,15 @@ async def fetch_binance_premium_index(session: aiohttp.ClientSession, symbol: st
     """
     Mark / index / last funding (Binance USDT-M public).
     """
+    from office_market_data import backoff_left, note_rate_limited
+
+    if backoff_left() > 0:
+        return None
     url = "https://fapi.binance.com/fapi/v1/premiumIndex"
     params = {"symbol": symbol.upper()}
     async with session.get(url, params=params) as resp:
+        if resp.status in (418, 429):
+            note_rate_limited(resp.headers.get("Retry-After"))
         if resp.status != 200:
             return None
         data = await resp.json()
@@ -823,9 +829,15 @@ async def fetch_binance_futures_ticker(session: aiohttp.ClientSession, symbol: s
     """
     Public 24h ticker for USDT-M futures.
     """
+    from office_market_data import backoff_left, note_rate_limited
+
+    if backoff_left() > 0:
+        raise RuntimeError(f"binance backoff {backoff_left():.0f}s")
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     params = {"symbol": symbol.upper()}
     async with session.get(url, params=params) as resp:
+        if resp.status in (418, 429):
+            note_rate_limited(resp.headers.get("Retry-After"))
         if resp.status != 200:
             raise RuntimeError(f"ticker status {resp.status}")
         data = await resp.json()
@@ -7159,8 +7171,19 @@ EV позитивне: {prob.get('ev_positive', '')}
             try:
                 items = await asyncio.to_thread(_lev_watch.tick, db_path)
                 for it in items:
-                    await send_office(str(it["text"])[:3800], stream="general")
-                    print(f"[lev-watch] sent {it['symbol']} {it['event']}")
+                    # той самий безпечний маршрут, що й картки Лева: політика, дедуп за (умова, подія), журнал доставки
+                    mid = await send_proactive(
+                        EVENT_TRADE_UPDATE,
+                        str(it["text"])[:3800],
+                        symbol=str(it["symbol"]),
+                        direction=str(it.get("direction") or ""),
+                        kind=str(it["event"]),
+                        intent="ANALYTICAL",
+                        canonical_id=str(it["watch_id"]),
+                        scenario_event=str(it["event"]),
+                    )
+                    await asyncio.to_thread(_lev_watch.mark_result, db_path, str(it["watch_id"]), str(it["event"]), bool(mid), mid)
+                    print(f"[lev-watch] {'sent' if mid else 'NOT DELIVERED'} {it['symbol']} {it['event']}{' (retry)' if it.get('retry') else ''} id={mid}")
             except Exception as exc:
                 print(f"[lev-watch][WARN] tick failed: {type(exc).__name__}: {exc}")
             await asyncio.sleep(int(os.getenv("OFFICE_LEV_WATCH_POLL_SEC", "300") or "300"))

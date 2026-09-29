@@ -54,6 +54,22 @@ def source_health() -> Dict[str, Any]:
     return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1))}
 
 
+def backoff_left() -> float:
+    """Скільки секунд ще діє загальна пауза після 429 (для aiohttp-запитів worker, що не йдуть через _http_get_json)."""
+    return max(0.0, _BACKOFF_UNTIL - time.time())
+
+
+def note_rate_limited(retry_after: Any = None) -> None:
+    global _BACKOFF_UNTIL
+    try:
+        ra = float(retry_after) if retry_after is not None else 30.0
+    except (TypeError, ValueError):
+        ra = 30.0
+    _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + min(max(ra, 5.0), 300.0))
+    _HEALTH["rate_limited"] += 1
+    _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()
+
+
 def reset_market_cache() -> None:
     global _BACKOFF_UNTIL
     with _CACHE_LOCK:

@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - claude/eager-pascal-t9e1ac
+      - claude/pr-b-tracking-delivery
     paths:
       - '.github/workflows/pr68-lev-replay.yml'
       - 'scripts/replay_lev_history.py'
@@ -12,6 +13,8 @@ on:
       - 'office_lev_verdict.py'
       - 'office_confluence.py'
       - 'office_market_regime.py'
+      - 'office_lev_watch.py'
+      - 'office_user_messages.py'
 
 permissions:
   contents: read

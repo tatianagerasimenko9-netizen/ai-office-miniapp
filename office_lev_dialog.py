@@ -170,6 +170,49 @@ def changes_text(db_path: str, sym: str) -> str:
     return "\n".join(lines)
 
 
+def _card_row(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
+    """Найновіший ВІДПРАВЛЕНИЙ сценарій Лева по монеті (ACTIVE/CONFIRMED/HIT_ENTRY), якщо є."""
+    from office_bridge import _fetchall
+
+    try:
+        rows = _fetchall(db_path, "SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr, status, ts_created, ts_updated, outcome, analysis_note "
+                                  "FROM office_signals WHERE symbol = ? AND status IN ('ACTIVE','CONFIRMED','HIT_ENTRY') ORDER BY ts_updated DESC LIMIT 1", (symbol,))
+    except Exception:  # noqa: BLE001
+        return None
+    if not rows:
+        return None
+    keys = ("signal_id", "symbol", "direction", "entry_low", "entry_high", "sl", "tp1", "tp2", "rr", "status", "ts_created", "ts_updated", "outcome", "analysis_note")
+    return dict(zip(keys, rows[0]))
+
+
+def _answer_from_card(db_path: str, sym: str, intent: str) -> Optional[Dict[str, Any]]:
+    """Якщо по монеті вже є відправлений сценарій — відповідаємо тим самим станом, що й Mini App (одне джерело правди)."""
+    row = _card_row(db_path, sym) if db_path else None
+    if not row:
+        return None
+    try:
+        import office_mini_v2 as MV
+        from office_thesis_journal import latest_thesis
+        from office_user_messages import render_human, ticker
+
+        sid = str(row["signal_id"])
+        h = MV._human_view(row, latest_thesis(db_path, sid), MV.scenario_events(sid))
+        if intent == "invalid":
+            body = f"{h['icon']} {ticker(sym)} · ЩО СКАСУЄ ПЛАН\n{h.get('cancel') or 'Рівень скасування система не визначила.'}"
+        elif intent == "changes":
+            hist = h.get("history") or []
+            body = (f"🕘 {ticker(sym)} · ЩО ЗМІНЮВАЛОСЬ\n" + "\n".join(f"{str(x['ts'])[5:16].replace('T', ' ')} UTC — {x['text']}" for x in hist)) if hist \
+                else f"⚪ {ticker(sym)} · ЗМІН ПОКИ НЕ БУЛО"
+        else:
+            body = render_human(h)
+        return {"ok": True, "symbol": sym, "verdict": {"READY": "PLAN", "WAIT": "WAIT", "IN_ZONE": "WAIT"}.get(h["state"], "NO_TRADE"), "intent": intent,
+                "text": body, "state": h["state"], "data_age_min": None, "data_stale": h["state"] == "NO_DATA", "tracking": False,
+                "order_authorized": False, "source": "scenario"}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lev-dialog] card answer failed {sym}: {type(exc).__name__}: {exc}")
+        return None
+
+
 def answer(db_path: str, text: str, *, symbol: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
     """Відповідь Лева людською мовою. {ok, symbol, verdict, intent, text, data_age_min, data_stale, tracking}."""
     from office_lev_watch import notify_enabled, register
@@ -177,6 +220,9 @@ def answer(db_path: str, text: str, *, symbol: Optional[str] = None, now: Option
 
     sym = explicit_symbol(text) or symbol or "BTCUSDT"
     intent = detect_intent(text)
+    card_ans = _answer_from_card(db_path, sym, intent)
+    if card_ans is not None:
+        return card_ans
     res = compute(db_path, sym, now=now)
     sym = res["symbol"]
     code, _head = verdict(res)
