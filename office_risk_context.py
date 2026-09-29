@@ -52,7 +52,7 @@ def existing_risk_usdt(db_path: str) -> Dict[str, Any]:
         rows = _fetchall(
             db_path,
             """
-            SELECT trade_id, entry_price, stop_loss, position_qty, entry_reason, setup_name
+            SELECT trade_id, entry_price, stop_loss, position_qty, entry_reason, setup_name, direction
             FROM trade_journal
             WHERE status = 'OPEN'
             """,
@@ -63,7 +63,7 @@ def existing_risk_usdt(db_path: str) -> Dict[str, Any]:
     total = 0.0
     unknown: List[str] = []
     n = 0
-    for tid, entry, sl, qty, reason, setup in rows or []:
+    for tid, entry, sl, qty, reason, setup, direction in rows or []:
         if not is_confirmed_position_row(reason, setup, tid):
             continue
         n += 1
@@ -71,10 +71,16 @@ def existing_risk_usdt(db_path: str) -> Dict[str, Any]:
         if e is None or s is None or q is None:
             unknown.append(str(tid))
             continue
-        total += abs(e - s) * q
+        side = str(direction or "").upper()
+        if side == "LONG":
+            total += max(0.0, e - s) * q      # стоп вище входу = вже зафіксований прибуток, ризику немає
+        elif side == "SHORT":
+            total += max(0.0, s - e) * q
+        else:
+            total += abs(e - s) * q
     if unknown:
         return {"value": None, "status": "UNAVAILABLE", "reason": "позиції без entry/SL/qty: " + ", ".join(unknown[:5]), "open": n}
-    return {"value": total, "status": "OK", "reason": "підтверджені /position", "open": n}
+    return {"value": round(total, 8), "status": "OK", "reason": "підтверджені /position", "open": n}
 
 
 def _last_ts(candles: Any) -> Optional[str]:

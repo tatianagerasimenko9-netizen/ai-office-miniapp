@@ -909,6 +909,24 @@ def session_payload(symbol: str = "BTCUSDT") -> Dict[str, Any]:
     return brief
 
 
+def _exposure_block(confirmed: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ризик відкритих позицій із ручного обліку. «Нічого не внесено» ≠ «ризику немає»."""
+    try:
+        import office_positions as P
+
+        if P.schema_present(_db()):
+            ex = P.exposure(_db())
+            if ex["status"] == "OK":
+                return {"value": ex["risk_now_usdt"], "status": "OK", "unit": "USDT", "open": ex["n_open"],
+                        "notional_usdt": ex.get("notional_usdt"),
+                        "text": f"{ex['text']} Ризик до поточних стопів: {ex['risk_now_usdt']} USDT."}
+            return {"value": None, "status": "NONE_RECORDED", "text": ex["text"]}
+    except Exception:
+        pass
+    return {"value": None, "status": DATA_UNAVAILABLE,
+            "text": "Дані про відкриті позиції не підтверджені (облік угод не активовано)."}
+
+
 def risk_payload() -> Dict[str, Any]:
     """Екран «Ризик». Невідоме ≠ нуль: без перевіреного джерела — «Дані недоступні»."""
     pos = positions_v2()
@@ -965,15 +983,7 @@ def risk_payload() -> Dict[str, Any]:
         "orders": False,
         "order_authorized": False,
         "equity": {"value": None, "status": DATA_UNAVAILABLE, "text": "Дані недоступні: капітал не підключено"},
-        "exposure": {
-            "value": None,
-            "status": DATA_UNAVAILABLE if not confirmed else "PARTIAL",
-            "text": (
-                "Дані про відкриті позиції не підтверджені"
-                if not confirmed
-                else f"Підтверджених позицій через /position: {len(confirmed)}; сума ризику не розрахована"
-            ),
-        },
+        "exposure": _exposure_block(confirmed),
         "budget": {"value": None, "status": DATA_UNAVAILABLE, "text": "Ризиковий бюджет дня не затверджено"},
         "positions": confirmed,
         "plans": plans[:20],
@@ -1002,6 +1012,124 @@ def db_alive(*, ttl: float = 5.0) -> bool:
         ok = False
     _DB_PROBE.update(ts=now, ok=ok)
     return ok
+
+
+_PRICE_CACHE: Dict[str, Any] = {}
+
+
+def _live_price(symbol: str) -> Dict[str, Any]:
+    """Остання ціна M1 і чи вона свіжа (feed quality). Fixture/недоступно → не свіжа. Кеш 10 с."""
+    sym = str(symbol or "").upper()
+    now = time.time()
+    hit = _PRICE_CACHE.get(sym)
+    if hit and now - hit["t"] < 10:
+        return hit["v"]
+    pack = candles_payload(sym, "M1", 3)
+    last = (pack.get("candles") or [None])[-1]
+    fresh = bool(last) and pack.get("data_status") == "DATA_OK" and not pack.get("fixture")
+    v = {"price": _f(last.get("close")) if last else None, "fresh": fresh, "as_of": pack.get("as_of"),
+         "data_status": pack.get("data_status")}
+    _PRICE_CACHE[sym] = {"t": now, "v": v}
+    return v
+
+
+def _scenario_status(sid: Optional[str]) -> Optional[str]:
+    if not sid:
+        return None
+    try:
+        r = _fetchall(_db(), "SELECT status FROM office_signals WHERE signal_id = ?", (str(sid),))
+        return str(r[0][0]) if r else None
+    except Exception:
+        return None
+
+
+def _with_display(pos: Dict[str, Any]) -> Dict[str, Any]:
+    sym, side = pos["symbol"], pos["direction"]
+    pos["display"] = {
+        "entry": format_px(pos["entry"], sym),
+        "sl": format_px(pos.get("sl"), sym, side=side, kind="SL") if pos.get("sl") else "",
+        "tp1": format_px(pos.get("tp1"), sym, side=side, kind="TP1") if pos.get("tp1") else "",
+        "tp2": format_px(pos.get("tp2"), sym, side=side, kind="TP2") if pos.get("tp2") else "",
+        "exit": format_px(pos.get("exit_price"), sym) if pos.get("exit_price") else "",
+    }
+    return pos
+
+
+def trades_payload(state: str = "open") -> Dict[str, Any]:
+    import office_positions as P
+
+    if not P.schema_present(_db()):
+        return {"ok": True, "readonly": True, "schema_missing": True, "positions": [],
+                "note": "Облік угод ще не активовано (потрібна міграція бази).", "order_authorized": False}
+    rows = P.list_positions(_db(), state if state in ("open", "closed", "all") else "open", 100)
+    out = []
+    for p in rows:
+        _with_display(p)
+        if p["status"] == "OPEN":
+            px = _live_price(p["symbol"])
+            p["tracking"] = P.tracking(p, price=px["price"], price_fresh=px["fresh"],
+                                       scenario_status=_scenario_status(p.get("scenario_id")))
+            p["tracking"]["price_display"] = format_px(px["price"], p["symbol"]) if px["price"] else ""
+            p["tracking"]["price_as_of"] = px["as_of"]
+        out.append(p)
+    return {"ok": True, "readonly": True, "positions": out, "exposure": P.exposure(_db()),
+            "stats": P.stats(_db()), "order_authorized": False, "orders": False,
+            "note": "Це ваші фактичні угоди, внесені вручну. Офіс не торгує і не змінює ордери на біржі."}
+
+
+def trade_detail(trade_id: str) -> Dict[str, Any]:
+    import office_positions as P
+
+    try:
+        pos = _with_display(P.get_position(_db(), trade_id))
+    except P.PositionError as e:
+        return {"ok": False, "error": e.code, "message": e.message}
+    if pos["status"] == "OPEN":
+        px = _live_price(pos["symbol"])
+        pos["tracking"] = P.tracking(pos, price=px["price"], price_fresh=px["fresh"],
+                                     scenario_status=_scenario_status(pos.get("scenario_id")))
+    return {"ok": True, "position": pos, "order_authorized": False}
+
+
+TRADE_ACTIONS = ("open", "partial", "move_sl", "move_tp", "close", "void", "note")
+
+
+def trade_action(action: str, body: Dict[str, Any]) -> tuple:
+    """Виконує ручний запис. Повертає (HTTP-код, JSON). Ордерів не створює."""
+    import office_positions as P
+
+    if action not in TRADE_ACTIONS:
+        return 404, {"ok": False, "error": "unknown_action"}
+    idem = str(body.get("idem_key") or "")[:80]
+    tid = str(body.get("trade_id") or "")
+    try:
+        if action == "open":
+            pos = P.open_position(
+                _db(), symbol=body.get("symbol"), direction=body.get("direction"), entry=body.get("entry"),
+                qty=body.get("qty"), sl=body.get("sl"), tp1=body.get("tp1"), tp2=body.get("tp2"),
+                fee_usdt=body.get("fee_usdt"), opened_at=body.get("opened_at"),
+                scenario_id=str(body.get("scenario_id") or "")[:200], note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "partial":
+            pos = P.partial_exit(_db(), tid, price=body.get("price"), qty=body.get("qty"),
+                                 fee_usdt=body.get("fee_usdt"), note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "move_sl":
+            pos = P.move_sl(_db(), tid, sl=body.get("sl"), note=str(body.get("note") or ""), idem_key=idem)
+        elif action == "move_tp":
+            pos = P.move_tp(_db(), tid, tp1=body.get("tp1"), tp2=body.get("tp2"), note=str(body.get("note") or ""),
+                            idem_key=idem)
+        elif action == "close":
+            pos = P.close_position(_db(), tid, price=body.get("price"), fee_usdt=body.get("fee_usdt"),
+                                   note=str(body.get("note") or ""), exit_reason=str(body.get("exit_reason") or ""),
+                                   idem_key=idem)
+        elif action == "void":
+            pos = P.void_position(_db(), tid, reason=str(body.get("reason") or ""), idem_key=idem)
+        else:
+            pos = P.add_note(_db(), tid, note=str(body.get("note") or ""), idem_key=idem)
+    except P.PositionError as e:
+        code = 409 if e.code in ("duplicate", "not_open") else (503 if e.code == "schema_missing" else
+                                                              (404 if e.code == "not_found" else 422))
+        return code, {"ok": False, "error": e.code, "message": e.message}
+    return 200, {"ok": True, "position": _with_display(pos), "order_authorized": False, "orders": False}
 
 
 def html_v2() -> str:
