@@ -82,7 +82,7 @@ def reset_market_cache() -> None:
 def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
     global _BACKOFF_UNTIL
     now = time.time()
-    if "binance" in url and now < _BACKOFF_UNTIL:
+    if "fapi.binance.com" in url and now < _BACKOFF_UNTIL:
         raise RateLimited(_BACKOFF_UNTIL - now)
     qs = urlencode(params)
     full_url = f"{url}?{qs}" if qs else url
@@ -97,6 +97,8 @@ def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
         with urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
+        if exc.code in (418, 429) and "fapi.binance.com" not in url:
+            raise  # резервні джерела не вмикають паузу основного
         if exc.code in (418, 429):
             try:
                 ra = float(exc.headers.get("Retry-After") or 30)
@@ -125,6 +127,77 @@ def _parse_klines(data: Any) -> List[Dict[str, Any]]:
     return out
 
 
+FUTURES_SRC = "binance_futures"
+_SRC_UA = {"binance_spot_vision": "спот Binance", "bybit_linear": "ф'ючерси Bybit"}
+_FALLBACK_AT: Dict[str, tuple] = {}
+
+
+def _tag(rows: List[Dict[str, Any]], src: str) -> List[Dict[str, Any]]:
+    for r in rows:
+        r["src"] = src
+    return rows
+
+
+def _note_src(sym: str, rows: Any) -> None:
+    try:
+        src = (rows[-1] or {}).get("src") if isinstance(rows, list) and rows else None
+        if src and src != FUTURES_SRC:
+            _FALLBACK_AT[sym] = (time.time(), src)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def fallback_recent(symbol: str, within: float = 1800.0) -> Optional[str]:
+    """Назва резервного ринку, якщо свічки цієї монети за останні `within` с брались НЕ з ф'ючерсів Binance; інакше None."""
+    sym = str(symbol or "").upper().strip()
+    if sym and not sym.endswith("USDT"):
+        sym += "USDT"
+    v = _FALLBACK_AT.get(sym)
+    if v and time.time() - v[0] <= within:
+        return v[1]
+    return None
+
+
+def source_ua(src: Optional[str]) -> str:
+    return _SRC_UA.get(str(src or ""), str(src or ""))
+
+
+_BYBIT_TF = {"1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240", "1d": "D", "1w": "W"}
+
+
+def _fallback_klines(sym: str, tf: str, limit: int) -> List[Dict[str, Any]]:
+    """Резервні свічки, коли fapi.binance.com відмовляє (429/збій): спот Binance (публічне дзеркало) → Bybit perp.
+    Джерело фіксується в _HEALTH['fallback_used']; вимкнути: OFFICE_CANDLE_FALLBACK=0. Ціни ≈ ф'ючерсам Binance
+    (різниця — базис), тож це лише для структури/тренду; підтвердження входу споживачі й далі судять за свіжістю свічки."""
+    if os.getenv("OFFICE_CANDLE_FALLBACK", "1").strip() == "0":
+        return []
+    try:
+        rows = _parse_klines(_http_get_json("https://data-api.binance.vision/api/v3/klines", {"symbol": sym, "interval": tf, "limit": limit}))
+        if rows:
+            _HEALTH["fallback_used"] = _HEALTH.get("fallback_used", 0) + 1
+            _HEALTH["fallback_src"] = "binance_spot_vision"
+            return _tag(rows, "binance_spot_vision")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        iv = _BYBIT_TF.get(tf)
+        if not iv:
+            return []
+        data = _http_get_json("https://api.bybit.com/v5/market/kline", {"category": "linear", "symbol": sym, "interval": iv, "limit": min(int(limit), 1000)})
+        lst = ((data or {}).get("result") or {}).get("list") if isinstance(data, dict) else None
+        out = []
+        for r in reversed(lst or []):  # Bybit віддає від новішої до старішої
+            if isinstance(r, list) and len(r) >= 6:
+                out.append({"open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]),
+                            "ts": datetime.fromtimestamp(int(r[0]) / 1000.0, tz=timezone.utc).isoformat()})
+        if out:
+            _HEALTH["fallback_used"] = _HEALTH.get("fallback_used", 0) + 1
+            _HEALTH["fallback_src"] = "bybit_linear"
+        return _tag(out, "bybit_linear")
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Futures-свічки Binance для будь-якої USDT-пари. Список свічок або {} при збої.
@@ -149,17 +222,25 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 hit = _CANDLE_CACHE.get(key)
             ttl = _CANDLE_TTL.get(str(tf), 60)
             if hit and now - hit[0] < ttl and hit[1] >= lim:
+                _note_src(sym, hit[2])
                 return hit[2][-lim:]
         want = max(lim, hit[1] if hit else 0)
         try:
-            data = _http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": sym, "interval": tf, "limit": want})
-            rows = _parse_klines(data)
-            if not rows:
-                raise ValueError("empty klines")
+            try:
+                data = _http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": sym, "interval": tf, "limit": want})
+                rows = _tag(_parse_klines(data), FUTURES_SRC)
+                if not rows:
+                    raise ValueError("empty klines")
+                _FALLBACK_AT.pop(sym, None)  # ф'ючерси відновились; старі резервні свічки в кеші самі знову позначать себе при читанні
+            except Exception:  # noqa: BLE001
+                _HEALTH["errors"] += 1
+                rows = _fallback_klines(sym, str(tf), want)
+                if not rows:
+                    raise
         except Exception:  # noqa: BLE001
-            _HEALTH["errors"] += 1
             if use_cache and hit and now - hit[0] <= _MAX_STALE.get(str(tf), _MAX_STALE_DEFAULT) and hit[2]:
                 _HEALTH["stale_served"] += 1
+                _note_src(sym, hit[2])
                 return hit[2][-lim:]
             return {}
         if use_cache:
@@ -167,6 +248,9 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 if len(_CANDLE_CACHE) > 3000:
                     _CANDLE_CACHE.clear()
                 _CANDLE_CACHE[key] = (now, want, rows)
+        _note_src(sym, rows)
+        bs = _HEALTH.setdefault("by_src", {})
+        bs[rows[-1].get("src", "?")] = bs.get(rows[-1].get("src", "?"), 0) + 1
         return rows[-lim:]
     except Exception:  # noqa: BLE001
         return {}

@@ -101,6 +101,19 @@ def gate_send_on_fresh_data(
     if not out.get("send") or os.getenv(FEED_GATE_ENV, "1").strip() == "0":
         return out
     now = now_utc or datetime.now(timezone.utc)
+    # свічки з іншого ринку (спот/інша біржа) ≠ ф'ючерси Binance: ціни, обсяги й хвости різні → ф'ючерсний вхід не підтверджуємо
+    try:
+        from office_market_data import FUTURES_SRC, fallback_recent, source_ua
+
+        srcs = {str((c or {}).get("src")) for c in (candles_ltf if isinstance(candles_ltf, list) else [])[-5:] if (c or {}).get("src")}
+        other = next((x for x in srcs if x != FUTURES_SRC), None) or fallback_recent(str(out.get("symbol") or ""))
+    except Exception:  # noqa: BLE001
+        other = None
+    if other:
+        out.update({"action": "WAIT", "send": False,
+                    "reason": f"ціни зараз з резервного ринку ({source_ua(other)}), а не з ф'ючерсів Binance — готовий план входу не формую, лише спостерігаю",
+                    "recheck": "коли ф'ючерсні свічки Binance знову доступні", "data_source": other})
+        return out
     res = assess_feed(
         {"kind": "ohlcv", "source": source,
          "observed_at": last_candle_observed_at(candles_ltf, interval, now),
