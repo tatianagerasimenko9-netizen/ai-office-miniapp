@@ -46,3 +46,24 @@ assert session_payload("BTC/../x?y=1")["data_status"] == "DATA_UNAVAILABLE"
 os.environ["OFFICE_MINI_FIXTURE"] = "1"
 assert session_payload("BTCUSDT")["fixture"] is True
 print("OK Session Desk: ranges, sweep vs acceptance, DST London open, honest unavailable")
+
+# DST transition days and the midnight boundary (windows are recomputed from the clock each call: restart-safe).
+def _active(ts):
+    day = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    cands = m15(day - timedelta(days=2), [(10, 9, 9.5)] * 4 * 24 * 3)
+    return session_brief(cands, now_utc=ts)["active"]
+
+# UK clocks forward on 2026-03-29 01:00 UTC: London 08:00 local = 08:00 UTC on 03-28 but 07:00 UTC on 03-29.
+assert "Лондон" not in _active(datetime(2026, 3, 28, 7, 30, tzinfo=timezone.utc))
+assert "Лондон" in _active(datetime(2026, 3, 29, 7, 30, tzinfo=timezone.utc))
+# US clocks forward on 2026-03-08: NY 08:00 local = 13:00 UTC on 03-06 but 12:00 UTC on 03-09.
+assert "Нью-Йорк" not in _active(datetime(2026, 3, 6, 12, 30, tzinfo=timezone.utc))
+assert "Нью-Йорк" in _active(datetime(2026, 3, 9, 12, 30, tzinfo=timezone.utc))
+# UK clocks back on 2026-10-25: London 08:00 local = 07:00 UTC before, 08:00 UTC after.
+assert "Лондон" in _active(datetime(2026, 10, 24, 7, 30, tzinfo=timezone.utc))
+assert "Лондон" not in _active(datetime(2026, 10, 26, 7, 30, tzinfo=timezone.utc))
+# Midnight UTC: Asia starts, previous-session range is still the last completed session.
+b0 = session_brief(m15(datetime(2026, 6, 10, tzinfo=timezone.utc) - timedelta(days=2),
+                       [(10, 9, 9.5)] * 4 * 24 * 3), now_utc=datetime(2026, 6, 10, 0, 0, tzinfo=timezone.utc))
+assert b0["data_status"] == "DATA_OK" and "Азія" in b0["active"] and b0["previous"]["end"] <= "2026-06-10T00:00:00+00:00", b0
+print("OK Session Desk DST transition days and midnight boundary")
