@@ -388,6 +388,7 @@ def detect_ltf_confirms(
     zone_lo: Any,
     zone_hi: Any,
     range_bounds: Optional[Dict[str, Any]] = None,
+    now_ts: Optional[float] = None,
 ) -> List[str]:
     """Підтвердження Булковскі/Pine на молодшому ТФ у зоні."""
     side = str(direction or "").upper()
@@ -401,6 +402,15 @@ def detect_ltf_confirms(
         return hits
     if lo > hi:
         lo, hi = hi, lo
+    # Подвійні/потрійні дно й вершина — лише за перевірюваним правилом (office_patterns): екстремуми в зоні й допуску, ≥3 свічок між ними,
+    # підтвердження закриттям за лінією шиї. Свічка підтвердження вже може бути поза зоною, тому це перевіряється до «дотику зони».
+    from office_patterns import find_multi
+
+    for n, name in ((3, "triple"), (2, "double")):
+        pat = find_multi(candles_ltf, direction=side, n=n, zone_lo=lo, zone_hi=hi, now_ts=now_ts)
+        if pat and pat["confirmed"]:
+            hits.append(f"{name}_{'top' if side == 'SHORT' else 'bottom'}")
+
     # Ціна має торкнутись зони тінню.
     touched = float(last["low"]) <= hi and float(last["high"]) >= lo
     if not touched:
@@ -408,23 +418,9 @@ def detect_ltf_confirms(
         prev = rows[-2]
         touched = float(prev["low"]) <= hi and float(prev["high"]) >= lo
     if not touched:
-        return hits
+        return [h for h in hits if h in ("triple_top", "triple_bottom", "double_top", "double_bottom")]
 
     highs, lows = _swings(rows)
-    tol = (hi - lo) * 0.35 if hi > lo else abs(hi) * 0.002
-    if side == "SHORT" and len(highs) >= 2:
-        a, b = highs[-2], highs[-1]
-        if abs(a - b) <= max(tol, abs(a) * 0.002):
-            hits.append("double_top")
-        if len(highs) >= 3 and abs(highs[-3] - b) <= max(tol, abs(b) * 0.002):
-            hits.append("triple_top")
-    if side == "LONG" and len(lows) >= 2:
-        a, b = lows[-2], lows[-1]
-        if abs(a - b) <= max(tol, abs(a) * 0.002):
-            hits.append("double_bottom")
-        if len(lows) >= 3 and abs(lows[-3] - b) <= max(tol, abs(b) * 0.002):
-            hits.append("triple_bottom")
-
     # SFP: тінь за зону, закриття всередині / назад у зону (Turtle Soup).
     if side == "SHORT" and float(last["high"]) > hi and float(last["close"]) <= hi:
         hits.append("sfp")
