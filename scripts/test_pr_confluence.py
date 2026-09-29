@@ -127,7 +127,7 @@ def main() -> int:
         direction="SHORT",
         timeframe="M15",
         candidates=[_cand("sc_ote", 1.0, 1.01, "M15", "сильна свічка M15")],
-        price=1.04,
+        price=1.0,
     )
     if weak.get("send_card") or weak.get("reason") != "менше 2 збігів":
         return _fail(f"1 tag must db-only {weak}")
@@ -142,7 +142,7 @@ def main() -> int:
             _cand("sc_ote", 1.00, 1.01, "M15", "сильна свічка M15"),
             _cand("ob", 1.002, 1.012, "H1", "OB H1"),
         ],
-        price=1.03,
+        price=1.0,
     )
     if not grade_b.get("send_card") or grade_b.get("grade") != "B":
         return _fail(f"2 tags → B {grade_b}")
@@ -178,11 +178,11 @@ def main() -> int:
     for i in range(4):
         prep = prepare_desk_send(
             symbol="BTCUSDT",
-            direction="SHORT",
+            direction="LONG",
             timeframe="H1",
             entry=px_now,
-            sl=85900.0,
-            tp1=80000.0,
+            sl=82300.0,
+            tp1=88000.0,
             atr_h1=900.0,
             score=12,
             min_score=10,
@@ -378,10 +378,21 @@ def main() -> int:
         },
         price=0.935,
         candles_ltf=[_c(0.93, 0.936, 0.929, 0.935)],
-        now_ts=10.0,
+        now_ts=10.0 + 2 * 3600,
+        candles_h1=[{"ts": "1970-01-01T01:00:00+00:00", "open": 0.93, "high": 0.937, "low": 0.929, "close": 0.935}],
     )
-    if sl_hit.get("action") != "cancel":
+    if sl_hit.get("action") != "cancel" or "годинна свічка" not in str(sl_hit.get("reason")):
         return _fail(f"sl cancel {sl_hit}")
+    # прокол за рівнем без закриття H1 за ним — НЕ скасування
+    wick = follow_setup(
+        setup={"direction": "SHORT", "sl": 0.930, "zone_lo": 0.922, "zone_hi": 0.928, "ts": 1.0, "timeframe": "M15"},
+        price=0.935,
+        candles_ltf=[_c(0.93, 0.936, 0.929, 0.935)],
+        now_ts=10.0 + 2 * 3600,
+        candles_h1=[{"ts": "1970-01-01T01:00:00+00:00", "open": 0.925, "high": 0.937, "low": 0.924, "close": 0.926}],
+    )
+    if wick.get("action") == "cancel":
+        return _fail(f"wick must not cancel {wick}")
     print("OK follow confirm/timeout/SL")
 
     clus = cluster_zones(_btc_cands())

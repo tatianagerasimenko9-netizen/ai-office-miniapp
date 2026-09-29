@@ -292,10 +292,19 @@ def desk_entry_gate(
             }
         if not mem.get("allow_entry"):
             return {**empty, "reason": str(mem.get("reason") or "пам'ять сценарію"), "memory": mem}
+    side_u = str(direction or "").upper()
+    side_ok = (s > e > t) if side_u == "SHORT" else (s < e < t)
+    if not side_ok:
+        return {**empty, "reason": "стоп/TP1 не з того боку від входу"}
     wide = widen_sl_to_atr_h1(entry=e, sl=s, direction=direction, atr_h1=atr_h1)
     if not wide.get("ok"):
         return {**empty, "reason": str(wide.get("reason") or "стоп/ATR")}
     s2 = float(wide["sl"])
+    from office_radar import MIN_RR
+
+    rr = abs(t - e) / abs(e - s2) if abs(e - s2) > 1e-12 else 0.0
+    if rr + 1e-12 < float(MIN_RR):
+        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR}"}
     need = min_tp1_pct(symbol)
     move = move_pct_to_tp(entry=e, tp=t)
     if move is None or move + 1e-12 < need:
@@ -448,6 +457,7 @@ def format_desk_card(
     why_line: str = "",
     invalidate_line: str = "",
     confluence: Optional[Dict[str, Any]] = None,
+    compact: bool = False,
 ) -> str:
     """Універсальна картка LONG/SHORT. Без RR 1:, range, балів. Розмір — лише після валідної геометрії."""
     from office_alert_gate import validate_trade_geometry
@@ -498,6 +508,7 @@ def format_desk_card(
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано — {why}")
         else:
             lines.append(f"🔄 {pdir} від {pe or '—'} скасовано")
+    pre_lines = list(lines)
     ctf = str(chart_tf or "").upper()
     head = f"{mark} {side} · {str(symbol).upper()} · сценарій {tf}"
     if ctf and ctf != tf:
@@ -545,6 +556,21 @@ def format_desk_card(
         lev_note=ln,
         why_line=yw,
     )
+    if compact and not ready.get("ready"):
+        # Картка-сценарій без підтвердження: коротко й без «плану» — стоп, обсяг і %-и з'являються лише коли план готовий
+        long_ = side != "SHORT"
+        short_lines: List[str] = [x for x in pre_lines if x == plink or x.startswith("🔄")]
+        short_lines.append(f"🟡 {str(symbol).upper()} · {'КУПІВЛЯ' if long_ else 'ПРОДАЖ'} · ЧЕКАЄМО")
+        short_lines.append("ЗАРАЗ: входу немає. Це план, а не сигнал.")
+        short_lines.append(f"ЧОГО ЧЕКАЄМО: повернення ціни в зону {span} і розвороту {'вгору' if long_ else 'вниз'} на 15-хвилинному графіку.")
+        if s is not None:
+            short_lines.append(f"КОЛИ СКАСУЄМО: годинна свічка закриється {'нижче' if long_ else 'вище'} {_px(s, symbol)}.")
+        else:
+            short_lines.append("КОЛИ СКАСУЄМО: рівень ще не визначено — входити не можна.")
+        if t1 is not None:
+            short_lines.append(f"Орієнтир, не для входу: ціль 1 — {_px(t1, symbol)}.")
+        short_lines.append("Готовий вхід, стоп і цілі надішлю окремо, коли з'явиться підтвердження.")
+        return "\n".join(short_lines)
     plan_title = "План після підтвердження"
     if not ready.get("ready"):
         plan_title = "Приклад розрахунку, не валідований торговий план"
@@ -962,6 +988,8 @@ def prepare_desk_send(
                     "origin": "desk",
                     "signal_id": existing.get("signal_id"),
                     "sl": existing.get("sl"),
+                    "tp1": existing.get("tp1"),
+                    "tp2": existing.get("tp2"),
                     "zone_lo": conf.get("zone_lo"),
                     "zone_hi": conf.get("zone_hi"),
                     "entry_low": conf.get("zone_lo"),
@@ -1075,6 +1103,7 @@ def prepare_desk_send(
         lev_note=str(lev_note or (conf or {}).get("lev_note") or ""),
         chart_tf="M15",
         confluence=conf,
+        compact=True,
     )
     key = str((conf or {}).get("setup_key") or "")
     if key and (ready.get("ready") or not require_confluence):
@@ -1086,6 +1115,8 @@ def prepare_desk_send(
                 "timeframe": timeframe,
                 "origin": "desk",
                 "sl": gate.get("sl"),
+                "tp1": tp1,
+                "tp2": tp2,
                 "zone_lo": zone_lo,
                 "zone_hi": zone_hi,
                 "entry_low": zone_lo,
