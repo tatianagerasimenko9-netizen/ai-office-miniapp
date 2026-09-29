@@ -197,6 +197,8 @@ async function office(){
       <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
     </div>
     ${sessionHtml(ses)}
+    <h2>Що відстежує Лев</h2>
+    <div class="card" id="watchbox"><div class="mut">Завантажую…</div></div>
     <h2>Запитати Лева</h2>
     <div class="card frm" id="levbox">
       <div class="mut">Відповідь — лише з живого аналізу Лева й журналу. «NO TRADE» — нормальна відповідь.</div>
@@ -217,6 +219,16 @@ async function office(){
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
+  (async()=>{ const box=$('watchbox'); if(!box) return;
+    try{ const r=await j('/api/v2/watches');
+      if(!r.ok){ box.innerHTML='<div class="mut">Дані про відстеження недоступні.</div>'; return; }
+      const w=(r.watches||[]).map(x=>`<div class="kv"><span><b>${esc(x.ticker)}</b> · ${esc(x.state_ua)}</span><b>зона ${esc(x.zone)} · скасування ${esc(x.invalidation)}</b></div>`).join('');
+      const h=(r.recent||[]).map(x=>`<div class="mut">${hhmm(x.ts)} · ${esc(x.headline)}${x.sent?'':' · (не надсилалось в Telegram)'}</div>`).join('');
+      box.innerHTML=(w||'<div class="mut">Зараз нічого не відстежується. Спитай Лева про монету — і якщо він скаже «чекаємо», він збереже умову.</div>')
+        +(h?'<div class="mut" style="margin-top:8px">Що вже змінювалось:</div>'+h:'')
+        +`<div class="mut" style="margin-top:8px">${r.notify_enabled?'Лев пише в Telegram, коли ситуація змінюється.':'Сповіщення в Telegram ще не ввімкнено — зміни видно тут.'}</div>`;
+    }catch(e){ if(!e.stale) box.innerHTML='<div class="mut">Немає зв’язку із сервером.</div>'; }
+  })();
   const lq=$('levq');
   if(lq) lq.querySelectorAll('[data-q]').forEach(b=>b.onclick=async()=>{
     const sym=($('levsym').value||'').trim(); S.levsym=sym; const out=$('levout'); out.textContent='Лев рахує на свіжих свічках…';

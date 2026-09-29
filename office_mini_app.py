@@ -1428,6 +1428,10 @@ class Handler(BaseHTTPRequestHandler):
                 from office_write_auth import config_status
 
                 data = {"ok": True, **config_status()}
+            elif u.path == "/api/v2/watches":
+                from office_mini_v2 import watches_payload
+
+                data = watches_payload()
             elif u.path == "/api/v2/lev":
                 from office_mini_v2 import lev_payload
 

@@ -101,6 +101,26 @@ def verdict(res: Dict[str, Any]) -> Tuple[str, str]:
     return "NO_TRADE", "NO TRADE — входу немає"
 
 
+_REASON_RX = (
+    (re.compile(r"ATR day_used ([\d.]+)%"), lambda m: f"Ціна вже пройшла близько {float(m.group(1)):.0f}% звичайного денного руху — входити пізно."),
+    (re.compile(r"немає збігів|менше 2 збігів"), lambda m: "Немає достатньо підстав для входу."),
+    (re.compile(r"пробій ренджу|подія, не вхід"), lambda m: "Ціна вийшла з діапазону — це рух, а не вхід."),
+    (re.compile(r"суперечн"), lambda m: "Індикатори суперечать напрямку."),
+    (re.compile(r"пул рівних|рівних лоїв|рівних хаїв"), lambda m: "Стоп ставав би там, де зазвичай збирають стопи."),
+    (re.compile(r"застар|STALE|DATA_"), lambda m: "Дані ненадійні."),
+)
+
+
+def plain_reason(reason: Any) -> str:
+    """Причина людською мовою; повний технічний текст лишається в «Деталях» Mini App."""
+    txt = str(reason or "")
+    for rx, fn in _REASON_RX:
+        m = rx.search(txt)
+        if m:
+            return fn(m)
+    return "Підтвердженого напряму зараз немає."
+
+
 def _fp(v: Any, sym: str) -> str:
     try:
         return format_px(float(v), sym) if v is not None else "—"
@@ -108,111 +128,88 @@ def _fp(v: Any, sym: str) -> str:
         return "—"
 
 
-def _db_scenario_line(db_path: str, sym: str, direction: str) -> str:
-    try:
-        from office_bridge import _fetchall
-
-        rows = _fetchall(db_path, "SELECT signal_id, direction, status, ts_updated FROM office_signals WHERE symbol = ? "
-                         "ORDER BY ts_updated DESC LIMIT 3", (sym,))
-    except Exception:  # noqa: BLE001
-        return "Сценарії в базі: недоступно"
-    if not rows:
-        return "Сценаріїв у базі по символу немає"
-    return "У базі: " + "; ".join(f"{r[1]} {r[2]} (оновл. {str(r[3])[:16]})" for r in rows)
-
-
-def _risk_line(db_path: str, sym: str) -> str:
-    try:
-        from office_bridge import _fetchone
-
-        row = _fetchone(db_path, "SELECT ts_utc, payload_json FROM office_events WHERE event_type = 'RISK_SHADOW_REVIEW' "
-                        "AND payload_json LIKE ? ORDER BY id DESC LIMIT 1", (f'%"{sym}"%',))
-    except Exception:  # noqa: BLE001
-        return "Risk Officer (shadow): недоступно"
-    if not row:
-        return "Risk Officer (shadow): для цього символу ще не було перевірок"
-    try:
-        p = json.loads(row[1])
-    except Exception:  # noqa: BLE001
-        return "Risk Officer (shadow): запис нечитабельний"
-    return f"Risk Officer (shadow, {str(row[0])[:16]}): {'заблокував би' if p.get('would_veto') else 'не блокував би'} — лише інформація"
-
-
-def changes_lines(db_path: str, sym: str, limit: int = 6) -> List[str]:
-    try:
-        from office_bridge import _fetchall
-
-        rows = _fetchall(db_path, "SELECT ts_utc, payload_json FROM office_events WHERE event_type = 'THESIS_VERSION' "
-                         "AND payload_json LIKE ? ORDER BY id DESC LIMIT ?", (f'%"symbol": "{sym}"%', limit))
-    except Exception:  # noqa: BLE001
-        return ["Журнал змін недоступний"]
-    out = []
-    for ts, pj in rows or []:
-        try:
-            p = json.loads(pj)
-        except Exception:  # noqa: BLE001
-            continue
-        out.append(f"{str(ts)[5:16]} · {p.get('direction')} · {p.get('state')} · режим {p.get('regime')} · Лев: {p.get('lev_action')}")
-    return out or ["Версій тези для цього символу ще немає — змін не бачу"]
-
-
-def answer(db_path: str, text: str, *, symbol: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
-    """Відповідь Лева на запит. Повертає {ok, symbol, verdict, intent, text, data_age_min, data_stale}."""
-    sym = explicit_symbol(text) or symbol or "BTCUSDT"
-    intent = detect_intent(text)
-    res = compute(db_path, sym, now=now)
-    sym = res["symbol"]
+def _view(res: Dict[str, Any], code: str, *, tracking: bool, watch: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     cyc = res["cycle"]
-    code, head = verdict(res)
+    sym = res["symbol"]
     draft = cyc.get("draft") or {}
     conf = draft.get("confluence") or {}
     side = str(cyc.get("direction") or draft.get("direction") or "").upper()
     lo, hi = draft.get("zone_lo"), draft.get("zone_hi")
-    age = res.get("data_age_min")
     price = draft.get("price") or conf.get("price")
-    lines: List[str] = []
-    fresh = "немає" if age is None else f"{age:g} хв тому"
-    lines.append(f"🦁 Лев · {sym} · H1 · ціна {_fp(price, sym)} · остання свічка M15 (відкриття): {fresh}")
+    state = {"PLAN": "CONFIRMED", "WAIT": "WAIT"}.get(code, "NO_TRADE")
     if res.get("data_stale"):
-        lines.append("⚠️ Дані застарілі або недоступні — не покладайся на цей екран, перевір Binance.")
-    if intent in ("full", "why", "plan", "confirm", "invalid"):
-        lines.append(f"Висновок: {head}")
-    reason = str(cyc.get("reason") or "").strip()
-    if intent in ("full", "why") and reason:
-        lines.append(f"Причина: {reason}")
+        state = "STALE"
     has_zone = lo is not None and hi is not None and side in ("LONG", "SHORT")
-    if intent in ("full", "plan"):
-        if has_zone:
-            tag = "План" if code == "PLAN" else "Кандидат-зона (це спостереження, не вхід)"
-            lines.append(f"{tag}: {side} · зона {_fp(lo, sym)}–{_fp(hi, sym)}")
-            if code == "PLAN":
-                lines.append(f"SL {_fp(cyc.get('sl'), sym)} · TP1 {_fp(cyc.get('tp1'), sym)}")
-        else:
-            lines.append("Зони входу зараз немає.")
-    if intent in ("full", "confirm") and has_zone and conf.get("confirm_wait"):
-        lines.append(f"Що чекаю: {conf.get('confirm_wait')}")
-    if intent in ("full", "invalid"):
-        inv = draft.get("invalidation")
-        lines.append(f"Скасується: закриття за {_fp(inv, sym)}" if inv is not None else "Інвалідація не визначена — сценарій не вважаю готовим.")
-    if intent in ("full", "plan", "confirm") and conf.get("now_line"):
-        lines.append(str(conf.get("now_line")))
-    if intent == "full":
-        alt = draft.get("alternative") or {}
-        if alt.get("eligible"):
-            lines.append(f"Альтернатива: {alt.get('direction')} {_fp(alt.get('zone_lo'), sym)}–{_fp(alt.get('zone_hi'), sym)}")
-        lines.append(_db_scenario_line(db_path, sym, side))
-        lines.append(_risk_line(db_path, sym))
+    if state == "WAIT" and not (has_zone and draft.get("invalidation") is not None):
+        state = "NO_TRADE"  # без зони чи рівня скасування «чекаємо» — порожня обіцянка
+    v = {"symbol": sym, "state": state, "direction": side, "price": price, "zone_lo": lo, "zone_hi": hi,
+         "invalidation": draft.get("invalidation"), "wait_tf": conf.get("wait_tf") or "M15", "scenario_tf": "H1",
+         "plan": {"entry": cyc.get("entry"), "sl": cyc.get("sl"), "tp1": cyc.get("tp1"), "tp2": cyc.get("tp2") or draft.get("tp2")},
+         "tracking": tracking, "expires_at": (watch or {}).get("expires_at"), "reason": plain_reason(cyc.get("reason"))}
+    if state == "CONFIRMED":
+        from office_lev_watch import check_plan
+
+        bad = check_plan(sym, side, v["plan"], lo, hi)
+        if bad:
+            v.update(state="REJECTED", reason=bad)
+    return v
+
+
+def changes_text(db_path: str, sym: str) -> str:
+    from office_lev_watch import recent_notes
+    from office_user_messages import ticker
+
+    notes = recent_notes(db_path, symbol=sym, limit=5)
+    if not notes:
+        return (f"⚪ {ticker(sym)} · ЗМІН ПОКИ НЕ БУЛО\nЛев ще не оголошував і не змінював план по цій монеті. "
+                "Коли з'явиться — тут буде видно, що саме змінилось.")
+    lines = [f"🕘 {ticker(sym)} · ЩО ЗМІНЮВАЛОСЬ"]
+    for n in notes:
+        head = str(n.get("text") or "").split("\n", 1)[0]
+        lines.append(f"{str(n.get('ts'))[5:16].replace('T', ' ')} UTC — {head}")
+    return "\n".join(lines)
+
+
+def answer(db_path: str, text: str, *, symbol: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
+    """Відповідь Лева людською мовою. {ok, symbol, verdict, intent, text, data_age_min, data_stale, tracking}."""
+    from office_lev_watch import notify_enabled, register
+    from office_user_messages import render, ticker, _cancel_line, _px
+
+    sym = explicit_symbol(text) or symbol or "BTCUSDT"
+    intent = detect_intent(text)
+    res = compute(db_path, sym, now=now)
+    sym = res["symbol"]
+    code, _head = verdict(res)
+    v = _view(res, code, tracking=False)
+    watch = None
+    can_watch = v["state"] in ("WAIT", "CONFIRMED") and not res.get("data_stale")
+    if can_watch and db_path:
+        try:
+            watch = register(db_path, symbol=sym, direction=v["direction"], zone_lo=v["zone_lo"], zone_hi=v["zone_hi"],
+                             invalidation=v["invalidation"], wait_tf=v["wait_tf"], state=v["state"],
+                             plan=v["plan"] if v["state"] == "CONFIRMED" else None)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[lev-watch] register failed {sym}: {type(exc).__name__}: {exc}")
+    tracking = bool(watch) and notify_enabled()   # обіцянку «напишу сам» — лише коли умова збережена і сповіщення справді ввімкнені
+    v = _view(res, code, tracking=tracking, watch=watch)
     if intent == "changes":
-        lines.append("Як змінювався сценарій (журнал тез):")
-        lines.extend("· " + x for x in changes_lines(db_path, sym))
-        lines.append(f"Зараз: {head}")
-    lines.append("Не ордер. Рішення й ордер на біржі — лише твої.")
-    return {"ok": True, "symbol": sym, "verdict": code, "intent": intent, "text": "\n".join(lines),
-            "data_age_min": age, "data_stale": bool(res.get("data_stale")), "order_authorized": False}
+        body = changes_text(db_path, sym)
+    elif intent == "invalid":
+        if v["state"] in ("WAIT", "CONFIRMED") and v.get("invalidation") is not None:
+            body = f"🔴 {ticker(sym)} · ЩО СКАСУЄ ПЛАН\nПлан скасується {_cancel_line(v)}"
+        else:
+            body = f"⚪ {ticker(sym)} · ПЛАНУ ЗАРАЗ НЕМАЄ\nСкасовувати нічого: підтвердженого сценарію по цій монеті зараз немає."
+    else:
+        body = render(v)
+    return {"ok": True, "symbol": sym, "verdict": code, "intent": intent, "text": body, "state": v["state"],
+            "data_age_min": res.get("data_age_min"), "data_stale": bool(res.get("data_stale")), "tracking": tracking,
+            "order_authorized": False}
 
 
-LAST: Dict[str, Optional[str]] = {"symbol": None}   # контекст діалогу: «а інвалідація?» без символу → попередній символ
+CONTEXT_SEC = 30 * 60
+LAST: Dict[str, Any] = {"symbol": None, "at": 0.0}   # контекст діалогу: «а інвалідація?» без монети → та, про яку щойно говорили
 _CMD = re.compile(r"^\s*(?:[/!]lev\b|лев\b|lev\b)[\s,:;\-—]*(.*)$", re.IGNORECASE | re.DOTALL)
+ASK_SYMBOL = "Про яку монету? Напиши, наприклад: /lev BTC або «Лев, аналіз SOL»."
 
 
 def parse_command(text: str) -> Optional[str]:
@@ -221,7 +218,27 @@ def parse_command(text: str) -> Optional[str]:
     return None if not m else m.group(1).strip()
 
 
+def context_symbol(now: Optional[float] = None) -> Optional[str]:
+    t = time.time() if now is None else now
+    return LAST.get("symbol") if LAST.get("symbol") and t - float(LAST.get("at") or 0) <= CONTEXT_SEC else None
+
+
+def parse_followup(text: str, now: Optional[float] = None) -> Optional[str]:
+    """Уточнення без звернення до Лева («а інвалідація?») — лише в межах 30 хв після його відповіді
+    і лише коли це схоже на питання про план. Інакше None: звичайна розмова з командою не перехоплюється."""
+    raw = str(text or "").strip()
+    if not raw or raw[0] in "/!" or len(raw) > 140 or context_symbol(now) is None:
+        return None
+    return raw if detect_intent(raw) != "full" else None
+
+
 def ask(db_path: str, question: str, *, now: Optional[float] = None) -> Dict[str, Any]:
-    res = answer(db_path, question or "аналіз", symbol=LAST.get("symbol"), now=now)
-    LAST["symbol"] = res["symbol"]
+    """Діалог у Telegram. Монету визначаємо з питання або з попередньої відповіді (≤30 хв); не можемо — перепитуємо.
+    Рівні іншої монети ніколи не підставляємо."""
+    q = str(question or "").strip()
+    sym = explicit_symbol(q) or context_symbol(now)
+    if not sym:
+        return {"ok": False, "needs_symbol": True, "text": ASK_SYMBOL, "order_authorized": False}
+    res = answer(db_path, q or "аналіз", symbol=sym, now=now)
+    LAST["symbol"], LAST["at"] = res["symbol"], (time.time() if now is None else now)
     return res

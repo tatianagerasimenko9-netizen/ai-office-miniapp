@@ -128,6 +128,19 @@ try:
     assert _fetchone(DB, "SELECT COUNT(*) FROM office_signals WHERE analysis_note LIKE '%scenario_id=%' AND symbol = ?", ("PCTUSDT",))[0] == 1
     from office_thesis_journal import canonical_scenario_id  # шлях, що падав після SEND
     canonical_scenario_id(DB, {"draft": {"symbol": "PCTUSDT", "direction": "LONG", "timeframe": "H1", "zone_lo": 1.0, "zone_hi": 1.1, "confluence": {}}})
+    # 10. Умови, які відстежує Лев (LEV_WATCH), на реальному PG: реєстрація без дубля, тик, подія записана один раз.
+    import office_lev_watch as W
+    t0 = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+    w = W.register(DB, symbol="BTCUSDT", direction="LONG", zone_lo=83066, zone_hi=83901, invalidation=82965, now=t0)
+    assert w and W.register(DB, symbol="BTCUSDT", direction="LONG", zone_lo=83066, zone_hi=83901, invalidation=82965, now=t0)["watch_id"] == w["watch_id"]
+    late = t0 + timedelta(hours=13)
+    cs = [{"ts": (late - timedelta(minutes=15 * (8 - i))).isoformat(), "open": 84200, "close": 84200, "low": 84200, "high": 84200} for i in range(8)]
+    fetch = lambda sym, iv, n=100: cs  # noqa: E731
+    out = W.tick(DB, now=late, fetch=fetch, cycle_fn=lambda d, s: {}, send_enabled=True)
+    assert [o["event"] for o in out] == ["EXPIRED"] and W.active_watches(DB) == []
+    assert W.tick(DB, now=late, fetch=fetch, cycle_fn=lambda d, s: {}, send_enabled=True) == []
+    from office_mini_v2 import watches_payload
+    assert watches_payload()["ok"] and watches_payload()["recent"][0]["event"] == "EXPIRED"
 finally:
     with psycopg.connect(URL, autocommit=True) as c:
         c.execute(f"DROP SCHEMA {SCHEMA} CASCADE")

@@ -48,24 +48,25 @@ assert D.parse_command("Левада привіт") is None and D.parse_command(
 # свіжі дані → повна відповідь із висновком, ціною, свіжістю, «не ордер»
 r = D.answer(db, "Лев, аналіз BTC", now=NOW)
 assert r["ok"] and r["symbol"] == "BTCUSDT" and r["verdict"] in ("PLAN", "WAIT", "NO_TRADE"), r
-assert "Висновок:" in r["text"] and "Не ордер" in r["text"] and not r["data_stale"], r["text"]
+assert r["text"].split("\n")[0].startswith(("🟡 BTC", "🟢 BTC", "⚪ BTC", "🔴 BTC")) and "не ордер" in r["text"] and not r["data_stale"], r["text"]
+assert "ЩО ЗАРАЗ" in r["text"] and "Risk Officer" not in r["text"] and "LONG" not in r["text"] and "WATCHING" not in r["text"], r["text"]
 assert r["order_authorized"] is False
 # уточнення: інвалідація і причина — окремі, змістовні відповіді
 inv = D.answer(db, "а де інвалідація?", symbol="BTCUSDT", now=NOW)
-assert "Скасується" in inv["text"] or "Інвалідація не визначена" in inv["text"]
+assert "СКАСУЄ ПЛАН" in inv["text"] or "ПЛАНУ ЗАРАЗ НЕМАЄ" in inv["text"], inv["text"]
 why = D.answer(db, "чому так?", symbol="BTCUSDT", now=NOW)
 assert why["intent"] == "why" and why["symbol"] == "BTCUSDT"
 # зміни: з журналу тез, без вигадок
 log_event(db, "THESIS_VERSION", {"symbol": "BTCUSDT", "direction": "LONG", "state": "WATCHING", "regime": "RANGE", "lev_action": "WAIT"}, "s1")
 ch = D.answer(db, "що змінилось?", symbol="BTCUSDT", now=NOW)
-assert "WATCHING" in ch["text"] and "журнал тез" in ch["text"], ch["text"]
-assert "змін не бачу" in D.answer(db, "що змінилось по SOL?", now=NOW)["text"]
+assert ch["intent"] == "changes" and ("ЗМІН ПОКИ НЕ БУЛО" in ch["text"] or "ЩО ЗМІНЮВАЛОСЬ" in ch["text"]), ch["text"]
+assert "ЗМІН ПОКИ НЕ БУЛО" in D.answer(db, "що змінилось по SOL?", now=NOW)["text"]
 # застарілі дані → NO TRADE, ніколи не план
 STATE["shift"] = timedelta(hours=-3)
 D._CACHE.clear()
 old = D.answer(db, "план BTC", now=NOW)
-assert old["data_stale"] and old["verdict"] == "NO_TRADE" and "застарілі" in old["text"], old
-assert "SL " not in old["text"].split("Висновок")[0]
+assert old["data_stale"] and old["verdict"] == "NO_TRADE" and "ДАНІ ЗАСТАРІЛИ" in old["text"], old
+assert "ПЛАН УГОДИ: вхід" not in old["text"] and "🟢" not in old["text"]
 # помилка джерела → NO TRADE з причиною, не виняток
 def boom(*a, **k):
     raise RuntimeError("net")
@@ -75,14 +76,24 @@ bad = D.answer(db, "аналіз XRP", now=NOW)
 assert bad["ok"] and bad["verdict"] == "NO_TRADE" and bad["data_stale"], bad
 # діалог нічого не пише в БД (крім того, що ми самі додали)
 assert _fetchone(db, "SELECT COUNT(*) FROM office_events WHERE event_type IN ('RISK_SHADOW_REVIEW','RISK_VETO')", ())[0] == 0
-assert _fetchone(db, "SELECT COUNT(*) FROM office_events", ())[0] == 1
-# контекст діалогу: питання без символу відноситься до попереднього
-D.LAST["symbol"] = None
+# єдиний запис у БД від діалогу — умова, яку Лев сам оголосив і відстежуватиме (LEV_WATCH); більше нічого
+assert _fetchone(db, "SELECT COUNT(*) FROM office_events WHERE event_type NOT IN ('THESIS_VERSION','LEV_WATCH')", ())[0] == 0
+# контекст діалогу (production-дефект: «а інвалідація?» після /lev BTC відповіла про LINK)
+import time as _t
+D.LAST.update(symbol=None, at=0.0)
 D._CACHE.clear()
 MD.fetch_candles = fake_fetch
 STATE["shift"] = timedelta(0)
-a1 = D.ask(db, "аналіз ETH")
-assert a1["symbol"] == "ETHUSDT"
-a2 = D.ask(db, "а інвалідація?")
-assert a2["symbol"] == "ETHUSDT" and a2["intent"] == "invalid"
+assert D.ask(db, "")["needs_symbol"] is True and "Про яку монету" in D.ask(db, "а інвалідація?")["text"], "без контексту — перепитати, не вгадувати"
+assert D.parse_followup("а інвалідація?") is None, "без попередньої відповіді уточнення не перехоплюємо"
+a1 = D.ask(db, "аналіз BTC")
+assert a1["symbol"] == "BTCUSDT"
+assert D.parse_followup("а інвалідація?") == "а інвалідація?"
+a2 = D.ask(db, D.parse_followup("а інвалідація?"))
+assert a2["symbol"] == "BTCUSDT" and a2["intent"] == "invalid" and "BTC" in a2["text"] and "LINK" not in a2["text"], a2["text"]
+assert D.parse_followup("привіт, як справи?") is None and D.parse_followup("/status") is None
+assert D.ask(db, "а по SOL що?")["symbol"] == "SOLUSDT"                      # явна інша монета — її, а не BTC
+assert D.ask(db, "а інвалідація?")["symbol"] == "SOLUSDT"                    # контекст оновився
+D.LAST["at"] = _t.time() - 3600                                               # контекст застарів → перепитуємо
+assert D.parse_followup("а інвалідація?") is None and D.ask(db, "а інвалідація?")["needs_symbol"] is True
 print("OK Lev dialog: grounded answers, NO TRADE on stale/failed data, follow-ups, no DB writes")

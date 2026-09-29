@@ -172,6 +172,7 @@ from office_trade_steer import (
 from office_rsi_heat import exhaustion_candle, rsi_from_candles
 from office_lev_verdict import lev_cycle
 import office_lev_dialog as _lev_dialog
+import office_lev_watch as _lev_watch
 from office_telegram_policy import (
     EVENT_EVENING_DEBRIEF,
     EVENT_NEWS_CRITICAL,
@@ -3389,11 +3390,13 @@ async def run() -> None:
                     )
                     return
                 lev_q = _lev_dialog.parse_command(text)
+                if lev_q is None:
+                    lev_q = _lev_dialog.parse_followup(text)   # «а інвалідація?» після відповіді Лева — про ту саму монету
                 if lev_q is not None:
                     # Лев відповідає лише з фактичного циклу на свіжих свічках і з БД (без LLM); NO TRADE — нормальна відповідь.
                     try:
                         ans = await asyncio.to_thread(_lev_dialog.ask, db_path, lev_q)
-                        await send_office(fmt_agent_line("lev", ans["text"][:3800]), stream="general")
+                        await send_office(str(ans["text"])[:3800], stream="general")
                     except Exception as exc_l:
                         print(f"[lev-dialog] error: {type(exc_l).__name__}: {exc_l}")
                         await send_office(fmt_agent_line("lev", "Не вдалося отримати аналіз: NO TRADE, доки не буде свіжих даних."), stream="tech")
@@ -7140,6 +7143,22 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(int(os.getenv("OFFICE_MARKET_ALERT_POLL_SEC", "180") or "180"))
 
     asyncio.create_task(monitor_funding_atr_alerts())
+
+    async def monitor_lev_watches() -> None:
+        """Лев відстежує умови, які сам оголосив (чекаємо → в зоні → підтверджено/скасовано/час минув/дані застаріли).
+        Події пишуться завжди; у Telegram (OFFICE-чат) — лише за OFFICE_LEV_WATCH_NOTIFY=1, по одному повідомленню на зміну."""
+        await asyncio.sleep(45)
+        while True:
+            try:
+                items = await asyncio.to_thread(_lev_watch.tick, db_path)
+                for it in items:
+                    await send_office(str(it["text"])[:3800], stream="general")
+                    print(f"[lev-watch] sent {it['symbol']} {it['event']}")
+            except Exception as exc:
+                print(f"[lev-watch][WARN] tick failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(int(os.getenv("OFFICE_LEV_WATCH_POLL_SEC", "300") or "300"))
+
+    asyncio.create_task(monitor_lev_watches())
 
     async def monitor_daily_report() -> None:
         nonlocal last_daily_report_date
