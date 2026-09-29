@@ -197,6 +197,16 @@ async function office(){
       <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
     </div>
     ${sessionHtml(ses)}
+    <h2>Запитати Лева</h2>
+    <div class="card frm" id="levbox">
+      <div class="mut">Відповідь — лише з живого аналізу Лева й журналу. «NO TRADE» — нормальна відповідь.</div>
+      <label for="levsym">Символ (порожньо = BTCUSDT)</label>
+      <input id="levsym" type="text" inputmode="text" autocomplete="off" placeholder="BTC, SOL, ETHUSDT" value="${esc(S.levsym||'')}">
+      <div class="chips" id="levq" style="margin-top:8px">
+        <button data-q="аналіз">Аналіз</button><button data-q="план">План і рівні</button><button data-q="що чекаєш">Що чекає</button>
+        <button data-q="інвалідація">Скасування</button><button data-q="що змінилось">Що змінилось</button></div>
+      <pre id="levout" class="mut" style="white-space:pre-wrap;font:inherit;font-size:13px;margin:8px 0 0" aria-live="polite"></pre>
+    </div>
     <h2>Активні сценарії</h2>
     ${live.map(scCard).join('')||'<div class="empty">Немає активних планів Лева</div>'}
     ${watch.length?`<h2>Спостереження</h2>${watch.slice(0,4).map(scCard).join('')}`:''}
@@ -207,6 +217,13 @@ async function office(){
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
+  const lq=$('levq');
+  if(lq) lq.querySelectorAll('[data-q]').forEach(b=>b.onclick=async()=>{
+    const sym=($('levsym').value||'').trim(); S.levsym=sym; const out=$('levout'); out.textContent='Лев рахує на свіжих свічках…';
+    try{ const r=await j('/api/v2/lev?q='+encodeURIComponent(b.dataset.q)+'&symbol='+encodeURIComponent(sym));
+      out.textContent=r.ok?r.text:('Лев не відповів: '+(r.reason||'помилка')+'. Це NO TRADE, доки немає даних.'); }
+    catch(e){ if(!e.stale) out.textContent='Немає зв’язку із сервером. Це NO TRADE, доки немає даних.'; }
+  });
 }
 
 const TEST_UA={SWEEP:'свіп — вийшли й повернулись',ACCEPTED:'прийняття за рівнем',NOT_TESTED:'не тестували'};
@@ -396,7 +413,7 @@ async function trades(){
   const open=rows.filter(p=>p.status==='OPEN'), closed=rows.filter(p=>p.status!=='OPEN');
   const canWrite=au&&au.write_enabled&&!d.schema_missing;
   const authBox=d.schema_missing?`<div class="card err">${esc(d.note)}</div>`:(!au.write_enabled?
-    `<div class="card err"><b>Запис вимкнено</b><div class="mut">${esc(au.hint||'')}</div></div>`:
+    `<div class="mut" style="margin-bottom:8px">Запис власних угод вимкнено на сервері — необов’язкова функція; журнал сценаріїв і аналітика працюють.</div>`:
     (!tgInit()&&au.write_key?`<div class="mut" style="margin-bottom:8px">Поза Telegram потрібен ключ запису: <button class="btn" id="setkey" style="min-height:36px;padding:4px 10px">${lsGet('ao_wkey','')?'змінити ключ':'ввести ключ'}</button></div>`:''));
   app.innerHTML=`<div class="banner">Це ваші фактичні угоди, внесені вручну. Офіс не торгує; ордери — лише ви на біржі.</div>
     ${jchips('trades')}${authBox}

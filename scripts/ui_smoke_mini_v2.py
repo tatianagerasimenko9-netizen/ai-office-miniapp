@@ -144,6 +144,12 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
             await page.wait_for_timeout(1500)
             if lwc and not await page.evaluate("!!window.LightweightCharts"):
                 problems.append(f"{name}: lightweight-charts did not load (integrity/route)")
+            await page.click("nav button[data-r=office]")
+            await page.wait_for_selector("#levq [data-q]")
+            await page.click("#levq [data-q]")
+            await page.wait_for_function("document.getElementById('levout').textContent.length > 20 && !document.getElementById('levout').textContent.includes('рахує')")
+            if "FIXTURE" not in await page.inner_text("#levout"):
+                problems.append(f"{name}: «Запитати Лева» did not render an answer: {await page.inner_text('#levout')!r}")
             for tab in ("office", "radar", "scenarios", "journal", "risk"):
                 await page.click(f"nav button[data-r={tab}]")
                 await page.wait_for_timeout(700)
