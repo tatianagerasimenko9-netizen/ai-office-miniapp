@@ -9,6 +9,7 @@ Render у сесії розробки був недоступний: усі пу
 |---|---|---|---|
 | `office_telegram_delivery` (PR #68) | нова таблиця | лише `migrate_delivery_ledger()` вручну | не видаляти під час інциденту; вимкнути `OFFICE_TG_PERSISTENT_DEDUP` |
 | `office_telegram_scenario_thread` (PR #69) | нова таблиця (та сама міграція) | там само | те саме |
+| `office_position_events` (PR #69, ручний облік угод) | нова таблиця (та сама міграція) | `scripts/migrate_release.py --apply`; записи в `trade_journal` (`setup_name='MANUAL_POSITION'`) — лише коли власниця вносить угоду | таблицю не видаляти; запис вимкнути, прибравши `OFFICE_WRITE_KEY`/`OFFICE_OWNER_TG_IDS` |
 | нові типи рядків `office_events`: `THESIS_VERSION`, `RISK_SHADOW_REVIEW`, `RISK_VETO`, `SCENARIO_EXPIRED` | лише дані, схема не змінюється | воркером | нічого відкочувати; читаються лише Mini App |
 Наявні таблиці не змінюються (`ALTER` немає). Міграції ідемпотентні (перевірено на SQLite і PostgreSQL 16.13).
 
@@ -20,6 +21,10 @@ Render у сесії розробки був недоступний: усі пу
 | `OFFICE_WATCHING_TTL_EXPIRE` | вимкнено | worker закриває WATCHING старші за 4 год | змінює статуси в БД |
 | `OFFICE_FEED_GATE` | **увімкнено** (`0` — відкат) | SEND→WAIT при застарілих/відсутніх LTF-свічках | **змінює поведінку**: менше нових сигналів при збої даних |
 | `OFFICE_LEGACY_ACTIVE_REQUIRES_LEV` | **увімкнено** (`0` — відкат) | LLM-сканер і ручний аналіз створюють ACTIVE лише за SEND Лева, інакше WATCHING | **змінює поведінку** старих шляхів |
+| `OFFICE_WRITE_KEY` | не задано | ключ (≥16 символів) для запису ручних угод з браузера поза Telegram | без нього й без `OFFICE_OWNER_TG_IDS` запис вимкнено (fail-closed) |
+| `OFFICE_OWNER_TG_IDS` (+ `OFFICE_WEBAPP_BOT_TOKEN` або `TG_BOT_TOKEN`) | не задано | Telegram-ID власниці; запис із Mini App у Telegram перевіряється за підписом initData | токен не потрапляє у відповіді/логи |
+| `OFFICE_DEFAULT_FEE_PCT` | код-дефолт | оцінка комісії, якщо власниця не вказала фактичну (у записі позначено «оцінка») | — |
+| `OFFICE_TG_POSITION_SUPPORT` | **вимкнено** | Telegram-супровід відкритих позицій (TP/SL/трейл) | окремий дозвіл власниці; за замовчуванням жодних таких повідомлень |
 | `OFFICE_MINI_PUBLIC_URL` | `https://ai-office-miniapp.onrender.com` | база для кнопки «📊 Сценарій» | — |
 Два прапорці «увімкнено» — свідоме посилення захисту (описано в PR #69); власниця вирішує, чи лишати їх такими у першому релізі.
 
@@ -28,9 +33,9 @@ Render у сесії розробки був недоступний: усі пу
 2. **Backup Postgres** (Render → Database → Backups → Create) і перевірити відновлення на окремій тимчасовій БД.
 3. Merge PR #69 → гілка PR #68 → повторити CI → merge PR #68 у `main` (лише після review і підтвердження).
 4. **Deploy web першим** (лише читає БД; нові поля JSON зворотно-сумісні зі старим worker). Перевірити `/v2`, `/api/v2/home`, `/api/v2/risk`.
-5. **Міграція**: разова команда з Render Shell web-сервісу, з тим самим `DATABASE_URL`:
-   `python3 -c "import os; from office_telegram_delivery_ledger import migrate_delivery_ledger as m; m(os.environ['DATABASE_URL'])"`.
-   Перевірити: `SELECT to_regclass('office_telegram_delivery'), to_regclass('office_telegram_scenario_thread');` — обидва не NULL.
+5. **Міграція** (адитивна, ідемпотентна; лише після backup): з Render Shell web-сервісу, з тим самим `DATABASE_URL`:
+   `python3 scripts/migrate_release.py --check` (лише читає) → `python3 scripts/migrate_release.py --apply`.
+   Створює `office_telegram_delivery`, `office_telegram_scenario_thread`, `office_position_events`; нічого не змінює й не видаляє. Повторний `--check` має показати всі три таблиці.
 6. **Deploy worker** з `OFFICE_TG_PERSISTENT_DEDUP` вимкненим. Спостерігати логи 30 хв: помилки `[risk]`, `[thesis]`, `[ttl]`, `[relay]`.
 7. Лише після відсутності помилок і окремого дозволу — `OFFICE_TG_PERSISTENT_DEDUP=1` (окремий deploy/перезапуск).
 8. Увімкнути автодеплой назад лише після стабільної доби.
