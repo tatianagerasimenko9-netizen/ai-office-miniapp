@@ -934,6 +934,8 @@ SCAN_STALE_SEC = 2 * 3600
 def radar_reasons(c: Dict[str, Any]) -> List[str]:
     """«Чому в радарі» лише зі збережених полів market_state. Не сигнал."""
     out: List[str] = []
+    if c.get("scout_reason"):   # чому скан узяв цю монету в короткий список (ще до повного аналізу)
+        out.append(f"у списку: {c['scout_reason']}")
     for key, label in (("pump", "pump-score"), ("dump", "dump-score"), ("score", "score")):
         v = _f(c.get(key))
         if v is not None and not (key == "score" and (c.get("pump") is not None or c.get("dump") is not None)):
@@ -1044,6 +1046,7 @@ def settings_payload() -> Dict[str, Any]:
             "atr_t0": 90,
             "edge": 85,
             "min_rr": MIN_RR,
+            "rr_rule": __import__("office_alert_gate").rr_rule(),
             "tp1_majors_pct": MAJORS_TP1_PCT,
             "tp1_alts_pct": ALTS_TP1_PCT,
         },

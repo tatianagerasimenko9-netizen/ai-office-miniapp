@@ -260,6 +260,45 @@ def promote_for_deep_scan(
     return (user + auto)[: max(1, int(cap))]
 
 
+def shortlist_with_reasons(
+    screen: MarketScreen,
+    *,
+    extra_user_symbols: Optional[Sequence[str]] = None,
+    active_watching: Optional[Sequence[str]] = None,
+    cap: int = DEEP_SCAN_CAP,
+) -> List[Dict[str, Any]]:
+    """Короткий список кандидатів ЗІ ЗРОЗУМІЛОЮ ПРИЧИНОЮ відбору (а не лише символи). Той самий порядок і відбір, що в `promote_for_deep_scan`.
+    Причина — що саме в даних привело монету в список: запит власниці, контекст BTC/ETH, уже в спостереженні, зміна за 24 год, обсяг.
+    Потрапляння в список — лише привід для повного аналізу Лева, не сигнал."""
+    syms = promote_for_deep_scan(screen, extra_user_symbols=extra_user_symbols, active_watching=active_watching, cap=cap)
+    by = {str(r.get("symbol")): r for r in (screen.rows or []) if isinstance(r, dict)}
+    vol_rank = {str(r.get("symbol")): i + 1 for i, r in enumerate(sorted(screen.rows or [], key=lambda r: float(r.get("volume_usdt") or 0.0), reverse=True))}
+    user = {_sym(x) for x in (extra_user_symbols or [])}
+    active = {_sym(x) for x in (active_watching or [])}
+    out: List[Dict[str, Any]] = []
+    for s in syms:
+        r = by.get(s) or {}
+        ch = _f(r.get("change_pct"))
+        vol = _f(r.get("volume_usdt"))
+        parts: List[str] = []
+        if s in user:
+            parts.append("запит власниці")
+        if s in CONTEXT_SEEDS:
+            parts.append("контекст ринку (завжди в аналізі)")
+        if s in active:
+            parts.append("вже у спостереженні")
+        if ch is not None and ch >= 5.0:
+            parts.append(f"ріст за 24 год {ch:+.1f}%".replace(".", ","))
+        elif ch is not None and ch <= -5.0:
+            parts.append(f"падіння за 24 год {ch:+.1f}%".replace(".", ","))
+        elif s in by and any(s == _sym(x.get("symbol")) for x in (screen.gainers[:8] + screen.losers[:8])) and ch is not None:
+            parts.append(f"серед найбільших рухів за 24 год ({ch:+.1f}%)".replace(".", ","))
+        if vol is not None and vol_rank.get(s, 999) <= 12:
+            parts.append(f"топ-{vol_rank[s]} за обсягом ({vol / 1e6:.0f} млн USDT)")
+        out.append({"symbol": s, "reason": "; ".join(parts) or "відібрано за ринковим оглядом", "change_pct": ch, "volume_usdt": vol})
+    return out
+
+
 def btc_context_only(screen: MarketScreen) -> Dict[str, Any]:
     btc = screen.btc or {}
     have = btc.get("change_pct") is not None or btc.get("price") is not None

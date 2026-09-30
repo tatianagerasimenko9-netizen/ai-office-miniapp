@@ -1858,6 +1858,7 @@ def fetch_funding_rate(symbol: str) -> Dict[str, Any]:
             "funding_rate_pct": funding_rate_pct,
             "mark_price": float(data.get("markPrice") or 0.0),
             "index_price": float(data.get("indexPrice") or 0.0),
+            "time_ms": int(data.get("time") or 0) or None,   # час біржі на момент розрахунку (для перевірки свіжості)
         }
     except Exception:
         return {}

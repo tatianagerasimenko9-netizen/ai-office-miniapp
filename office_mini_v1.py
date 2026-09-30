@@ -299,6 +299,7 @@ def scanner_payload() -> Dict[str, Any]:
                 "decision": r[3],
                 "quality": r[4],
                 "as_of": r[5],
+                "scout_reason": sig.get("scout_reason"),
             }
         )
     cands.sort(key=lambda x: float(x.get("score") or 0), reverse=True)

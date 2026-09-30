@@ -15,6 +15,9 @@ PRICE_MOVE_PCT = 0.3          # зміна ціни за ~3 год, % — «є �
 LS_CROWD_HI = 2.0             # співвідношення лонг/шорт-акаунтів
 LS_CROWD_LO = 0.6
 CACHE_SEC = 120
+# Свіжість обов'язкова: показник старший за ліміт НЕ використовується (пишемо «дані застарілі»). Ліміти — з природи джерела:
+# фандинг і поточна ціна оновлюються постійно (10 хв), а OI-історія й співвідношення покупців/продавців — погодинні точки (2 год).
+MAX_AGE_SEC = {"фандинг": 600.0, "відкритий інтерес": 7200.0, "співвідношення покупців і продавців": 7200.0}
 NOT_CONNECTED = ["стакан і спред", "карта ліквідацій", "новини й календар подій"]
 _CACHE: Dict[str, tuple] = {}
 
@@ -114,6 +117,39 @@ def context_for(symbol: str, direction: str) -> Dict[str, Any]:
     chg = None
     if len(h1) >= 4 and _f(h1[-4].get("close")) and _f(h1[-1].get("close")):
         chg = (float(h1[-1]["close"]) - float(h1[-4]["close"])) / float(h1[-4]["close"]) * 100.0
-    return analyse(direction, funding_pct=_f(fr.get("funding_rate_pct")) if isinstance(fr, dict) else None,
-                   oi_hist=oi.get("history") if isinstance(oi, dict) and isinstance(oi.get("history"), list) else [],
-                   price_change_pct=chg, ls_ratio=_f(ls.get("current_ratio")) if isinstance(ls, dict) else None)
+    now = time.time()
+    fund_ts = (float(fr["time_ms"]) / 1000.0) if isinstance(fr, dict) and _f(fr.get("time_ms")) else None
+    oi_hist = oi.get("history") if isinstance(oi, dict) and isinstance(oi.get("history"), list) else []
+    ls_hist = ls.get("history") if isinstance(ls, dict) and isinstance(ls.get("history"), list) else []
+    fresh = [_freshness("фандинг", fund_ts, now, present=isinstance(fr, dict) and _f(fr.get("funding_rate_pct")) is not None),
+             _freshness("відкритий інтерес", _hist_ts(oi_hist), now, present=len(oi_hist) >= 2),
+             _freshness("співвідношення покупців і продавців", _hist_ts(ls_hist), now, present=isinstance(ls, dict) and _f(ls.get("current_ratio")) is not None)]
+    ok = {f["name"]: f["fresh"] for f in fresh}
+    res = analyse(direction,
+                  funding_pct=_f(fr.get("funding_rate_pct")) if (isinstance(fr, dict) and ok["фандинг"]) else None,
+                  oi_hist=oi_hist if ok["відкритий інтерес"] else [],
+                  price_change_pct=chg,
+                  ls_ratio=_f(ls.get("current_ratio")) if (isinstance(ls, dict) and ok["співвідношення покупців і продавців"]) else None)
+    why = {f["name"]: ("дані застарілі" if f["age_sec"] is not None else "у даних немає часу") for f in fresh if f["present"] and not f["fresh"]}
+    res["unchecked"] = [(f"{u} — {why[u]}" if u in why else u) for u in res["unchecked"]]
+    res["freshness"] = fresh
+    return res
+
+
+def _hist_ts(hist: List[Dict[str, Any]]) -> Optional[float]:
+    """Час найновішої точки історії (секунди) або None."""
+    from datetime import datetime
+
+    for item in reversed(hist or []):
+        try:
+            return datetime.fromisoformat(str(item.get("timestamp") or "").replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _freshness(name: str, ts: Optional[float], now: float, present: bool) -> Dict[str, Any]:
+    """{'name','present','as_of','age_sec','fresh'}; немає мітки часу = невідомо = НЕ свіже (не довіряємо)."""
+    age = (now - ts) if ts else None
+    return {"name": name, "present": bool(present), "as_of": ts, "age_sec": round(age, 1) if age is not None else None,
+            "fresh": bool(present and age is not None and 0 <= age <= MAX_AGE_SEC[name] + 1.0)}

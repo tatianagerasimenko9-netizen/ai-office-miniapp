@@ -26,4 +26,47 @@ assert "стакан і спред" in r["not_connected"] and "карта лік
 C._raw = lambda s: (_ for _ in ()).throw(RuntimeError("net"))
 r = C.context_for("BTCUSDT", "LONG")
 assert r["notes"] == [] and len(r["unchecked"]) == 3
+# --- свіжість обов'язкова: застаріле або без часу НЕ використовується ---
+import time as _t  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+NOW = _t.time()
+
+
+def iso(sec_ago):
+    return (datetime.fromtimestamp(NOW - sec_ago, tz=timezone.utc)).isoformat()
+
+
+def raw(fund_age, oi_age, ls_age, fund_has_time=True):
+    return {"funding": {"funding_rate_pct": 0.08, "time_ms": int((NOW - fund_age) * 1000) if fund_has_time else None},
+            "oi": {"history": [{"oi": 100, "timestamp": iso(oi_age + 7200)}, {"oi": 95, "timestamp": iso(oi_age)}]},
+            "ls": {"current_ratio": 2.4, "history": [{"ratio": 2.0, "timestamp": iso(ls_age + 3600)}, {"ratio": 2.4, "timestamp": iso(ls_age)}]},
+            "h1": [{"close": 100}, {"close": 100.2}, {"close": 100.5}, {"close": 101.0}]}
+
+
+C._raw = lambda s: raw(60, 1800, 1800)
+r = C.context_for("BTCUSDT", "LONG")
+check_fresh = {f["name"]: f["fresh"] for f in r["freshness"]}
+assert all(check_fresh.values()) and len(r["notes"]) == 3 and r["unchecked"] == [], r
+assert all(f["as_of"] and f["age_sec"] is not None for f in r["freshness"])
+
+C._raw = lambda s: raw(3600, 1800, 1800)                      # фандинг годину тому → не використовуємо
+r = C.context_for("BTCUSDT", "LONG")
+assert "фандинг — дані застарілі" in r["unchecked"] and not any("Фандинг" in n["text"] for n in r["notes"]) and len(r["notes"]) == 2, r
+
+C._raw = lambda s: raw(60, 5 * 3600, 1800)                    # OI-історія 5 год тому → не використовуємо
+r = C.context_for("BTCUSDT", "LONG")
+assert "відкритий інтерес — дані застарілі" in r["unchecked"] and not any("інтерес" in n["text"] for n in r["notes"]), r
+
+C._raw = lambda s: raw(60, 1800, 3 * 3600)                    # співвідношення 3 год тому → не використовуємо
+r = C.context_for("BTCUSDT", "LONG")
+assert "співвідношення покупців і продавців — дані застарілі" in r["unchecked"] and not any("натовп у купівлі" in n["text"] for n in r["notes"]), r
+
+C._raw = lambda s: raw(60, 1800, 1800, fund_has_time=False)   # без мітки часу → невідомо = не довіряємо
+r = C.context_for("BTCUSDT", "LONG")
+assert "фандинг — у даних немає часу" in r["unchecked"] and not any("Фандинг" in n["text"] for n in r["notes"]), r
+C._raw = lambda s: {}
+r = C.context_for("BTCUSDT", "LONG")
+assert len(r["unchecked"]) == 3 and all("застарілі" not in u for u in r["unchecked"]), r   # немає даних зовсім — не «застарілі»
+print("OK market context freshness: stale/unknown-time data is never used and is labelled honestly")
 print("OK market context: rules tied to numbers, direction-aware, unchecked stays unchecked, not-connected sources listed")

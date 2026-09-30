@@ -143,6 +143,7 @@ from office_market_scout import (
     btc_context_only,
     promote_for_deep_scan,
     screen_futures_market,
+    shortlist_with_reasons,
 )
 from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
@@ -5317,7 +5318,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     _h1x = fetch_candles(symbol, "1h", 60)
                                 act_c = _lc.confirmed_plan_action(ts_updated=row.get("ts_updated"), tf=scenario_meta.get("timeframe") or "H1", sl=sl,
                                                                   direction=direction, candles_h1=_h1x, has_position=_pos_open,
-                                                                  tp1=tp1, price=((_h1x[-1] or {}).get("close") if isinstance(_h1x, list) and _h1x else None))
+                                                                  tp1=tp1, tp2=row.get("tp2"), price=((_h1x[-1] or {}).get("close") if isinstance(_h1x, list) and _h1x else None))
                                 if act_c:
                                     signal_update(db_path, signal_id=signal_id, status=act_c["status"], outcome=act_c["outcome"], analysis_note=act_c["note"])
                                     print(f"[signals] {symbol} підтверджений план знято без Telegram: {act_c['status']} ({act_c.get('reason')})")
@@ -6491,11 +6492,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                             watching_now.append(str(_aw.get("symbol")))
                 except Exception:
                     watching_now = []
-                deep_syms = promote_for_deep_scan(
-                    screen,
-                    extra_user_symbols=extra_req,
-                    active_watching=watching_now,
-                )
+                _short = shortlist_with_reasons(screen, extra_user_symbols=extra_req, active_watching=watching_now)
+                deep_syms = [x["symbol"] for x in _short]
+                _why = {x["symbol"]: x["reason"] for x in _short}
+                print("[scout] shortlist: " + "; ".join(f"{x['symbol']} ({x['reason']})" for x in _short[:30]))
                 btc_ctx = btc_context_only(screen)
                 print(
                     f"[scout] screened={screen.screened} status={screen.data_status} "
@@ -6525,6 +6525,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 rsi_h4=rsi4,
                                 decision="WATCH",
                                 data_quality="OK" if rsi1 is not None else "UNAVAILABLE",
+                                scout_reason=_why.get(rsym),
                             )
                         except Exception as exc_ms:
                             print(f"[scout] market_state {rsym}: {type(exc_ms).__name__}")
@@ -6838,7 +6839,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             tgt = {}
                         try:
                             plan_bad = _lev_watch.check_plan(sym_f, str(st.get("direction") or ""),
-                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1")},
+                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": st.get("tp2")},   # лише ЗАПИСАНИЙ TP2 сценарію (не структурний)
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
@@ -6861,7 +6862,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 except Exception as exc_rj:
                                     print(f"[track] record rejected failed: {exc_rj}")
                             continue
-                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"))
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), st.get("tp2"))
                         if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
                             print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
                             continue
@@ -7275,31 +7276,8 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_lev_watches())
 
-    if os.getenv("OFFICE_REPLAY_ON_START", "").strip() == "1":   # одноразовий replay контрольних кейсів на реальних свічках: лише лог [replay], Telegram не задіяно
-        async def _replay_once() -> None:
-            await asyncio.sleep(120)
-            try:
-                import office_replay
-
-                await asyncio.to_thread(office_replay.run_all)
-                print("[replay] готово; вимкни OFFICE_REPLAY_ON_START, щоб не повторювати при кожному старті")
-            except Exception as exc_rp:  # noqa: BLE001
-                print(f"[replay] помилка: {type(exc_rp).__name__}: {exc_rp}")
-
-        asyncio.create_task(_replay_once())
-
-    if os.getenv("OFFICE_RR_ANALYSIS_ON_START", "").strip() == "1":   # одноразовий аналіз правила RR на історії (лише читання, лог [rr]); Telegram не задіяно
-        async def _rr_once() -> None:
-            await asyncio.sleep(150)
-            try:
-                import office_rr_analysis
-
-                await asyncio.to_thread(office_rr_analysis.run, db_path)
-                print("[rr] готово; вимкни OFFICE_RR_ANALYSIS_ON_START")
-            except Exception as exc_rr:  # noqa: BLE001
-                print(f"[rr] помилка: {type(exc_rr).__name__}: {exc_rr}")
-
-        asyncio.create_task(_rr_once())
+    # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
+    # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.
 
     async def monitor_signal_tracks() -> None:
         """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
