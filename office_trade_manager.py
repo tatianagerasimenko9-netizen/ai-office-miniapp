@@ -140,6 +140,17 @@ def advise(pos: Dict[str, Any], *, h1: Any, m15: Any, h4: Any = None, sent: Opti
                 if r["_t"] + H1 > t_run and ((long_ and float(r["close"]) < stop_lvl) or ((not long_) and float(r["close"]) > stop_lvl)):
                     add("END_STRUCTURE", f"🏁 {T} · злам структури H1 · закрий залишок")
                     break
+        # старший ТФ: закриття H4 за останнім підтвердженим H4-свінгом (HL/LH) після початку runner — теж кінець руху
+        h4c = _closed(h4, 4 * H1, now_ts)
+        if len(h4c) >= 6:
+            sw4 = swings(h4c, long_)
+            for r in h4c:
+                if r["_t"] + 4 * H1 <= t_run:
+                    continue
+                prev_sw = [x for x in sw4 if x["t"] + 2 * 4 * H1 <= r["_t"]]   # свінг підтверджений (2 свічки після нього) ДО цієї свічки
+                if prev_sw and ((long_ and float(r["close"]) < prev_sw[-1]["price"]) or ((not long_) and float(r["close"]) > prev_sw[-1]["price"])):
+                    add("END_STRUCTURE_H4", f"🏁 {T} · злам структури H4 · закрий залишок")
+                    break
     if stop_hit:
         add("STOP_PRICE", f"🔴 {T} · ціна досягла стопа")
     # добір: один раз, після TP1, ретест пробитого H1-рівня з підтвердженням M15

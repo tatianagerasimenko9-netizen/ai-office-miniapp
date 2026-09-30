@@ -1,0 +1,24 @@
+name: Replay control cases (real candles, read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      symbol: {description: "symbol", default: "AKEUSDT"}
+      side: {description: "LONG/SHORT", default: "LONG"}
+      entry: {description: "entry", default: "0.030259"}
+      sl: {description: "stop", default: "0.029568"}
+      tp1: {description: "tp1", default: "0.031621"}
+      tp2: {description: "tp2", default: "0.032086"}
+      start: {description: "start UTC ISO", default: "2026-09-30T00:00:00Z"}
+      source: {description: "prod|vision", default: "prod"}
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: python -m pip install -r requirements.txt
+      - name: Replay trade management on real candles
+        run: python scripts/replay_trade_manager.py --symbol "${{ inputs.symbol }}" --side "${{ inputs.side }}" --entry "${{ inputs.entry }}" --sl "${{ inputs.sl }}" --tp1 "${{ inputs.tp1 }}" --tp2 "${{ inputs.tp2 }}" --start "${{ inputs.start }}" --source "${{ inputs.source }}"
