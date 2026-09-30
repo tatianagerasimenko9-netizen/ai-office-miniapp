@@ -16,8 +16,9 @@ from office_confluence import follow_setup  # noqa: E402
 d = lambda s: datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp()  # noqa: E731
 hhmm = lambda x: datetime.fromtimestamp(x, tz=timezone.utc).strftime("%d %H:%M")  # noqa: E731
 # межі: M15 — до кінця НАСТУПНОЇ сесії; Азія переживає Лондон; H1 24, H4 48, D1 5 діб
-assert hhmm(TT.deadline(d("2026-09-30T00:30:00"), "M15")) == "30 16:00"      # створено в Азії → живе до кінця Лондона
+assert hhmm(TT.deadline(d("2026-09-30T00:30:00"), "M15")) == "30 15:00"      # створено в Азії → живе до кінця Лондона (літній час: 16:00 BST = 15:00 UTC)
 assert hhmm(TT.deadline(d("2026-09-29T22:00:00"), "M15")) == "30 08:00"      # між сесіями → до кінця Азії
+assert hhmm(TT.deadline(d("2026-12-10T00:30:00"), "M15")) == "10 16:00"      # взимку Лондон = UTC: 16:00
 assert TT.deadline(100.0, "H1") == 100.0 + 24 * 3600 and TT.deadline(100.0, "H4") == 100.0 + 48 * 3600 and TT.deadline(100.0, "D1") == 100.0 + 5 * 86400
 # AKE: створений о 22:00 UTC (H1) о 03:17 (5 год) НЕ знімається за часом
 assert not TT.is_time_expired(d("2026-09-29T22:00:00"), "H1", d("2026-09-30T03:17:00"))
