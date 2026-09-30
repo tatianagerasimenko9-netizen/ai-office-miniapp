@@ -54,6 +54,8 @@ check("жодна порада не повторилась", len(codes) == len(s
 check("є порада по TP1", any(c.startswith("TP1") for c in codes), str(codes))
 check("MFE додатний, MAE не від'ємний", res["mfe_pct"] > 0 and res["mae_pct"] >= 0)
 
+mid = rp.replay({**case, "start": "2026-09-29T01:07:00Z"}, data)   # старт усередині свічки 01:00–01:15: вона входить (вхід 100 торкається її)
+check("свічка, у якій відкрито угоду (старт усередині неї), враховується", mid["status"] == "FILLED" and mid["filled_at"].startswith("2026-09-29T01:15"), str(mid)[:200])
 nf = rp.replay({**case, "entry": 50.0, "sl": 48.0, "tp1": 55.0}, data)
 check("ціна не торкнулась входу → NOT_FILLED (а не вигадана угода)", nf["status"] == "NOT_FILLED")
 nd = rp.replay(case, {"15m": []})
@@ -71,6 +73,11 @@ check("вердикт ПРОЙДЕНО для чистої хронології"
 bad = {"ok": True, "status": "FILLED", "timeline": [{"code": "TP1", "text": "Угоду закрито."}, {"code": "TP1", "text": "x"}]}
 vb = rp.verdict("AKE", bad, None)
 check("вердикт НЕ пройдено: «закрито» без підтвердження і дубль поради", not vb["passed"] and sum(1 for c in vb["checks"] if not c["ok"]) == 2, str(vb))
+vnf = rp.verdict("AKE", {"ok": True, "status": "NOT_FILLED", "timeline": []}, None)
+check("NOT_FILLED для кейсу ведення НЕ вважається пройденим (нічого не перевірено)", vnf["passed"] is False and any(c["name"].startswith("вхід заповнено") and not c["ok"] for c in vnf["checks"]), str(vnf))
+vtp = rp.verdict("AKE", {"ok": True, "status": "FILLED", "timeline": [], "mfe_pct": 9.0}, None)
+check("ціна дійшла до цілі 1, а поради нема → не пройдено", vtp["passed"] is False, str(vtp))
+check("LSK пройдено лише за шлюзом навіть без заповненого входу", rp.verdict("LSK", {"ok": True, "status": "NOT_FILLED", "timeline": []}, "відхилено")["passed"] is True)
 check("вердикт LSK вимагає відхилення плану", rp.verdict("LSK", res, None)["passed"] is False and rp.verdict("LSK", res, "відхилено")["passed"] is True)
 
 # повний прогін кейсів на підставних свічках + звіт
