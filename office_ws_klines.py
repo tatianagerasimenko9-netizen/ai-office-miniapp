@@ -27,7 +27,8 @@ _MAX_BARS = 1500              # ліміт історії Binance за один 
 _LOCK = threading.RLock()
 _STORE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _STATE: Dict[str, Any] = {"connected": False, "connected_at": 0.0, "last_msg": 0.0, "connects": 0, "disconnects": 0,
-                          "msgs": 0, "hits": 0, "misses": 0, "seeds": 0, "errors": 0, "last_error": None, "sub_errors": 0}
+                          "msgs": 0, "hits": 0, "misses": 0, "seeds": 0, "errors": 0, "last_error": None, "sub_errors": 0,
+                          "events": 0, "last_event": 0.0, "watchdog": 0, "base_idx": 0, "session_events": 0}
 _THREAD: Optional[threading.Thread] = None
 _HEARTBEAT = ("BTCUSDT", "1m")   # постійний потік: щохвилини десятки повідомлень — за ним бачимо, що з'єднання живе
 _INFLIGHT: Dict[int, List[Tuple[str, str]]] = {}
@@ -47,8 +48,30 @@ def _max_streams() -> int:
         return 200
 
 
+_SILENCE_SEC = 20.0   # BTCUSDT@kline_1m шле події кілька разів на секунду: 20 с тиші = потік мертвий (а не «тихий ринок») → перепідключення
+
+
+def _bases() -> List[str]:
+    """Адреси підключення за порядком спроб. Основна — OFFICE_WS_BASE; якщо сесія не дала жодної події, пробуємо наступну."""
+    first = os.getenv("OFFICE_WS_BASE", "wss://fstream.binance.com/stream").strip()
+    extra = [u.strip() for u in os.getenv("OFFICE_WS_BASE_ALT", "wss://fstream.binance.com/market/stream").split(",") if u.strip()]
+    out = [first]
+    for u in extra:
+        if u not in out:
+            out.append(u)
+    return out
+
+
 def _base_url() -> str:
-    return os.getenv("OFFICE_WS_BASE", "wss://fstream.binance.com/stream").strip()
+    b = _bases()
+    return b[_STATE["base_idx"] % len(b)]
+
+
+def _log(msg: str) -> None:
+    try:
+        print(f"[ws-klines] {msg}", flush=True)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _stream(sym: str, tf: str) -> str:
@@ -283,6 +306,21 @@ async def _sender(ws: Any) -> None:
         await asyncio.sleep(0.5)
 
 
+async def _watchdog(ws: Any) -> None:
+    """Потік формально живий, але подій нема (а BTC 1m мав би їх сипати) → закриваємо, _run перепідключить."""
+    while True:
+        await asyncio.sleep(3.0)
+        now = time.time()
+        quiet = now - max(_STATE["last_event"], _STATE["connected_at"])
+        if quiet > _SILENCE_SEC:
+            with _LOCK:
+                _STATE["watchdog"] += 1
+                _STATE["last_error"] = f"тиша {quiet:.0f} с → перепідключення"
+            _log(f"тиша {quiet:.0f} с без подій — перепідключення")
+            await ws.close()
+            return
+
+
 async def _session() -> None:
     import aiohttp
 
@@ -297,7 +335,10 @@ async def _session() -> None:
                 _STORE.setdefault(_HEARTBEAT, _new_entry(now))
                 hb = _STORE[_HEARTBEAT]
                 hb.update(state="acked", acked_at=now)   # він у самій адресі підключення
+            _STATE["session_events"] = 0
+            _log(f"підключено {url.split('?')[0]}")
             sender = asyncio.ensure_future(_sender(ws))
+            dog = asyncio.ensure_future(_watchdog(ws))
             try:
                 async for m in ws:
                     if m.type == aiohttp.WSMsgType.TEXT:
@@ -312,12 +353,21 @@ async def _session() -> None:
                             _on_reply(data)
                             continue
                         ev = _parse_event(data)
+                        if ev is None and _STATE.get("other_logged", 0) < 5:   # незвичайні повідомлення сервера (діагностика)
+                            _STATE["other_logged"] = _STATE.get("other_logged", 0) + 1
+                            _log(f"повідомлення не kline: {str(m.data)[:200]}")
                         if ev:
+                            with _LOCK:
+                                _STATE["events"] += 1
+                                _STATE["session_events"] += 1
+                                _STATE["last_event"] = time.time()
                             _apply(*ev)
                     elif m.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.ERROR):
                         break
             finally:
                 sender.cancel()
+                dog.cancel()
+                _log(f"сесію завершено: події={_STATE['session_events']}, код={ws.close_code}")
 
 
 def _thread_main() -> None:
@@ -337,6 +387,9 @@ def _thread_main() -> None:
                     _STATE["errors"] += 1
                     _STATE["last_error"] = f"{type(exc).__name__}: {exc}"[:200]
             _on_disconnect()
+            if _STATE["session_events"] == 0:   # сесія не дала жодної події — пробуємо іншу адресу
+                _STATE["base_idx"] += 1
+                _log(f"сесія без подій, наступна адреса: {_base_url()}")
             await asyncio.sleep(backoff)
             backoff = 1.0 if time.time() - t0 > 60.0 else min(backoff * 2, 120.0)   # стабільна сесія → швидкий перепідйом; збої → подвоєння
 
@@ -353,7 +406,8 @@ def stats() -> Dict[str, Any]:
             by["acked"] += e["state"] == "acked"
             by["seeded"] += bool(e["seeded"])
             by["bad"] += e["state"] == "bad"
-        return {"enabled": enabled(), **{k: _STATE[k] for k in ("connected", "connects", "disconnects", "msgs", "hits", "misses", "seeds", "errors", "sub_errors", "last_error")},
+        return {"enabled": enabled(), **{k: _STATE[k] for k in ("connected", "connects", "disconnects", "msgs", "events", "hits", "misses", "seeds", "errors", "sub_errors", "watchdog", "last_error")},
+                "base": _base_url(), "event_age": round(time.time() - _STATE["last_event"], 1) if _STATE["last_event"] else None,
                 "streams": len(_STORE), **by, "silent_sec": round(time.time() - _STATE["last_msg"], 1) if _STATE["last_msg"] else None}
 
 
@@ -362,4 +416,4 @@ def reset_for_tests() -> None:
         _STORE.clear()
         _INFLIGHT.clear()
         _STATE.update(connected=False, connected_at=0.0, last_msg=0.0, connects=0, disconnects=0, msgs=0, hits=0, misses=0,
-                      seeds=0, errors=0, last_error=None, sub_errors=0)
+                      seeds=0, errors=0, last_error=None, sub_errors=0, events=0, last_event=0.0, watchdog=0, base_idx=0, session_events=0, other_logged=0)
