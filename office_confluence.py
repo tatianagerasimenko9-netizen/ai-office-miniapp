@@ -42,6 +42,9 @@ CONFIRM_UA = {
     "double_bottom": "подвійне дно",
     "triple_top": "потрійна вершина",
     "triple_bottom": "потрійне дно",
+    "head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "висхідний трикутник",
+    "descending_triangle": "низхідний трикутник", "symmetrical_triangle": "симетричний трикутник", "rectangle": "прямокутник",
+    "rising_wedge": "висхідний клин", "falling_wedge": "спадний клин", "flag": "прапор", "pennant": "вимпел",
     "sfp": "SFP",
     "engulf": "поглинання",
     "bos": "BOS",
@@ -411,6 +414,14 @@ def detect_ltf_confirms(
         if pat and pat["confirmed"]:
             hits.append(f"{name}_{'top' if side == 'SHORT' else 'bottom'}")
 
+    # Фігури Булковскі (office_bulkowski): лише підтверджені закриттям за межею, і лише якщо ціна за останні 12 свічок торкалась зони
+    from office_bulkowski import confirmed_for
+
+    if any(float(r["low"]) <= hi and float(r["high"]) >= lo for r in rows[-12:]):
+        for pat in confirmed_for(candles_ltf, side, now_ts=now_ts):
+            if pat["kind"] not in hits:
+                hits.append(pat["kind"])
+
     # Ціна має торкнутись зони тінню.
     touched = float(last["low"]) <= hi and float(last["high"]) >= lo
     if not touched:
@@ -418,7 +429,9 @@ def detect_ltf_confirms(
         prev = rows[-2]
         touched = float(prev["low"]) <= hi and float(prev["high"]) >= lo
     if not touched:
-        return [h for h in hits if h in ("triple_top", "triple_bottom", "double_top", "double_bottom")]
+        from office_bulkowski import KINDS_IMPLEMENTED as _BK
+
+        return [h for h in hits if h in ("triple_top", "triple_bottom", "double_top", "double_bottom") or h in _BK]
 
     highs, lows = _swings(rows)
     # SFP: тінь за зону, закриття всередині / назад у зону (Turtle Soup).
