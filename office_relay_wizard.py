@@ -5301,35 +5301,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                             created_dt = now_utc
 
                         if status == "CONFIRMED":
-                            # Повторна зона після підтвердження — не новий вхід. Але план уже надіслано власниці: якщо до входу
-                            # годинна свічка закрилась за рівнем скасування — це подія надісланого сигналу, повідомляємо один раз.
+                            # План уже надіслано, але угоду власниця не позначила відкритою: закінчення часу дії й скасування за закриттям H1
+                            # — внутрішній стан (БД/Mini App), у Telegram НЕ шлемо. Якщо угоду позначено відкритою — її веде супровід позиції.
                             try:
                                 sl_c = float(sl) if sl is not None else None
                                 _tf_c = str(scenario_meta.get("timeframe") or "H1")
                                 _conf_ts = _lc._ts(row.get("ts_updated")) or 0.0
-                                if _conf_ts and time.time() > _lc.valid_until_ts(_conf_ts, _tf_c) and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
+                                _pos_open = bool(get_explicit_open_position(db_path, symbol, direction).get("ok"))
+                                if _conf_ts and not _pos_open and time.time() > _lc.valid_until_ts(_conf_ts, _tf_c):
                                     signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED",
                                                   analysis_note="EXPIRED after confirm: plan validity window passed without entry")
-                                    await send_proactive(
-                                        EVENT_TRADE_UPDATE, _msgs.expired_plan_card(symbol=symbol, direction=direction),
-                                        stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
-                                        kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="EXPIRED",
-                                    )
                                     continue
-                                if sl_c is not None and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
+                                if sl_c is not None and not _pos_open:
                                     _h1x = fetch_candles(symbol, "1h", 8)
                                     if _lc.closed_h1_beyond(_h1x, side=direction, level=sl_c,
                                                             since_ts=_lc._ts(row.get("ts_updated")) or 0.0, now_ts=time.time()):
                                         signal_update(db_path, signal_id=signal_id, status="CANCELLED", outcome="CANCELLED",
                                                       analysis_note=f"CANCELLED after confirm: H1 close beyond {sl_c}")
-                                        from office_confluence import format_cancel_card as _fcc
-
-                                        await send_proactive(
-                                            EVENT_TRADE_UPDATE,
-                                            _fcc(symbol=symbol, direction=direction, reason=_lc.cancel_reason_h1(direction, sl_c, symbol) + ". Якщо ти вже в угоді — перевір свій стоп"),
-                                            stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
-                                            kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="CANCELLED",
-                                        )
                             except Exception as exc_cc:
                                 print(f"[signals] confirmed-cancel check {symbol}: {type(exc_cc).__name__}: {exc_cc}")
                             continue
@@ -6846,19 +6834,38 @@ EV позитивне: {prob.get('ev_positive', '')}
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
-                        if plan_bad:  # умови збіглися, але плану для входу немає: це внутрішній стан аналізу, у Telegram не шлемо
+                        from office_alert_gate import max_entry_price
+                        from office_position_size import plan_position_size
+                        import office_signal_track as _trk
+
+                        _dir_c = str(st.get("direction") or "")
+                        _tf_c2 = str(st.get("timeframe") or "H1")
+                        _now_c = time.time()
+                        if plan_bad:  # умови збіглися, але плану для входу немає: внутрішній стан, у Telegram не шлемо; результат відстежуємо мовчки
                             if okey not in _CONFIRM_REJECT_LOGGED:
                                 _CONFIRM_REJECT_LOGGED.add(okey)
                                 print(f"[confluence] confirm без готового плану {key}: {plan_bad} — мовчу, стан лише в Mini App")
+                                try:
+                                    _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
+                                                     tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2", {}) and (tgt or {}).get("tp2", {}).get("price"),
+                                                     tp3=None, max_entry=None, confirmed_ts=_now_c,
+                                                     valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2), rejected=True, reason=str(plan_bad)[:200])
+                                except Exception as exc_rj:
+                                    print(f"[track] record rejected failed: {exc_rj}")
                             continue
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"))
+                        if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
+                            print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
+                            continue
+                        _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
-                            _msgs.confirm_card(
-                                symbol=sym_f, direction=str(st.get("direction") or ""), entry=plan_px, sl=st.get("sl"),
-                                tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), cancel=st.get("sl"),
-                                why=(_msgs.plain_confirms(list(fu.get("confirms") or [])) or str(fu.get("reason") or "")),
-                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(time.time(), st.get("timeframe"))),
-                                bad=plan_bad),
+                            _msgs.ready_signal(
+                                symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
+                                tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), max_entry=_max_e,
+                                size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
+                                risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
+                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(_now_c, _tf_c2))),
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
@@ -6870,6 +6877,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                             continue
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
+                        try:  # мовчазне відстеження кожного «Плану готовий» для статистики (не залежить від кнопки «Я відкрила угоду»)
+                            _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
+                                             tp1=st.get("tp1"), tp2=((tgt or {}).get("tp2") or {}).get("price"), tp3=((tgt or {}).get("tp3") or {}).get("price"),
+                                             max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2),
+                                             rejected=False, confirm_msg_id=confirm_msg_id)
+                        except Exception as exc_tr:
+                            print(f"[track] record plan failed: {exc_tr}")
                         try:
                             from office_scenario_memory import apply_confirmed_status
 
@@ -6889,22 +6903,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                         live_drop(key)
                         print(f"[confluence] confirmed {key}")
                     elif act == "cancel":
-                        from office_scenario_lifecycle import db_status, is_announced
-
-                        st_db = db_status(db_path, str(st.get("signal_id") or key))
-                        if is_announced(st_db):  # повідомляємо лише про скасування того, що власниця бачила як картку
-                            await send_proactive(
-                                EVENT_TRADE_UPDATE,
-                                _msgs.cancel_card(symbol=sym_f, direction=str(st.get("direction") or ""),
-                                                  reason=str(fu.get("reason") or ""), level=st.get("sl")),
-                                symbol=sym_f,
-                                kind="CANCEL_BEFORE_ENTRY",
-                                intent="ANALYTICAL",
-                                canonical_id=str(st.get("scenario_id") or key),
-                                scenario_event="CANCELLED",
-                            )
-                        else:
-                            print(f"[confluence] cancel silent {key}: картки не було (статус {st_db})")
+                        # Скасування внутрішнього сценарію (до готового плану) — не подія для Telegram: лише БД/Mini App.
+                        print(f"[confluence] cancel {key}: {fu.get('reason')} — без Telegram")
                         ckey = str(st.get("scenario_id") or key)
                         apply_setup_event(ckey, "CANCELLED")
                         try:
