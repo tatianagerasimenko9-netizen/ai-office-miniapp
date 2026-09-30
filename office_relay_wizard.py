@@ -7309,6 +7309,18 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(_launch_once())
 
+    async def _pine_parity_once() -> None:   # одноразова звірка Pine-еталон ↔ продакшн на реальних свічках (архів Binance); результат — у БД (LAUNCH_DIAG, pine_parity)
+        await asyncio.sleep(420)
+        try:
+            import office_pine_parity
+
+            if await asyncio.to_thread(office_pine_parity.run_once, db_path):
+                print("[pine-parity] виконано й записано в БД (LAUNCH_DIAG)")
+        except Exception as exc_pp:  # noqa: BLE001
+            print(f"[pine-parity] помилка: {type(exc_pp).__name__}: {exc_pp}")
+
+    asyncio.create_task(_pine_parity_once())
+
     # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
     # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.
 
