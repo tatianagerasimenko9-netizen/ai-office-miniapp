@@ -133,7 +133,7 @@ try:
     t0 = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
     w = W.register(DB, symbol="BTCUSDT", direction="LONG", zone_lo=83066, zone_hi=83901, invalidation=82965, now=t0)
     assert w and W.register(DB, symbol="BTCUSDT", direction="LONG", zone_lo=83066, zone_hi=83901, invalidation=82965, now=t0)["watch_id"] == w["watch_id"]
-    late = t0 + timedelta(hours=13)
+    late = t0 + timedelta(hours=25)
     cs = [{"ts": (late - timedelta(minutes=15 * (8 - i))).isoformat(), "open": 84200, "close": 84200, "low": 84200, "high": 84200} for i in range(8)]
     fetch = lambda sym, iv, n=100: cs  # noqa: E731
     out = W.tick(DB, now=late, fetch=fetch, cycle_fn=lambda d, s: {}, send_enabled=True)

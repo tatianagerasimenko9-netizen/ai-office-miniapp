@@ -5314,12 +5314,18 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _pos_open = bool(get_explicit_open_position(db_path, symbol, direction).get("ok"))
                                 _h1x = None
                                 if not _pos_open and sl is not None:
-                                    _h1x = fetch_candles(symbol, "1h", 8)
+                                    _h1x = fetch_candles(symbol, "1h", 60)
                                 act_c = _lc.confirmed_plan_action(ts_updated=row.get("ts_updated"), tf=scenario_meta.get("timeframe") or "H1", sl=sl,
-                                                                  direction=direction, candles_h1=_h1x, has_position=_pos_open)
+                                                                  direction=direction, candles_h1=_h1x, has_position=_pos_open,
+                                                                  tp1=tp1, price=((_h1x[-1] or {}).get("close") if isinstance(_h1x, list) and _h1x else None))
                                 if act_c:
                                     signal_update(db_path, signal_id=signal_id, status=act_c["status"], outcome=act_c["outcome"], analysis_note=act_c["note"])
-                                    print(f"[signals] {symbol} підтверджений план знято без Telegram: {act_c['status']}")
+                                    print(f"[signals] {symbol} підтверджений план знято без Telegram: {act_c['status']} ({act_c.get('reason')})")
+                                    if act_c.get("reason") == "TIME":   # зняття за часом перевіряємо заднім числом: чи не вбили хорошу ідею (FALSE_EXPIRY)
+                                        import office_signal_track as _trk2
+
+                                        _trk2.record_expiry(db_path, scenario_id=canonical_sid or signal_id, symbol=symbol, direction=direction,
+                                                            zone_lo=entry_low, zone_hi=entry_high, sl=sl, tp1=tp1, expired_ts=time.time())
                             except Exception as exc_cc:
                                 print(f"[signals] confirmed-plan check {symbol}: {type(exc_cc).__name__}: {exc_cc}")
                             continue
@@ -6805,7 +6811,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     except Exception:
                         px_f = None
                     try:
-                        h1_f = fetch_candles(sym_f, "1h", 8)
+                        h1_f = fetch_candles(sym_f, "1h", 60)
                     except Exception:
                         h1_f = None
                     fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf, candles_h1=h1_f if isinstance(h1_f, list) else None)
@@ -6906,7 +6912,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[confluence] confirmed {key}")
                     elif act == "cancel":
                         # Скасування внутрішнього сценарію (до готового плану) — не подія для Telegram: лише БД/Mini App.
-                        print(f"[confluence] cancel {key}: {fu.get('reason')} — без Telegram")
+                        print(f"[confluence] cancel {key}: {fu.get('reason')} ({fu.get('kind')}) — без Telegram")
+                        if fu.get("kind") == "TIME":
+                            try:
+                                import office_signal_track as _trk3
+
+                                _trk3.record_expiry(db_path, scenario_id=str(st.get("scenario_id") or key), symbol=sym_f, direction=str(st.get("direction") or ""),
+                                                    zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), sl=st.get("sl"), tp1=st.get("tp1"), expired_ts=time.time())
+                            except Exception as exc_ex:
+                                print(f"[track] record expiry failed: {exc_ex}")
                         ckey = str(st.get("scenario_id") or key)
                         apply_setup_event(ckey, "CANCELLED")
                         try:
@@ -7269,6 +7283,8 @@ EV позитивне: {prob.get('ev_positive', '')}
         while True:
             try:
                 res = await asyncio.to_thread(trk.tick, db_path)
+                for fx_ in await asyncio.to_thread(trk.check_false_expiry, db_path):
+                    print(f"[track] зняття за часом {fx_['symbol']} {fx_['direction']}: {'FALSE_EXPIRY (ідея відпрацювала)' if fx_['false_expiry'] else 'ок'}")
                 for r in res:
                     print(f"[track] {r['symbol']} {r['direction']} {'відхилений' if r['rejected'] else 'сигнал'} → {r['outcome']} MFE {r['mfe_pct']} MAE {r['mae_pct']}")
             except Exception as exc:

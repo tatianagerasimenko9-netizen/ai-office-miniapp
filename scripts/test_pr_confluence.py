@@ -363,7 +363,7 @@ def main() -> int:
         },
         price=0.925,
         candles_ltf=ltf,
-        now_ts=1.0 + 3 * 3600 + 10,
+        now_ts=1.0 + 17 * 3600,
     )
     if to.get("action") != "cancel" or "таймаут" not in str(to.get("reason") or ""):
         return _fail(f"ttl {to}")

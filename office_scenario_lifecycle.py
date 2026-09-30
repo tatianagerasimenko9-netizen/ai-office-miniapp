@@ -125,7 +125,10 @@ def plan_valid_sec(tf: Any = "H1") -> int:
 
 
 def valid_until_ts(confirmed_ts: float, tf: Any = "H1") -> float:
-    return float(confirmed_ts) + plan_valid_sec(tf)
+    """TTL 2.0 (office_scenario_ttl): верхня межа життя плану — за сесією/таймфреймом; знімають насамперед причини."""
+    from office_scenario_ttl import deadline
+
+    return deadline(float(confirmed_ts), tf)
 
 
 def kyiv_hhmm(ts: float) -> str:
@@ -137,17 +140,84 @@ def kyiv_hhmm(ts: float) -> str:
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M") + " UTC"
 
 
+def _swing_level(rows: List[Dict[str, Any]], long_: bool, before_ts: float) -> Optional[float]:
+    """Останній підтверджений свінг (по 2 свічки з боків) серед закритих свічок ДО before_ts: LONG — мінімум, SHORT — максимум."""
+    seq = [(_ts(r.get("ts")), r) for r in rows if _ts(r.get("ts")) is not None and _ts(r.get("ts")) + H1_SEC <= before_ts]
+    seq.sort(key=lambda x: x[0])
+    rr = [r for _t, r in seq]
+    key = "low" if long_ else "high"
+    best = None
+    for i in range(2, len(rr) - 2):
+        v = _f(rr[i].get(key))
+        around = [_f(rr[j].get(key)) for j in range(i - 2, i + 3) if j != i]
+        if v is None or any(a is None for a in around):
+            continue
+        if (long_ and all(v < a for a in around)) or ((not long_) and all(v > a for a in around)):
+            best = v
+    return best
+
+
+def structure_break_h1(candles_h1: Any, *, side: str, since_ts: float, now_ts: float) -> Optional[Dict[str, Any]]:
+    """Злам структури H1 проти сценарію: закрита після створення H1-свічка за останнім свінгом (LONG — під мінімум, SHORT — над максимум)."""
+    if not isinstance(candles_h1, list):
+        return None
+    long_ = str(side).upper() != "SHORT"
+    lvl = _swing_level(candles_h1, long_, since_ts)
+    if lvl is None:
+        return None
+    for c in candles_h1:
+        t0 = _ts((c or {}).get("ts"))
+        cl = _f((c or {}).get("close"))
+        if t0 is None or cl is None or t0 + H1_SEC > now_ts or t0 + H1_SEC <= since_ts:
+            continue
+        if (long_ and cl < lvl) or ((not long_) and cl > lvl):
+            return {"level": lvl, "close": cl}
+    return None
+
+
+def target_without_entry(candles_h1: Any, *, side: str, zone_lo: Any, zone_hi: Any, tp1: Any, since_ts: float, now_ts: float) -> bool:
+    """Ціль 1 досягнута, а ціна до того ні разу не торкнулась зони входу: рух пішов без нас, план скасовується."""
+    lo, hi, t1 = _f(zone_lo), _f(zone_hi), _f(tp1)
+    if lo is None or hi is None or t1 is None or not isinstance(candles_h1, list):
+        return False
+    if lo > hi:
+        lo, hi = hi, lo
+    long_ = str(side).upper() != "SHORT"
+    rows = sorted([(_ts(c.get("ts")), c) for c in candles_h1 if _ts((c or {}).get("ts")) is not None], key=lambda x: x[0])
+    for t0, c in rows:
+        if t0 + H1_SEC > now_ts or t0 + H1_SEC <= since_ts:
+            continue
+        h, l = _f(c.get("high")), _f(c.get("low"))
+        if h is None or l is None:
+            continue
+        if l <= hi and h >= lo:
+            return False   # зони торкнулись першими — це вже не «без входу»
+        if (long_ and h >= t1) or ((not long_) and l <= t1):
+            return True
+    return False
+
+
 def confirmed_plan_action(*, ts_updated: Any, tf: Any, sl: Any, direction: str, candles_h1: Any, has_position: bool,
-                          now_ts: Optional[float] = None) -> Optional[Dict[str, str]]:
+                          now_ts: Optional[float] = None, tp1: Any = None, price: Any = None) -> Optional[Dict[str, str]]:
     """Що зробити з уже підтвердженим планом, за яким власниця НЕ відкривала угоди: знімаємо за часом дії або за закриттям H1 за рівнем.
     Чиста функція: лише рішення для БД. У Telegram таке не йде ніколи (лише ведення позначеної угоди)."""
     if has_position:
         return None   # відкриту вручну угоду веде супровід позиції, а не термін плану
     now = time.time() if now_ts is None else now_ts
     t0 = _ts(ts_updated)
-    if t0 and now > valid_until_ts(t0, tf):
-        return {"status": "EXPIRED", "outcome": "EXPIRED", "note": "EXPIRED after confirm: plan validity window passed without entry"}
     lv = _f(sl)
+    # спершу ПРИЧИНИ: годинник — лише верхня межа
     if lv is not None and closed_h1_beyond(candles_h1, side=direction, level=lv, since_ts=t0 or 0.0, now_ts=now):
-        return {"status": "CANCELLED", "outcome": "CANCELLED", "note": f"CANCELLED after confirm: H1 close beyond {lv}"}
+        return {"status": "CANCELLED", "outcome": "CANCELLED", "note": f"CANCELLED after confirm: H1 close beyond {lv}", "reason": "SL_CLOSE"}
+    if structure_break_h1(candles_h1, side=direction, since_ts=t0 or 0.0, now_ts=now):
+        return {"status": "CANCELLED", "outcome": "CANCELLED", "note": "CANCELLED after confirm: H1 structure broken against the plan", "reason": "STRUCTURE"}
+    if tp1 is not None and price is not None and lv is not None:
+        from office_alert_gate import max_entry_price
+
+        me = max_entry_price(direction, lv, tp1)
+        px = _f(price)
+        if me is not None and px is not None and ((str(direction).upper() != "SHORT" and px > me) or (str(direction).upper() == "SHORT" and px < me)):
+            return {"status": "EXPIRED", "outcome": "EXPIRED", "note": f"EXPIRED after confirm: price beyond max entry {me}", "reason": "BEYOND_MAX_ENTRY"}
+    if t0 and now > valid_until_ts(t0, tf):
+        return {"status": "EXPIRED", "outcome": "EXPIRED", "note": "EXPIRED after confirm: upper time bound passed without entry", "reason": "TIME"}
     return None

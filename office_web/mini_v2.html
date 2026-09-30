@@ -641,7 +641,7 @@ async function openSc(id){
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
     ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry+(hm.plan.max_entry?` (не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${hm.plan.max_entry})`:''))}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
       ${hm.size&&hm.size.usdt?`<div class="kv"><span>Позиція</span><b>${esc(Math.round(hm.size.usdt))} USDT · ризик ${esc(Math.round(hm.size.risk_usd))} $</b></div>`:''}
-      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Діє до ${esc(hm.plan.valid_until)} (Київ). Якщо входу не буде — план знімається.</div>`:''}</div>`:''}
+      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Діє до ${esc(hm.plan.valid_until)} (Київ) — верхня межа; раніше знімається, якщо ідея зламана (закриття H1 за рівнем, злам структури, ціль без входу, ціна за межею входу).</div>`:''}</div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
     ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}

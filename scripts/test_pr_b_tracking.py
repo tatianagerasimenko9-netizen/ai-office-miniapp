@@ -62,7 +62,7 @@ pg = MV.scenario_detail(w["watch_id"])
 assert pg["ok"] and pg["human"]["state"] in ("WAIT", "NO_DATA", "IN_ZONE") and pg["scenario"]["symbol"] == "BTCUSDT", pg.get("human")
 
 # 4. Доставка з результатом: pending → failed → повтор (≤3) → sent; після успіху тиша
-late = NOW + timedelta(hours=13)
+late = NOW + timedelta(hours=25)
 cs = [{"ts": (late - timedelta(minutes=15 * (8 - i))).isoformat(), "open": 84200, "close": 84200, "low": 84200, "high": 84200} for i in range(8)]
 fetch = lambda sym, iv, n=100: cs  # noqa: E731
 cyc = lambda d, s: {}  # noqa: E731
