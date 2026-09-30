@@ -22,6 +22,7 @@ class Resp:
 
 W = {"v": 100}
 M.urlopen = lambda req, timeout=12: Resp(W["v"])
+M._STARTED_AT = time.time() - 1000   # поза стартовим розгоном
 t0 = time.time()
 for _ in range(6):
     M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {})
@@ -37,3 +38,13 @@ for _ in range(5):
     M._http_get_json("https://data-api.binance.vision/api/v3/klines", {})
 assert time.time() - t1 < 0.2 and M.backoff_left() == 0
 print("OK fapi pacing: 60ms spacing, weight-aware pause before 429, fallbacks unaffected")
+
+# стартовий розгін: перші 3 хв процесу — ≥250 мс між запитами
+M._STARTED_AT = time.time()
+M._BACKOFF_UNTIL = 0.0
+W["v"] = 100
+t2 = time.time()
+for _ in range(4):
+    M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {})
+assert time.time() - t2 >= 3 * 0.24, "стартовий темп"
+print("OK fapi startup ramp")
