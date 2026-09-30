@@ -34,13 +34,11 @@ def _src_close(rows: Sequence[Dict[str, Any]]) -> List[float]:
 
 
 def linreg_value(src: Sequence[float], length: int, offset: int) -> Optional[float]:
-    """Pine ta.linreg: OLS y = a + b*x, значення на offset від кінця вікна."""
+    """Pine linreg(src, len, offset) = a + b*(len-1-offset) на ТОМУ САМОМУ вікні останніх len барів."""
     n = int(length)
-    if n < 2 or len(src) < n + offset:
+    if n < 2 or len(src) < n:
         return None
-    window = list(src[-(n + offset) : len(src) - offset if offset else None])
-    if len(window) != n:
-        return None
+    window = list(src[-n:])
     # x = 0..n-1
     sum_x = (n - 1) * n / 2.0
     sum_x2 = (n - 1) * n * (2 * n - 1) / 6.0
@@ -51,8 +49,7 @@ def linreg_value(src: Sequence[float], length: int, offset: int) -> Optional[flo
         return None
     b = (n * sum_xy - sum_x * sum_y) / den
     a = (sum_y - b * sum_x) / n
-    # Pine linreg(..., offset) — значення регресії на останній точці зсунутого вікна.
-    return a + b * (n - 1)
+    return a + b * (n - 1 - int(offset))
 
 
 def get_channel(src: Sequence[float], length: int) -> Optional[Tuple[float, float, float, float]]:
@@ -71,8 +68,7 @@ def get_channel(src: Sequence[float], length: int) -> Optional[Tuple[float, floa
     endy = intercept + slope * (n - 1)
     acc = 0.0
     for x in range(n):
-        pred = slope * (n - 1 - x) + intercept
-        # Pine: src[x] від кінця (x=0 — last of window)
+        pred = slope * (n - x) + intercept  # Pine: slope*(len-x)+intercept, x=0 — останній бар
         acc += (window[n - 1 - x] - pred) ** 2
     dev = math.sqrt(acc / n)
     return intercept, endy, dev, slope
