@@ -3059,6 +3059,11 @@ async def run() -> None:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
             return None
+        from office_telegram_policy import outbound_allowed as _tg_allowed
+
+        if not _tg_allowed(event_type=event_type, kind=kind, intent=intent, confirmed_position=confirmed_position, position_open=position_open):
+            print(f"[relay] silent (у Telegram лише готовий сигнал і ведення позначеної угоди) {event_type}/{kind}/{intent}: {str(message or '')[:120]}")
+            return None
         tg = gate_outbound_telegram(
             intent=intent,
             text=message,
@@ -3267,8 +3272,11 @@ async def run() -> None:
                     "🛠️ Техніка: все працює.\n"
                     f"База: {db_kind} · fingerprint `{_fp}`."
                 )
-                await send_office(fmt_agent_line("dev", polish_agent_message(health_plain)), stream="tech")
-                print("[relay] tech health (Artem) sent -> TECH thread")
+                if os.getenv("OFFICE_TG_TECH_PINGS", "").strip() == "1":   # службові повідомлення в Telegram — лише за явним дозволом
+                    await send_office(fmt_agent_line("dev", polish_agent_message(health_plain)), stream="tech")
+                    print("[relay] tech health (Artem) sent -> TECH thread")
+                else:
+                    print("[relay] tech health: без Telegram (OFFICE_TG_TECH_PINGS не задано)")
             except Exception as exc:
                 print(f"[relay][WARN] tech health ping failed: {exc}")
 
@@ -5301,37 +5309,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                             created_dt = now_utc
 
                         if status == "CONFIRMED":
-                            # Повторна зона після підтвердження — не новий вхід. Але план уже надіслано власниці: якщо до входу
-                            # годинна свічка закрилась за рівнем скасування — це подія надісланого сигналу, повідомляємо один раз.
+                            # План надіслано, угоду власниця не позначала: термін дії/скасування за закриттям H1 — лише БД, у Telegram НІКОЛИ.
                             try:
-                                sl_c = float(sl) if sl is not None else None
-                                _tf_c = str(scenario_meta.get("timeframe") or "H1")
-                                _conf_ts = _lc._ts(row.get("ts_updated")) or 0.0
-                                if _conf_ts and time.time() > _lc.valid_until_ts(_conf_ts, _tf_c) and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
-                                    signal_update(db_path, signal_id=signal_id, status="EXPIRED", outcome="EXPIRED",
-                                                  analysis_note="EXPIRED after confirm: plan validity window passed without entry")
-                                    await send_proactive(
-                                        EVENT_TRADE_UPDATE, _msgs.expired_plan_card(symbol=symbol, direction=direction),
-                                        stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
-                                        kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="EXPIRED",
-                                    )
-                                    continue
-                                if sl_c is not None and not get_explicit_open_position(db_path, symbol, direction).get("ok"):
+                                _pos_open = bool(get_explicit_open_position(db_path, symbol, direction).get("ok"))
+                                _h1x = None
+                                if not _pos_open and sl is not None:
                                     _h1x = fetch_candles(symbol, "1h", 8)
-                                    if _lc.closed_h1_beyond(_h1x, side=direction, level=sl_c,
-                                                            since_ts=_lc._ts(row.get("ts_updated")) or 0.0, now_ts=time.time()):
-                                        signal_update(db_path, signal_id=signal_id, status="CANCELLED", outcome="CANCELLED",
-                                                      analysis_note=f"CANCELLED after confirm: H1 close beyond {sl_c}")
-                                        from office_confluence import format_cancel_card as _fcc
-
-                                        await send_proactive(
-                                            EVENT_TRADE_UPDATE,
-                                            _fcc(symbol=symbol, direction=direction, reason=_lc.cancel_reason_h1(direction, sl_c, symbol) + ". Якщо ти вже в угоді — перевір свій стоп"),
-                                            stream="general", intent="ANALYTICAL", symbol=symbol, direction=direction,
-                                            kind="CANCEL_BEFORE_ENTRY", canonical_id=canonical_sid or signal_id, scenario_event="CANCELLED",
-                                        )
+                                act_c = _lc.confirmed_plan_action(ts_updated=row.get("ts_updated"), tf=scenario_meta.get("timeframe") or "H1", sl=sl,
+                                                                  direction=direction, candles_h1=_h1x, has_position=_pos_open)
+                                if act_c:
+                                    signal_update(db_path, signal_id=signal_id, status=act_c["status"], outcome=act_c["outcome"], analysis_note=act_c["note"])
+                                    print(f"[signals] {symbol} підтверджений план знято без Telegram: {act_c['status']}")
                             except Exception as exc_cc:
-                                print(f"[signals] confirmed-cancel check {symbol}: {type(exc_cc).__name__}: {exc_cc}")
+                                print(f"[signals] confirmed-plan check {symbol}: {type(exc_cc).__name__}: {exc_cc}")
                             continue
 
                         from office_lifecycle import watching_ttl_enabled, watching_ttl_exceeded
@@ -6889,22 +6879,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                         live_drop(key)
                         print(f"[confluence] confirmed {key}")
                     elif act == "cancel":
-                        from office_scenario_lifecycle import db_status, is_announced
-
-                        st_db = db_status(db_path, str(st.get("signal_id") or key))
-                        if is_announced(st_db):  # повідомляємо лише про скасування того, що власниця бачила як картку
-                            await send_proactive(
-                                EVENT_TRADE_UPDATE,
-                                _msgs.cancel_card(symbol=sym_f, direction=str(st.get("direction") or ""),
-                                                  reason=str(fu.get("reason") or ""), level=st.get("sl")),
-                                symbol=sym_f,
-                                kind="CANCEL_BEFORE_ENTRY",
-                                intent="ANALYTICAL",
-                                canonical_id=str(st.get("scenario_id") or key),
-                                scenario_event="CANCELLED",
-                            )
-                        else:
-                            print(f"[confluence] cancel silent {key}: картки не було (статус {st_db})")
+                        # Скасування внутрішнього сценарію (до готового плану) — не подія для Telegram: лише БД/Mini App.
+                        print(f"[confluence] cancel {key}: {fu.get('reason')} — без Telegram")
                         ckey = str(st.get("scenario_id") or key)
                         apply_setup_event(ckey, "CANCELLED")
                         try:
@@ -7337,10 +7313,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                 if now_ts - _last_alert_ts >= 300:
                     _last_alert_ts = now_ts
                     try:
-                        await send_office(
-                            f"⚠️ Relay session: {type(e).__name__}: {str(e)[:200]}"
-                            f"\nРеконнект без exit 1."
-                        )
+                        if os.getenv("OFFICE_TG_TECH_PINGS", "").strip() == "1":
+                            await send_office(
+                                f"⚠️ Relay session: {type(e).__name__}: {str(e)[:200]}"
+                                f"\nРеконнект без exit 1."
+                            )
                     except Exception as alert_exc:
                         print(f"[relay][WARN] crash alert send failed: {alert_exc}")
             await asyncio.sleep(15)

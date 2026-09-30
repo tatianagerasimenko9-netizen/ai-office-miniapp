@@ -6,6 +6,7 @@ No credentials, production DB, network, Telegram, or relay main loop.
 import ast
 import asyncio
 import os
+os.environ["OFFICE_TG_STRICT"] = "0"  # тест механіки доставки (фото, гілка), не політики; політика — test_tg_silence.py
 import tempfile
 import sys
 from pathlib import Path

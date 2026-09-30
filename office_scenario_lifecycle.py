@@ -133,3 +133,19 @@ def kyiv_hhmm(ts: float) -> str:
         return datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Kyiv")).strftime("%H:%M")
     except Exception:  # noqa: BLE001
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M") + " UTC"
+
+
+def confirmed_plan_action(*, ts_updated: Any, tf: Any, sl: Any, direction: str, candles_h1: Any, has_position: bool,
+                          now_ts: Optional[float] = None) -> Optional[Dict[str, str]]:
+    """Що зробити з уже підтвердженим планом, за яким власниця НЕ відкривала угоди: знімаємо за часом дії або за закриттям H1 за рівнем.
+    Чиста функція: лише рішення для БД. У Telegram таке не йде ніколи (лише ведення позначеної угоди)."""
+    if has_position:
+        return None   # відкриту вручну угоду веде супровід позиції, а не термін плану
+    now = time.time() if now_ts is None else now_ts
+    t0 = _ts(ts_updated)
+    if t0 and now > valid_until_ts(t0, tf):
+        return {"status": "EXPIRED", "outcome": "EXPIRED", "note": "EXPIRED after confirm: plan validity window passed without entry"}
+    lv = _f(sl)
+    if lv is not None and closed_h1_beyond(candles_h1, side=direction, level=lv, since_ts=t0 or 0.0, now_ts=now):
+        return {"status": "CANCELLED", "outcome": "CANCELLED", "note": f"CANCELLED after confirm: H1 close beyond {lv}"}
+    return None
