@@ -115,8 +115,8 @@ import office_user_messages as M  # noqa: E402
 
 card = M.confirm_card(symbol="LSKUSDT", direction="LONG", entry=0.3035, sl=0.2953, tp1=0.3180, tp2={"price": 0.326, "why": "межа азійської сесії"},
                       tp3=None, cancel=0.2953, why="розворот", valid_until="23:40")
-assert "ДІЄ ДО: 23:40 (Київ)" in card and card.count("Рішення") == 1 and "Це аналіз" not in card and card.strip().endswith("Офіс ордерів не ставить."), card
-assert L.plan_valid_sec("H1") == 4 * 3600 and L.plan_valid_sec("M15") == 3600 and L.plan_valid_sec("M5") == 3600 and L.plan_valid_sec("H4") == 12 * 3600
+assert "⏳ Діє до 23:40 (Київ)" in card and "Рішення" not in card and "Це аналіз" not in card and card.startswith("🟢 LONG · LSK · ПЛАН ГОТОВИЙ ✅"), card
+assert L.plan_valid_sec("H1") == 4 * 3600 and L.plan_valid_sec("M15") == 3600 and L.plan_valid_sec("M5") == 3600 and L.plan_valid_sec("H4") == 12 * 3600 and L.plan_valid_sec("D1") == 24 * 3600
 assert not hasattr(M, "expired_plan_card"), "повідомлення про завершення терміну плану заборонене"
 # підтверджений план знімається за часом (стан сценарію)
 import office_scenario_state as SS  # noqa: E402

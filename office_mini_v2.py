@@ -859,6 +859,10 @@ def journal_payload(*, kind: str = "scenarios") -> Dict[str, Any]:
                 "note": f"n={n} < {MIN_GROUP} — WR/криву не показуємо",
             }
         return {**st, "wr_shown": True}
+    if k == "signals":
+        import office_signal_track as trk
+
+        return trk.report(_db())
     if k == "positions":
         return positions_v2()
     cards = list_scenarios(include_watching=True)

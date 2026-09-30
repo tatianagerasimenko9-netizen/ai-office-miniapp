@@ -225,6 +225,12 @@ def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) 
 
 def render_human(h: Dict[str, Any]) -> str:
     """Той самий стан, що й на сторінці сценарію в Mini App (`office_scenario_state.build`), у вигляді повідомлення."""
+    if h.get("state") == "READY" and h.get("levels"):   # той самий торговий формат, що й сигнал: лише цифри
+        lv = h["levels"]
+        sz = h.get("size") or {}
+        return ready_signal(symbol=str(h.get("symbol") or h.get("ticker") or ""), direction="SHORT" if str(h.get("icon")) == "🔴" else "LONG",
+                            entry=lv.get("entry"), sl=lv.get("sl"), tp1=lv.get("tp1"), tp2=lv.get("tp2"), tp3=lv.get("tp3"), max_entry=lv.get("max_entry"),
+                            size_usdt=sz.get("usdt"), risk_usd=sz.get("risk_usd"), valid_until=str((h.get("plan") or {}).get("valid_until") or ""))
     L = [f"{h.get('icon', '')} {h.get('ticker', '')} · {str(h.get('state_ua') or '').upper()}", f"ЗАРАЗ: {h.get('headline', '')}"]
     if h.get("price"):
         L.append(f"Ціна: {h['price']}")

@@ -186,6 +186,12 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 bad = plan_check(sym, side, plan, lo, hi)
                 if bad:
                     missing.append(bad)
+            if not missing:   # ціна вже за межею входу (RR після комісій < мінімуму) — сигнал неактуальний
+                from office_alert_gate import max_entry_price
+
+                _me = max_entry_price(side, sl, tp1)
+                if _me is not None and p is not None and ((side != "SHORT" and p > _me) or (side == "SHORT" and p < _me)):
+                    missing.append(f"Ціна вже за межею входу ({px(_me, sym)}): потенціал до цілі замалий — сигнал неактуальний.")
             state = "READY" if not missing else "NOT_READY"
             if state == "READY":
                 tg = targets or {}
@@ -197,7 +203,19 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 fee = fee_round_trip_pct()
                 to_tp1 = abs(tp1 - entry) / entry * 100.0
                 to_sl = abs(entry - sl) / entry * 100.0
-                v["levels"] = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": (tg.get("tp2") or {}).get("price"), "tp3": (tg.get("tp3") or {}).get("price"), "cancel": cancel}
+                try:
+                    from office_alert_gate import max_entry_price
+                    from office_position_size import plan_position_size
+
+                    _me2 = max_entry_price(side, sl, tp1)
+                    _sz = plan_position_size(entry=entry, sl=sl, score=12, min_score=10, direction=side)
+                    v["plan"]["max_entry"] = px(_me2, sym) if _me2 is not None else None
+                    v["size"] = ({"usdt": _sz.get("size_usdt"), "risk_usd": float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)}
+                                 if _sz.get("ok") and _sz.get("size_usdt") else None)
+                except Exception:  # noqa: BLE001
+                    _me2 = None
+                    v["size"] = None
+                v["levels"] = {"max_entry": _me2, "entry": entry, "sl": sl, "tp1": tp1, "tp2": (tg.get("tp2") or {}).get("price"), "tp3": (tg.get("tp3") or {}).get("price"), "cancel": cancel}
                 try:
                     from office_scenario_lifecycle import kyiv_hhmm, plan_valid_sec, _ts as _lts
 
@@ -214,6 +232,9 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         else:
             state = "WAIT"
     icon, title, tone = STATES[state]
+    if state == "READY":   # колір і слово — за напрямком угоди (не за готовністю): 🟢 LONG / 🔴 SHORT
+        icon = "🔴" if side == "SHORT" else "🟢"
+        title = f"{'SHORT' if side == 'SHORT' else 'LONG'} · {title}"
     v.update(state=state, state_ua=title, icon=icon, tone=tone, missing=missing)
     tf_txt = TF_UA.get(ctf or "M15", "15-хвилинному")
     if state == "WAIT":

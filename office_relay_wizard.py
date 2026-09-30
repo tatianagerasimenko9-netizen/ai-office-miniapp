@@ -7261,6 +7261,57 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_lev_watches())
 
+    async def monitor_signal_tracks() -> None:
+        """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
+        import office_signal_track as trk
+
+        await asyncio.sleep(120)
+        while True:
+            try:
+                res = await asyncio.to_thread(trk.tick, db_path)
+                for r in res:
+                    print(f"[track] {r['symbol']} {r['direction']} {'відхилений' if r['rejected'] else 'сигнал'} → {r['outcome']} MFE {r['mfe_pct']} MAE {r['mae_pct']}")
+            except Exception as exc:
+                print(f"[track][WARN] tick failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(600)
+
+    asyncio.create_task(monitor_signal_tracks())
+
+    async def monitor_manual_trades() -> None:
+        """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.
+        Проходить через send_proactive (шлюз: POSITION_MANAGE + відкрита позиція; додатково OFFICE_TG_POSITION_SUPPORT)."""
+        import office_signal_track as trk
+        import office_trade_updates as tu
+        from office_market_data import fetch_candles as _fc
+
+        def _price(sym: str) -> Optional[float]:
+            c = _fc(sym, "1m", 3)
+            if isinstance(c, list) and c:
+                return float(c[-1].get("close"))
+            return None
+
+        await asyncio.sleep(90)
+        while True:
+            try:
+                for it in await asyncio.to_thread(tu.pending, db_path, _price):
+                    pos = it["trade"]
+                    reply = await asyncio.to_thread(trk.confirm_msg_for, db_path, str(pos.get("scenario_id") or "")) if pos.get("scenario_id") else None
+                    mid = await send_proactive(
+                        EVENT_TRADE_UPDATE, it["text"], reply_to_message_id=reply, symbol=str(pos["symbol"]), direction=str(pos["direction"]),
+                        kind=it["code"], intent="POSITION_MANAGE", confirmed_position=True, position_id=str(pos["trade_id"]), position_open=True,
+                        canonical_id=str(pos["trade_id"]), scenario_event=it["code"],
+                    )
+                    if mid:
+                        await asyncio.to_thread(tu.record, db_path, str(pos["trade_id"]), it["code"], mid)
+                        print(f"[trade-updates] sent {pos['symbol']} {it['code']} id={mid}")
+                    else:
+                        print(f"[trade-updates] not delivered {pos['symbol']} {it['code']} (супровід позицій вимкнено або збій)")
+            except Exception as exc:
+                print(f"[trade-updates][WARN] tick failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(120)
+
+    asyncio.create_task(monitor_manual_trades())
+
     async def monitor_daily_report() -> None:
         nonlocal last_daily_report_date
         while True:
