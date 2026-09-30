@@ -7276,31 +7276,8 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_lev_watches())
 
-    if os.getenv("OFFICE_REPLAY_ON_START", "").strip() == "1":   # одноразовий replay контрольних кейсів на реальних свічках: лише лог [replay], Telegram не задіяно
-        async def _replay_once() -> None:
-            await asyncio.sleep(120)
-            try:
-                import office_replay
-
-                await asyncio.to_thread(office_replay.run_all)
-                print("[replay] готово; вимкни OFFICE_REPLAY_ON_START, щоб не повторювати при кожному старті")
-            except Exception as exc_rp:  # noqa: BLE001
-                print(f"[replay] помилка: {type(exc_rp).__name__}: {exc_rp}")
-
-        asyncio.create_task(_replay_once())
-
-    if os.getenv("OFFICE_RR_ANALYSIS_ON_START", "").strip() == "1":   # одноразовий аналіз правила RR на історії (лише читання, лог [rr]); Telegram не задіяно
-        async def _rr_once() -> None:
-            await asyncio.sleep(150)
-            try:
-                import office_rr_analysis
-
-                await asyncio.to_thread(office_rr_analysis.run, db_path)
-                print("[rr] готово; вимкни OFFICE_RR_ANALYSIS_ON_START")
-            except Exception as exc_rr:  # noqa: BLE001
-                print(f"[rr] помилка: {type(exc_rr).__name__}: {exc_rr}")
-
-        asyncio.create_task(_rr_once())
+    # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
+    # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.
 
     async def monitor_signal_tracks() -> None:
         """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
