@@ -191,9 +191,12 @@ def record_scan_facts(
     regime: Any = None,
     decision: Any = None,
     data_quality: Any = None,
+    scout_reason: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Пише лише наявні факти зі скану. Порожні поля не вигадує."""
     sig: Dict[str, Any] = {}
+    if scout_reason:
+        sig["scout_reason"] = str(scout_reason)[:200]
     if rsi_h1 is not None:
         sig["rsi"] = rsi_h1
         sig["rsi_h1"] = rsi_h1
@@ -212,7 +215,7 @@ def record_scan_facts(
         sig["score"] = dump_score
     q = data_quality
     if q is None:
-        q = "OK" if sig else "UNAVAILABLE"
+        q = "OK" if {k for k in sig if k != "scout_reason"} else "UNAVAILABLE"
     try:
         return market_state_upsert(
             db_path,

@@ -302,12 +302,13 @@ def desk_entry_gate(
     s2 = float(wide["sl"])
     from office_radar import MIN_RR
 
-    from office_alert_gate import net_rr
+    from office_alert_gate import rr_gate
 
-    nr = net_rr(e, s2, t)
-    rr = nr["rr_net"] if nr else 0.0
-    if rr + 1e-12 < float(MIN_RR):
-        return {**empty, "sl": s2, "reason": f"RR {rr:.2f} < {MIN_RR} (після комісій)"}
+    g_rr = rr_gate(e, s2, t, tp2)
+    if not g_rr["ok"]:
+        rr = g_rr["rr_net"] or 0.0
+        return {**empty, "sl": s2, "reason": (f"RR {rr:.2f} < {MIN_RR} (після комісій)" if g_rr["rule"] == "tp1"
+                                                 else f"RR {rr:.2f} до цілі 1, зважений {g_rr['rr_weighted'] or 0:.2f} (після комісій) — нижче правила")}
     need = min_tp1_pct(symbol)
     move = move_pct_to_tp(entry=e, tp=t)
     if move is None or move + 1e-12 < need:

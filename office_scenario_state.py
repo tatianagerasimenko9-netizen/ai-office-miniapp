@@ -173,7 +173,8 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         inside = lo is not None and hi is not None and lo <= p <= hi
         if confirmed:
             entry = _confirmed_px(row)
-            plan = {"entry": entry, "sl": sl, "tp1": tp1}
+            _tp2 = ((targets or {}).get("tp2") or {}).get("price")
+            plan = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": _tp2}
             if entry is None:
                 missing.append("не збережено ціну входу в момент підтвердження")
             if sl is None:
@@ -187,7 +188,7 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
             if not missing:   # ціна вже за межею входу (RR після комісій < мінімуму) — сигнал неактуальний
                 from office_alert_gate import max_entry_price
 
-                _me = max_entry_price(side, sl, tp1)
+                _me = max_entry_price(side, sl, tp1, _tp2)
                 if _me is not None and p is not None and ((side != "SHORT" and p > _me) or (side == "SHORT" and p < _me)):
                     missing.append(f"Ціна вже за межею входу ({px(_me, sym)}): потенціал до цілі замалий — сигнал неактуальний.")
             state = "READY" if not missing else "NOT_READY"
@@ -205,7 +206,7 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                     from office_alert_gate import max_entry_price
                     from office_position_size import plan_position_size
 
-                    _me2 = max_entry_price(side, sl, tp1)
+                    _me2 = max_entry_price(side, sl, tp1, _tp2)
                     _sz = plan_position_size(entry=entry, sl=sl, score=12, min_score=10, direction=side)
                     v["plan"]["max_entry"] = px(_me2, sym) if _me2 is not None else None
                     v["size"] = ({"usdt": _sz.get("size_usdt"), "risk_usd": float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)}

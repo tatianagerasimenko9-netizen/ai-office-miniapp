@@ -143,6 +143,7 @@ from office_market_scout import (
     btc_context_only,
     promote_for_deep_scan,
     screen_futures_market,
+    shortlist_with_reasons,
 )
 from office_level_scalp import evaluate_level_book
 from office_skip_plan import persist_skip_case
@@ -5317,7 +5318,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     _h1x = fetch_candles(symbol, "1h", 60)
                                 act_c = _lc.confirmed_plan_action(ts_updated=row.get("ts_updated"), tf=scenario_meta.get("timeframe") or "H1", sl=sl,
                                                                   direction=direction, candles_h1=_h1x, has_position=_pos_open,
-                                                                  tp1=tp1, price=((_h1x[-1] or {}).get("close") if isinstance(_h1x, list) and _h1x else None))
+                                                                  tp1=tp1, tp2=row.get("tp2"), price=((_h1x[-1] or {}).get("close") if isinstance(_h1x, list) and _h1x else None))
                                 if act_c:
                                     signal_update(db_path, signal_id=signal_id, status=act_c["status"], outcome=act_c["outcome"], analysis_note=act_c["note"])
                                     print(f"[signals] {symbol} підтверджений план знято без Telegram: {act_c['status']} ({act_c.get('reason')})")
@@ -6491,11 +6492,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                             watching_now.append(str(_aw.get("symbol")))
                 except Exception:
                     watching_now = []
-                deep_syms = promote_for_deep_scan(
-                    screen,
-                    extra_user_symbols=extra_req,
-                    active_watching=watching_now,
-                )
+                _short = shortlist_with_reasons(screen, extra_user_symbols=extra_req, active_watching=watching_now)
+                deep_syms = [x["symbol"] for x in _short]
+                _why = {x["symbol"]: x["reason"] for x in _short}
+                print("[scout] shortlist: " + "; ".join(f"{x['symbol']} ({x['reason']})" for x in _short[:30]))
                 btc_ctx = btc_context_only(screen)
                 print(
                     f"[scout] screened={screen.screened} status={screen.data_status} "
@@ -6525,6 +6525,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 rsi_h4=rsi4,
                                 decision="WATCH",
                                 data_quality="OK" if rsi1 is not None else "UNAVAILABLE",
+                                scout_reason=_why.get(rsym),
                             )
                         except Exception as exc_ms:
                             print(f"[scout] market_state {rsym}: {type(exc_ms).__name__}")
@@ -6838,7 +6839,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             tgt = {}
                         try:
                             plan_bad = _lev_watch.check_plan(sym_f, str(st.get("direction") or ""),
-                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1")},
+                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": ((tgt or {}).get("tp2") or {}).get("price")},
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
@@ -6861,7 +6862,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 except Exception as exc_rj:
                                     print(f"[track] record rejected failed: {exc_rj}")
                             continue
-                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"))
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), ((tgt or {}).get("tp2") or {}).get("price"))
                         if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
                             print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
                             continue

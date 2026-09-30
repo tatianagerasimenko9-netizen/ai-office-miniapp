@@ -493,7 +493,7 @@ async function risk(){
     <div class="card">
       <div class="kv"><span>ATR: блок входу / T0</span><b>${esc(g.atr_entry_block)}% / ${esc(g.atr_t0)}%</b></div>
       <div class="kv"><span>Edge</span><b>${esc(g.edge)}</b></div>
-      <div class="kv"><span>Мінімальний RR</span><b>1:${esc(g.min_rr)}</b></div>
+      <div class="kv"><span>Мінімальний RR</span><b>1:${esc(g.min_rr)}${g.rr_rule==='weighted'?' — зважений (40% ціль 1 + 60% ціль 2) і ≥ 1:1 до цілі 1':' — до цілі 1'}</b></div>
       <div class="kv"><span>TP1 мінімум BTC/ETH · альти</span><b>${esc(g.tp1_majors_pct)}% · ${esc(g.tp1_alts_pct)}%</b></div>
       <div class="kv"><span>Автоторгівля / ордери</span><b>вимкнено</b></div>
     </div>
@@ -657,6 +657,7 @@ async function openSc(id){
     ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}
       <div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>
+      ${(hm.context.freshness||[]).length?`<div class="mut" style="margin-top:6px">Дані станом на: ${(hm.context.freshness||[]).map(f=>esc(f.name)+' — '+(f.as_of&&f.fresh?new Date(f.as_of*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжих')).join('; ')}.</div>`:''}
       <div class="mut" style="margin-top:6px">${esc(hm.context.rule_note||'')}</div></div>`:''}
     ${hm.news?`<div class="sec"><h3>Новини</h3>${hm.news.status!=='DATA_OK'?`<div class="mut">${esc(hm.news.note)}</div>`
       :(hm.news.block?`<div class="mut">🚫 Вхід заблоковано: «${esc(hm.news.block.title)}» (${esc(hm.news.block.country)}) о ${esc(hm.news.block.at)} (Київ).</div>`

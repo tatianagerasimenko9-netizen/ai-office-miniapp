@@ -198,7 +198,7 @@ def target_without_entry(candles_h1: Any, *, side: str, zone_lo: Any, zone_hi: A
 
 
 def confirmed_plan_action(*, ts_updated: Any, tf: Any, sl: Any, direction: str, candles_h1: Any, has_position: bool,
-                          now_ts: Optional[float] = None, tp1: Any = None, price: Any = None) -> Optional[Dict[str, str]]:
+                          now_ts: Optional[float] = None, tp1: Any = None, price: Any = None, tp2: Any = None) -> Optional[Dict[str, str]]:
     """Що зробити з уже підтвердженим планом, за яким власниця НЕ відкривала угоди: знімаємо за часом дії або за закриттям H1 за рівнем.
     Чиста функція: лише рішення для БД. У Telegram таке не йде ніколи (лише ведення позначеної угоди)."""
     if has_position:
@@ -214,7 +214,7 @@ def confirmed_plan_action(*, ts_updated: Any, tf: Any, sl: Any, direction: str, 
     if tp1 is not None and price is not None and lv is not None:
         from office_alert_gate import max_entry_price
 
-        me = max_entry_price(direction, lv, tp1)
+        me = max_entry_price(direction, lv, tp1, tp2)
         px = _f(price)
         if me is not None and px is not None and ((str(direction).upper() != "SHORT" and px > me) or (str(direction).upper() == "SHORT" and px < me)):
             return {"status": "EXPIRED", "outcome": "EXPIRED", "note": f"EXPIRED after confirm: price beyond max entry {me}", "reason": "BEYOND_MAX_ENTRY"}

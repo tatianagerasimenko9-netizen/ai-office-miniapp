@@ -526,9 +526,22 @@ def fee_round_trip_pct() -> float:
     return (v if 0 <= v < 1 else 0.05) * 2.0
 
 
-def net_rr(entry: Any, sl: Any, tp1: Any) -> Optional[Dict[str, float]]:
-    """RR від ФАКТИЧНОЇ ціни входу з урахуванням комісій (кругла): вигода мінус комісія / ризик плюс комісія. None — немає даних."""
-    e, s_, t = _f(entry), _f(sl), _f(tp1)
+W_TP1, W_TP2 = 0.4, 0.6     # план виходу: 40% на TP1, 30% на TP2 + 30% runner (runner рахуємо як вихід на TP2)
+RR_TP1_FLOOR = 1.0          # правило «weighted»: RR до TP1 не менше 1,0
+
+
+def rr_rule() -> str:
+    """Правило RR плану: 'tp1' — RR до TP1 після комісій ≥ MIN_RR (1,5); 'weighted' — зважений RR (40% TP1 + 60% TP2) ≥ 1,5 І RR до TP1 ≥ 1,0.
+    Перемикається OFFICE_RR_RULE (миттєвий відкат змінною)."""
+    import os
+
+    return "weighted" if os.getenv("OFFICE_RR_RULE", "tp1").strip().lower() == "weighted" else "tp1"
+
+
+def net_rr(entry: Any, sl: Any, tp1: Any, tp2: Any = None) -> Optional[Dict[str, float]]:
+    """RR від ФАКТИЧНОЇ ціни входу з урахуванням комісій (кругла): вигода мінус комісія / ризик плюс комісія. None — немає даних.
+    `rr_weighted` — за планом виходу 40% TP1 + 60% TP2 (runner = TP2); без TP2 весь обсяг виходить на TP1 (тоді rr_weighted = rr_net)."""
+    e, s_, t, t2 = _f(entry), _f(sl), _f(tp1), _f(tp2)
     if not e or e <= 0 or s_ is None or t is None:
         return None
     fee = fee_round_trip_pct()
@@ -536,18 +549,72 @@ def net_rr(entry: Any, sl: Any, tp1: Any) -> Optional[Dict[str, float]]:
     risk = abs(e - s_) / e * 100.0
     if risk <= 0:
         return None
-    return {"reward_pct": reward, "risk_pct": risk, "fee_pct": fee, "rr_gross": reward / risk, "rr_net": max(reward - fee, 0.0) / (risk + fee)}
+    d2 = abs(t2 - e) / e * 100.0 if t2 is not None else reward
+    rr_w = max(W_TP1 * reward + W_TP2 * d2 - fee, 0.0) / (risk + fee)
+    return {"reward_pct": reward, "risk_pct": risk, "fee_pct": fee, "rr_gross": reward / risk, "rr_net": max(reward - fee, 0.0) / (risk + fee),
+            "rr_weighted": rr_w, "reward2_pct": d2}
 
 
-def max_entry_price(direction: str, sl: Any, tp1: Any) -> Optional[float]:
-    """Найгірша ціна входу, при якій RR (з комісіями) ще ≥ MIN_RR: LONG — «не вище», SHORT — «не нижче». Далі за нею сигнал неактуальний."""
-    s_, t = _f(sl), _f(tp1)
+def _ua_num(text: str) -> str:
+    """Десяткова крапка → кома в числах; крапка в кінці речення лишається крапкою."""
+    t = text.replace(".", ",")
+    return t[:-1] + "." if t.endswith(",") else t
+
+
+def rr_gate(entry: Any, sl: Any, tp1: Any, tp2: Any = None) -> Dict[str, Any]:
+    """Єдине місце правила RR плану: {'ok', 'rule', 'rr_net', 'rr_weighted', 'reason'}. Причина — людською мовою (кома в числах)."""
+    nr = net_rr(entry, sl, tp1, tp2)
+    if nr is None:
+        return {"ok": False, "rule": rr_rule(), "rr_net": None, "rr_weighted": None, "reason": "Не вдалося порахувати співвідношення ризику й потенціалу — плану немає."}
+    rule = rr_rule()
+    out = {"rule": rule, "rr_net": nr["rr_net"], "rr_weighted": nr["rr_weighted"], "nr": nr}
+    if rule == "tp1":
+        ok = nr["rr_net"] + 1e-12 >= float(MIN_RR)
+        reason = None if ok else _ua_num(f"Потенціал замалий порівняно з ризиком: до цілі {nr['reward_pct']:.2f}%, до стопа {nr['risk_pct']:.2f}%, "
+                                          f"після комісій співвідношення {nr['rr_net']:.2f}, потрібно не менше {MIN_RR:g}.")
+        return {**out, "ok": ok, "reason": reason}
+    bad = []
+    if nr["rr_weighted"] + 1e-12 < float(MIN_RR):
+        bad.append(f"зважений RR {nr['rr_weighted']:.2f} (40% на ціль 1 + 60% на ціль 2, після комісій), потрібно не менше {MIN_RR:g}")
+    if nr["rr_net"] + 1e-12 < RR_TP1_FLOOR:
+        bad.append(f"RR до цілі 1 {nr['rr_net']:.2f}, потрібно не менше {RR_TP1_FLOOR:.1f}")
+    reason = None if not bad else _ua_num("Потенціал замалий порівняно з ризиком: до цілі 1 " f"{nr['reward_pct']:.2f}%, до стопа {nr['risk_pct']:.2f}%; " + "; ".join(bad) + ".")
+    return {**out, "ok": not bad, "reason": reason}
+
+
+def max_entry_price(direction: str, sl: Any, tp1: Any, tp2: Any = None) -> Optional[float]:
+    """Найгірша ціна входу, при якій правило RR (з комісіями) ще виконується: LONG — «не вище», SHORT — «не нижче». Далі за нею сигнал неактуальний.
+    Правило 'tp1' — замкнена формула; 'weighted' — пошук межі діленням навпіл (умова монотонна за ціною входу)."""
+    s_, t, t2 = _f(sl), _f(tp1), _f(tp2)
     if s_ is None or t is None:
         return None
+    short = str(direction or "").upper() == "SHORT"
+    if rr_rule() == "weighted":
+        lo, hi = (t, s_) if short else (s_, t)           # LONG: вхід між стопом і TP1; SHORT: між TP1 і стопом
+        if lo >= hi:
+            return None
+        ok = lambda E: rr_gate(E, s_, t, t2)["ok"]       # noqa: E731
+        good, bad = (hi, lo) if short else (lo, hi)      # good — «межа, де правило виконується», bad — де ні
+        if short:
+            # SHORT: чим нижче вхід (ближче до TP1), тим гірше; шукаємо мінімальний допустимий
+            a, b = lo, hi
+            if not ok(b - (b - a) * 1e-6):
+                return None
+            for _ in range(60):
+                m = (a + b) / 2.0
+                a, b = (a, m) if ok(m) else (m, b)
+            return b
+        a, b = lo, hi
+        if not ok(a + (b - a) * 1e-6):
+            return None
+        for _ in range(60):
+            m = (a + b) / 2.0
+            a, b = (m, b) if ok(m) else (a, m)
+        return a
     f = fee_round_trip_pct() / 100.0   # комісія круга в частках ціни входу
     k = float(MIN_RR)
     # вигода = |tp−E| − f·E, ризик = |E−sl| + f·E, вигода/ризик = k
-    if str(direction or "").upper() == "SHORT":
+    if short:
         return (t + k * s_) / ((1.0 + k) - f * (1.0 + k))
     return (t + k * s_) / ((1.0 + k) + f * (1.0 + k))
 
@@ -640,7 +707,13 @@ def validate_trade_geometry(
     if risk <= 0:
         return {**deny, "reason": "дистанція ризику не додатна — abs() не ховає стоп з неправильного боку"}
     rr = reward / risk if risk else 0.0
-    if rr + 1e-12 < MIN_RR:
+    if rr_rule() == "weighted":
+        # найгірший випадок за краями зони (без комісій): RR до TP1 ≥ 1,0 і зважений (40% TP1 + 60% TP2; TP2 немає → весь обсяг на TP1) ≥ MIN_RR
+        r2 = (abs(t2 - (hi if side == "LONG" else lo)) / risk) if t2 is not None else rr
+        rr_w = W_TP1 * rr + W_TP2 * r2
+        if rr + 1e-12 < RR_TP1_FLOOR or rr_w + 1e-12 < MIN_RR:
+            return {**deny, "reason": f"RR {rr:.2f} до цілі 1, зважений {rr_w:.2f} < {MIN_RR} (знаковий ризик)", "rr": rr, "rr_weighted": rr_w, "sl": s}
+    elif rr + 1e-12 < MIN_RR:
         return {**deny, "reason": f"RR {rr:.2f} < {MIN_RR} (знаковий ризик)", "rr": rr, "sl": s}
     return {
         "ok": True,

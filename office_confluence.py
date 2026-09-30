@@ -37,12 +37,12 @@ TAG_UA = {
     "bpr": "BPR",
 }
 
-FORMAL_TAGS = ("level_false_break", "level_hold", "level_retest", "pin_bar", "inside_bar_break", "engulfing_ctx", "exhaustion", "sweep_pool", "displacement", "fvg_retest", "ob_retest", "breaker_retest", "ote", "spring", "spring_test", "upthrust", "upthrust_test", "channel_edge")
+FORMAL_TAGS = ("level_false_break", "level_hold", "level_retest", "pin_bar", "inside_bar_break", "engulfing_ctx", "exhaustion", "sweep_pool", "displacement", "fvg_retest", "ob_retest", "breaker_retest", "ote", "spring", "spring_test", "upthrust", "upthrust_test", "channel_edge", "bos", "choch")
 CONFIRM_UA = {
     "level_false_break": "хибний пробій рівня", "level_hold": "закріплення за рівнем", "level_retest": "ретест рівня",
     "pin_bar": "пін-бар біля зони", "inside_bar_break": "пробій після inside bar", "engulfing_ctx": "поглинання біля зони", "exhaustion": "виснаження руху",
     "sweep_pool": "зняття ліквідності", "displacement": "сильний імпульс", "fvg_retest": "ретест FVG", "ob_retest": "ретест order block",
-    "breaker_retest": "ретест breaker", "ote": "зона OTE", "spring_test": "тест spring", "upthrust_test": "тест upthrust", "channel_edge": "межа регресійного каналу",
+    "breaker_retest": "ретест breaker", "ote": "зона OTE", "spring_test": "тест spring", "upthrust_test": "тест upthrust", "channel_edge": "межа регресійного каналу", "bos": "злам структури (BOS)", "choch": "зміна характеру (CHoCH)",
     "double_top": "подвійна вершина",
     "double_bottom": "подвійне дно",
     "triple_top": "потрійна вершина",

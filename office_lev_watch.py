@@ -238,21 +238,23 @@ def check_plan(symbol: str, direction: str, plan: Dict[str, Any], zone_lo: Any, 
     news = entry_block()
     if news:
         return news
-    g = validate_trade_geometry(direction=direction, sl=plan["sl"], tp1=plan["tp1"], entry=plan["entry"], entry_low=zone_lo, entry_high=zone_hi)
+    g = validate_trade_geometry(direction=direction, sl=plan["sl"], tp1=plan["tp1"], entry=plan["entry"], entry_low=zone_lo, entry_high=zone_hi, tp2=plan.get("tp2"))
     if not g.get("ok"):
         reason = str(g.get("reason") or "")
         if "RR" in reason and g.get("rr") is not None:
-            return f"Потенціал до цілі замалий порівняно з ризиком (співвідношення {float(g['rr']):.2f}, потрібно не менше 1,5).".replace(".", ",", 0)
-        return "План не пройшов перевірку рівнів: стоп або ціль стоять не на своєму боці від входу."
-    # RR від фактичного входу з комісіями (геометрія вище рахує за краями зони — так LSK з RR 1,40 пройшов би)
-    from office_alert_gate import MIN_RR, net_rr
+            from office_alert_gate import _ua_num
 
-    nr = net_rr(plan["entry"], plan["sl"], plan["tp1"])
-    if nr is None:
-        return "Не вдалося порахувати співвідношення ризику й потенціалу — плану немає."
-    if nr["rr_net"] + 1e-12 < float(MIN_RR):
-        return (f"Потенціал замалий порівняно з ризиком: до цілі {nr['reward_pct']:.2f}%, до стопа {nr['risk_pct']:.2f}%, "
-                f"після комісій співвідношення {nr['rr_net']:.2f}, потрібно не менше {MIN_RR:g}.").replace(".", ",")
+            if g.get("rr_weighted") is not None:
+                return _ua_num(f"Потенціал замалий порівняно з ризиком (за краями зони: до цілі 1 — {float(g['rr']):.2f}, зважений RR — {float(g['rr_weighted']):.2f}; "
+                               "потрібно: зважений не менше 1,5 і до цілі 1 не менше 1,0).")
+            return _ua_num(f"Потенціал до цілі замалий порівняно з ризиком (співвідношення {float(g['rr']):.2f}, потрібно не менше 1,5).")
+        return "План не пройшов перевірку рівнів: стоп або ціль стоять не на своєму боці від входу."
+    # RR від фактичного входу з комісіями (геометрія вище рахує за краями зони — так LSK з RR 1,40 пройшов би); правило — office_alert_gate.rr_gate
+    from office_alert_gate import rr_gate
+
+    g2 = rr_gate(plan["entry"], plan["sl"], plan["tp1"], plan.get("tp2"))
+    if not g2["ok"]:
+        return g2["reason"]
     need = min_tp1_pct(symbol)
     mv = move_pct_to_tp(entry=_f(plan["entry"]), tp=_f(plan["tp1"]))
     if mv is None or mv + 1e-12 < need:
