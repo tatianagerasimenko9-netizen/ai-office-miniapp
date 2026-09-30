@@ -108,7 +108,7 @@ const NA='Не визначено';
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
+const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', lv:lsGet('ao_lv','1')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
   layers:{zone:true,sl:true,tp:true}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
@@ -502,10 +502,13 @@ async function risk(){
       <div class="mut">Таймфрейм графіка за замовчуванням</div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
       <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
+      <label class="mut" style="display:block"><input type="checkbox" id="lvov"> шар рівнів Лева (зони, дзеркальні, PDH/PDL/PWH/PWL — контекст, не сигнал)</label>
       <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
   $('chov').checked=S.ch;
   $('chov').onchange=e=>{S.ch=e.target.checked; lsSet('ao_ch', S.ch?'1':'0');};
+  $('lvov').checked=S.lv;
+  $('lvov').onchange=e=>{S.lv=e.target.checked; lsSet('ao_lv', S.lv?'1':'0');};
   app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
   bindCards();
 }
@@ -571,6 +574,14 @@ async function paintChart(el, s){
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
     line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2); line(lv.tp3,'#27C99A','TP3',2); line(lv.entry,'#E8EDF4','вхід',1);
+    if(S.lv){
+      try{const lvp=await j(`/api/v2/levels?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+      if(lvp&&lvp.ok){
+        (lvp.zones||[]).forEach(z=>{const c=z.mirror?'#B48CFF':'#8392A5', t=(z.mirror?'дзеркальний ':'рівень ')+'×'+z.touches;
+          series.createPriceLine({price:z.lo,color:c,title:t,lineStyle:3,lineWidth:1}); series.createPriceLine({price:z.hi,color:c,title:'',lineStyle:3,lineWidth:1});});
+        Object.entries(lvp.previous||{}).forEach(([k,v])=>series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}));
+      }}catch(e){}
+    }
     if(S.ch){
       try{const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
       if(chp&&chp.ok){

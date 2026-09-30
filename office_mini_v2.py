@@ -992,6 +992,34 @@ def channel_payload(symbol: str, tf: str) -> Dict[str, Any]:
     return {**ch, "symbol": str(symbol or "").upper(), "tf": pack.get("tf")}
 
 
+def levels_payload(symbol: str, tf: str) -> Dict[str, Any]:
+    """Шар «Рівні Лева» для графіка: зони рівнів (кластери свінгів, дзеркальні) і PDH/PDL/PWH/PWL — ті самі правила, що й у підтвердженнях (office_levels).
+    Лише найближчі до ціни зони; немає свічок → чесно порожньо."""
+    import office_levels as lv
+
+    pack = candles_payload(symbol, tf, 300)
+    rows = [c for c in (pack.get("candles") or []) if isinstance(c, dict)]
+    out: Dict[str, Any] = {"ok": bool(rows), "data_status": pack.get("data_status"), "symbol": str(symbol or "").upper(), "tf": pack.get("tf"),
+                           "zones": [], "previous": {}, "note": "контекст графіка, не вхід"}
+    if not rows:
+        return out
+    try:
+        last = float(rows[-1]["close"])
+    except (KeyError, TypeError, ValueError):
+        return out
+    zs = lv.zones(rows)
+    zs.sort(key=lambda z: min(abs(z["lo"] - last), abs(z["hi"] - last)))
+    out["zones"] = [{"lo": z["lo"], "hi": z["hi"], "touches": z["touches"], "mirror": bool(z["mirror"])} for z in zs[:6]]
+    if not _fixture_on():
+        try:
+            from office_market_data import fetch_candles
+
+            out["previous"] = {k: v for k, v in lv.previous_levels(fetch_candles(symbol, "1d", 5), fetch_candles(symbol, "1w", 4)).items() if v is not None}
+        except Exception:  # noqa: BLE001
+            out["previous"] = {}
+    return out
+
+
 def settings_payload() -> Dict[str, Any]:
     return {
         "ok": True,
@@ -1144,7 +1172,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:

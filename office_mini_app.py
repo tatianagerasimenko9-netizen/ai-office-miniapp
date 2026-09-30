@@ -1368,6 +1368,7 @@ class Handler(BaseHTTPRequestHandler):
             from office_mini_v2 import (
                 candles_payload,
                 channel_payload,
+                levels_payload,
                 home_v2,
                 journal_payload,
                 overview_payload,
@@ -1408,6 +1409,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim)
             elif u.path == "/api/v2/channel":
                 data = channel_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
+            elif u.path == "/api/v2/levels":
+                data = levels_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
             elif u.path == "/api/v2/overview":
                 data = overview_payload()
             elif u.path == "/api/v2/scanner":
