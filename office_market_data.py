@@ -53,7 +53,7 @@ _CACHE_LOCK = threading.Lock()
 
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
-    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1))}
+    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used")}
 
 
 def backoff_left() -> float:
@@ -79,6 +79,38 @@ def reset_market_cache() -> None:
     _BACKOFF_UNTIL = 0.0
 
 
+_FAPI_LAST = 0.0
+_FAPI_GAP = 0.06            # ≥60 мс між запитами до fapi (~16/с): рівномірний потік замість пачки на старті
+_WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
+_WEIGHT_LAST: Dict[str, Any] = {"used": None, "at": 0.0}
+_PACE_LOCK = threading.Lock()
+
+
+def _pace_fapi() -> None:
+    global _FAPI_LAST
+    with _PACE_LOCK:
+        wait = _FAPI_GAP - (time.time() - _FAPI_LAST)
+        if wait > 0:
+            time.sleep(wait)
+        _FAPI_LAST = time.time()
+
+
+def _note_weight(headers: Any) -> None:
+    """Витрачена вага за хвилину з відповіді Binance: наближаємось до ліміту → коротка пауза, поки хвилина не мине (до 429 не доводимо)."""
+    global _BACKOFF_UNTIL
+    try:
+        used = int(headers.get("X-MBX-USED-WEIGHT-1M")) if headers is not None else None
+    except (TypeError, ValueError):
+        used = None
+    if used is None:
+        return
+    _WEIGHT_LAST.update(used=used, at=time.time())
+    if used >= _WEIGHT_SOFT:
+        pause = 60.0 - (time.time() % 60.0)
+        _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + pause)
+        _HEALTH["weight_pauses"] = _HEALTH.get("weight_pauses", 0) + 1
+
+
 def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
     global _BACKOFF_UNTIL
     now = time.time()
@@ -93,9 +125,13 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
             "Accept": "application/json,text/plain,*/*",
         },
     )
+    if "fapi.binance.com" in url:
+        _pace_fapi()
     try:
         with urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
+            if "fapi.binance.com" in url:
+                _note_weight(getattr(resp, "headers", None))
     except HTTPError as exc:
         if exc.code in (418, 429) and scope == "depth":
             try:
