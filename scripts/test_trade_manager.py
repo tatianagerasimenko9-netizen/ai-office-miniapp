@@ -96,3 +96,19 @@ assert TM.reentry(pos, m15=mm, h4=h4rows(), sent={"STOP_PRICE"}, now_ts=stop_ts 
 # RR після комісій < 1,5 → перезаходу немає
 assert TM.reentry(pos, m15=mm, h4=h4rows(), sent={"STOP_PRICE"}, now_ts=stop_ts + 4 * 900 + 60, stop_alert_ts=stop_ts, tp1=101.0) is None
 print("OK trade manager: breakeven, TP1 40%, TP2 30%, runner trail by HL/LH, structure end, add once, re-entry once")
+
+# ---------------- runner: кінець за зламом структури H4 (старший ТФ)
+def h4c(spec, t0=T0 - 12 * 4 * H):
+    out, prev = [], spec[0][2]
+    for i, (lo, hi, cl) in enumerate(spec):
+        out.append({"ts": datetime.fromtimestamp(t0 + i * 4 * H, tz=timezone.utc).isoformat(), "open": prev, "high": hi, "low": lo, "close": cl})
+        prev = cl
+    return out
+
+
+H4SPEC = [(99, 100, 99.5)] * 10 + [(104.6, 107, 106), (105.0, 107.4, 106.6), (104.0, 107.5, 105), (105.2, 108, 107.6), (105.8, 109, 108.5), (106.6, 110, 109.4)]
+# HL H4 = 104.0; закриття H4 нижче нього після TP2 → кінець (у пласкому H4 до цього — нічого)
+h4_break = h4c(H4SPEC + [(101.0, 108.0, 102.0)])
+a = TM.advise(pos, h1=h1(run), m15=[], h4=h4_break, sent={"BREAKEVEN", "TP1", "TP2", "TRAIL:105.0"}, now_ts=T0 + 200 * H, price=109.0)
+assert "END_STRUCTURE_H4" in [x["code"] for x in a] and "H4" in [x["text"] for x in a if x["code"] == "END_STRUCTURE_H4"][0], a
+print("OK trade manager: H4 structure end for the runner")
