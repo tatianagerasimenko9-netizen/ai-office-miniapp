@@ -281,7 +281,11 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
             with _CACHE_LOCK:
                 hit = _CANDLE_CACHE.get(key)
             ttl = _CANDLE_TTL.get(str(tf), 60)
-            if hit and now - hit[0] < ttl and hit[1] >= lim and not (ws_on and _ws.needs_seed(sym, str(tf))):
+            if hit and now - hit[0] < ttl and hit[1] >= lim:
+                if ws_on and _ws.needs_seed(sym, str(tf)) and _ws.seed(sym, str(tf), hit[2], hit[0]):
+                    ws_rows = _ws.get(sym, str(tf), lim)   # історія вже завантажена — засіваємо потік без другого REST-запиту
+                    if ws_rows:
+                        return ws_rows
                 _note_src(sym, hit[2])
                 return hit[2][-lim:]
         want = max(lim, hit[1] if hit else 0, _ws.wanted_limit(sym, str(tf)) if ws_on else 0)
