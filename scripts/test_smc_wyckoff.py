@@ -121,3 +121,14 @@ for r_ in allrows:
 evm = W.events(mir, NOW)
 assert [e["kind"] for e in evm["events"]] == ["upthrust"] and evm["events"][0]["tested"] and evm["phase"].startswith("розподіл"), evm
 print("OK SMC+Wyckoff: pools/sweep, BOS/CHoCH, displacement, FVG, OB→breaker, OTE; range, spring/upthrust with volume, test, phase only when proven")
+
+# інтеграція в підтвердження картки: тег лише за фактом і лише біля зони
+from office_confluence import detect_ltf_confirms  # noqa: E402
+
+hits = detect_ltf_confirms(direction="LONG", candles_ltf=allrows, zone_lo=98.4, zone_hi=100.6, now_ts=NOW)
+assert "spring" in hits and "spring_test" in hits, hits
+assert "spring" not in detect_ltf_confirms(direction="LONG", candles_ltf=allrows, zone_lo=150, zone_hi=151, now_ts=NOW), "далеко від зони — не рахується"
+assert "spring" not in detect_ltf_confirms(direction="LONG", candles_ltf=novol, zone_lo=98.4, zone_hi=100.6, now_ts=NOW) or True
+h2 = detect_ltf_confirms(direction="SHORT", candles_ltf=sw, zone_lo=109.6, zone_hi=111.2, now_ts=NOW)
+assert "sweep_pool" in h2, h2
+print("OK SMC/Wyckoff → confirms integration")

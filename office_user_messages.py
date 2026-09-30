@@ -156,7 +156,7 @@ def render(v: Dict[str, Any]) -> str:
 
 # ------------------------------------------------------------------ картки підтвердження/скасування (worker)
 PLAIN_CONFIRM = {
-    "double_bottom": "подвійне дно", "double_top": "подвійна вершина", "triple_bottom": "потрійне дно", "triple_top": "потрійна вершина", "head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "висхідний трикутник", "descending_triangle": "низхідний трикутник", "symmetrical_triangle": "симетричний трикутник", "rectangle": "прямокутник", "rising_wedge": "висхідний клин", "falling_wedge": "спадний клин", "flag": "прапор", "pennant": "вимпел",
+    "double_bottom": "подвійне дно", "double_top": "подвійна вершина", "triple_bottom": "потрійне дно", "triple_top": "потрійна вершина", "sweep_pool": "зняття ліквідності", "displacement": "сильний імпульс", "fvg_retest": "ретест FVG", "ob_retest": "ретест order block", "breaker_retest": "ретест breaker", "ote": "зона OTE", "spring_test": "тест spring", "upthrust_test": "тест upthrust", "head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "висхідний трикутник", "descending_triangle": "низхідний трикутник", "symmetrical_triangle": "симетричний трикутник", "rectangle": "прямокутник", "rising_wedge": "висхідний клин", "falling_wedge": "спадний клин", "flag": "прапор", "pennant": "вимпел",
     "sfp": "хибний пробій рівня з поверненням", "engulf": "поглинання попередньої свічки", "bos": "пробій структури",
     "choch": "зміна напрямку руху", "spring": "хибний прокол вниз і повернення", "upthrust": "хибний прокол вгору і повернення",
 }
