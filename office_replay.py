@@ -1,4 +1,6 @@
 """Replay контрольних кейсів на реальних свічках (лише читання: нічого не пишеться в Telegram і не торгує).
+Свічки — з архіву data.binance.vision (він НЕ рахується в ліміт API; IP спільний із живим Левом і ботами власниці). REST fapi — лише запасний шлях
+при used_weight_1m < 600 і з паузою між запитами; інакше replay чесно пише «немає даних».
 
 Ядро: крок 15 хв, `office_trade_manager.advise/reentry` бачать лише ЗАКРИТІ свічки до поточного кроку (без підглядання в майбутнє).
 Вхід моделюється на першій свічці після `start`, що торкнулась ціни входу. Окремо для кожного кейсу перевіряється шлюз плану
@@ -9,7 +11,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 os.environ.setdefault("OFFICE_DEPO_USDT", "1000")
@@ -37,14 +39,96 @@ def _ts(r: Dict[str, Any]) -> float:
     return datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")).timestamp()
 
 
-def load_data(symbol: str, fetch: Optional[Callable[..., Any]] = None) -> Dict[str, List[Dict[str, Any]]]:
-    """Реальні свічки через office_market_data.fetch_candles (те саме джерело, що й у Лева): 15м ≈5 діб, 1г, 4г."""
-    if fetch is None:
-        from office_market_data import fetch_candles as fetch
-    out: Dict[str, List[Dict[str, Any]]] = {}
+VISION_URL = "https://data.binance.vision/data/futures/um/daily/klines/{sym}/15m/{sym}-15m-{day}.zip"
+WEIGHT_LIMIT = 600          # REST-запасний шлях лише при used_weight_1m нижче цього (IP спільний із живим Левом і ботами власниці)
+REST_GAP_SEC = 1.0          # і з розтягуванням запитів у часі
+
+
+def _vision_zip(url: str) -> bytes:
+    import urllib.request
+
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "office-replay/1"}), timeout=60).read()
+
+
+def from_vision(symbol: str, start: datetime, end: datetime, getter: Optional[Callable[[str], bytes]] = None) -> Dict[str, Any]:
+    """15-хв свічки з архіву data.binance.vision (НЕ рахується в ліміт API). Є лише завершені доби; відсутні дні пропускаємо й повідомляємо."""
+    import io
+    import urllib.parse
+    import zipfile
+    from datetime import timedelta
+
+    get = getter or _vision_zip
+    rows: List[Dict[str, Any]] = []
+    missing: List[str] = []
+    d = start.date()
+    while d <= end.date():
+        url = VISION_URL.format(sym=urllib.parse.quote(symbol), day=d.isoformat())
+        try:
+            z = zipfile.ZipFile(io.BytesIO(get(url)))
+            for line in z.read(z.namelist()[0]).decode().splitlines():
+                p = line.split(",")
+                if p and p[0].isdigit():
+                    rows.append({"ts": _iso(int(p[0]) / 1000), "open": float(p[1]), "high": float(p[2]), "low": float(p[3]), "close": float(p[4]), "volume": float(p[5])})
+        except Exception:  # noqa: BLE001
+            missing.append(d.isoformat())
+        d += timedelta(days=1)
+    rows.sort(key=lambda r: r["ts"])
+    return {"15m": rows, "missing_days": missing}
+
+
+def resample(m15: List[Dict[str, Any]], sec: int) -> List[Dict[str, Any]]:
+    buckets: Dict[int, Dict[str, Any]] = {}
+    for r in m15:
+        b = int(_ts(r) // sec * sec)
+        x = buckets.setdefault(b, {"ts": _iso(b), "open": r["open"], "high": r["high"], "low": r["low"], "close": r["close"], "volume": 0.0})
+        x["high"] = max(x["high"], r["high"])
+        x["low"] = min(x["low"], r["low"])
+        x["close"] = r["close"]
+        x["volume"] += r.get("volume") or 0.0
+    return [buckets[k] for k in sorted(buckets)]
+
+
+def _rest_allowed() -> bool:
+    """Запасний REST лише коли вага IP вільна: used_weight_1m відомий і нижче WEIGHT_LIMIT (невідомо = не ризикуємо)."""
+    try:
+        from office_market_data import source_health
+
+        used = source_health().get("used_weight_1m")
+        return used is not None and int(used) < WEIGHT_LIMIT
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def load_data(symbol: str, fetch: Optional[Callable[..., Any]] = None, start: Optional[datetime] = None, end: Optional[datetime] = None,
+              getter: Optional[Callable[[str], bytes]] = None) -> Dict[str, Any]:
+    """Свічки для replay. Порядок: (1) `fetch` — лише для тестів; (2) архів data.binance.vision (не їсть ліміт API; 1г і 4г збираємо з 15м);
+    (3) якщо архіву за потрібні дні нема — REST fapi, але тільки при used_weight_1m < 600 і з паузою між запитами, інакше чесно без даних."""
+    import time as _time
+    from datetime import timedelta
+
+    if fetch is not None:
+        out: Dict[str, Any] = {}
+        for tf, n in (("15m", 500), ("1h", 500), ("4h", 300)):
+            rows = fetch(symbol, tf, n)
+            out[tf] = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        out["source"] = "fetch"
+        return out
+    end = end or datetime.now(timezone.utc)
+    start = (start or end) - timedelta(days=3)       # контекст для H1/H4 до входу
+    v = from_vision(symbol, start, end, getter)
+    m15 = v["15m"]
+    if m15:
+        return {"15m": m15, "1h": resample(m15, 3600), "4h": resample(m15, 14400), "source": "vision", "missing_days": v["missing_days"]}
+    if not _rest_allowed():
+        return {"15m": [], "1h": [], "4h": [], "source": "none", "missing_days": v["missing_days"],
+                "note": "архів data.binance.vision недоступний, а used_weight_1m невідомий або ≥ 600 — REST не чіпаємо, щоб не вибити ліміт IP"}
+    from office_market_data import fetch_candles
+
+    out = {"source": "rest", "missing_days": v["missing_days"]}
     for tf, n in (("15m", 500), ("1h", 500), ("4h", 300)):
-        rows = fetch(symbol, tf, n)
+        rows = fetch_candles(symbol, tf, n)
         out[tf] = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        _time.sleep(REST_GAP_SEC)
     return out
 
 
@@ -124,14 +208,21 @@ def verdict(case_key: str, res: Dict[str, Any], gate: Optional[str]) -> Dict[str
     return {"passed": all(c["ok"] for c in checks), "checks": checks}
 
 
-def run_case(key: str, fetch: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
+def run_case(key: str, fetch: Optional[Callable[..., Any]] = None, getter: Optional[Callable[[str], bytes]] = None) -> Dict[str, Any]:
     case = CASES[key]
     try:
         gate = plan_gate(case)
     except Exception as exc:  # noqa: BLE001
         gate = f"шлюз не відпрацював: {type(exc).__name__}"
     try:
-        res = replay(case, load_data(case["symbol"], fetch))
+        st = datetime.fromisoformat(case["start"].replace("Z", "+00:00"))
+        data = load_data(case["symbol"], fetch, start=st, end=st + timedelta(days=2), getter=getter)
+        res = replay(case, data)
+        res["source"] = data.get("source")
+        if data.get("missing_days"):
+            res["missing_days"] = data["missing_days"]
+        if data.get("note"):
+            res["note"] = data["note"]
     except Exception as exc:  # noqa: BLE001
         res = {"ok": False, "status": "ERROR", "note": f"{type(exc).__name__}: {exc}"}
     return {"case": key, "symbol": case["symbol"], "note": case["note"], "gate": gate or "план пройшов би шлюз (геометрія, RR після комісій, мінімальна ціль)",
@@ -141,7 +232,8 @@ def run_case(key: str, fetch: Optional[Callable[..., Any]] = None) -> Dict[str, 
 def format_report(r: Dict[str, Any]) -> List[str]:
     res = r["result"]
     lines = [f"[replay] == {r['case']} {r['symbol']} · {r['note']}", f"[replay] шлюз плану: {r['gate']}",
-             f"[replay] стан: {res.get('status')} {res.get('filled_at') or res.get('note') or ''}".rstrip()]
+             f"[replay] стан: {res.get('status')} {res.get('filled_at') or res.get('note') or ''} · джерело свічок: {res.get('source')}"
+             + (f" · днів без архіву: {', '.join(res['missing_days'])}" if res.get('missing_days') else "")]
     for x in res.get("timeline") or []:
         lines.append(f"[replay] {x['ts']}  {x['text']}")
     if res.get("status") == "FILLED":
@@ -151,10 +243,11 @@ def format_report(r: Dict[str, Any]) -> List[str]:
     return lines
 
 
-def run_all(keys: Optional[List[str]] = None, fetch: Optional[Callable[..., Any]] = None, printer: Callable[[str], None] = print) -> List[Dict[str, Any]]:
+def run_all(keys: Optional[List[str]] = None, fetch: Optional[Callable[..., Any]] = None, printer: Callable[[str], None] = print,
+            getter: Optional[Callable[[str], bytes]] = None) -> List[Dict[str, Any]]:
     out = []
     for k in keys or list(CASES):
-        r = run_case(k, fetch)
+        r = run_case(k, fetch, getter)
         for ln in format_report(r):
             printer(ln)
         out.append(r)

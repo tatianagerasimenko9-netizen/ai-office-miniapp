@@ -80,5 +80,66 @@ check("кейси мають реальні параметри з журналу
 lines = rp.format_report(out[1])
 check("звіт містить вердикт і шлюз", any("вердикт LSK" in x for x in lines) and any("шлюз плану" in x for x in lines))
 
+# ---- джерело свічок: архів data.binance.vision, а не REST (IP спільний із живим Левом і ботами) ----
+import io  # noqa: E402
+import zipfile  # noqa: E402
+
+import office_market_data as omd  # noqa: E402
+
+
+def make_zip(day):
+    d0 = datetime.fromisoformat(day + "T00:00:00+00:00")
+    lines = []
+    for i in range(96):
+        t = d0 + timedelta(minutes=15 * i)
+        c = 100.0 + (0.1 * i if day == "2026-09-29" else 0.0)
+        lines.append(f"{int(t.timestamp() * 1000)},{c},{c * 1.002},{c * 0.998},{c},10,0,0,0,0,0,0")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("x.csv", "\n".join(lines))
+    return buf.getvalue()
+
+
+calls = []
+
+
+def getter(url):
+    calls.append(url)
+    day = url.rsplit("-", 3)[-3:]
+    day = "-".join(day).replace(".zip", "")
+    if day in ("2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29"):
+        return make_zip(day)
+    raise OSError("404")
+
+
+rest_calls = []
+omd.fetch_candles = lambda *a, **k: rest_calls.append(a) or []
+st = datetime(2026, 9, 29, 0, 0, tzinfo=timezone.utc)
+d = rp.load_data("AKEUSDT", None, start=st, end=st + timedelta(days=2), getter=getter)
+check("архів дав 15м свічки й похідні 1г/4г, REST не чіпали", d["source"] == "vision" and len(d["15m"]) == 96 * 4 and len(d["1h"]) > 0 and len(d["4h"]) > 0 and not rest_calls, str({k: (len(v) if isinstance(v, list) else v) for k, v in d.items()}))
+check("дні без архіву (сьогодні) названо чесно", "2026-09-30" in d["missing_days"] and "2026-10-01" in d["missing_days"], str(d["missing_days"]))
+check("URL архіву містить ф'ючерсний каталог і 15m", all("futures/um/daily/klines" in u and "/15m/" in u for u in calls))
+chinese = [u for u in calls if "%" in u]
+check("символ з ієрогліфами кодується в URL", bool(rp.VISION_URL) and "%" in __import__("urllib.parse").parse.quote("龙虾USDT"))
+
+def dead(url):
+    raise OSError("архів недоступний")
+
+omd.source_health = lambda: {"used_weight_1m": None}
+nd = rp.load_data("AKEUSDT", None, start=st, end=st + timedelta(days=1), getter=dead)
+check("архів недоступний + вага невідома → REST не чіпаємо, чесне «немає даних»", nd["source"] == "none" and nd["15m"] == [] and not rest_calls and "не чіпаємо" in nd["note"], str(nd))
+omd.source_health = lambda: {"used_weight_1m": 1500}
+nd2 = rp.load_data("AKEUSDT", None, start=st, end=st + timedelta(days=1), getter=dead)
+check("вага ≥ 600 → REST не чіпаємо", nd2["source"] == "none" and not rest_calls)
+omd.source_health = lambda: {"used_weight_1m": 120}
+rp.REST_GAP_SEC = 0.0
+ok = rp.load_data("AKEUSDT", None, start=st, end=st + timedelta(days=1), getter=dead)
+check("вага < 600 → REST дозволено, по одному запиту на ТФ", ok["source"] == "rest" and len(rest_calls) == 3, str(len(rest_calls)))
+
+# кейс повністю через архів: звіт називає джерело
+rest_calls.clear()
+r = rp.run_case("AKE", getter=getter)
+check("run_case на архіві: джерело vision у звіті", r["result"].get("source") == "vision" and any("джерело свічок: vision" in x for x in rp.format_report(r)), str(r["result"])[:200])
+
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)
