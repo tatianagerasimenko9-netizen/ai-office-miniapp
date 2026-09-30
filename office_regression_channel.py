@@ -129,3 +129,44 @@ def regression_channel(
         "closed_only": closed_only,
         "note": "контекст графіка, не вхід",
     }
+
+
+def tags_for(candles: Any, side: str, zone_lo: Any, zone_hi: Any, now_ts: Any = None, length: int = 100, deviation: float = 2.0) -> List[Dict[str, Any]]:
+    """Формальне правило «зона сценарію на межі регресійного каналу» (контекст підтвердження, не вхід).
+
+    LONG: нижня межа каналу (на кінці каналу) потрапляє в зону (із допуском 0,25 σ), остання закрита свічка закрилась не нижче межі
+    (межу втримано), канал не спрямований вниз (нахил ≥ 0). SHORT — дзеркально: верхня межа в зоні, закриття не вище межі, нахил ≤ 0.
+    Канал рахується лише по закритих свічках; замало даних (< 30 свічок) або застарілі дані — тегу нема."""
+    side = str(side or "").upper()
+    if side not in ("LONG", "SHORT"):
+        return []
+    try:
+        zl, zh = sorted((float(zone_lo), float(zone_hi)))
+    except (TypeError, ValueError):
+        return []
+    rows = [r for r in (candles or []) if isinstance(r, dict)]
+    if len(rows) < 31:
+        return []
+    n = min(int(length), len(rows) - 1)
+    ch = regression_channel(rows, length=n, deviation=deviation)
+    if not ch.get("ok"):
+        return []
+    sigma = (float(ch["upper_end"]) - float(ch["mid_end"])) / float(deviation)
+    if sigma <= 0:
+        return []
+    tol = 0.25 * sigma
+    closed = rows[-2]   # остання закрита (остання в списку — та, що формується)
+    try:
+        close = float(closed["close"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    slope = float(ch["slope"])
+    if side == "LONG":
+        edge = float(ch["lower_end"])
+        if zl - tol <= edge <= zh + tol and close >= edge and slope >= 0:
+            return [{"kind": "channel_edge", "level": edge, "note": "зона на нижній межі висхідного/плоского регресійного каналу, межу втримано"}]
+    else:
+        edge = float(ch["upper_end"])
+        if zl - tol <= edge <= zh + tol and close <= edge and slope <= 0:
+            return [{"kind": "channel_edge", "level": edge, "note": "зона на верхній межі низхідного/плоского регресійного каналу, межу втримано"}]
+    return []

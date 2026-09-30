@@ -88,7 +88,15 @@ def analyse(direction: str, *, funding_pct: Optional[float], oi_hist: List[Dict[
             notes.append({"tone": "bad" if long_ else "good", "text": f"Покупців значно більше, ніж продавців ({r}): натовп у купівлі."})
         elif ls_ratio <= LS_CROWD_LO:
             notes.append({"tone": "good" if long_ else "bad", "text": f"Продавців значно більше, ніж покупців ({r}): натовп у продажі."})
-    return {"notes": notes, "unchecked": unchecked, "not_connected": list(NOT_CONNECTED),
+    nc = list(NOT_CONNECTED)
+    try:
+        from office_calendar import block_enabled
+
+        if block_enabled():   # календар підключено (OFFICE_CALENDAR_BLOCK=1) — більше не «не бачить»
+            nc = [x for x in nc if "новини" not in x]
+    except Exception:  # noqa: BLE001
+        pass
+    return {"notes": notes, "unchecked": unchecked, "not_connected": nc,
             "rule_note": "Це пояснення, а не сигнал: ці показники не блокують і не змінюють рішення Лева."}
 
 
