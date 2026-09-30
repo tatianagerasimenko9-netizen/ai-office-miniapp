@@ -7288,6 +7288,19 @@ EV позитивне: {prob.get('ev_positive', '')}
 
         asyncio.create_task(_replay_once())
 
+    if os.getenv("OFFICE_RR_ANALYSIS_ON_START", "").strip() == "1":   # одноразовий аналіз правила RR на історії (лише читання, лог [rr]); Telegram не задіяно
+        async def _rr_once() -> None:
+            await asyncio.sleep(150)
+            try:
+                import office_rr_analysis
+
+                await asyncio.to_thread(office_rr_analysis.run, db_path)
+                print("[rr] готово; вимкни OFFICE_RR_ANALYSIS_ON_START")
+            except Exception as exc_rr:  # noqa: BLE001
+                print(f"[rr] помилка: {type(exc_rr).__name__}: {exc_rr}")
+
+        asyncio.create_task(_rr_once())
+
     async def monitor_signal_tracks() -> None:
         """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
         import office_signal_track as trk
