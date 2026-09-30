@@ -79,7 +79,7 @@ def reset_market_cache() -> None:
     _BACKOFF_UNTIL = 0.0
 
 
-def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
+def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
     global _BACKOFF_UNTIL
     now = time.time()
     if "fapi.binance.com" in url and now < _BACKOFF_UNTIL:
@@ -97,6 +97,13 @@ def _http_get_json(url: str, params: Dict[str, Any]) -> JSONLike:
         with urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
+        if exc.code in (418, 429) and scope == "depth":
+            try:
+                ra_d = float(exc.headers.get("Retry-After") or 60)
+            except (TypeError, ValueError):
+                ra_d = 60.0
+            _depth_backoff(ra_d)   # стакан має ОКРЕМУ паузу й не вмикає паузу свічок
+            raise RateLimited(ra_d) from exc
         if exc.code in (418, 429) and "fapi.binance.com" not in url:
             raise  # резервні джерела не вмикають паузу основного
         if exc.code in (418, 429):
@@ -629,6 +636,49 @@ def fetch_market_structure(symbol: str, tf: str = "1h") -> Dict[str, Any]:
         return {}
 
 
+_DEPTH_BACKOFF_UNTIL = 0.0
+_DEPTH_LAST_REQ = 0.0
+_DEPTH_CACHE: Dict[str, tuple] = {}
+_DEPTH_TTL = 60.0
+_DEPTH_GAP = 3.0        # мінімум секунд між ЗАПИТАМИ стакана (розносимо в часі)
+_DEPTH_LOCK = threading.Lock()
+_DEPTH_STATS = {"requests": 0, "cache": 0, "skipped_disabled": 0, "skipped_not_listed": 0, "skipped_backoff": 0, "rate_limited": 0}
+
+
+def _depth_backoff(sec: float) -> None:
+    global _DEPTH_BACKOFF_UNTIL
+    _DEPTH_BACKOFF_UNTIL = max(_DEPTH_BACKOFF_UNTIL, time.time() + min(max(sec, 30.0), 600.0))
+    _DEPTH_STATS["rate_limited"] += 1
+
+
+def depth_enabled() -> bool:
+    return os.getenv("OFFICE_DEPTH_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def depth_symbols() -> List[str]:
+    raw = os.getenv("OFFICE_DEPTH_SYMBOLS", "BTCUSDT,ETHUSDT")
+    return [x.strip().upper() for x in raw.split(",") if x.strip()]
+
+
+def depth_stats() -> Dict[str, Any]:
+    return {**_DEPTH_STATS, "enabled": depth_enabled(), "symbols": depth_symbols(), "backoff_left_sec": max(0.0, round(_DEPTH_BACKOFF_UNTIL - time.time(), 1))}
+
+
+def _depth_gate(sym: str) -> Optional[str]:
+    """None — можна робити запит стакана; інакше причина відмови. Свічки мають пріоритет над стаканом."""
+    if not depth_enabled():
+        _DEPTH_STATS["skipped_disabled"] += 1
+        return "вимкнено"
+    if sym not in depth_symbols():
+        _DEPTH_STATS["skipped_not_listed"] += 1
+        return "монета не в короткому списку"
+    now = time.time()
+    if now < _DEPTH_BACKOFF_UNTIL or now < _BACKOFF_UNTIL:   # своя пауза стакана АБО пауза свічок ф'ючерсів (пріоритет свічкам)
+        _DEPTH_STATS["skipped_backoff"] += 1
+        return "пауза"
+    return None
+
+
 def fetch_order_book_walls(symbol: str, min_size_usdt: float = 500_000.0) -> Dict[str, Any]:
     """
     Order book depth — великі рівні bid/ask (агреговані як «стіни» у notional USDT).
@@ -649,10 +699,22 @@ def fetch_order_book_walls(symbol: str, min_size_usdt: float = 500_000.0) -> Dic
         if min_sz <= 0:
             min_sz = 500_000.0
 
-        raw = _http_get_json(
-            "https://fapi.binance.com/fapi/v1/depth",
-            {"symbol": sym, "limit": 100},
-        )
+        why_no = _depth_gate(sym)
+        if why_no:
+            return {"symbol": sym, "description": "DOM недоступний", "reason": why_no}
+        with _DEPTH_LOCK:
+            hit = _DEPTH_CACHE.get(sym)
+            global _DEPTH_LAST_REQ
+            if hit and time.time() - hit[0] < _DEPTH_TTL:
+                _DEPTH_STATS["cache"] += 1
+                raw = hit[1]
+            else:
+                if time.time() - _DEPTH_LAST_REQ < _DEPTH_GAP:   # рознесення запитів у часі: без блокування циклу — цей тік стакана пропускаємо
+                    return {"symbol": sym, "description": "DOM недоступний", "reason": "рознесення"}
+                _DEPTH_LAST_REQ = time.time()
+                _DEPTH_STATS["requests"] += 1
+                raw = _http_get_json("https://fapi.binance.com/fapi/v1/depth", {"symbol": sym, "limit": 100}, scope="depth")
+                _DEPTH_CACHE[sym] = (time.time(), raw)
         if not isinstance(raw, dict):
             return {"symbol": sym, "description": "DOM недоступний"}
 
