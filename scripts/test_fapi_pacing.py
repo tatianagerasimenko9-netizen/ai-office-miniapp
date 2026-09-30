@@ -39,8 +39,14 @@ for _ in range(5):
 assert time.time() - t1 < 0.2 and M.backoff_left() == 0
 print("OK fapi pacing: 60ms spacing, weight-aware pause before 429, fallbacks unaffected")
 
-# стартовий розгін: перші 3 хв процесу — ≥250 мс між запитами
+# стартовий розгін: на Render перші 3 хв процесу — ≥250 мс між запитами; поза Render (тести/CI) — ні
+os.environ.pop('RENDER', None)
 M._STARTED_AT = time.time()
+t_ = time.time()
+for _ in range(4):
+    M._http_get_json('https://fapi.binance.com/fapi/v1/klines', {})
+assert time.time() - t_ < 0.6, 'поза Render розгону немає'
+os.environ['RENDER'] = 'true'
 M._BACKOFF_UNTIL = 0.0
 W["v"] = 100
 t2 = time.time()

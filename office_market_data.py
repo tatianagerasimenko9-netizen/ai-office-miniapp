@@ -92,7 +92,7 @@ _PACE_LOCK = threading.Lock()
 def _pace_fapi() -> None:
     global _FAPI_LAST
     with _PACE_LOCK:
-        gap = _RAMP_GAP if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
+        gap = _RAMP_GAP if (os.getenv("RENDER", "").strip() and (time.time() - _STARTED_AT) < _RAMP_SEC) else _FAPI_GAP   # розгін лише на Render (у CI/тестах він гальмував би сотні запитів)
         wait = gap - (time.time() - _FAPI_LAST)
         if wait > 0:
             time.sleep(wait)
