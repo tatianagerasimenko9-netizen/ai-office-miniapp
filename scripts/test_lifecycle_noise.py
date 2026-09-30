@@ -117,8 +117,7 @@ card = M.confirm_card(symbol="LSKUSDT", direction="LONG", entry=0.3035, sl=0.295
                       tp3=None, cancel=0.2953, why="розворот", valid_until="23:40")
 assert "ДІЄ ДО: 23:40 (Київ)" in card and card.count("Рішення") == 1 and "Це аналіз" not in card and card.strip().endswith("Офіс ордерів не ставить."), card
 assert L.plan_valid_sec("H1") == 4 * 3600 and L.plan_valid_sec("M15") == 3600 and L.plan_valid_sec("M5") == 3600 and L.plan_valid_sec("H4") == 12 * 3600
-exp = M.expired_plan_card(symbol="LSKUSDT", direction="LONG")
-assert "ЧАС ДІЇ ПЛАНУ ЗАКІНЧИВСЯ" in exp and exp.count("Рішення") == 1, exp
+assert not hasattr(M, "expired_plan_card"), "повідомлення про завершення терміну плану заборонене"
 # підтверджений план знімається за часом (стан сценарію)
 import office_scenario_state as SS  # noqa: E402
 

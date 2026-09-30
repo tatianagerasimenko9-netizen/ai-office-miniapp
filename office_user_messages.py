@@ -194,13 +194,6 @@ def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
     return "\n".join(L)
 
 
-def expired_plan_card(*, symbol: str, direction: str) -> str:
-    w = _side_words(direction)
-    return "\n".join([f"⚪ {ticker(symbol)} · ЧАС ДІЇ ПЛАНУ ЗАКІНЧИВСЯ", f"Входу не було. План {w['gen']} знято.",
-                      "ЗАРАЗ: нічого не робимо. Якщо ти вже в угоді — перевір свій стоп.",
-                      "Рішення й ордер — лише твої, Офіс ордерів не ставить."])
-
-
 def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) -> str:
     w = _side_words(direction)
     low = str(reason or "").lower()
