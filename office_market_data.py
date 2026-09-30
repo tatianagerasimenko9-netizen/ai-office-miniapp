@@ -79,6 +79,9 @@ def reset_market_cache() -> None:
     _BACKOFF_UNTIL = 0.0
 
 
+_STARTED_AT = time.time()
+_RAMP_SEC = 180.0           # перші 3 хв після старту процесу — повільніший темп (web і worker перезапускаються одночасно з одного IP)
+_RAMP_GAP = 0.25
 _FAPI_LAST = 0.0
 _FAPI_GAP = 0.06            # ≥60 мс між запитами до fapi (~16/с): рівномірний потік замість пачки на старті
 _WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
@@ -89,7 +92,8 @@ _PACE_LOCK = threading.Lock()
 def _pace_fapi() -> None:
     global _FAPI_LAST
     with _PACE_LOCK:
-        wait = _FAPI_GAP - (time.time() - _FAPI_LAST)
+        gap = _RAMP_GAP if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
+        wait = gap - (time.time() - _FAPI_LAST)
         if wait > 0:
             time.sleep(wait)
         _FAPI_LAST = time.time()
