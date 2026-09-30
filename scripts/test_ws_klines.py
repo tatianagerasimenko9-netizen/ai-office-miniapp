@@ -25,7 +25,7 @@ def check(name, cond, extra=""):
 
 
 # ---------- фальшивий Binance ----------
-SRV = {"conns": [], "close_now": False, "rev": 0}
+SRV = {"conns": [], "close_now": False, "rev": 0, "mute": False}
 T0_MS = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000) // 900000 * 900000
 
 
@@ -40,7 +40,7 @@ async def handler(request):
         i = 0
         while not resp.closed:
             i += 1
-            for s in list(subs):
+            for s in ([] if SRV["mute"] else list(subs)):
                 sym, _, kl = s.partition("@kline_")
                 await resp.send_str(json.dumps({"stream": s, "data": {"e": "kline", "s": sym.upper(), "k": {
                     "t": T0_MS + SRV["rev"] * 900000, "s": sym.upper(), "i": kl, "o": "100", "h": "110", "l": "90",
@@ -206,6 +206,25 @@ check("після відновлення історія засіяна знов�
 os.environ["OFFICE_WS_MAX_STREAMS"] = "3"
 check("ліміт потоків: понад ліміт — REST", ws.register("XRPUSDT", "5m", 5) is False)
 os.environ.pop("OFFICE_WS_MAX_STREAMS")
+
+# 7) сторож тиші: з'єднання формально живе, а подій нема → перепідключення, далі потік знову йде
+ws._SILENCE_SEC = 2.0
+ev0 = ws.stats()["events"]
+SRV["mute"] = True
+ok = wait_for(lambda: ws.stats()["watchdog"] >= 1, 12)
+check("сторож виявив тишу", ok, str(ws.stats()))
+SRV["mute"] = False
+ok = wait_for(lambda: ws.stats()["connected"] and ws.stats()["events"] > ev0 and ws.stats()["connects"] >= 3, 15)
+check("після тиші з'єднання відновилось і події знову йдуть", ok, str(ws.stats()))
+
+# 8) перша адреса недоступна → сесія без подій → наступна адреса
+ws.reset_for_tests()
+os.environ["OFFICE_WS_BASE"] = "ws://127.0.0.1:1/stream"          # нічого не слухає
+os.environ["OFFICE_WS_BASE_ALT"] = f"ws://127.0.0.1:{info['port']}/stream"
+for c in SRV["conns"]:
+    asyncio.run_coroutine_threadsafe(c["ws"].close(), info["loop"])
+ok = wait_for(lambda: ws.stats()["base"].endswith(f":{info['port']}/stream") and ws.stats()["connected"], 20)
+check("недоступну адресу змінено на запасну", ok, str(ws.stats()))
 
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)
