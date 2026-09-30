@@ -47,3 +47,10 @@ ex = mk([{"open": 101.2, "high": 101.3, "low": 100.9, "close": 101.0, "volume": 
          {"open": 100.7, "high": 100.8, "low": 100.3, "close": 100.4, "volume": 110}, {"open": 100.4, "high": 100.6, "low": 99.3, "close": 100.5, "volume": 320}])
 assert "exhaustion" in kinds(ex), kinds(ex)
 print("OK candles in context: pin bar, inside-bar break, engulfing, exhaustion — zone + volume + ATR + session required")
+
+# інтеграція: тег у підтвердженнях картки лише в контексті
+from office_confluence import detect_ltf_confirms  # noqa: E402
+
+assert "pin_bar" in detect_ltf_confirms(direction="LONG", candles_ltf=pin, zone_lo=100.0, zone_hi=100.5, now_ts=NOW)
+assert "pin_bar" not in detect_ltf_confirms(direction="LONG", candles_ltf=pin, zone_lo=110.0, zone_hi=111.0, now_ts=NOW)
+print("OK candles → confirms integration")

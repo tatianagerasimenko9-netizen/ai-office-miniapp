@@ -37,8 +37,9 @@ TAG_UA = {
     "bpr": "BPR",
 }
 
-FORMAL_TAGS = ("sweep_pool", "displacement", "fvg_retest", "ob_retest", "breaker_retest", "ote", "spring", "spring_test", "upthrust", "upthrust_test")
+FORMAL_TAGS = ("pin_bar", "inside_bar_break", "engulfing_ctx", "exhaustion", "sweep_pool", "displacement", "fvg_retest", "ob_retest", "breaker_retest", "ote", "spring", "spring_test", "upthrust", "upthrust_test")
 CONFIRM_UA = {
+    "pin_bar": "пін-бар біля зони", "inside_bar_break": "пробій після inside bar", "engulfing_ctx": "поглинання біля зони", "exhaustion": "виснаження руху",
     "sweep_pool": "зняття ліквідності", "displacement": "сильний імпульс", "fvg_retest": "ретест FVG", "ob_retest": "ретест order block",
     "breaker_retest": "ретест breaker", "ote": "зона OTE", "spring_test": "тест spring", "upthrust_test": "тест upthrust",
     "double_top": "подвійна вершина",
@@ -428,7 +429,9 @@ def detect_ltf_confirms(
         import office_smc as _smc
         import office_wyckoff as _wy
 
-        for t in _smc.tags_for(candles_ltf, side, lo, hi, now_ts=now_ts) + _wy.tags_for(candles_ltf, side, now_ts=now_ts):
+        import office_candles as _cd
+
+        for t in _smc.tags_for(candles_ltf, side, lo, hi, now_ts=now_ts) + _wy.tags_for(candles_ltf, side, now_ts=now_ts) + _cd.tags_for(candles_ltf, side, lo, hi, now_ts=now_ts):
             if t["kind"] not in hits and t["kind"] in FORMAL_TAGS:
                 hits.append(t["kind"])
 
