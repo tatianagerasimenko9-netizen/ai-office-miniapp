@@ -59,5 +59,17 @@ except Exception:  # noqa: BLE001
 r = ms.record_scan_facts(db, "PUMPUSDT", rsi_h1=71.0, decision="WATCH", scout_reason="ріст за 24 год +18,5%")
 check("record_scan_facts зберігає причину відбору", bool(r) and "scout_reason" in str(r), str(r)[:200])
 
+# --- нові кандидати ринку не витісняються великим списком «вже у спостереженні» ---
+many = [f"W{i:02d}USDT" for i in range(60)]
+big = [tk("BTCUSDT", 0.5, 9e9, 60000), tk("PUMPUSDT", 18.5, 60e6), tk("DUMPUSDT", -12.0, 45e6), tk("VOLUSDT", 0.3, 4e9)] + [tk(w, 0.1, 8e6) for w in many]
+sc2 = SC.screen_futures_market(big)
+sl2 = SC.shortlist_with_reasons(sc2, active_watching=many)
+names = [x["symbol"] for x in sl2]
+check("60 монет у спостереженні НЕ витісняють нових кандидатів ринку", "PUMPUSDT" in names and "DUMPUSDT" in names and "VOLUSDT" in names, str(names))
+check("ліміт списку дотримано навіть із 60 у спостереженні", len(names) <= SC.DEEP_SCAN_CAP)
+check("спостереження заповнює решту місць", sum(1 for n in names if n.startswith("W")) >= 5, str(names))
+pr = {x["symbol"]: x["reason"] for x in sl2}
+check("причина нового кандидата — рух, а не «спостереження»", "ріст за 24 год" in pr["PUMPUSDT"] and "спостереженні" not in pr["PUMPUSDT"], str(pr["PUMPUSDT"]))
+
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)

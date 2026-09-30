@@ -20,6 +20,8 @@ STABLE_BASES = frozenset({"USDC", "BUSD", "TUSD", "USDP", "DAI", "FDUSD"})
 # Той самий ліквідний поріг, що fetch_top_movers.
 MIN_QUOTE_VOLUME = 5_000_000.0
 DEEP_SCAN_CAP = 24
+MOVER_QUOTA = 8     # місць у короткому списку для найбільших рухів за 24 год (нові кандидати ринку)
+VOL_QUOTA = 6       # і для найбільшого обсягу; решту до ліміту займає вже відоме спостереження
 CONTEXT_SEEDS: Tuple[str, ...] = ("BTCUSDT", "XAUUSDT")
 GOLD_SYMBOLS = ("XAUUSDT", "XAUUSD")
 GOLD_YAHOO = "GC=F"
@@ -241,22 +243,32 @@ def promote_for_deep_scan(
         u = _ok(s)
         if u:
             auto.append(u)
+    # Нові кандидати з ринку мають СВОЇ місця: інакше весь ліміт займають монети «вже у спостереженні» і скан нічого нового не знаходить.
+    # Порядок: запит власниці → контекст (BTC/золото) → найбільші рухи за 24 год (≤ MOVER_QUOTA) → найбільший обсяг (≤ VOL_QUOTA) → решта — спостереження.
+    if screen.data_status == DATA_OK:
+        movers = list(screen.gainers[:8]) + list(screen.losers[:8])
+        movers.sort(key=lambda r: abs(float(r.get("change_pct") or 0.0)), reverse=True)
+        n = 0
+        for r in movers:
+            if n >= MOVER_QUOTA:
+                break
+            u = _ok(r.get("symbol"))
+            if u:
+                auto.append(u)
+                n += 1
+        vol_sorted = sorted(screen.rows, key=lambda r: float(r.get("volume_usdt") or 0.0), reverse=True)
+        n = 0
+        for r in vol_sorted[:12]:
+            if n >= VOL_QUOTA:
+                break
+            u = _ok(r.get("symbol"))
+            if u:
+                auto.append(u)
+                n += 1
     for s in active_watching or []:
         u = _ok(s)
         if u:
             auto.append(u)
-    if screen.data_status == DATA_OK:
-        movers = list(screen.gainers[:8]) + list(screen.losers[:8])
-        movers.sort(key=lambda r: abs(float(r.get("change_pct") or 0.0)), reverse=True)
-        vol_sorted = sorted(screen.rows, key=lambda r: float(r.get("volume_usdt") or 0.0), reverse=True)
-        for r in movers:
-            u = _ok(r.get("symbol"))
-            if u:
-                auto.append(u)
-        for r in vol_sorted[:12]:
-            u = _ok(r.get("symbol"))
-            if u:
-                auto.append(u)
     return (user + auto)[: max(1, int(cap))]
 
 
