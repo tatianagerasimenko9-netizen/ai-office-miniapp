@@ -233,6 +233,11 @@ def check_plan(symbol: str, direction: str, plan: Dict[str, Any], zone_lo: Any, 
 
     if any(_f(plan.get(k)) is None for k in ("entry", "sl", "tp1")):
         return "План неповний: немає входу, стопа або цілі."
+    from office_calendar import entry_block   # важлива новина: нові плани не відкриваємо (вікно 30 хв до / 15 хв після)
+
+    news = entry_block()
+    if news:
+        return news
     g = validate_trade_geometry(direction=direction, sl=plan["sl"], tp1=plan["tp1"], entry=plan["entry"], entry_low=zone_lo, entry_high=zone_hi)
     if not g.get("ok"):
         reason = str(g.get("reason") or "")

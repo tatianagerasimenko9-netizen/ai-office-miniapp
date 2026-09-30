@@ -462,6 +462,12 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
                 human["context"] = context_for(str(row.get("symbol") or ""), str(row.get("direction") or ""))
             except Exception:  # noqa: BLE001
                 human["context"] = None
+            try:  # макрокалендар (безкоштовне джерело): найближча важлива новина й чи діє блок входу; лише коли увімкнено OFFICE_CALENDAR_BLOCK=1
+                from office_calendar import block_enabled, summary as _cal_summary
+
+                human["news"] = _cal_summary() if block_enabled() else None
+            except Exception:  # noqa: BLE001
+                human["news"] = None
     except Exception as exc:  # noqa: BLE001
         print(f"[mini] human view failed {sid}: {type(exc).__name__}: {exc}")
     return {
