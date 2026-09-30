@@ -108,6 +108,22 @@ jobs:
         run: |
           python scripts/test_mini_v2.py
           python scripts/test_mini_v2_cards.py
+      - name: Final launch tests (offline)
+        run: |
+          python scripts/test_ws_klines.py
+          python scripts/test_channel_tag.py
+          python scripts/test_calendar.py
+          python scripts/test_levels_payload.py
+          python scripts/test_replay.py
+          python scripts/test_rr_analysis.py
+          python scripts/test_rr_rule.py
+          python scripts/test_confirm_tags.py
+          python scripts/test_scout_shortlist.py
+          python scripts/test_market_context.py
+          python scripts/test_smc_wyckoff.py
+          python scripts/test_liq_map.py
+          python scripts/test_data_stability.py
+          python scripts/test_launch_once.py
 
   mini-app-ui-smoke:
     runs-on: ubuntu-latest
