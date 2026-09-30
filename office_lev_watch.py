@@ -178,7 +178,7 @@ def register(db: str, *, symbol: str, direction: str, zone_lo: Any, zone_hi: Any
         return cur  # той самий сценарій уже відстежується — не дублюємо
     rec = {"watch_id": wid, "symbol": str(symbol).upper(), "direction": side, "zone_lo": lo, "zone_hi": hi, "invalidation": inv,
            "wait_tf": wait_tf, "scenario_tf": scenario_tf, "state": state, "plan": plan, "scenario_id": scenario_id,
-           "touched_zone": False, "created_at": t.isoformat(), "expires_at": (t + timedelta(seconds=TTL_SEC)).isoformat()}
+           "touched_zone": False, "created_at": t.isoformat(), "expires_at": datetime.fromtimestamp(__import__("office_scenario_ttl").deadline(t.timestamp(), scenario_tf or "H1"), tz=timezone.utc).isoformat()}
     _save(db, rec)
     return rec
 

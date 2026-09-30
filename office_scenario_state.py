@@ -98,22 +98,20 @@ def _too_old(row: Dict[str, Any], now: Optional[datetime]) -> bool:
     if str(row.get("status") or "").upper() == "CONFIRMED":
         # підтверджений план діє обмежений час (див. office_scenario_lifecycle.plan_valid_sec), далі знімається
         try:
-            from office_scenario_lifecycle import _ts, plan_valid_sec
+            from office_scenario_lifecycle import _ts, valid_until_ts
 
-            m = re.search(r"(?:tf|timeframe)=([A-Za-z0-9]+)", str(row.get("analysis_note") or ""))
             t0 = _ts(row.get("ts_updated"))
-            return bool(t0 and (now or datetime.now(timezone.utc)).timestamp() > t0 + plan_valid_sec(m.group(1) if m else "H1"))
+            return bool(t0 and (now or datetime.now(timezone.utc)).timestamp() > valid_until_ts(t0, _tf_from_row(row)))
         except Exception:  # noqa: BLE001
             return False
     try:
-        from office_confluence import ttl_sec
+        from office_scenario_ttl import deadline
 
-        m = re.search(r"(?:tf|timeframe)=([A-Za-z0-9]+)", str(row.get("analysis_note") or ""))
-        tf = (m.group(1) if m else "H1").upper()
+        tf = _tf_from_row(row)
         born = datetime.fromisoformat(str(row.get("ts_created")).replace("Z", "+00:00"))
         if born.tzinfo is None:
             born = born.replace(tzinfo=timezone.utc)
-        return ((now or datetime.now(timezone.utc)) - born).total_seconds() >= ttl_sec(tf)
+        return (now or datetime.now(timezone.utc)).timestamp() >= deadline(born.timestamp(), tf)
     except Exception:  # noqa: BLE001
         return False
 
@@ -217,11 +215,11 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                     v["size"] = None
                 v["levels"] = {"max_entry": _me2, "entry": entry, "sl": sl, "tp1": tp1, "tp2": (tg.get("tp2") or {}).get("price"), "tp3": (tg.get("tp3") or {}).get("price"), "cancel": cancel}
                 try:
-                    from office_scenario_lifecycle import kyiv_hhmm, plan_valid_sec, _ts as _lts
+                    from office_scenario_lifecycle import kyiv_hhmm, valid_until_ts, _ts as _lts
 
                     t_conf = _lts(row.get("ts_updated"))
                     if t_conf:
-                        v["plan"]["valid_until"] = kyiv_hhmm(t_conf + plan_valid_sec(_tf_from_row(row)))
+                        v["plan"]["valid_until"] = kyiv_hhmm(valid_until_ts(t_conf, _tf_from_row(row)))
                 except Exception:  # noqa: BLE001
                     pass
                 v["plan"]["potential"] = f"до цілі 1 ≈ {to_tp1:.2f}% (≈ {max(to_tp1 - fee, 0):.2f}% після комісій), до стопа ≈ {to_sl:.2f}%".replace(".", ",")

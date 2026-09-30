@@ -748,7 +748,9 @@ def evaluate_confluence(
                 break
     if live:
         born = float(live.get("ts") or 0)
-        if ts - born < ttl_sec(timeframe):
+        from office_scenario_ttl import deadline as _dl2
+
+        if ts < _dl2(born, timeframe):
             live.update(
                 {
                     "zone_lo": float(best["lo"]),
@@ -913,7 +915,9 @@ def hydrate_live_from_db(db_path: str) -> int:
             continue  # службові спостереження: картки не було, повідомляти про їх «скасування» не можна
         tf_h = str(parse_note_meta(note).get("timeframe") or "H1")
         born = _iso_ts(r.get("ts_created"))
-        if st != "CANCELLED" and born and time.time() - born >= ttl_sec(tf_h):
+        from office_scenario_ttl import deadline as _dl
+
+        if st != "CANCELLED" and born and time.time() >= _dl(born, tf_h):
             continue  # протермінований до перезапуску — не воскрешаємо (завершені лишаємо: цикл їх не чіпає, а стан переживає рестарт)
         mark_live(
             key,
@@ -956,15 +960,24 @@ def follow_setup(
     ts = float(now_ts if now_ts is not None else time.time())
     born = float(setup.get("ts") or 0)
     tf = str(setup.get("timeframe") or "M15")
-    if born and ts - born >= ttl_sec(tf):
-        return {"action": "cancel", "reason": f"таймаут {ttl_sec(tf)//3600} год без входу"}
+    if born:
+        from office_scenario_ttl import deadline
+
+        if ts >= deadline(born, tf):
+            return {"action": "cancel", "reason": f"таймаут {int((deadline(born, tf) - born) // 3600)} год без входу", "kind": "TIME"}
     if sl is not None and candles_h1 is not None:
         # рівень скасування — за ЗАКРИТТЯМ годинної свічки, а не за проколом ціни (на картці так і написано)
         from office_scenario_lifecycle import cancel_reason_h1, closed_h1_beyond
 
         hit = closed_h1_beyond(candles_h1, side=side, level=sl, since_ts=born, now_ts=ts)
         if hit:
-            return {"action": "cancel", "reason": cancel_reason_h1(side, sl, str(setup.get("symbol") or "")), "closed_h1": hit["close"]}
+            return {"action": "cancel", "reason": cancel_reason_h1(side, sl, str(setup.get("symbol") or "")), "closed_h1": hit["close"], "kind": "SL_CLOSE"}
+        from office_scenario_lifecycle import structure_break_h1, target_without_entry
+
+        if structure_break_h1(candles_h1, side=side, since_ts=born, now_ts=ts):
+            return {"action": "cancel", "reason": "злам структури H1 проти сценарію", "kind": "STRUCTURE"}
+        if target_without_entry(candles_h1, side=side, zone_lo=lo, zone_hi=hi, tp1=setup.get("tp1"), since_ts=born, now_ts=ts):
+            return {"action": "cancel", "reason": "ціль досягнута без входу", "kind": "TARGET_NO_ENTRY"}
     confirms = detect_ltf_confirms(
         direction=side,
         candles_ltf=candles_ltf,

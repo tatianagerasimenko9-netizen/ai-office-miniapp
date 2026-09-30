@@ -104,7 +104,7 @@ assert "🟢" not in out[0]["text"] and "ВХОДУ НЕМАЄ" in out[0]["text"
 db3 = str(Path(tempfile.mkdtemp()) / "w3.db")
 init_office_db(db3)
 W.register(db3, symbol=SYM, direction="LONG", zone_lo=83066, zone_hi=83901, invalidation=82965, now=T0)
-late = T0 + timedelta(hours=13)
+late = T0 + timedelta(hours=25)
 out = W.tick(db3, now=late, fetch=feed(late, [84200] * 8, [84100] * 3), cycle_fn=fake_cycle(), send_enabled=True)
 assert [o["event"] for o in out] == ["EXPIRED"] and "⚪" in out[0]["text"], out
 

@@ -244,7 +244,7 @@ def render_human(h: Dict[str, Any]) -> str:
         if p.get("potential"):
             L.append(p["potential"])
         if p.get("valid_until"):
-            L.append(f"ДІЄ ДО: {p['valid_until']} (Київ). Якщо входу не буде — план знімається.")
+            L.append(f"ДІЄ ДО: {p['valid_until']} (Київ) — верхня межа; раніше знімається, якщо ідея зламана.")
     elif h.get("prelim"):
         L.append("ПОПЕРЕДНЬО, НЕ ДЛЯ ВХОДУ: " + "; ".join(h["prelim"]))
     if h.get("next"):

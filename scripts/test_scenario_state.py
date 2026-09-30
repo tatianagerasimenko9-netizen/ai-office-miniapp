@@ -83,10 +83,10 @@ assert S.build({**ROW, "status": "EXPIRED"}, thesis=THESIS, price=FRESH)["state"
 w = S.build({**ROW, "signal_id": "watch-near-LSKUSDT-scalp", "sl": None, "tp1": None}, thesis=None, price=FRESH)
 assert w["state"] == "OBSERVE" and "Входити не можна" in w["headline"]
 
-# 7b. Строк дії картки (H1 = 12 год) минув, а статус у базі ще ACTIVE → «Час очікування минув», не «Чекаємо»
-old = _build({**ROW, "ts_created": "2026-09-28T20:00:00+00:00"}, thesis=THESIS, price=FRESH, now=NOW)
+# 7b. Строк дії картки (H1 = 24 год) минув, а статус у базі ще ACTIVE → «Час очікування минув», не «Чекаємо»
+old = _build({**ROW, "ts_created": "2026-09-27T20:00:00+00:00"}, thesis=THESIS, price=FRESH, now=NOW)
 assert old["state"] == "EXPIRED", old["state"]
-assert _build({**row5, "ts_created": "2026-09-28T20:00:00+00:00"}, thesis=THESIS, price={**FRESH, "price": 0.3036}, plan_check=check_plan, now=NOW)["state"] == "READY", "підтверджений план за часом не застарює"
+assert _build({**row5, "ts_created": "2026-09-27T20:00:00+00:00"}, thesis=THESIS, price={**FRESH, "price": 0.3036}, plan_check=check_plan, now=NOW)["state"] == "READY", "підтверджений план за часом не застарює"
 
 # 8. Список без ціни ніколи не каже «готовий»
 for st in ("ACTIVE", "WATCHING", "CONFIRMED", "HIT_ENTRY"):

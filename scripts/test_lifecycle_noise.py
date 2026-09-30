@@ -64,7 +64,7 @@ try:
         _execute(db, "UPDATE office_signals SET ts_created = ? WHERE signal_id = ?", (iso(created), sid))
 
     add("SCN|ENAUSDT|LONG|H1|fresh0000000001", real_now - 1 * H)
-    add("SCN|ENAUSDT|LONG|H1|old000000000002", real_now - 20 * H)
+    add("SCN|ENAUSDT|LONG|H1|old000000000002", real_now - 30 * H)
     add("lev-watch-ENAUSDT-1", real_now - 1 * H, status="WATCHING", note="WATCHING сетап tf=H1")
     reset_live()
     hydrate_live_from_db(db)
@@ -116,14 +116,15 @@ import office_user_messages as M  # noqa: E402
 card = M.confirm_card(symbol="LSKUSDT", direction="LONG", entry=0.3035, sl=0.2953, tp1=0.3180, tp2={"price": 0.326, "why": "межа азійської сесії"},
                       tp3=None, cancel=0.2953, why="розворот", valid_until="23:40")
 assert "⏳ Діє до 23:40 (Київ)" in card and "Рішення" not in card and "Це аналіз" not in card and card.startswith("🟢 LONG · LSK · ПЛАН ГОТОВИЙ ✅"), card
-assert L.plan_valid_sec("H1") == 4 * 3600 and L.plan_valid_sec("M15") == 3600 and L.plan_valid_sec("M5") == 3600 and L.plan_valid_sec("H4") == 12 * 3600 and L.plan_valid_sec("D1") == 24 * 3600
+import office_scenario_ttl as TT  # noqa: E402
+assert TT.deadline(NOW, "H1") == NOW + 24 * 3600 and TT.deadline(NOW, "H4") == NOW + 48 * 3600 and TT.deadline(NOW, "D1") == NOW + 5 * 86400
 assert not hasattr(M, "expired_plan_card"), "повідомлення про завершення терміну плану заборонене"
 # підтверджений план знімається за часом (стан сценарію)
 import office_scenario_state as SS  # noqa: E402
 
-old_row = {"status": "CONFIRMED", "ts_updated": iso(NOW - 5 * H), "analysis_note": "tf=H1"}
+old_row = {"status": "CONFIRMED", "ts_updated": iso(NOW - 30 * H), "analysis_note": "tf=H1"}
 assert SS._too_old(old_row, datetime.fromtimestamp(NOW, tz=timezone.utc)) is True
-assert SS._too_old(dict(old_row, ts_updated=iso(NOW - 1 * H)), datetime.fromtimestamp(NOW, tz=timezone.utc)) is False
+assert SS._too_old(dict(old_row, ts_updated=iso(NOW - 10 * H)), datetime.fromtimestamp(NOW, tz=timezone.utc)) is False
 # відкрита вручну угода: закінчення часу дії сигналу не зачіпає (стан сценарію не «протермінований»)
 assert SS._too_old(dict(old_row, _has_position=True), datetime.fromtimestamp(NOW, tz=timezone.utc)) is False
 from office_alert_gate import fee_round_trip_pct, net_rr  # noqa: E402

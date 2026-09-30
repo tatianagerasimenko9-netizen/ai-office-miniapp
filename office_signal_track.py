@@ -13,6 +13,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 EV_PLAN = "SIGNAL_PLAN"
 EV_RESULT = "SIGNAL_RESULT"
+EV_EXPIRY = "SCENARIO_TIME_EXPIRY"
+EV_FALSE = "FALSE_EXPIRY_CHECK"
+FALSE_EXPIRY_WINDOW_SEC = 48 * 3600
 MAX_TRACK_SEC = 72 * 3600
 TF_SEC = 900
 
@@ -167,7 +170,10 @@ def report(db: str, min_sample: int = 20) -> Dict[str, Any]:
             out["note"] = f"n={len(rs)} < {min_sample} — відсотки не показуємо"
         return out
 
+    fx = [e["p"] for e in _events(db, EV_FALSE)]
+    exp_n = len(_events(db, EV_EXPIRY))
     return {"ok": True, "readonly": True, "kind": "signals", "signals": block(False), "rejected": block(True),
+            "time_expiry": {"expired_by_time": exp_n, "checked": len(fx), "false_expiry": sum(1 for x in fx if x.get("false_expiry"))},
             "note": "Результати сигналів Лева — за ринком, без повідомлень і не залежать від кнопки «Я відкрила угоду». Мої угоди — окремо."}
 
 
@@ -180,3 +186,45 @@ def confirm_msg_for(db: str, scenario_id: str) -> Optional[int]:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def record_expiry(db: str, *, scenario_id: str, symbol: str, direction: str, zone_lo: Any, zone_hi: Any, sl: Any, tp1: Any, expired_ts: float) -> None:
+    """Зняття сценарію ЗА ЧАСОМ (не за причиною): запам'ятовуємо, щоб згодом перевірити заднім числом, чи ідея не відпрацювала (FALSE_EXPIRY)."""
+    from office_bridge import log_event
+
+    log_event(db, EV_EXPIRY, {"scenario_id": scenario_id, "symbol": str(symbol).upper(), "direction": str(direction).upper(), "zone_lo": _f(zone_lo),
+                              "zone_hi": _f(zone_hi), "sl": _f(sl), "tp1": _f(tp1), "expired_ts": float(expired_ts)}, scenario_id)
+
+
+def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Для кожного зняття за часом: після зняття ціна зайшла в зону й дійшла до TP1 раніше за стоп у межах 48 год → FALSE_EXPIRY. Пишемо один раз."""
+    from office_bridge import log_event
+
+    if fetch is None:
+        from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
+    now = time.time() if now_ts is None else now_ts
+    done = {e["p"].get("scenario_id") for e in _events(db, EV_FALSE)}
+    out: List[Dict[str, Any]] = []
+    for ev in _events(db, EV_EXPIRY):
+        p = ev["p"]
+        if p.get("scenario_id") in done or now < float(p["expired_ts"]) + 3600:
+            continue
+        lo, hi = _f(p.get("zone_lo")), _f(p.get("zone_hi"))
+        if lo is None or hi is None or _f(p.get("sl")) is None or _f(p.get("tp1")) is None:
+            continue
+        try:
+            candles = fetch(p["symbol"], "15m", 300)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(candles, list) or not candles:
+            continue
+        plan = {"direction": p["direction"], "entry": (lo + hi) / 2.0, "sl": p["sl"], "tp1": p["tp1"], "confirmed_ts": float(p["expired_ts"]),
+                "valid_until_ts": float(p["expired_ts"]) + FALSE_EXPIRY_WINDOW_SEC}
+        res = simulate(plan, candles, now)
+        if res["status"] == "PENDING" and now < float(p["expired_ts"]) + FALSE_EXPIRY_WINDOW_SEC:
+            continue
+        payload = {"scenario_id": p["scenario_id"], "symbol": p["symbol"], "direction": p["direction"], "false_expiry": res["status"] in ("TP1", "TP2", "TP3"),
+                   "after_expiry_outcome": res["status"]}
+        log_event(db, EV_FALSE, payload, p["scenario_id"])
+        out.append(payload)
+    return out
