@@ -104,9 +104,9 @@ def pending(db: str, price_of: Callable[[str], Optional[float]], candles_of: Opt
                     evs = [re_]
         else:
             evs = [e for e in texts(pos, float(px)) if e["code"] not in sent]
-        order = {"STOP_PRICE": 0, "END_STRUCTURE": 1, "BREAKEVEN": 2, "TP1": 3, "TP2": 4, "TP3": 5}
+        order = {"STOP_PRICE": 0, "END_STRUCTURE": 1, "END_STRUCTURE_H4": 1, "BREAKEVEN": 2, "TP1": 3, "TP2": 4, "TP3": 5}
         for ev in sorted(evs, key=lambda e: order.get(e["code"].split(":")[0], 9)):
-            if ev["code"] == "STOP_PRICE" and "END_STRUCTURE" in sent:
+            if ev["code"] == "STOP_PRICE" and ("END_STRUCTURE" in sent or "END_STRUCTURE_H4" in sent):
                 continue
             out.append({"trade": pos, "code": ev["code"], "text": ev["text"]})
             break
