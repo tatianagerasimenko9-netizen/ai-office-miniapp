@@ -103,7 +103,7 @@ finally:
 # --- ведення позначеної угоди: дія в рядку, один раз
 pos = {"symbol": "AKEUSDT", "direction": "LONG", "entry": 0.030259, "sl": 0.029568, "tp1": 0.031621, "tp2": 0.032086}
 ev = {e["code"]: e["text"] for e in U.texts(pos, 0.0317)}
-assert ev == {"TP1": "🎯 AKE · TP1 · закрий 50%, стоп у беззбиток 0,030259 $"}, ev
+assert ev == {"TP1": "🎯 AKE · TP1 · закрий 40%, стоп у беззбиток 0,030259 $"}, ev
 ev2 = {e["code"]: e["text"] for e in U.texts(pos, 0.0322)}
 assert "TP2" in ev2 and "стоп на TP1 0,031621 $" in ev2["TP2"] and "TP1" in ev2
 st = U.texts(pos, 0.0295)

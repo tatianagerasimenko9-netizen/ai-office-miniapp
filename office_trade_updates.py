@@ -41,25 +41,32 @@ def texts(pos: Dict[str, Any], price: float) -> List[Dict[str, str]]:
     if t3 is not None and beyond(t3, True):
         out.append({"code": "TP3", "text": f"🎯 {t} · TP3 · закрий залишок"})
     if t2 is not None and beyond(t2, True):
-        out.append({"code": "TP2", "text": f"🎯 {t} · TP2 · закрий ще частину, стоп на TP1 {_px(t1, sym)}" if t1 is not None else f"🎯 {t} · TP2 · закрий ще частину"})
+        out.append({"code": "TP2", "text": f"🎯 {t} · TP2 · закрий ще 30%, стоп на TP1 {_px(t1, sym)}" if t1 is not None else f"🎯 {t} · TP2 · закрий ще частину"})
     if t1 is not None and beyond(t1, True):
-        out.append({"code": "TP1", "text": f"🎯 {t} · TP1 · закрий 50%, стоп у беззбиток {_px(entry, sym)}"})
+        out.append({"code": "TP1", "text": f"🎯 {t} · TP1 · закрий 40%, стоп у беззбиток {_px(entry, sym)}"})
+    return out
+
+
+def sent_codes(db: str, trade_id: str) -> Dict[str, float]:
+    """Коди подій, які вже надсилались для цієї угоди → час (епоха) першої відправки."""
+    import json
+
+    from office_bridge import _fetchall
+    from office_signal_track import _ts
+
+    out: Dict[str, float] = {}
+    for ts_utc, pj in _fetchall(db, "SELECT ts_utc, payload_json FROM office_events WHERE event_type = ? AND signal_id = ? ORDER BY id", (EV, trade_id)) or []:
+        try:
+            code = json.loads(pj).get("code")
+        except (TypeError, ValueError):
+            continue
+        if code and code not in out:
+            out[code] = _ts(ts_utc) or 0.0
     return out
 
 
 def sent_before(db: str, trade_id: str, code: str) -> bool:
-    from office_bridge import _fetchall
-
-    rows = _fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = ? AND signal_id = ?", (EV, trade_id))
-    import json
-
-    for (pj,) in rows or []:
-        try:
-            if json.loads(pj).get("code") == code:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+    return code in sent_codes(db, trade_id)
 
 
 def record(db: str, trade_id: str, code: str, message_id: Any = None) -> None:
@@ -68,20 +75,39 @@ def record(db: str, trade_id: str, code: str, message_id: Any = None) -> None:
     log_event(db, EV, {"trade_id": trade_id, "code": code, "message_id": message_id}, trade_id)
 
 
-def pending(db: str, price_of: Callable[[str], Optional[float]]) -> List[Dict[str, Any]]:
-    """Що ще не надіслано для кожної відкритої ручної позиції: найвища за важливістю нова подія (один рядок на позицію за прохід)."""
-    import office_positions as OP
+def pending(db: str, price_of: Callable[[str], Optional[float]], candles_of: Optional[Callable[[str, str, int], Any]] = None,
+            now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Що ще не надіслано для кожної відкритої ручної позиції — одна порада на позицію за прохід. Є свічки → повне ведення
+    (office_trade_manager: беззбиток/TP/runner/трейлінг/добір/перезахід); немає → лише рівні за ціною (TP/стоп)."""
+    import time
 
+    import office_positions as OP
+    import office_trade_manager as TM
+
+    now = time.time() if now_ts is None else now_ts
     out: List[Dict[str, Any]] = []
     for pos in OP.list_positions(db, "open", 100):
-        px = price_of(str(pos.get("symbol") or ""))
+        sym = str(pos.get("symbol") or "")
+        px = price_of(sym)
         if px is None:
             continue
-        evs = texts(pos, float(px))
-        # від найвищого TP до нижчого: якщо TP2 уже за ціною, а TP1 не надсилали — шлемо TP1 спершу (порядок дій зберігаємо)
-        order = {"STOP_PRICE": 0, "TP1": 1, "TP2": 2, "TP3": 3}
-        for ev in sorted(evs, key=lambda e: order.get(e["code"], 9)):
-            if not sent_before(db, str(pos["trade_id"]), ev["code"]):
-                out.append({"trade": pos, "code": ev["code"], "text": ev["text"]})
-                break
+        sent = sent_codes(db, str(pos["trade_id"]))
+        evs: List[Dict[str, str]] = []
+        h1 = candles_of(sym, "1h", 120) if candles_of else None
+        if isinstance(h1, list) and h1:
+            m15 = candles_of(sym, "15m", 96)
+            h4 = candles_of(sym, "4h", 60)
+            evs = TM.advise(pos, h1=h1, m15=m15, h4=h4, sent=set(sent), now_ts=now, price=float(px))
+            if "STOP_PRICE" in sent and not evs:
+                re_ = TM.reentry(pos, m15=m15, h4=h4, sent=set(sent), now_ts=now, stop_alert_ts=sent.get("STOP_PRICE"))
+                if re_:
+                    evs = [re_]
+        else:
+            evs = [e for e in texts(pos, float(px)) if e["code"] not in sent]
+        order = {"STOP_PRICE": 0, "END_STRUCTURE": 1, "BREAKEVEN": 2, "TP1": 3, "TP2": 4, "TP3": 5}
+        for ev in sorted(evs, key=lambda e: order.get(e["code"].split(":")[0], 9)):
+            if ev["code"] == "STOP_PRICE" and "END_STRUCTURE" in sent:
+                continue
+            out.append({"trade": pos, "code": ev["code"], "text": ev["text"]})
+            break
     return out
