@@ -6836,19 +6836,38 @@ EV позитивне: {prob.get('ev_positive', '')}
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
-                        if plan_bad:  # умови збіглися, але плану для входу немає: це внутрішній стан аналізу, у Telegram не шлемо
+                        from office_alert_gate import max_entry_price
+                        from office_position_size import plan_position_size
+                        import office_signal_track as _trk
+
+                        _dir_c = str(st.get("direction") or "")
+                        _tf_c2 = str(st.get("timeframe") or "H1")
+                        _now_c = time.time()
+                        if plan_bad:  # умови збіглися, але плану для входу немає: внутрішній стан, у Telegram не шлемо; результат відстежуємо мовчки
                             if okey not in _CONFIRM_REJECT_LOGGED:
                                 _CONFIRM_REJECT_LOGGED.add(okey)
                                 print(f"[confluence] confirm без готового плану {key}: {plan_bad} — мовчу, стан лише в Mini App")
+                                try:
+                                    _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
+                                                     tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2", {}) and (tgt or {}).get("tp2", {}).get("price"),
+                                                     tp3=None, max_entry=None, confirmed_ts=_now_c,
+                                                     valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2), rejected=True, reason=str(plan_bad)[:200])
+                                except Exception as exc_rj:
+                                    print(f"[track] record rejected failed: {exc_rj}")
                             continue
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"))
+                        if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
+                            print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
+                            continue
+                        _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
-                            _msgs.confirm_card(
-                                symbol=sym_f, direction=str(st.get("direction") or ""), entry=plan_px, sl=st.get("sl"),
-                                tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), cancel=st.get("sl"),
-                                why=(_msgs.plain_confirms(list(fu.get("confirms") or [])) or str(fu.get("reason") or "")),
-                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(time.time(), st.get("timeframe"))),
-                                bad=plan_bad),
+                            _msgs.ready_signal(
+                                symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
+                                tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), max_entry=_max_e,
+                                size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
+                                risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
+                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(_now_c, _tf_c2))),
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
@@ -6860,6 +6879,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                             continue
                         mark_confirm_sent(okey)
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
+                        try:  # мовчазне відстеження кожного «Плану готовий» для статистики (не залежить від кнопки «Я відкрила угоду»)
+                            _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
+                                             tp1=st.get("tp1"), tp2=((tgt or {}).get("tp2") or {}).get("price"), tp3=((tgt or {}).get("tp3") or {}).get("price"),
+                                             max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2),
+                                             rejected=False, confirm_msg_id=confirm_msg_id)
+                        except Exception as exc_tr:
+                            print(f"[track] record plan failed: {exc_tr}")
                         try:
                             from office_scenario_memory import apply_confirmed_status
 
@@ -7234,6 +7260,57 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(int(os.getenv("OFFICE_LEV_WATCH_POLL_SEC", "300") or "300"))
 
     asyncio.create_task(monitor_lev_watches())
+
+    async def monitor_signal_tracks() -> None:
+        """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
+        import office_signal_track as trk
+
+        await asyncio.sleep(120)
+        while True:
+            try:
+                res = await asyncio.to_thread(trk.tick, db_path)
+                for r in res:
+                    print(f"[track] {r['symbol']} {r['direction']} {'відхилений' if r['rejected'] else 'сигнал'} → {r['outcome']} MFE {r['mfe_pct']} MAE {r['mae_pct']}")
+            except Exception as exc:
+                print(f"[track][WARN] tick failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(600)
+
+    asyncio.create_task(monitor_signal_tracks())
+
+    async def monitor_manual_trades() -> None:
+        """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.
+        Проходить через send_proactive (шлюз: POSITION_MANAGE + відкрита позиція; додатково OFFICE_TG_POSITION_SUPPORT)."""
+        import office_signal_track as trk
+        import office_trade_updates as tu
+        from office_market_data import fetch_candles as _fc
+
+        def _price(sym: str) -> Optional[float]:
+            c = _fc(sym, "1m", 3)
+            if isinstance(c, list) and c:
+                return float(c[-1].get("close"))
+            return None
+
+        await asyncio.sleep(90)
+        while True:
+            try:
+                for it in await asyncio.to_thread(tu.pending, db_path, _price):
+                    pos = it["trade"]
+                    reply = await asyncio.to_thread(trk.confirm_msg_for, db_path, str(pos.get("scenario_id") or "")) if pos.get("scenario_id") else None
+                    mid = await send_proactive(
+                        EVENT_TRADE_UPDATE, it["text"], reply_to_message_id=reply, symbol=str(pos["symbol"]), direction=str(pos["direction"]),
+                        kind=it["code"], intent="POSITION_MANAGE", confirmed_position=True, position_id=str(pos["trade_id"]), position_open=True,
+                        canonical_id=str(pos["trade_id"]), scenario_event=it["code"],
+                    )
+                    if mid:
+                        await asyncio.to_thread(tu.record, db_path, str(pos["trade_id"]), it["code"], mid)
+                        print(f"[trade-updates] sent {pos['symbol']} {it['code']} id={mid}")
+                    else:
+                        print(f"[trade-updates] not delivered {pos['symbol']} {it['code']} (супровід позицій вимкнено або збій)")
+            except Exception as exc:
+                print(f"[trade-updates][WARN] tick failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(120)
+
+    asyncio.create_task(monitor_manual_trades())
 
     async def monitor_daily_report() -> None:
         nonlocal last_daily_report_date

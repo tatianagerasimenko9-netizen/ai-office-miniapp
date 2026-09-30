@@ -539,6 +539,19 @@ def net_rr(entry: Any, sl: Any, tp1: Any) -> Optional[Dict[str, float]]:
     return {"reward_pct": reward, "risk_pct": risk, "fee_pct": fee, "rr_gross": reward / risk, "rr_net": max(reward - fee, 0.0) / (risk + fee)}
 
 
+def max_entry_price(direction: str, sl: Any, tp1: Any) -> Optional[float]:
+    """Найгірша ціна входу, при якій RR (з комісіями) ще ≥ MIN_RR: LONG — «не вище», SHORT — «не нижче». Далі за нею сигнал неактуальний."""
+    s_, t = _f(sl), _f(tp1)
+    if s_ is None or t is None:
+        return None
+    f = fee_round_trip_pct() / 100.0   # комісія круга в частках ціни входу
+    k = float(MIN_RR)
+    # вигода = |tp−E| − f·E, ризик = |E−sl| + f·E, вигода/ризик = k
+    if str(direction or "").upper() == "SHORT":
+        return (t + k * s_) / ((1.0 + k) - f * (1.0 + k))
+    return (t + k * s_) / ((1.0 + k) + f * (1.0 + k))
+
+
 def validate_trade_geometry(
     *,
     direction: str,

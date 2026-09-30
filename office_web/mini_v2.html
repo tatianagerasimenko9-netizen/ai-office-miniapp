@@ -301,7 +301,17 @@ async function journal(){
   if(kind==='trades') return trades();
   let d; try{d=await j('/api/v2/journal?kind='+kind);}catch(e){return fail(e,'журнал');}
   let body='';
-  if(kind==='stats'){
+  if(kind==='signals'){
+    const blk=(t,b)=>`<h2>${esc(t)}</h2><div class="card"><div class="kv"><span>Планів</span><b>${esc(b.plans)}</b></div>
+      <div class="kv"><span>Завершено</span><b>${esc(b.finished)}</b></div><div class="kv"><span>Ще йдуть</span><b>${esc(b.pending)}</b></div>
+      <div class="kv"><span>Вхід заповнено</span><b>${esc(b.filled)}</b></div>
+      ${Object.entries(b.outcomes||{}).map(([k,v])=>`<div class="kv"><span>${esc(({STOP:'Стоп',TP1:'TP1',TP2:'TP2',TP3:'TP3',NOT_FILLED:'Не заповнено',OPEN_TIMEOUT:'Без результату'})[k]||k)}</span><b>${esc(v)}</b></div>`).join('')}
+      ${b.fill_rate_pct!=null?`<div class="kv"><span>Заповнено, %</span><b>${esc(b.fill_rate_pct)}</b></div>`:''}
+      ${b.tp_rate_pct!=null?`<div class="kv"><span>Дійшло до цілі, %</span><b>${esc(b.tp_rate_pct)}</b></div><div class="kv"><span>Стоп, %</span><b>${esc(b.stop_rate_pct)}</b></div>
+        <div class="kv"><span>Середній MFE / MAE, %</span><b>${esc(b.avg_mfe_pct)} / ${esc(b.avg_mae_pct)}</b></div>`:''}
+      ${b.note?`<div class="mut">${esc(b.note)}</div>`:''}</div>`;
+    body=blk('Сигнали Лева (відстежено мовчки)',d.signals||{})+blk('Відхилені плани (що зробила ціна)',d.rejected||{})+`<div class="mut">${esc(d.note||'')}</div>`;
+  } else if(kind==='stats'){
     body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(d.message||d.note||'мало даних')}</pre>
       <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
   } else if(kind==='positions'){
@@ -333,7 +343,7 @@ async function journal(){
 }
 /* ---------- Мої угоди (ручний облік; ордерів немає) ---------- */
 function jchips(kind){
-  return chips([['trades','Мої угоди'],['scenarios','Сценарії (симуляція)'],['audit','Аудит рішень'],['stats','Модельна статистика']],kind,'k');
+  return chips([['trades','Мої угоди'],['signals','Сигнали Лева'],['scenarios','Сценарії (симуляція)'],['audit','Аудит рішень'],['stats','Модельна статистика']],kind,'k');
 }
 function tgInit(){
   try{ if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData) return Telegram.WebApp.initData; }catch(e){}
@@ -629,7 +639,8 @@ async function openSc(id){
       <div class="kv"><span>Сценарій оновлено</span><b>${hm.updated_at?hhmm(hm.updated_at):'—'}</b></div></div>
     ${hm.wait?`<div class="sec"><h3>Чого чекаємо</h3><p>${esc(hm.wait)}</p></div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
-    ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry)}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
+    ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry+(hm.plan.max_entry?` (не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${hm.plan.max_entry})`:''))}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
+      ${hm.size&&hm.size.usdt?`<div class="kv"><span>Позиція</span><b>${esc(Math.round(hm.size.usdt))} USDT · ризик ${esc(Math.round(hm.size.risk_usd))} $</b></div>`:''}
       <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Діє до ${esc(hm.plan.valid_until)} (Київ). Якщо входу не буде — план знімається.</div>`:''}</div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
     ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}

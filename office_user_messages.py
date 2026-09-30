@@ -174,24 +174,41 @@ def _plan_line(symbol: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[st
     return f"ВХІД {_px(entry, symbol)} · СТОП {_px(sl, symbol)} · TP1 {_px(tp1, symbol)} · TP2 {t(tp2)} · TP3 {t(tp3)}"
 
 
+def _dir_head(direction: str) -> tuple:
+    long_ = str(direction or "").upper() != "SHORT"
+    return ("🟢", "LONG") if long_ else ("🔴", "SHORT")
+
+
+def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
+                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "") -> str:
+    """Готовий сигнал для Telegram — лише торгові цифри. Колір і слово — за НАПРЯМКОМ (не за готовністю). Пояснення, підстави,
+    рівні, умови скасування — у Mini App/БД. TP2/TP3 — лише якщо підтверджені; аргументи цін — числа (dict {'price'} теж приймаємо)."""
+    def price_of(x: Any) -> Any:
+        return x.get("price") if isinstance(x, dict) else x
+
+    dot, word = _dir_head(direction)
+    long_ = word == "LONG"
+    ent = f"Вхід: {_px(entry, symbol)}"
+    if max_entry is not None:
+        ent += f" (не {'вище' if long_ else 'нижче'} {_px(max_entry, symbol)})"
+    L = [f"{dot} {word} · {ticker(symbol)} · ПЛАН ГОТОВИЙ ✅", "", ent, f"Стоп: {_px(sl, symbol)}", f"TP1: {_px(tp1, symbol)}"]
+    if price_of(tp2) is not None:
+        L.append(f"TP2: {_px(price_of(tp2), symbol)}")
+    if price_of(tp3) is not None:
+        L.append(f"TP3: {_px(price_of(tp3), symbol)}")
+    if size_usdt:
+        L += ["", f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else "")]
+    if valid_until:
+        L.append(("" if size_usdt else "") + f"⏳ Діє до {valid_until} (Київ)")
+    return "\n".join(L)
+
+
 def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,
                  tp3: Optional[Dict[str, Any]] = None, cancel: Any = None, why: str = "", bad: Optional[str] = None,
-                 valid_until: str = "") -> str:
-    """Підтвердження умови: або повний план (🟢), або чесне «входу немає» (🔴), якщо план не проходить перевірки."""
-    w = _side_words(direction)
-    if bad:
-        return "\n".join([f"🔴 {ticker(symbol)} · УМОВИ Є, АЛЕ ВХОДУ НЕМАЄ", f"ЗАРАЗ: {w['dont']}. {bad}",
-                          "Це аналіз, не ордер: рішення й ордер на біржі — лише твої."])
-    L = [f"🟢 {ticker(symbol)} · ПЛАН ГОТОВИЙ", "ЗАРАЗ: умови виконано."]
-    if why:
-        L.append(f"ПІДСТАВА: {why}.")
-    L.append(_plan_line(symbol, entry, sl, tp1, tp2, tp3))
-    if cancel is not None:
-        L.append(f"КОЛИ СКАСОВУЄМО: якщо годинна свічка закриється {w['cross']} {_px(cancel, symbol)}.")
-    if valid_until:
-        L.append(f"ДІЄ ДО: {valid_until} (Київ). Якщо входу не буде — план знімається.")
-    L.append("Рішення й ордер — лише твої, Офіс ордерів не ставить.")
-    return "\n".join(L)
+                 valid_until: str = "", max_entry: Any = None, size_usdt: Any = None, risk_usd: Any = None) -> str:
+    """Сумісність зі старими викликами: `why`/`cancel`/`bad` в Telegram не потрапляють (пояснення — в Mini App)."""
+    return ready_signal(symbol=symbol, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, max_entry=max_entry,
+                        size_usdt=size_usdt, risk_usd=risk_usd, valid_until=valid_until)
 
 
 def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) -> str:
@@ -208,6 +225,12 @@ def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) 
 
 def render_human(h: Dict[str, Any]) -> str:
     """Той самий стан, що й на сторінці сценарію в Mini App (`office_scenario_state.build`), у вигляді повідомлення."""
+    if h.get("state") == "READY" and h.get("levels"):   # той самий торговий формат, що й сигнал: лише цифри
+        lv = h["levels"]
+        sz = h.get("size") or {}
+        return ready_signal(symbol=str(h.get("symbol") or h.get("ticker") or ""), direction="SHORT" if str(h.get("icon")) == "🔴" else "LONG",
+                            entry=lv.get("entry"), sl=lv.get("sl"), tp1=lv.get("tp1"), tp2=lv.get("tp2"), tp3=lv.get("tp3"), max_entry=lv.get("max_entry"),
+                            size_usdt=sz.get("usdt"), risk_usd=sz.get("risk_usd"), valid_until=str((h.get("plan") or {}).get("valid_until") or ""))
     L = [f"{h.get('icon', '')} {h.get('ticker', '')} · {str(h.get('state_ua') or '').upper()}", f"ЗАРАЗ: {h.get('headline', '')}"]
     if h.get("price"):
         L.append(f"Ціна: {h['price']}")
