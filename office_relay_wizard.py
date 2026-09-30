@@ -7250,7 +7250,7 @@ EV позитивне: {prob.get('ev_positive', '')}
         while True:
             try:
                 _n += 1
-                if _n % 3 == 1:   # раз на ~15 хв: чесна статистика джерела даних (429, віддача зі старого кешу)
+                if _n % 3 == 1 or (_n <= 12):   # раз на ~15 хв (перші ~годину — щоцикл): статистика джерела (429, вага IP, WebSocket, кеш)
                     from office_market_data import source_health
 
                     print(f"[data] binance {source_health()} depth={__import__('office_market_data').depth_stats()}")

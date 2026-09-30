@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import office_ws_klines as _ws
+
 
 JSONLike = Union[Dict[str, Any], List[Any]]
 
@@ -53,7 +55,8 @@ _CACHE_LOCK = threading.Lock()
 
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
-    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used")}
+    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
+            "ws": _ws.stats() if _ws.enabled() else "off"}
 
 
 def backoff_left() -> float:
@@ -131,6 +134,7 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
     )
     if "fapi.binance.com" in url:
         _pace_fapi()
+        _HEALTH["fapi_calls"] = _HEALTH.get("fapi_calls", 0) + 1   # скільки запитів офіс зробив у fapi (WebSocket мав би їх майже прибрати)
     try:
         with urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
@@ -264,20 +268,32 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
         key = (sym, str(tf))
         now = time.time()
         hit = None
+        ws_on = _ws.register(sym, str(tf), lim)   # WebSocket-потік свічок (OFFICE_WS_KLINES=1); REST — лише історія й запасний шлях
+        if ws_on:
+            ws_rows = _ws.get(sym, str(tf), lim)
+            if ws_rows:
+                _HEALTH["ws_hits"] = _HEALTH.get("ws_hits", 0) + 1
+                bs0 = _HEALTH.setdefault("by_src", {})
+                bs0[FUTURES_SRC] = bs0.get(FUTURES_SRC, 0) + 1
+                _FALLBACK_AT.pop(sym, None)
+                return ws_rows
         if use_cache:
             with _CACHE_LOCK:
                 hit = _CANDLE_CACHE.get(key)
             ttl = _CANDLE_TTL.get(str(tf), 60)
-            if hit and now - hit[0] < ttl and hit[1] >= lim:
+            if hit and now - hit[0] < ttl and hit[1] >= lim and not (ws_on and _ws.needs_seed(sym, str(tf))):
                 _note_src(sym, hit[2])
                 return hit[2][-lim:]
-        want = max(lim, hit[1] if hit else 0)
+        want = max(lim, hit[1] if hit else 0, _ws.wanted_limit(sym, str(tf)) if ws_on else 0)
         try:
             try:
+                t_req = time.time()
                 data = _http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": sym, "interval": tf, "limit": want})
                 rows = _tag(_parse_klines(data), FUTURES_SRC)
                 if not rows:
                     raise ValueError("empty klines")
+                if ws_on:
+                    _ws.seed(sym, str(tf), rows, t_req)   # історія з REST лягає в пам'ять; далі свічки йдуть потоком
                 _FALLBACK_AT.pop(sym, None)  # ф'ючерси відновились; старі резервні свічки в кеші самі знову позначать себе при читанні
             except Exception:  # noqa: BLE001
                 _HEALTH["errors"] += 1
