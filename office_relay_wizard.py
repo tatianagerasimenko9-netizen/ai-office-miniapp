@@ -7275,6 +7275,19 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_lev_watches())
 
+    if os.getenv("OFFICE_REPLAY_ON_START", "").strip() == "1":   # одноразовий replay контрольних кейсів на реальних свічках: лише лог [replay], Telegram не задіяно
+        async def _replay_once() -> None:
+            await asyncio.sleep(120)
+            try:
+                import office_replay
+
+                await asyncio.to_thread(office_replay.run_all)
+                print("[replay] готово; вимкни OFFICE_REPLAY_ON_START, щоб не повторювати при кожному старті")
+            except Exception as exc_rp:  # noqa: BLE001
+                print(f"[replay] помилка: {type(exc_rp).__name__}: {exc_rp}")
+
+        asyncio.create_task(_replay_once())
+
     async def monitor_signal_tracks() -> None:
         """Мовчазне відстеження результатів «Плану готовий» і відхилених планів (для навчання). У Telegram нічого не шле."""
         import office_signal_track as trk
