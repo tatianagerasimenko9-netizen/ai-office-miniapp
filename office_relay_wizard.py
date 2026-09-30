@@ -7253,7 +7253,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                 if _n % 3 == 1:   # раз на ~15 хв: чесна статистика джерела даних (429, віддача зі старого кешу)
                     from office_market_data import source_health
 
-                    print(f"[data] binance {source_health()}")
+                    print(f"[data] binance {source_health()} depth={__import__('office_market_data').depth_stats()}")
                 items = await asyncio.to_thread(_lev_watch.tick, db_path)
                 for it in items:
                     # той самий безпечний маршрут, що й картки Лева: політика, дедуп за (умова, подія), журнал доставки
