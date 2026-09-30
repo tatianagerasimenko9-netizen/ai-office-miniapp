@@ -711,8 +711,24 @@ def _depth_backoff(sec: float) -> None:
     _DEPTH_STATS["rate_limited"] += 1
 
 
+def depth_mode() -> str:
+    v = os.getenv("OFFICE_DEPTH_ENABLED", "0").strip().lower()
+    return "on" if v in ("1", "true", "yes", "on") else ("auto" if v == "auto" else "off")
+
+
 def depth_enabled() -> bool:
-    return os.getenv("OFFICE_DEPTH_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+    """Стакан: 1 — увімкнено; 0 — вимкнено; auto — вмикається САМ, коли 24 год поспіль свічки стабільні (ф'ючерсні ≥95%, без 429; office_data_stability)."""
+    m = depth_mode()
+    if m == "on":
+        return True
+    if m == "auto":
+        try:
+            from office_data_stability import auto_ok
+
+            return auto_ok()
+        except Exception:  # noqa: BLE001
+            return False
+    return False
 
 
 def depth_symbols() -> List[str]:
@@ -721,7 +737,7 @@ def depth_symbols() -> List[str]:
 
 
 def depth_stats() -> Dict[str, Any]:
-    return {**_DEPTH_STATS, "enabled": depth_enabled(), "symbols": depth_symbols(), "backoff_left_sec": max(0.0, round(_DEPTH_BACKOFF_UNTIL - time.time(), 1))}
+    return {**_DEPTH_STATS, "enabled": depth_enabled(), "mode": depth_mode(), "symbols": depth_symbols(), "backoff_left_sec": max(0.0, round(_DEPTH_BACKOFF_UNTIL - time.time(), 1))}
 
 
 def _depth_gate(sym: str) -> Optional[str]:

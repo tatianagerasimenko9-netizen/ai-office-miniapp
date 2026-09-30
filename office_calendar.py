@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from urllib.request import Request, urlopen
 
 URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+MIRRORS = ("https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",)
 _CACHE: Dict[str, Any] = {"at": 0.0, "events": None, "fail_at": 0.0, "error": None}
 _LOCK = threading.Lock()
 _TTL = 3600.0          # джерело оновлюється рідко й лімітує частоту — раз на годину
@@ -62,11 +63,50 @@ def parse(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
-def _fetch() -> List[Dict[str, Any]]:
-    req = Request(os.getenv("OFFICE_CALENDAR_URL", URL).strip() or URL,
-                  headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+def _urls() -> List[str]:
+    """Адреси джерела за порядком спроб: OFFICE_CALENDAR_URL (якщо задано), основна й дзеркало (одне безкоштовне джерело на двох хостах)."""
+    first = os.getenv("OFFICE_CALENDAR_URL", "").strip()
+    out = ([first] if first else []) + [URL] + [u for u in MIRRORS]
+    seen: List[str] = []
+    for u in out:
+        if u and u not in seen:
+            seen.append(u)
+    return seen
+
+
+def _fetch_one(url: str) -> List[Dict[str, Any]]:
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
     with urlopen(req, timeout=10) as resp:
         return parse(json.loads(resp.read().decode("utf-8", errors="replace")))
+
+
+def _fetch() -> List[Dict[str, Any]]:
+    last: Optional[Exception] = None
+    for u in _urls():
+        try:
+            ev = _fetch_one(u)
+            if ev:
+                return ev
+            last = ValueError("порожній календар")
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+    raise last or RuntimeError("немає адрес календаря")
+
+
+def diagnose() -> Dict[str, Any]:
+    """Перевірка, що джерело реально завантажується: по кожній адресі — успіх, кількість подій, кількість важливих USD-подій і найближча."""
+    now = time.time()
+    rows = []
+    for u in _urls():
+        try:
+            ev = _fetch_one(u)
+            hi = [e for e in ev if _relevant(e)]
+            nxt = next((e for e in hi if e["ts"] > now), None)
+            rows.append({"url": u, "ok": bool(ev), "events": len(ev), "high_usd_events": len(hi),
+                         "next_high_usd": ({"title": nxt["title"], "at_utc": datetime.fromtimestamp(nxt["ts"], tz=timezone.utc).isoformat()} if nxt else None)})
+        except Exception as exc:  # noqa: BLE001
+            rows.append({"url": u, "ok": False, "error": f"{type(exc).__name__}: {exc}"[:160]})
+    return {"ok": any(r.get("ok") for r in rows), "sources": rows, "block_enabled": block_enabled()}
 
 
 def load(now: Optional[float] = None) -> Dict[str, Any]:

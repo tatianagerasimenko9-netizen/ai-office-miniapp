@@ -148,14 +148,21 @@ def replay(case: Dict[str, Any], data: Dict[str, List[Dict[str, Any]]]) -> Dict[
         return {"ok": False, "status": "NO_DATA", "note": "немає свічок — replay не виконано (нічого не вигадуємо)"}
     long_ = str(case["side"]).upper() != "SHORT"
     entry, start = float(case["entry"]), datetime.fromisoformat(case["start"].replace("Z", "+00:00")).timestamp()
+    # вікно входу: за замовчуванням — від start (включно зі свічкою, у якій угоду відкрито); якщо задано window_before_sec/window_after_sec —
+    # шукаємо вхід у [start − before; start + after]: власниця могла записати угоду пізніше, ніж зайшла (або раніше)
+    w_from = start - float(case.get("window_before_sec") or 0.0)
+    w_to = start + float(case["window_after_sec"]) if case.get("window_after_sec") is not None else None
     fill_t = None
     for r in m15:
         t = _ts(r)
-        if t + 900 > start and float(r["low"]) <= entry <= float(r["high"]):   # включно зі свічкою, у якій угоду відкрито (вона могла початись раніше за start)
+        if w_to is not None and t >= w_to:
+            break
+        if t + 900 > w_from and float(r["low"]) <= entry <= float(r["high"]):
             fill_t = t + 900
             break
     if fill_t is None:
-        return {"ok": True, "status": "NOT_FILLED", "note": f"ціна не торкнулась входу {entry} після {case['start']} (дані до {m15[-1]['ts']})", "timeline": []}
+        win = f" у вікні ±{int(float(case['window_after_sec']) // 3600)} год від {case['start']}" if case.get("window_after_sec") is not None else f" після {case['start']}"
+        return {"ok": True, "status": "NOT_FILLED", "note": f"ціна не торкнулась входу {entry}{win} (дані до {m15[-1]['ts']})", "timeline": []}
     pos = {"symbol": case["symbol"], "direction": str(case["side"]).upper(), "entry": entry, "sl": case["sl"], "tp1": case["tp1"], "tp2": case.get("tp2"),
            "opened_at": _iso(fill_t)}
     sent: Dict[str, float] = {}
@@ -260,3 +267,63 @@ def run_all(keys: Optional[List[str]] = None, fetch: Optional[Callable[..., Any]
         out.append(r)
         time.sleep(0.2)
     return out
+
+
+# ---------------- replay угод із журналу власниці (час входу — з БД, вікно ±2 год) ----------------
+JOURNAL_NEEDLES = (("LONGXIA", "%龙虾%"), ("ENA", "ENAUSDT"))
+WINDOW_SEC = 2 * 3600.0
+
+
+def journal_cases(db: str, needles: Any = JOURNAL_NEEDLES) -> List[Dict[str, Any]]:
+    """Угоди власниці з `trade_journal` за символом: вхід/стоп/ціль (TP1) і час запису; фактичний результат — для порівняння."""
+    from office_bridge import _fetchall
+
+    out: List[Dict[str, Any]] = []
+    for label, pat in needles:
+        rows = _fetchall(db, "SELECT trade_id, ts_open_utc, symbol, direction, entry_price, stop_loss, take_profit, outcome, r_multiple "
+                             "FROM trade_journal WHERE symbol LIKE ? ORDER BY ts_open_utc", (pat,))
+        for r in rows or []:
+            tid, ts, sym, dr, en, sl, tp, oc, rm = r
+            try:
+                t = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+                en_, sl_, tp_ = float(en), float(sl), float(tp)
+            except (TypeError, ValueError):
+                continue
+            out.append({"label": label, "trade_id": str(tid)[:48], "symbol": str(sym), "side": str(dr).upper(), "entry": en_, "sl": sl_, "tp1": tp_, "tp2": None,
+                        "start": _iso(t).replace("+00:00", "Z"), "window_before_sec": WINDOW_SEC, "window_after_sec": WINDOW_SEC,
+                        "actual": {"outcome": oc, "r_multiple": float(rm) if rm is not None else None}})
+    return out
+
+
+def run_journal(db: str, needles: Any = JOURNAL_NEEDLES, getter: Optional[Callable[[str], bytes]] = None, printer: Callable[[str], None] = print) -> List[Dict[str, Any]]:
+    """Replay кожної угоди з журналу на свічках архіву: вхід шукаємо у вікні ±2 год від запису; далі — як Лев вів би (TP1, беззбиток, трейлінг, runner)."""
+    results: List[Dict[str, Any]] = []
+    for case in journal_cases(db, needles):
+        st = datetime.fromisoformat(case["start"].replace("Z", "+00:00"))
+        try:
+            data = load_data(case["symbol"], None, start=st, end=min(st + timedelta(days=4), datetime.now(timezone.utc)), getter=getter)
+            res = replay(case, data)
+            res["source"] = data.get("source")
+            if data.get("missing_days"):
+                res["missing_days"] = data["missing_days"]
+        except Exception as exc:  # noqa: BLE001
+            res = {"ok": False, "status": "ERROR", "note": f"{type(exc).__name__}: {exc}"}
+        gate = None
+        try:
+            gate = plan_gate(case)
+        except Exception:  # noqa: BLE001
+            pass
+        r = {"case": case["label"], "trade_id": case["trade_id"], "symbol": case["symbol"], "side": case["side"], "entry": case["entry"], "sl": case["sl"], "tp1": case["tp1"],
+             "recorded_at": case["start"], "actual": case["actual"], "gate": gate or "пройшов би шлюз плану", "result": res}
+        lines = [f"[replay-journal] {case['label']} {case['symbol']} {case['side']} вхід {case['entry']} стоп {case['sl']} ціль1 {case['tp1']} · записано {case['start']} · "
+                 f"фактично: {case['actual']['outcome']} R={case['actual']['r_multiple']} · шлюз: {gate or 'ок'}",
+                 f"[replay-journal] стан: {res.get('status')} {res.get('filled_at') or res.get('note') or ''} · джерело {res.get('source')}"]
+        for x in res.get("timeline") or []:
+            lines.append(f"[replay-journal]   {x['ts']}  {x['text']}")
+        if res.get("status") == "FILLED":
+            lines.append(f"[replay-journal] MFE {res['mfe_pct']}% · MAE {res['mae_pct']}% · подій {len(res['timeline'])} · дані до {res['data_until']}")
+        r["lines"] = lines
+        for ln in lines:
+            printer(ln)
+        results.append(r)
+    return results

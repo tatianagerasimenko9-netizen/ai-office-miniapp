@@ -6780,6 +6780,12 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[range] {rsym}: {type(exc_range).__name__}: {exc_range}")
                 try:
                     log_event(db_path, "BTC_FORCE_ORDERS", BTC_FORCE_ORDER_BOOK.snapshot())
+                    try:
+                        import office_liq_map as _lm2
+
+                        _lm2.persist(db_path)   # раз на 30 хв: зліпок усього ринку для Mini App
+                    except Exception:
+                        pass
                     print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
                 except Exception as exc_liq:
                     print(f"[liq] snapshot failed: {exc_liq}")
@@ -6946,6 +6952,13 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_trade_radar())
     asyncio.create_task(run_btc_force_order_loop(BTC_FORCE_ORDER_BOOK))
+    try:   # карта ліквідацій по всьому ринку (безкоштовний потік !forceOrder@arr); OFFICE_LIQ_MAP=0 вимикає
+        import office_liq_map as _liq_map
+
+        if _liq_map.start():
+            print("[liq-map] потік ліквідацій усього ринку запущено")
+    except Exception as exc_lm:
+        print(f"[liq-map] не запущено: {type(exc_lm).__name__}: {exc_lm}")
 
     async def process_tv_signal(signal: Dict[str, Any]) -> None:
         """
@@ -7254,7 +7267,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                 if _n % 3 == 1 or (_n <= 12):   # раз на ~15 хв (перші ~годину — щоцикл): статистика джерела (429, вага IP, WebSocket, кеш)
                     from office_market_data import source_health
 
-                    print(f"[data] binance {source_health()} depth={__import__('office_market_data').depth_stats()}")
+                    try:
+                        import office_data_stability as _stab
+
+                        _stab.set_db(db_path)
+                        _stab.tick(db=db_path)   # щогодинний облік стабільності свічок (для авто-вмикання стакана)
+                        _stab_txt = f" stability={_stab.status(db_path)}"
+                    except Exception:
+                        _stab_txt = ""
+                    print(f"[data] binance {source_health()} depth={__import__('office_market_data').depth_stats()}{_stab_txt}")
                 items = await asyncio.to_thread(_lev_watch.tick, db_path)
                 for it in items:
                     # той самий безпечний маршрут, що й картки Лева: політика, дедуп за (умова, подія), журнал доставки
@@ -7275,6 +7296,18 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(int(os.getenv("OFFICE_LEV_WATCH_POLL_SEC", "300") or "300"))
 
     asyncio.create_task(monitor_lev_watches())
+
+    async def _launch_once() -> None:   # одноразова діагностика запуску (календар, replay журналу, потік ліквідацій); результат — у БД (LAUNCH_DIAG), без змінних
+        await asyncio.sleep(240)
+        try:
+            import office_launch_once
+
+            if await asyncio.to_thread(office_launch_once.run, db_path):
+                print("[launch-diag] виконано й записано в БД (LAUNCH_DIAG)")
+        except Exception as exc_ld:  # noqa: BLE001
+            print(f"[launch-diag] помилка: {type(exc_ld).__name__}: {exc_ld}")
+
+    asyncio.create_task(_launch_once())
 
     # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
     # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.
