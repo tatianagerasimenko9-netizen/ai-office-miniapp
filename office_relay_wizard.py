@@ -7309,7 +7309,7 @@ EV позитивне: {prob.get('ev_positive', '')}
         await asyncio.sleep(90)
         while True:
             try:
-                for it in await asyncio.to_thread(tu.pending, db_path, _price):
+                for it in await asyncio.to_thread(tu.pending, db_path, _price, _fc):
                     pos = it["trade"]
                     reply = await asyncio.to_thread(trk.confirm_msg_for, db_path, str(pos.get("scenario_id") or "")) if pos.get("scenario_id") else None
                     mid = await send_proactive(
