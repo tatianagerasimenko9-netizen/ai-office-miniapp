@@ -108,7 +108,7 @@ const NA='Не визначено';
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', lv:lsGet('ao_lv','1')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
+const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', lv:lsGet('ao_lv','1')==='1', lq:lsGet('ao_lq','0')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
   layers:{zone:true,sl:true,tp:true}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
@@ -502,11 +502,14 @@ async function risk(){
       <div class="mut">Таймфрейм графіка за замовчуванням</div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
       <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
+      <label class="mut" style="display:block"><input type="checkbox" id="lqov"> шар ліквідацій (фактичні за 24 год — суцільні; орієнтовна оцінка з OI і плеча — пунктир; контекст, не сигнал)</label>
       <label class="mut" style="display:block"><input type="checkbox" id="lvov"> шар рівнів Лева (зони, дзеркальні, PDH/PDL/PWH/PWL — контекст, не сигнал)</label>
       <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
   $('chov').checked=S.ch;
   $('chov').onchange=e=>{S.ch=e.target.checked; lsSet('ao_ch', S.ch?'1':'0');};
+  $('lqov').checked=S.lq;
+  $('lqov').onchange=e=>{S.lq=e.target.checked; lsSet('ao_lq', S.lq?'1':'0');};
   $('lvov').checked=S.lv;
   $('lvov').onchange=e=>{S.lv=e.target.checked; lsSet('ao_lv', S.lv?'1':'0');};
   app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
@@ -580,6 +583,16 @@ async function paintChart(el, s){
         (lvp.zones||[]).forEach(z=>{const c=z.mirror?'#B48CFF':'#8392A5', t=(z.mirror?'дзеркальний ':'рівень ')+'×'+z.touches;
           series.createPriceLine({price:z.lo,color:c,title:t,lineStyle:3,lineWidth:1}); series.createPriceLine({price:z.hi,color:c,title:'',lineStyle:3,lineWidth:1});});
         Object.entries(lvp.previous||{}).forEach(([k,v])=>series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}));
+      }}catch(e){}
+    }
+    if(S.lq){
+      try{const lqp=await j(`/api/v2/liqmap?symbol=${encodeURIComponent(symbol)}`);
+      if(lqp&&lqp.ok){
+        const usd=v=>v>=1e6?(v/1e6).toFixed(1)+' млн $':Math.round(v/1e3)+' тис $';
+        ((lqp.real||{}).buckets||[]).slice(0,4).forEach(b=>series.createPriceLine({price:b.price,color:b.kind==='long_liq'?'#F39C4D':'#4DB8F3',title:'ліквід. '+(b.kind==='long_liq'?'лонгів ':'шортів ')+usd(b.usd),lineStyle:0,lineWidth:1}));
+        const e=lqp.estimate||{};
+        if(e.ok){ (e.below||[]).slice(0,3).forEach(b=>series.createPriceLine({price:b.price,color:'#F39C4D',title:'оцінка: лонги ~'+usd(b.usd),lineStyle:2,lineWidth:1}));
+                  (e.above||[]).slice(0,3).forEach(b=>series.createPriceLine({price:b.price,color:'#4DB8F3',title:'оцінка: шорти ~'+usd(b.usd),lineStyle:2,lineWidth:1})); }
       }}catch(e){}
     }
     if(S.ch){

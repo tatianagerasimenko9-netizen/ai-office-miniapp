@@ -6,13 +6,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 # Офіційний Futures combined-stream endpoint, один символ.
-FORCE_ORDER_WS_URL = "wss://fstream.binance.com/ws/btcusdt@forceOrder"
+# Стара адреса /ws/... відкривається, але подій не шле (перевірено на production: «connected», count=0 цілу годину) — як і /stream для свічок. Працює маршрут /market/.
+FORCE_ORDER_WS_URL = os.getenv("OFFICE_FORCE_ORDER_WS_URL", "wss://fstream.binance.com/market/stream?streams=btcusdt@forceOrder").strip()
 FORCE_ORDER_SYMBOL = "BTCUSDT"
 BUCKET_USD = 50.0
 WS_FRESH_SEC = 180.0

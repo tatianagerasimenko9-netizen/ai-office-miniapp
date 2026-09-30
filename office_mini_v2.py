@@ -1022,6 +1022,25 @@ def levels_payload(symbol: str, tf: str) -> Dict[str, Any]:
     return out
 
 
+def liqmap_payload(symbol: str) -> Dict[str, Any]:
+    """Карта ліквідацій для графіка: (1) ФАКТИЧНІ ліквідації Binance за 24 год (зліпок потоку з worker) і (2) ОРІЄНТОВНА оцінка з OI і плеча (модель).
+    Два шари різні за природою й підписані окремо. Контекст, не вхід; немає даних → чесно «недоступно»."""
+    import re
+
+    sym = str(symbol or "BTCUSDT").upper()
+    if not re.fullmatch(r"[A-Z0-9]{2,20}", sym):
+        return {"ok": False, "readonly": True, "note": "некоректний символ"}
+    if _fixture_on():
+        return {"ok": False, "readonly": True, "symbol": sym, "note": "у режимі fixture карти ліквідацій немає"}
+    import office_liq_map as lm
+
+    real = lm.latest_persisted(_db(), sym)
+    est = lm.fetch_estimate(sym)
+    return {"ok": True, "readonly": True, "creates_enter": False, "symbol": sym, "real": real.get("real") if real.get("ok") else None,
+            "real_note": None if real.get("ok") else real.get("note"), "real_age_sec": real.get("age_sec"), "estimate": est,
+            "note": "контекст графіка, не вхід і не сигнал"}
+
+
 def settings_payload() -> Dict[str, Any]:
     return {
         "ok": True,

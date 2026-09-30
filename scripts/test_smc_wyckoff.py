@@ -132,3 +132,16 @@ assert "spring" not in detect_ltf_confirms(direction="LONG", candles_ltf=novol, 
 h2 = detect_ltf_confirms(direction="SHORT", candles_ltf=sw, zone_lo=109.6, zone_hi=111.2, now_ts=NOW)
 assert "sweep_pool" in h2, h2
 print("OK SMC/Wyckoff → confirms integration")
+
+# повний ланцюг до підтвердження входу: FVG-ретест, OB-ретест, upthrust (дзеркало spring)
+hf = detect_ltf_confirms(direction="LONG", candles_ltf=fv, zone_lo=101.0, zone_hi=103.5, now_ts=NOW)
+assert "fvg_retest" in hf, hf
+obr = ob_base + [{"ts": ts(len(ob_base) + i), "open": o, "high": h_, "low": l_, "close": c_, "volume": 70}
+                 for i, (o, h_, l_, c_) in enumerate([(105.4, 105.5, 102.9, 103.0), (103.0, 103.2, 101.6, 101.8), (101.8, 102.0, 100.4, 100.6), (100.6, 101.0, 100.1, 100.7)])]
+assert "ob_retest" in kinds(S.tags_for(obr, "LONG", now_ts=NOW)), kinds(S.tags_for(obr, "LONG", now_ts=NOW))
+ho = detect_ltf_confirms(direction="LONG", candles_ltf=obr, zone_lo=99.8, zone_hi=101.2, now_ts=NOW)
+assert "ob_retest" in ho, ho
+hu = detect_ltf_confirms(direction="SHORT", candles_ltf=mir, zone_lo=103.4, zone_hi=105.8, now_ts=NOW)
+assert "upthrust" in hu and "upthrust_test" in hu, hu
+assert "upthrust" not in detect_ltf_confirms(direction="LONG", candles_ltf=mir, zone_lo=103.4, zone_hi=105.8, now_ts=NOW), "upthrust — лише для SHORT"
+print("OK FVG/OB/upthrust → confirms integration")
