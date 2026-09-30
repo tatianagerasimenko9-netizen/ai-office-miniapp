@@ -48,7 +48,7 @@ def _max_streams() -> int:
         return 200
 
 
-_SILENCE_SEC = 20.0   # BTCUSDT@kline_1m шле події кілька разів на секунду: 20 с тиші = потік мертвий (а не «тихий ринок») → перепідключення
+_SILENCE_SEC = float(os.getenv("OFFICE_WS_SILENCE_SEC", "20") or 20)  # BTCUSDT@kline_1m шле події кілька разів на секунду: 20 с тиші = потік мертвий (а не «тихий ринок») → перепідключення
 
 
 def _bases() -> List[str]:
