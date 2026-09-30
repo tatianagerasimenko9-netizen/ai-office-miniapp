@@ -151,7 +151,7 @@ def replay(case: Dict[str, Any], data: Dict[str, List[Dict[str, Any]]]) -> Dict[
     fill_t = None
     for r in m15:
         t = _ts(r)
-        if t >= start and float(r["low"]) <= entry <= float(r["high"]):
+        if t + 900 > start and float(r["low"]) <= entry <= float(r["high"]):   # включно зі свічкою, у якій угоду відкрито (вона могла початись раніше за start)
             fill_t = t + 900
             break
     if fill_t is None:
@@ -196,11 +196,18 @@ def replay(case: Dict[str, Any], data: Dict[str, List[Dict[str, Any]]]) -> Dict[
 
 
 def verdict(case_key: str, res: Dict[str, Any], gate: Optional[str]) -> Dict[str, Any]:
-    """Що саме перевірено кодом і чи пройдено."""
+    """Що саме перевірено кодом і чи пройдено. Кейс ведення без заповненого входу НЕ пройдено (нічого не перевірено); кейс LSK — лише за шлюзом плану."""
     checks: List[Dict[str, Any]] = []
-    checks.append({"name": "replay виконано на реальних свічках", "ok": bool(res.get("ok")) and res.get("status") != "NO_DATA"})
+    checks.append({"name": "replay виконано на реальних свічках", "ok": bool(res.get("ok")) and res.get("status") not in ("NO_DATA", "ERROR")})
     tl = res.get("timeline") or []
     codes = [x["code"] for x in tl]
+    if case_key != "LSK":
+        checks.append({"name": "вхід заповнено — ведення було що перевіряти", "ok": res.get("status") == "FILLED"})
+        case = CASES.get(case_key) or {}
+        if res.get("status") == "FILLED" and case.get("entry"):
+            need = abs(float(case["tp1"]) - float(case["entry"])) / float(case["entry"]) * 100.0
+            if float(res.get("mfe_pct") or 0) >= need:   # ціна дійшла до цілі 1 → порада «ціль 1» мусить бути
+                checks.append({"name": "ціль 1 досягнута → є порада по цілі 1", "ok": any(c.startswith("TP1") for c in codes)})
     checks.append({"name": "жодна порада не повторилась", "ok": len(codes) == len(set(codes))})
     checks.append({"name": "немає «закрито» без підтвердження виконання", "ok": not any(w in x["text"].lower() for x in tl for w in FORBIDDEN)})
     if case_key == "LSK":
