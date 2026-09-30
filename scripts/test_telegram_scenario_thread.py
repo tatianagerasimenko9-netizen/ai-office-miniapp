@@ -7,6 +7,7 @@ SQLite. No credentials, production DB, network, or Telegram.
 import ast
 import asyncio
 import os
+os.environ["OFFICE_TG_STRICT"] = "0"  # тест механіки доставки (фото, гілка), не політики; політика — test_tg_silence.py
 import sys
 import tempfile
 from pathlib import Path

@@ -211,11 +211,6 @@ def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
                         size_usdt=size_usdt, risk_usd=risk_usd, valid_until=valid_until)
 
 
-def expired_plan_card(*, symbol: str, direction: str) -> str:
-    dot, word = _dir_head(direction)
-    return f"⚪ {word} · {ticker(symbol)} · час дії плану закінчився. Входу не було — план знято."
-
-
 def cancel_card(*, symbol: str, direction: str, reason: str, level: Any = None) -> str:
     w = _side_words(direction)
     low = str(reason or "").lower()

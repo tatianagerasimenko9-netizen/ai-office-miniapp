@@ -251,3 +251,26 @@ def mini_app_button(
         url = f"{base}/?symbol={quote(sym, safe='')}&filterSymbol={quote(sym, safe='')}"
         return {"inline_keyboard": [[{"text": "📊 Графік", "url": url}]]}
     return None
+
+
+def strict_enabled() -> bool:
+    """Єдине правило Telegram: лише готовий сигнал і ведення позначеної угоди. Відкат: OFFICE_TG_STRICT=0."""
+    import os
+
+    return os.getenv("OFFICE_TG_STRICT", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def outbound_allowed(*, event_type: str = "", kind: str = "", intent: str = "", confirmed_position: bool = False,
+                     position_open: bool = False) -> bool:
+    """Єдине місце, що вирішує, чи може ПРОАКТИВНЕ повідомлення піти в Telegram (`send_proactive`).
+    Дозволено лише: (а) готовий сигнал (CONFIRM), (б) ведення угоди, яку власниця позначила відкритою (POSITION_MANAGE + відкрита позиція).
+    Усе інше — WATCHING, неповні плани, скасування/завершення терміну внутрішніх сценаріїв, службові стани — лише БД/Mini App."""
+    if not strict_enabled():
+        return True
+    it = str(intent or "").strip().upper()
+    kd = str(kind or "").strip().upper()
+    if it == "CONFIRM" and kd == "CONFIRM":
+        return True
+    if it == "POSITION_MANAGE" and bool(confirmed_position) and bool(position_open):
+        return True
+    return False
