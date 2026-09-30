@@ -532,10 +532,12 @@ RR_TP1_FLOOR = 1.0          # правило «weighted»: RR до TP1 не ме
 
 def rr_rule() -> str:
     """Правило RR плану: 'tp1' — RR до TP1 після комісій ≥ MIN_RR (1,5); 'weighted' — зважений RR (40% TP1 + 60% TP2) ≥ 1,5 І RR до TP1 ≥ 1,0.
-    Перемикається OFFICE_RR_RULE (миттєвий відкат змінною)."""
+    За замовчуванням 'weighted' (рішення власниці 2026-09-30): діє ЛИШЕ для планів із ЗАПИСАНИМ TP2 (виклики передають tp2 тільки з БД/збереженого
+    сценарію, не відновлений структурний); без записаного TP2 зважений RR дорівнює RR до TP1 і умова лишається чинною (≥ 1,5).
+    OFFICE_RR_RULE=tp1 — миттєвий відкат."""
     import os
 
-    return "weighted" if os.getenv("OFFICE_RR_RULE", "tp1").strip().lower() == "weighted" else "tp1"
+    return "tp1" if os.getenv("OFFICE_RR_RULE", "weighted").strip().lower() == "tp1" else "weighted"
 
 
 def net_rr(entry: Any, sl: Any, tp1: Any, tp2: Any = None) -> Optional[Dict[str, float]]:

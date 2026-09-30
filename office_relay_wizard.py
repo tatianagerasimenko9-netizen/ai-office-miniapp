@@ -6839,7 +6839,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             tgt = {}
                         try:
                             plan_bad = _lev_watch.check_plan(sym_f, str(st.get("direction") or ""),
-                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": ((tgt or {}).get("tp2") or {}).get("price")},
+                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": st.get("tp2")},   # лише ЗАПИСАНИЙ TP2 сценарію (не структурний)
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
@@ -6862,7 +6862,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 except Exception as exc_rj:
                                     print(f"[track] record rejected failed: {exc_rj}")
                             continue
-                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), ((tgt or {}).get("tp2") or {}).get("price"))
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), st.get("tp2"))
                         if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
                             print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
                             continue

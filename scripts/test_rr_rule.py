@@ -22,7 +22,10 @@ def check(name, cond, extra=""):
 
 os.environ.pop("OFFICE_RR_RULE", None)
 # --- режим за замовчуванням/«tp1»: як було ---
-check("режим за замовчуванням — tp1 (чинне правило)", G.rr_rule() == "tp1" or os.getenv("OFFICE_RR_RULE") == "weighted")
+check("режим за замовчуванням — weighted (рішення власниці); OFFICE_RR_RULE=tp1 — відкат", G.rr_rule() == "weighted")
+os.environ["OFFICE_RR_RULE"] = "tp1"
+check("відкат змінною: OFFICE_RR_RULE=tp1", G.rr_rule() == "tp1")
+os.environ.pop("OFFICE_RR_RULE", None)
 os.environ["OFFICE_RR_RULE"] = "tp1"
 g = G.rr_gate(100.0, 97.0, 104.0, 110.0)           # RR до TP1 = 1,26: чинне правило відхиляє, TP2 не рятує
 check("tp1: RR до TP1 1,26 < 1,5 → відхилено, навіть із далеким TP2", not g["ok"] and "потрібно не менше 1,5" in g["reason"], str(g))
@@ -74,6 +77,31 @@ import office_scenario_lifecycle as LC  # noqa: E402
 import inspect  # noqa: E402
 
 check("confirmed_plan_action приймає tp2", "tp2" in inspect.signature(LC.confirmed_plan_action).parameters)
+
+# --- шлюз бачить ЛИШЕ записаний TP2: структурний (targets) у перевірку RR не йде ---
+os.environ.pop("OFFICE_RR_RULE", None)
+import office_scenario_state as SS  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+
+NOW = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+seen = []
+
+
+def spy(sym, side, plan, lo, hi):
+    seen.append(dict(plan))
+    return None
+
+
+ROW = {"signal_id": "SCN|LSKUSDT|LONG|H1|54994d1a", "symbol": "LSKUSDT", "direction": "LONG", "entry_low": 0.30028, "entry_high": 0.30525,
+       "sl": 0.29531, "tp1": 0.3180, "tp2": None, "status": "CONFIRMED", "ts_created": "2026-09-29T11:11:40+00:00",
+       "analysis_note": "ЛЕВ cancel=0.2953189 ckey=LSKUSDT|LONG|0.30028|0.30525 origin=desk tf=H1 scenario_id=SCN|LSKUSDT|LONG|H1|54994d1a confirm_sent=1 confirmed_px=0.3035"}
+THESIS = {"invalidation": "закриття за 0.295319", "confirmation": "Чекаю на M15: подвійне дно або SFP у зоні"}
+FRESH = {"price": 0.3036, "fresh": True, "as_of": "2026-09-29T11:45:00+00:00"}
+SS.build(ROW, thesis=THESIS, price=FRESH, targets={"tp2": {"price": 0.326, "why": "межа азійської сесії"}, "tp3": None}, plan_check=spy, now=NOW)
+check("сценарій без записаного TP2: у шлюз RR іде tp2=None (структурний 0,326 не використано)", bool(seen) and seen[-1].get("tp2") is None, str(seen))
+seen.clear()
+SS.build({**ROW, "tp2": 0.3300}, thesis=THESIS, price=FRESH, targets={"tp2": {"price": 0.326, "why": "межа азійської сесії"}, "tp3": None}, plan_check=spy, now=NOW)
+check("сценарій із записаним TP2: у шлюз іде саме він (0,33), а не структурний (0,326)", bool(seen) and seen[-1].get("tp2") == 0.33, str(seen))
 
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)

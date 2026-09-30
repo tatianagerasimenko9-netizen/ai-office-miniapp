@@ -173,7 +173,7 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         inside = lo is not None and hi is not None and lo <= p <= hi
         if confirmed:
             entry = _confirmed_px(row)
-            _tp2 = ((targets or {}).get("tp2") or {}).get("price")
+            _tp2 = _f(row.get("tp2"))   # лише ЗАПИСАНИЙ у БД TP2 — відновлений структурний у шлюз RR не йде
             plan = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": _tp2}
             if entry is None:
                 missing.append("не збережено ціну входу в момент підтвердження")
