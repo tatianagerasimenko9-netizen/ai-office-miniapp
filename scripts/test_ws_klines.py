@@ -134,7 +134,7 @@ r1 = omd.fetch_candles("ETHUSDT", "15m", 20)
 check("перший виклик: REST (підписка ще не підтверджена)", isinstance(r1, list) and len(r1) == 20 and len(REST_CALLS) == 1)
 check("сервер отримав підключення", wait_for(lambda: ws.stats()["connected"]))
 ok = wait_for(lambda: (omd.fetch_candles("ETHUSDT", "15m", 20) and ws.stats()["seeds"] >= 1), 10)
-check("історія засіяна (seed) одним REST-запитом", ok and ws.stats()["seeds"] == 1, str(ws.stats()))
+check("історія засіяна (seed) з кешу першого REST-запиту, без другого", ok and ws.stats()["seeds"] == 1 and len(REST_CALLS) == 1, str(ws.stats()) + str(len(REST_CALLS)))
 n_rest = len(REST_CALLS)
 check("після seed підписка підтверджена", ws.stats()["acked"] >= 2)
 rows = None

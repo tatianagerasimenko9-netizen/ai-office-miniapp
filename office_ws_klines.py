@@ -61,7 +61,7 @@ def _iso(ms: int) -> str:
 
 def _new_entry(now: float, acked: bool = False) -> Dict[str, Any]:
     return {"bars": [], "seeded": False, "state": "acked" if acked else "new", "acked_at": now if acked else 0.0,
-            "last_msg": 0.0, "seeded_at": 0.0, "last_read": now, "want": 0, "bad_until": 0.0, "solo": False}
+            "last_msg": 0.0, "seeded_at": 0.0, "last_read": now, "want": 0, "bad_until": 0.0, "solo": False, "first_ts": None}
 
 
 def _ensure_thread() -> None:
@@ -138,9 +138,15 @@ def seed(symbol: str, tf: str, rows: List[Dict[str, Any]], started_at: float) ->
     key = (str(symbol).upper(), str(tf))
     with _LOCK:
         e = _STORE.get(key)
-        if e is None or e["state"] != "acked" or not e["acked_at"] or e["acked_at"] > started_at or not _STATE["connected"]:
+        if e is None or e["state"] != "acked" or not e["acked_at"] or not _STATE["connected"]:
             return False
-        if _STATE["connected_at"] > started_at:
+        if str(rows[-1].get("src") or "") != "binance_futures":
+            return False   # резервні свічки (спот/Bybit) у потік не кладемо
+        # діри між історією й потоком немає, якщо підписку підтверджено ДО запиту, АБО остання свічка історії — та сама, з якої почався потік
+        # (потік шле повний стан свічки, що формується, тож вона перезапишеться свіжою)
+        covered = e["acked_at"] <= started_at and _STATE["connected_at"] <= started_at
+        same_bar = e["first_ts"] is not None and rows[-1]["ts"] == e["first_ts"]
+        if not (covered or same_bar):
             return False
         merged = [dict(r) for r in rows][-_MAX_BARS:]
         for b in e["bars"]:   # оновлення, що прийшли під час запиту, новіші за REST
@@ -162,6 +168,8 @@ def _apply(sym: str, tf: str, row: Dict[str, Any]) -> None:
         if e is None:
             return
         e["last_msg"] = now
+        if e["first_ts"] is None:
+            e["first_ts"] = row["ts"]
         bars = e["bars"]
         if not bars:
             bars.append(row)
@@ -199,7 +207,7 @@ def _on_disconnect() -> None:
         _INFLIGHT.clear()
         now = time.time()
         for key, e in list(_STORE.items()):
-            e.update(bars=[], seeded=False, acked_at=0.0)
+            e.update(bars=[], seeded=False, acked_at=0.0, first_ts=None)
             e["state"] = "bad" if (e["state"] == "bad" and e["bad_until"] > now) else "new"
 
 
