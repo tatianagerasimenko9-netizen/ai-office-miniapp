@@ -37,7 +37,10 @@ TAG_UA = {
     "bpr": "BPR",
 }
 
+FORMAL_TAGS = ("sweep_pool", "displacement", "fvg_retest", "ob_retest", "breaker_retest", "ote", "spring", "spring_test", "upthrust", "upthrust_test")
 CONFIRM_UA = {
+    "sweep_pool": "зняття ліквідності", "displacement": "сильний імпульс", "fvg_retest": "ретест FVG", "ob_retest": "ретест order block",
+    "breaker_retest": "ретест breaker", "ote": "зона OTE", "spring_test": "тест spring", "upthrust_test": "тест upthrust",
     "double_top": "подвійна вершина",
     "double_bottom": "подвійне дно",
     "triple_top": "потрійна вершина",
@@ -421,6 +424,13 @@ def detect_ltf_confirms(
         for pat in confirmed_for(candles_ltf, side, now_ts=now_ts):
             if pat["kind"] not in hits:
                 hits.append(pat["kind"])
+        # ICT/SMC і Вайкоф як формальні правила (office_smc / office_wyckoff): sweep пулу, displacement, ретест FVG/OB/breaker, OTE, spring/upthrust + тест
+        import office_smc as _smc
+        import office_wyckoff as _wy
+
+        for t in _smc.tags_for(candles_ltf, side, lo, hi, now_ts=now_ts) + _wy.tags_for(candles_ltf, side, now_ts=now_ts):
+            if t["kind"] not in hits and t["kind"] in FORMAL_TAGS:
+                hits.append(t["kind"])
 
     # Ціна має торкнутись зони тінню.
     touched = float(last["low"]) <= hi and float(last["high"]) >= lo
@@ -431,7 +441,7 @@ def detect_ltf_confirms(
     if not touched:
         from office_bulkowski import KINDS_IMPLEMENTED as _BK
 
-        return [h for h in hits if h in ("triple_top", "triple_bottom", "double_top", "double_bottom") or h in _BK]
+        return [h for h in hits if h in ("triple_top", "triple_bottom", "double_top", "double_bottom") or h in _BK or h in FORMAL_TAGS]
 
     highs, lows = _swings(rows)
     # SFP: тінь за зону, закриття всередині / назад у зону (Turtle Soup).
