@@ -66,5 +66,15 @@ check("некоректна зона/напрямок → тегу нема", rc
 hits = cf.detect_ltf_confirms(direction="LONG", candles_ltf=up, zone_lo=zl, zone_hi=zh)
 check("detect_ltf_confirms віддає channel_edge біля зони", "channel_edge" in hits, str(hits))
 
+# звірка з Pine get_channel: нахил = справжній нахил OLS (linreg(len,0)-linreg(len,1) на одному вікні)
+_m = 0.05
+_line = [100.0 + _m * i for i in range(300)]
+_ic, _ey, _dev, _sl = rc.get_channel(_line, 100)
+check("нахил каналу = нахил прямої (Pine linreg offset на одному вікні)", abs(_sl - _m) < 1e-9, str(_sl))
+check("відхилення ідеальної прямої = |нахил| (як у Pine: slope*(len-x))", abs(_dev - _m) < 1e-9, str(_dev))
+_noisy = [100.0 + 0.05 * i + (1.0 if i % 2 else -1.0) for i in range(300)]
+_ic2, _ey2, _dev2, _sl2 = rc.get_channel(_noisy, 100)
+check("шум ±1 не подвоює нахил і відхилення", abs(_sl2 - 0.05) < 0.01 and 0.9 < _dev2 < 1.2, f"{_sl2} {_dev2}")
+
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)
