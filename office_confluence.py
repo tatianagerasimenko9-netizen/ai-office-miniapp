@@ -978,6 +978,14 @@ def follow_setup(
             return {"action": "cancel", "reason": "злам структури H1 проти сценарію", "kind": "STRUCTURE"}
         if target_without_entry(candles_h1, side=side, zone_lo=lo, zone_hi=hi, tp1=setup.get("tp1"), since_ts=born, now_ts=ts):
             return {"action": "cancel", "reason": "ціль досягнута без входу", "kind": "TARGET_NO_ENTRY"}
+    import os as _os
+
+    if _os.getenv("OFFICE_MANIP_HOLD", "1").strip() != "0":
+        from office_sessions import manipulation_window
+
+        mw = manipulation_window(ts)
+        if mw:   # 30 хв до відкриття сесії — типові хибні рухи: підтвердження не приймаємо, чекаємо після відкриття
+            return {"action": "hold", "reason": f"маніпуляційне вікно перед відкриттям {mw} — підтвердження не приймаю", "manipulation_window": mw}
     confirms = detect_ltf_confirms(
         direction=side,
         candles_ltf=candles_ltf,
