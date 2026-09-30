@@ -53,8 +53,9 @@ _SILENCE_SEC = float(os.getenv("OFFICE_WS_SILENCE_SEC", "20") or 20)  # BTCUSDT@
 
 def _bases() -> List[str]:
     """Адреси підключення за порядком спроб. Основна — OFFICE_WS_BASE; якщо сесія не дала жодної події, пробуємо наступну."""
-    first = os.getenv("OFFICE_WS_BASE", "wss://fstream.binance.com/stream").strip()
-    extra = [u.strip() for u in os.getenv("OFFICE_WS_BASE_ALT", "wss://fstream.binance.com/market/stream").split(",") if u.strip()]
+    # на production стара адреса /stream відкривається, але подій не шле (перевірено логом сесії), а /market/stream — шле
+    first = os.getenv("OFFICE_WS_BASE", "wss://fstream.binance.com/market/stream").strip()
+    extra = [u.strip() for u in os.getenv("OFFICE_WS_BASE_ALT", "wss://fstream.binance.com/stream").split(",") if u.strip()]
     out = [first]
     for u in extra:
         if u not in out:

@@ -22,3 +22,6 @@
 
 ## Доповнення (PR-V): сторож тиші й діагностика
 Після deploy PR-U потік замовк на ~2-й хвилині (`msgs` застряг на 121, `silent_sec` ріс до 1756 с, `connected: True`) — свічки повернулися на REST (ваги ~1800, 429, паузи). Причину (чому Binance перестає слати) з цього середовища не підтвердити: документація Binance недоступна (egress). Тому: (1) сторож — якщо BTCUSDT@kline_1m не дав подій `OFFICE_WS_SILENCE_SEC` (20 с), з'єднання закривається й піднімається заново; (2) якщо сесія не дала жодної події — пробуємо наступну адресу (`OFFICE_WS_BASE_ALT`, за замовчуванням `wss://fstream.binance.com/market/stream`); (3) у лозі `[ws-klines]` — підключення, завершення сесії з кодом закриття, перші 5 нетипових повідомлень сервера; у `[data] binance` — `events`, `event_age`, `watchdog`, `base`.
+
+## Доповнення (PR-W): маршрут `/market/stream`
+Діагностика PR-V на production: `wss://fstream.binance.com/stream` відкривається, але подій не шле (сесія «події=0», сторож через 21 с), а `wss://fstream.binance.com/market/stream` — шле. Тепер `/market/stream` — основна адреса, `/stream` — запасна (`OFFICE_WS_BASE` / `OFFICE_WS_BASE_ALT`).
