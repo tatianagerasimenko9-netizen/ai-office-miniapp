@@ -41,6 +41,8 @@ print("OK fapi pacing: 60ms spacing, weight-aware pause before 429, fallbacks un
 
 # стартовий розгін: на Render перші 3 хв процесу — ≥250 мс між запитами; поза Render (тести/CI) — ні
 os.environ.pop('RENDER', None)
+M._BACKOFF_UNTIL = 0.0
+W['v'] = 100
 M._STARTED_AT = time.time()
 t_ = time.time()
 for _ in range(4):
