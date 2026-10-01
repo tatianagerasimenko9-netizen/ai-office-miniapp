@@ -1252,7 +1252,9 @@ def next_manage_event(
     last_c = rows[-1] if rows else None
     hist_n = int(book.extras.get("manage_bars") or 0)
     book.extras["manage_bars"] = hist_n + 1
-    if setup in ("PUMP", "DUMP") and last_c is not None and hist_n >= 1:
+    from office_indicator_gate import is_active as _ind_active
+
+    if setup in ("PUMP", "DUMP") and last_c is not None and hist_n >= 1 and _ind_active("pump_dump"):
         try:
             from office_pump_dump import pump_add_retest, pump_continuation
 

@@ -14,6 +14,7 @@ from office_risk_officer import review_plan
 from office_confluence import TAG_UA, evaluate_confluence
 from office_desk_card import _f, widen_sl_to_atr_h1
 from office_ict_hunter import evaluate_ict_hunter
+from office_indicator_gate import DISABLED_REASON, active_keys, is_active
 from office_pump_dump import evaluate_pump_dump
 from office_radar import MIN_RR, detect_sweep_from_candles
 from office_regression_channel import regression_channel
@@ -366,6 +367,20 @@ def stance_channel(ch: Any, *, lev_direction: str, price: Any = None) -> Dict[st
     return st
 
 
+def _disabled_stance() -> Dict[str, Any]:
+    """Індикатор вимкнено: не підтверджує, не суперечить, не додає балів."""
+    return {
+        "stance": STANCE_NOT_CONNECTED,
+        "creates_enter": False,
+        "connected": False,
+        "signal": False,
+        "direction": "",
+        "reason": DISABLED_REASON,
+        "source": "disabled",
+        "disabled": True,
+    }
+
+
 def collect_indicator_stances(
     *,
     lev_direction: str,
@@ -381,17 +396,20 @@ def collect_indicator_stances(
     m5 = candles_m5 if isinstance(candles_m5, list) else []
     h1 = candles_h1 if isinstance(candles_h1, list) else []
     d1 = candles_d1 if isinstance(candles_d1, list) else []
-    pd_src = m15 if len(m15) >= 22 else (m5 if len(m5) >= 22 else m15)
-    pd = evaluate_pump_dump(candles=pd_src, daily=d1, weekly=candles_w if isinstance(candles_w, list) else None)  # тижневі рівні з Pine (w_h/w_l)
-    hunt_src = m15 if len(m15) >= 8 else h1
-    hunt = evaluate_ict_hunter(candles=hunt_src, timeframe="M15", daily=d1)
+    pd = hunt = None
+    if is_active("pump_dump"):
+        pd_src = m15 if len(m15) >= 22 else (m5 if len(m5) >= 22 else m15)
+        pd = evaluate_pump_dump(candles=pd_src, daily=d1, weekly=candles_w if isinstance(candles_w, list) else None)  # тижневі рівні з Pine (w_h/w_l)
+    if is_active("ict_hunter"):
+        hunt_src = m15 if len(m15) >= 8 else h1
+        hunt = evaluate_ict_hunter(candles=hunt_src, timeframe="M15", daily=d1)
     ch = regression_channel(h1 if len(h1) >= 12 else m15)
     alerts = pine_alerts if isinstance(pine_alerts, list) else []
     return {
-        "pump_dump": stance_pump_dump(pd, lev_direction=lev_direction),
-        "ict_hunter": stance_ict_hunter(hunt, lev_direction=lev_direction),
+        "pump_dump": stance_pump_dump(pd, lev_direction=lev_direction) if is_active("pump_dump") else _disabled_stance(),
+        "ict_hunter": stance_ict_hunter(hunt, lev_direction=lev_direction) if is_active("ict_hunter") else _disabled_stance(),
         "channel": stance_channel(ch, lev_direction=lev_direction, price=price),
-        "raw": {"pump_dump": pd, "ict_hunter": hunt, "channel": ch},
+        "raw": {"pump_dump": pd or {}, "ict_hunter": hunt or {}, "channel": ch},
         "pine_alerts": {
             "stance": STANCE_NOT_CONNECTED if not alerts else STANCE_NEUTRAL,
             "connected": bool(alerts),
@@ -403,7 +421,7 @@ def collect_indicator_stances(
 
 def _contradict_keys(stances: Dict[str, Any]) -> List[str]:
     hit = []
-    for k in INDICATOR_KEYS:
+    for k in active_keys(INDICATOR_KEYS):
         st = stances.get(k) if isinstance(stances.get(k), dict) else {}
         if st.get("stance") == STANCE_CONTRADICT:
             hit.append(k)
@@ -427,21 +445,22 @@ def lev_conclusion_text(draft: Dict[str, Any], stances: Dict[str, Any], action: 
         names = [TAG_UA.get(str(t), str(t)) for t in tags[:4]]
         parts.append("структура: " + ", ".join(names))
     contra = _contradict_keys(stances)
+    live = active_keys(INDICATOR_KEYS)
     missing = [
         k
-        for k in INDICATOR_KEYS
+        for k in live
         if (stances.get(k) or {}).get("stance") == STANCE_NOT_CONNECTED
     ]
     confirms = [
         k
-        for k in INDICATOR_KEYS
+        for k in live
         if (stances.get(k) or {}).get("stance") == STANCE_CONFIRM
     ]
     if action == ACTION_WAIT and contra:
         parts.append("розбіжність з індикатором — не підганяю сценарій, чекаю умову")
     elif confirms:
         parts.append("індикатори підсилюють висновок, не керують ним")
-    elif missing == list(INDICATOR_KEYS):
+    elif missing == list(live):
         parts.append("індикатори не підключені — рішення Лева без них")
     else:
         parts.append("індикатори нейтральні або неповні")
