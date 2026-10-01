@@ -44,7 +44,7 @@ LONG_CANDS = [cand("sc_ote", 83200, 83800, "M15", "сильна свічка M15
               cand("fib_h4", 83000, 83900, "H4", "Фібо 0.618–0.786 H4"), cand("breaker", 83300, 83650, "H1", "breaker H1")]
 draft = draft_lev_scenario(symbol="BTCUSDT", timeframe="H1", price=84870.0, atr_h1=900.0, day_used_pct=40.0,
                            candidates_long=LONG_CANDS, candidates_short=[cand("ob", 85100, 85600, "H1", "OB H1")],
-                           market_context={"data_status": "PARTIAL", "btc": "спот 84870"})
+                           market_context={"data_status": "PARTIAL", "btc": "спот 84870"}, target_levels=[(85300.0, "тестовий рівень")])
 check("база: власний сетап Лева LONG готовий", draft.get("direction") == "LONG" and draft.get("send_card"), str(draft.get("reason")))
 
 
@@ -107,7 +107,7 @@ check("канал обчислюється (підключений)", got["chann
 # 5. Повний цикл Лева із вимкненими портами формує готовий сигнал
 cyc = lv.lev_cycle(symbol="BTCUSDT", price=84870.0, timeframe="H1", candles_m15=h1, candles_h1=h1, atr_h1=900.0, day_used_pct=40.0,
                    candidates_long=LONG_CANDS, candidates_short=[cand("ob", 85100, 85600, "H1", "OB H1")],
-                   market_context={"data_status": "PARTIAL", "btc": "спот 84870"})
+                   market_context={"data_status": "PARTIAL", "btc": "спот 84870"}, target_levels=[(85300.0, "тестовий рівень")])
 check("lev_cycle: готовий сигнал формується (SEND)", cyc["action"] == ACTION_SEND, cyc["reason"])
 
 # 6. Радар не додає hunter_score; супровід Pump не працює
