@@ -108,8 +108,8 @@ const NA='Не визначено';
 const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
-const S={tf:lsGet('ao_tf','H1'), ch:lsGet('ao_ch','0')==='1', lv:lsGet('ao_lv','1')==='1', lq:lsGet('ao_lq','0')==='1', sf:'all', rf:'all', jkind:'trades',prefill:null,
-  layers:{zone:true,sl:true,tp:true}};
+const S={tf:lsGet('ao_tf','H1'), sf:'all', rf:'all', jkind:'trades',prefill:null, lastBar:0,
+  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch2','1')==='1', ctx:lsGet('ao_ctx','1')==='1'}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
 let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
@@ -501,17 +501,15 @@ async function risk(){
     <div class="card">
       <div class="mut">Таймфрейм графіка за замовчуванням</div>
     ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
-      <label class="mut"><input type="checkbox" id="chov"> шар регресійного каналу (контекст, не сигнал)</label>
-      <label class="mut" style="display:block"><input type="checkbox" id="lqov"> шар ліквідацій (фактичні за 24 год — суцільні; орієнтовна оцінка з OI і плеча — пунктир; контекст, не сигнал)</label>
-      <label class="mut" style="display:block"><input type="checkbox" id="lvov"> шар рівнів Лева (зони, дзеркальні, PDH/PDL/PWH/PWL — контекст, не сигнал)</label>
+      <label class="mut"><input type="checkbox" id="chov"> регресійний канал на графіку (центр і дві межі вибраного таймфрейму; контекст, не сигнал)</label>
+      <label class="mut" style="display:block"><input type="checkbox" id="ctxov"> FVG і сильна свічка — лише коли актуальні для цього сценарію</label>
+      <div class="mut" style="margin-top:6px">Order Block, дзеркальні й інші внутрішні рівні на графіку не показуємо: Лев враховує їх усередині.</div>
       <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
-  $('chov').checked=S.ch;
-  $('chov').onchange=e=>{S.ch=e.target.checked; lsSet('ao_ch', S.ch?'1':'0');};
-  $('lqov').checked=S.lq;
-  $('lqov').onchange=e=>{S.lq=e.target.checked; lsSet('ao_lq', S.lq?'1':'0');};
-  $('lvov').checked=S.lv;
-  $('lvov').onchange=e=>{S.lv=e.target.checked; lsSet('ao_lv', S.lv?'1':'0');};
+  $('chov').checked=S.layers.ch;
+  $('chov').onchange=e=>{S.layers.ch=e.target.checked; lsSet('ao_ch2', S.layers.ch?'1':'0');};
+  $('ctxov').checked=S.layers.ctx;
+  $('ctxov').onchange=e=>{S.layers.ctx=e.target.checked; lsSet('ao_ctx', S.layers.ctx?'1':'0');};
   app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
   bindCards();
 }
@@ -524,7 +522,7 @@ function priceFormat(tick){
   const p=Math.max(0,Math.min(10,(String(tick).split('.')[1]||'').replace(/0+$/,'').length));
   return {type:'price',precision:p,minMove:t};
 }
-function drawFallback(el, candles, lv){
+function drawFallback(el, candles, lv, cx){
   const c=document.createElement('canvas'); c.width=(el.clientWidth||320)*2; c.height=(el.clientHeight||320)*2;
   c.style.width='100%'; c.style.height='100%'; el.innerHTML=''; el.appendChild(c);
   const ctx=c.getContext('2d'); const w=c.width,h=c.height, pad=40;
@@ -532,6 +530,7 @@ function drawFallback(el, candles, lv){
   if(!xs.length){ctx.fillStyle='#94A3B8'; ctx.fillText('немає свічок',20,40); return;}
   let mn=Math.min(...xs.map(x=>x.low)), mx=Math.max(...xs.map(x=>x.high));
   Object.values(lv).forEach(v=>{if(v!=null){mn=Math.min(mn,v); mx=Math.max(mx,v);}});
+  if(cx&&cx.channel){['mid','upper','lower'].forEach(k=>['_start','_end'].forEach(e=>{const v=cx.channel[k+e]; if(v!=null){mn=Math.min(mn,v); mx=Math.max(mx,v);}}));}
   const x=i=>pad+(w-2*pad)*i/Math.max(xs.length-1,1);
   const y=v=>h-pad-(h-2*pad)*(v-mn)/Math.max(mx-mn,1e-9);
   ctx.fillStyle='#0E141D'; ctx.fillRect(0,0,w,h);
@@ -539,6 +538,15 @@ function drawFallback(el, candles, lv){
   ctx.lineWidth=2;
   [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A'],['tp3','#27C99A'],['entry','#E8EDF4']].forEach(([k,col])=>{
     if(lv[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(lv[k])); ctx.lineTo(w-pad,y(lv[k])); ctx.stroke();});
+  const chn=cx&&cx.channel;
+  if(chn){
+    const ix=t=>{let k=0; for(let i=0;i<xs.length;i++){ if(xs[i].time<=t) k=i; } return k;};
+    const a=ix(chn.start_time), b=ix(chn.end_time);
+    [['mid','#7DA7D9',[]],['upper','#5C7FA8',[8,6]],['lower','#5C7FA8',[8,6]]].forEach(([k,col,dash])=>{
+      ctx.strokeStyle=col; ctx.setLineDash(dash); ctx.lineWidth=2; ctx.beginPath();
+      ctx.moveTo(x(a),y(chn[k+'_start'])); ctx.lineTo(x(b),y(chn[k+'_end'])); ctx.stroke();});
+    ctx.setLineDash([]);
+  }
   xs.forEach((b,i)=>{const up=b.close>=b.open; ctx.strokeStyle=ctx.fillStyle=up?'#27C99A':'#F36B78';
     ctx.beginPath(); ctx.moveTo(x(i),y(b.high)); ctx.lineTo(x(i),y(b.low)); ctx.stroke();
     const top=y(Math.max(b.open,b.close)), bot=y(Math.min(b.open,b.close)); ctx.fillRect(x(i)-2,top,4,Math.max(2,bot-top));});
@@ -560,6 +568,7 @@ async function paintChart(el, s){
     pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
   if(stamp && pack.data_status==='STALE') stamp.textContent+=' · фід застарів — рівні не підтверджують вхід';
   const candles=(pack.candles||[]).filter(c=>c.time);
+  S.lastBar=candles.length?candles[candles.length-1].time:0;
   if(chart){try{chart.remove();}catch(e){} chart=null; series=null;}
   el.innerHTML='';
   if(!candles.length){ el.innerHTML='<div class="empty">Свічки недоступні — графік не live</div>'; return pack; }
@@ -577,37 +586,45 @@ async function paintChart(el, s){
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
     line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2); line(lv.tp3,'#27C99A','TP3',2); line(lv.entry,'#E8EDF4','вхід',1);
-    if(S.lv){
-      try{const lvp=await j(`/api/v2/levels?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
-      if(lvp&&lvp.ok){
-        (lvp.zones||[]).forEach(z=>{const c=z.mirror?'#B48CFF':'#8392A5', t=(z.mirror?'дзеркальний ':'рівень ')+'×'+z.touches;
-          series.createPriceLine({price:z.lo,color:c,title:t,lineStyle:3,lineWidth:1}); series.createPriceLine({price:z.hi,color:c,title:'',lineStyle:3,lineWidth:1});});
-        Object.entries(lvp.previous||{}).forEach(([k,v])=>series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}));
-      }}catch(e){}
+    /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
+       OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
+    const shown=['зона','SL','TP'];
+    let cx=null;
+    if(S.layers.ch||S.layers.ctx){
+      try{
+        const q=new URLSearchParams({symbol,tf,dir:String(s.direction||'').toUpperCase(),zlo:s.zone_lo==null?'':s.zone_lo,zhi:s.zone_hi==null?'':s.zone_hi});
+        ['tp1','tp2','tp3'].forEach(k=>{if(s[k]!=null) q.set(k,s[k]);});
+        cx=await j('/api/v2/chart_context?'+q.toString());
+      }catch(e){ if(e&&e.stale) return null; cx=null; }
     }
-    if(S.lq){
-      try{const lqp=await j(`/api/v2/liqmap?symbol=${encodeURIComponent(symbol)}`);
-      if(lqp&&lqp.ok){
-        const usd=v=>v>=1e6?(v/1e6).toFixed(1)+' млн $':Math.round(v/1e3)+' тис $';
-        ((lqp.real||{}).buckets||[]).slice(0,4).forEach(b=>series.createPriceLine({price:b.price,color:b.kind==='long_liq'?'#F39C4D':'#4DB8F3',title:'ліквід. '+(b.kind==='long_liq'?'лонгів ':'шортів ')+usd(b.usd),lineStyle:0,lineWidth:1}));
-        const e=lqp.estimate||{};
-        if(e.ok){ (e.below||[]).slice(0,3).forEach(b=>series.createPriceLine({price:b.price,color:'#F39C4D',title:'оцінка: лонги ~'+usd(b.usd),lineStyle:2,lineWidth:1}));
-                  (e.above||[]).slice(0,3).forEach(b=>series.createPriceLine({price:b.price,color:'#4DB8F3',title:'оцінка: шорти ~'+usd(b.usd),lineStyle:2,lineWidth:1})); }
-      }}catch(e){}
+    const lastT=candles[candles.length-1].time;
+    const seg=(t0,v0,t1,v1,o)=>{const ln=chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));
+      ln.setData(t0===t1?[{time:t0,value:v0}]:[{time:t0,value:v0},{time:t1,value:v1}]); return ln;};
+    if(cx&&cx.ok&&S.layers.ch&&cx.channel){
+      const c=cx.channel;
+      seg(c.start_time,c.mid_start,c.end_time,c.mid_end,{color:'#7DA7D9',lineWidth:2});
+      seg(c.start_time,c.upper_start,c.end_time,c.upper_end,{color:'#6F96C4',lineWidth:1,lineStyle:2});
+      seg(c.start_time,c.lower_start,c.end_time,c.lower_end,{color:'#6F96C4',lineWidth:1,lineStyle:2});
+      shown.push('канал');
     }
-    if(S.ch){
-      try{const chp=await j(`/api/v2/channel?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
-      if(chp&&chp.ok){
-        const mk=o=>chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false},o));
-        const mid=mk({}), up=mk({lineStyle:2}), dn=mk({lineStyle:2});
-        const t0=candles[Math.max(0,candles.length-(chp.length||100))].time, t1=candles[candles.length-1].time;
-        mid.setData([{time:t0,value:chp.mid_start},{time:t1,value:chp.mid_end}]);
-        up.setData([{time:t0,value:chp.upper_start},{time:t1,value:chp.upper_end}]);
-        dn.setData([{time:t0,value:chp.lower_start},{time:t1,value:chp.lower_end}]);
-      }}catch(e){}
+    if(cx&&cx.ok&&S.layers.ctx){
+      if(cx.fvg){
+        seg(cx.fvg.from_time,cx.fvg.hi,lastT,cx.fvg.hi,{color:'#B48CFF',lineStyle:2,title:'FVG',lastValueVisible:true});
+        seg(cx.fvg.from_time,cx.fvg.lo,lastT,cx.fvg.lo,{color:'#B48CFF',lineStyle:2});
+        shown.push('FVG');
+      }
+      if(cx.strong_candle){
+        const sc=cx.strong_candle, long_=String(s.direction||'').toUpperCase()!=='SHORT';
+        series.setMarkers([{time:sc.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'}]);
+        seg(sc.time,sc.ote_hi,lastT,sc.ote_hi,{color:'#4DB8F3',lineStyle:2,title:'відкат 62–79%',lastValueVisible:true});
+        seg(sc.time,sc.ote_lo,lastT,sc.ote_lo,{color:'#4DB8F3',lineStyle:2});
+        shown.push('сильна свічка');
+      }
+      Object.entries(cx.previous||{}).forEach(([k,v])=>{series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}); shown.push(k);});
     }
+    window.__chartLayers=shown; S.cx=cx;
     chart.timeScale().fitContent();
-  } else { usingLW=false; drawFallback(el,candles,lv); }
+  } else { usingLW=false; let cx=null; if(S.layers.ch){ try{ const q=new URLSearchParams({symbol,tf}); cx=await j('/api/v2/chart_context?'+q.toString()); }catch(e){ if(e&&e.stale) return null; } } drawFallback(el,candles,lv,cx); window.__chartLayers=['зона','SL','TP'].concat(cx&&cx.channel?['канал']:[]); }
   return pack;
 }
 
@@ -629,6 +646,12 @@ function thesisHtml(t){
     ${why?`<div class="mut" style="margin-top:6px">${esc(why)}</div>`:''}</div>`;
 }
 
+function newsHtml(n){
+  if(!n||n.status!=='DATA_OK') return `<div class="mut">${esc((n&&n.note)||'Календар новин недоступний.')}</div>`;
+  if(!n.item) return `<div class="mut">${esc(n.note||'Важливих новин найближчим часом немає.')}</div>`;
+  const it=n.item;
+  return `<div style="font-weight:600;font-size:14px">${it.blocked?'🚫':'📰'} ${esc(it.headline)}</div><div class="mut" style="margin-top:4px">${esc(it.text)}</div>`;
+}
 const CHK={OK:['ok','✓'],FAIL:['bad','✗'],UNAVAILABLE:['watch','?']};
 function execHtml(x){
   if(!x) return '';
@@ -669,12 +692,10 @@ async function openSc(id){
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
     ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}
-      <div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>
+      ${(hm.context.sources||[]).length?`<div class="mut" style="margin-top:8px">Джерела даних:</div>`+(hm.context.sources||[]).map(x=>`<div class="kv"><span><span class="dot ${x.state==='on'?'ok':'warn'}"></span> ${esc(x.name)}</span><b>${x.state==='on'?'підключено':'вимкнено'}</b></div><div class="mut" style="margin:0 0 6px">${esc(x.text)}</div>`).join(''):`<div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>`}
       ${(hm.context.freshness||[]).length?`<div class="mut" style="margin-top:6px">Дані станом на: ${(hm.context.freshness||[]).map(f=>esc(f.name)+' — '+(f.as_of&&f.fresh?new Date(f.as_of*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжих')).join('; ')}.</div>`:''}
       <div class="mut" style="margin-top:6px">${esc(hm.context.rule_note||'')}</div></div>`:''}
-    ${hm.news?`<div class="sec"><h3>Новини</h3>${hm.news.status!=='DATA_OK'?`<div class="mut">${esc(hm.news.note)}</div>`
-      :(hm.news.block?`<div class="mut">🚫 Вхід заблоковано: «${esc(hm.news.block.title)}» (${esc(hm.news.block.country)}) о ${esc(hm.news.block.at)} (Київ).</div>`
-      :(hm.news.next?`<div class="mut">Найближча важлива новина: «${esc(hm.news.next.title)}» (${esc(hm.news.next.country)}) о ${esc(hm.news.next.at)} (Київ). За 30 хв до і 15 хв після виходу нові плани не відкриваємо.</div>`:'<div class="mut">Важливих новин найближчим часом немає.</div>'))}</div>`:''}
+    ${hm.news?`<div class="sec"><h3>Новини</h3>${newsHtml(hm.news)}</div>`:''}
     ${hm.next?`<div class="sec"><h3>Що Лев зробить далі</h3><p>${esc(hm.next)}</p></div>`:''}
     ${(hm.history||[]).length?`<div class="sec"><h3>Що було</h3><div class="tl">${hm.history.map(x=>`<div><span class="mut num">${hhmm(x.ts)}</span> — ${esc(x.text)}</div>`).join('')}</div></div>`:''}`
     :`<div class="card err"><b>Не вдалося скласти зрозумілий висновок</b><div class="mut">Технічні дані нижче, у розділі «Для перевірки». Не вважай цей сценарій готовим планом.</div></div>`;
@@ -702,6 +723,8 @@ async function openSc(id){
       <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
       <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
       <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
+      <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
+      <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
       <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
     <div id="chart" class="chart"></div>
     <div class="mut" id="asof" style="margin:6px 0 12px"></div>
@@ -715,13 +738,14 @@ async function openSc(id){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
     let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){if(!e.stale) setHealth('bad','немає зв’язку'); return;}
     const last=(pack.candles||[]).slice(-1)[0];
     if(!last||!last.time) return;
+    if(last.time>S.lastBar) { await paintChart(el,s); return; }
     if(usingLW && series) series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
     else paintChart(el,s);
   }, 8000);

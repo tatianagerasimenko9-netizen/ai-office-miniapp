@@ -190,6 +190,15 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
                 problems.append(f"{name}: Enter on a card did not open it")
             if await page.evaluate("document.querySelector('nav button.on')?.getAttribute('aria-current')") is None:
                 problems.append(f"{name}: active tab lacks aria-current")
+            try:
+                await page.wait_for_function("Array.isArray(window.__chartLayers)", timeout=6000)
+                layers = await page.evaluate("window.__chartLayers")
+            except Exception:  # noqa: BLE001
+                layers = None
+            if not layers or "канал" not in layers:
+                problems.append(f"{name}: регресійний канал не намальовано на графіку сценарію (шари: {layers})")
+            if layers and any(x in ("OB", "дзеркальний") or str(x).startswith("рівень") for x in layers):
+                problems.append(f"{name}: на графіку є внутрішні рівні Лева: {layers}")
             if lwc and await page.locator("#chart canvas").count() == 0:
                 problems.append(f"{name}: interactive chart canvas missing on scenario card")
             if await page.evaluate("window.__xss === 1"):

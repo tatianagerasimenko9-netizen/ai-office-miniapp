@@ -163,6 +163,13 @@ def _hhmm(ts: float) -> str:
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M UTC")
 
 
+def _title_ua(e: Dict[str, Any]) -> str:
+    """Користувачу назву показуємо лише українською (office_news_ua); англійська лишається тільки в сирих даних календаря."""
+    from office_news_ua import title_ua
+
+    return title_ua(e.get("title"), e.get("country"))
+
+
 def entry_block(now: Optional[float] = None) -> Optional[str]:
     """Текст причини, якщо вхід зараз заблокований новиною; інакше None (у т.ч. коли календар недоступний — це видно в summary())."""
     if not block_enabled():
@@ -172,17 +179,17 @@ def entry_block(now: Optional[float] = None) -> Optional[str]:
     e = block_for(now, data["events"]) if data["status"] == "DATA_OK" else None
     if not e:
         return None
-    return (f"Вихід новини «{e['title']}» ({e['country']}) о {_hhmm(e['ts'])} за Києвом — за {_env_int('OFFICE_CALENDAR_BEFORE_MIN', 30)} хв до "
+    return (f"Вихід новини «{_title_ua(e)}» о {_hhmm(e['ts'])} за Києвом — за {_env_int('OFFICE_CALENDAR_BEFORE_MIN', 30)} хв до "
             f"і {_env_int('OFFICE_CALENDAR_AFTER_MIN', 15)} хв після виходу нові плани не відкриваємо.")
 
 
 def summary(now: Optional[float] = None) -> Dict[str, Any]:
-    """Для Mini App: статус джерела, чи є блок зараз, найближча важлива подія."""
+    """Статус джерела, чи є блок зараз, найближча важлива подія (назви — українською; Mini App показує office_news_ua.news_view)."""
     now = time.time() if now is None else now
     data = load(now)
     if data["status"] != "DATA_OK":
         return {"status": "DATA_UNAVAILABLE", "block": None, "next": None, "note": "Календар новин недоступний — блок входу за новинами не діє."}
     b = block_for(now, data["events"]) if block_enabled() else None
     n = next_event(now, data["events"])
-    return {"status": "DATA_OK", "block": ({"title": b["title"], "country": b["country"], "at": _hhmm(b["ts"])} if b else None),
-            "next": ({"title": n["title"], "country": n["country"], "at": _hhmm(n["ts"])} if n else None), "note": ""}
+    return {"status": "DATA_OK", "block": ({"title": _title_ua(b), "at": _hhmm(b["ts"])} if b else None),
+            "next": ({"title": _title_ua(n), "at": _hhmm(n["ts"])} if n else None), "note": ""}
