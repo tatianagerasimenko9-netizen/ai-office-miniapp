@@ -304,7 +304,7 @@ def _structure_tp(sd: Dict[str, Any]) -> Optional[float]:
 
 VARIANTS = [
     # name, description, tp function, rules
-    ("V0_current", "TP1=1.5R, чинні правила (мін. TP1% + RR>=1.5)", _r_tp(1.5), CURRENT_RULES),
+    ("V0_current", "TP1 зі структури (як у чинній логіці Лева), чинні правила (мін. TP1% + RR>=1.5)", lambda sd: sd["tp"], CURRENT_RULES),
     ("V1_no_min_tp1", "TP1=1.5R, без правила мінімального TP1%", _r_tp(1.5), {"min_tp1": False, "min_rr": 1.5}),
     ("V2_tp1.0R", "TP1=1.0R, без мін. TP1% і без порогу RR", _r_tp(1.0), {"min_tp1": False, "min_rr": None}),
     ("V3_tp2.0R", "TP1=2.0R, без мін. TP1%, RR>=1.5", _r_tp(2.0), {"min_tp1": False, "min_rr": 1.5}),

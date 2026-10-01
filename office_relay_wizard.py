@@ -6492,10 +6492,33 @@ EV позитивне: {prob.get('ev_positive', '')}
                             watching_now.append(str(_aw.get("symbol")))
                 except Exception:
                     watching_now = []
-                _short = shortlist_with_reasons(screen, extra_user_symbols=extra_req, active_watching=watching_now)
+                import office_scan_funnel as _fun
+
+                _fun_now = time.time()
+                _fun_rows: Dict[str, Dict[str, Any]] = {}
+                if not getattr(_fun.STATE, "hydrated", False):
+                    try:
+                        _fun.hydrate(db_path)
+                    except Exception as exc_fh:  # noqa: BLE001
+                        print(f"[funnel] hydrate: {type(exc_fh).__name__}")
+                    _fun.STATE.hydrated = True
+                if screen.data_status == "DATA_OK":
+                    _fun_rows = {str(r.get("symbol")): r for r in screen.rows if isinstance(r, dict)}
+                    for _r in screen.rows:   # дуже сильний рух — одразу PULLBACK WATCH, глибокий слот не витрачаємо (не наздоганяємо)
+                        if abs(float(_r.get("change_pct") or 0.0)) >= _fun.EXTENDED_PCT:
+                            _fun.register_pullback(_r["symbol"], _r, reason=f"сильний рух {float(_r.get('change_pct') or 0):+.1f}% за 24 год — не наздоганяємо, чекаємо відкат".replace(".", ","), now=_fun_now)
+                    _fun.update_pullbacks(screen.rows, _fun_now)
+                    _short = _fun.select_deep(screen.rows, screen.gainers, screen.losers, user_symbols=extra_req,
+                                              active_watching=watching_now, now=_fun_now)
+                else:
+                    _short = shortlist_with_reasons(screen, extra_user_symbols=extra_req, active_watching=watching_now)
                 deep_syms = [x["symbol"] for x in _short]
                 _why = {x["symbol"]: x["reason"] for x in _short}
-                print("[scout] shortlist: " + "; ".join(f"{x['symbol']} ({x['reason']})" for x in _short[:30]))
+                print("[scout] shortlist: " + "; ".join(f"{x['symbol']} ({x['reason']})" for x in _short[:40]))
+                try:
+                    print("[funnel] " + json.dumps({**_fun.counts_report(_short), **_fun.coverage(len(_fun_rows))}, ensure_ascii=False))
+                except Exception:  # noqa: BLE001
+                    pass
                 btc_ctx = btc_context_only(screen)
                 print(
                     f"[scout] screened={screen.screened} status={screen.data_status} "
@@ -6576,6 +6599,20 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 market_context=mctx,
                             )
                             _lev_record_thesis(cycle, {"H1": rh1, "M15": rm15, "M5": rm5})
+                            _fun.mark_deep(rsym, time.time())
+                            _fun.mark_checked(rsym, time.time())
+                            _frow = _fun_rows.get(rsym) or {}
+                            _fent = _fun.STATE.pullbacks.get(rsym)
+                            _imp = (_fent or {}).get("impulse") or _fun.impulse_of(_frow)
+                            _gate_hold = False
+                            if _imp and str(cycle.get("direction") or "") in ("LONG", "SHORT") and str(cycle.get("action") or "") in ("SEND", "WAIT", "WATCHING"):
+                                _g_ok, _g_why = _fun.direction_gate(str(cycle.get("direction")), _imp, reversal_ok=_fun.reversal_confirmed(rh1, _imp))
+                                if not _g_ok:
+                                    _gate_hold = True
+                                    cycle = {**cycle, "send": False, "action": "WATCHING", "reason": _g_why}
+                            _t0 = ((cycle.get("draft") or {}).get("atr") or {})
+                            if str(cycle.get("action") or "") == "SKIP" and (_t0.get("t0_entry_blocked") or _t0.get("gerchik_entry_blocked")) and _fun.impulse_of(_frow):
+                                _fun.register_pullback(rsym, _frow, reason="T0/ATR заблокував вхід після сильного руху — чекаємо відкат", now=time.time(), t0_blocked=True)
                             print(
                                 f"[lev] {rsym} {cycle.get('action')} {cycle.get('direction')} "
                                 f"{cycle.get('reason')}"
@@ -6589,6 +6626,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     entry=cycle.get("entry"),
                                     sl=cycle.get("sl"),
                                     tp1=cycle.get("tp1"),
+                                    tp2=cycle.get("tp2"),
                                     atr_h1=_atr_h1(rh1),
                                     score=12,
                                     min_score=10,
@@ -6600,7 +6638,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     lev_note=str(cycle.get("lev_note") or ""),
                                 ):
                                     print(f"[lev] {rsym} SEND {cycle.get('direction')}")
-                            elif str(cycle.get("action") or "") in ("WAIT", "WATCHING"):
+                            elif str(cycle.get("action") or "") in ("WAIT", "WATCHING") and not _gate_hold:
                                 zlo = (cycle.get("confluence") or {}).get("zone_lo")
                                 zhi = (cycle.get("confluence") or {}).get("zone_hi")
                                 if zlo is not None and zhi is not None:
@@ -6624,7 +6662,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                             entry_high=float(zhi),
                                             sl=cycle.get("sl"),
                                             tp1=cycle.get("tp1"),
-                                            tp2=None,
+                                            tp2=cycle.get("tp2"),
                                             rr=None,
                                             status="WATCHING",
                                             analysis_note=(
@@ -6945,6 +6983,14 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[confluence] cancelled {key}")
             except Exception as exc_fu:
                 print(f"[confluence] follow failed: {exc_fu}")
+            try:   # реєстр PULLBACK WATCH і покриття ротації переживають перезапуск worker (не частіше, ніж раз на 10 хв)
+                import office_scan_funnel as _fun_p
+
+                if time.time() - float(getattr(_fun_p.STATE, "persisted_at", 0.0)) >= 600 and (_fun_p.STATE.pullbacks or _fun_p.STATE.last_deep):
+                    await asyncio.to_thread(_fun_p.persist, db_path)
+                    _fun_p.STATE.persisted_at = time.time()
+            except Exception as exc_fp:  # noqa: BLE001
+                print(f"[funnel] persist: {type(exc_fp).__name__}")
             utc_now = datetime.now(timezone.utc)
             minute_of_day = utc_now.hour * 60 + utc_now.minute
             fast = (480 <= minute_of_day < 660) or (780 <= minute_of_day < 960)
@@ -7332,6 +7378,18 @@ EV позитивне: {prob.get('ev_positive', '')}
             print(f"[ui-check] помилка: {type(exc_uc).__name__}: {exc_uc}")
 
     asyncio.create_task(_ui_check_once())
+
+    async def _funnel_check_once() -> None:   # одноразова shadow-перевірка воронки скану на живих даних (покриття монет, Gainers/Losers, PULLBACK WATCH, шлях до READY); результат — у БД
+        await asyncio.sleep(660)
+        try:
+            import office_funnel_check
+
+            if await asyncio.to_thread(office_funnel_check.run_once, db_path):
+                print("[funnel-check] виконано й записано в БД (LAUNCH_DIAG)")
+        except Exception as exc_fc:  # noqa: BLE001
+            print(f"[funnel-check] помилка: {type(exc_fc).__name__}: {exc_fc}")
+
+    asyncio.create_task(_funnel_check_once())
 
     # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
     # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.

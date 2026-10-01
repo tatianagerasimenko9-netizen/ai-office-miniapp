@@ -53,6 +53,9 @@ def _c(o, h, l, cl, vol=12.0):
     return {"open": o, "high": h, "low": l, "close": cl, "volume": vol}
 
 
+TEST_LEVELS = [(85300.0, "тестовий структурний рівень")]   # реальна ціль зі структури: RR після комісій ≥ 1,5
+
+
 def _btc_long_cands():
     # Відкат ~83.2–83.8k при споті ~84 870 — зона Лева, не chase.
     return [
@@ -173,6 +176,7 @@ def main() -> int:
             "btc": "спот 84870, зона відкату нижче",
             "note": "Nasdaq/DXY/золото/нафта не підключені — кореляцій не вигадую",
         },
+        target_levels=TEST_LEVELS,
     )
     if draft.get("direction") != "LONG" or not draft.get("send_card"):
         return _fail(f"Lev LONG expected {draft.get('direction')} {draft.get('reason')}")
@@ -266,6 +270,7 @@ def main() -> int:
             "liquidations": "forceOrder не є прогнозною heatmap",
         },
         stances=collected,
+        target_levels=TEST_LEVELS,
     )
     a_without = draft_lev_scenario(
         symbol="BTCUSDT",
@@ -275,6 +280,7 @@ def main() -> int:
         day_used_pct=35.0,
         candidates_long=_btc_long_cands(),
         candidates_short=_btc_short_cands_weak(),
+        target_levels=TEST_LEVELS,
     )
     entry_changed = a_without.get("entry") != cycle.get("entry")
     sl_changed = a_without.get("sl") != cycle.get("sl")
