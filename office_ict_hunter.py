@@ -188,16 +188,25 @@ def detect_turtle_soup(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _asia_range(rows: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+    """Азійський рендж ОСТАННЬОЇ сесії 03:00–07:00 Київ — як у Pine (скидається на початку кожної сесії, тримається до наступної).
+    Раніше брало min/max по всіх добах вікна, через що рівні й цілі (office_targets) були хибними."""
     hi = lo = None
+    prev_in = False
+    prev_day = None
     for r in rows:
         dt = parse_bar_ts(r.get("ts"))
         local = _kyiv(dt) if dt is not None else None
         if local is None:
             continue
-        if ASIA_KYIV[0] <= local.hour < ASIA_KYIV[1]:
+        in_asia = ASIA_KYIV[0] <= local.hour < ASIA_KYIV[1]
+        day = local.date()
+        if in_asia:
             h, l = float(r["high"]), float(r["low"])
-            hi = h if hi is None else max(hi, h)
-            lo = l if lo is None else min(lo, l)
+            if not prev_in or day != prev_day:
+                hi, lo = h, l
+            else:
+                hi, lo = max(hi, h), min(lo, l)
+        prev_in, prev_day = in_asia, day
     return {"high": hi, "low": lo}
 
 
