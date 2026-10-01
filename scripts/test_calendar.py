@@ -35,7 +35,7 @@ cal.set_events_for_tests(ev)
 t0 = T.timestamp()
 check("за 31 хв до виходу — не блокуємо", cal.entry_block(t0 - 31 * 60) is None)
 msg = cal.entry_block(t0 - 29 * 60)
-check("за 29 хв до виходу — блок із назвою й часом", bool(msg) and "CPI m/m" in msg and ":" in msg, str(msg))
+check("за 29 хв до виходу — блок із українською назвою й часом (без англійської)", bool(msg) and "Інфляція" in msg and "CPI" not in msg and ":" in msg, str(msg))
 check("у момент виходу — блок", cal.entry_block(t0) is not None)
 check("через 14 хв після — блок", cal.entry_block(t0 + 14 * 60) is not None)
 check("через 16 хв після — блоку нема", cal.entry_block(t0 + 16 * 60) is None)
@@ -57,9 +57,9 @@ check("за замовчуванням блок вимкнено (без мер�
 os.environ["OFFICE_CALENDAR_BLOCK"] = "1"
 
 s = cal.summary(t0 - 3600)
-check("summary: є найближча подія, блоку нема", s["status"] == "DATA_OK" and s["block"] is None and s["next"] and s["next"]["title"] == "CPI m/m", str(s))
+check("summary: є найближча подія, блоку нема", s["status"] == "DATA_OK" and s["block"] is None and s["next"] and "Інфляція" in s["next"]["title"] and "CPI" not in s["next"]["title"], str(s))
 s = cal.summary(t0 - 60)
-check("summary: блок зараз", s["block"] and s["block"]["title"] == "CPI m/m")
+check("summary: блок зараз, назва українською", s["block"] and "Інфляція" in s["block"]["title"])
 
 # джерело недоступне й кешу нема → DATA_UNAVAILABLE, блок не вигадуємо
 cal.set_events_for_tests(None)
@@ -81,7 +81,7 @@ plan = {"entry": 100.0, "sl": 98.0, "tp1": 104.0}
 real_entry_block = cal.entry_block
 cal.entry_block = lambda now=None: real_entry_block(t0 - 60)   # «зараз» = за хвилину до CPI
 why = lw.check_plan("BTCUSDT", "LONG", plan, 99.5, 100.5)
-check("check_plan: під час новини план відхилено з причиною", bool(why) and "CPI m/m" in why, str(why))
+check("check_plan: під час новини план відхилено з українською причиною", bool(why) and "Інфляція" in why and "CPI" not in why, str(why))
 cal.entry_block = lambda now=None: real_entry_block(t0 - 3 * 3600)
 check("check_plan: поза вікном новини не заважає", "CPI" not in str(lw.check_plan("BTCUSDT", "LONG", plan, 99.5, 100.5)))
 

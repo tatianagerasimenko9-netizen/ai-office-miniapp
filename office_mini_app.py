@@ -1369,6 +1369,7 @@ class Handler(BaseHTTPRequestHandler):
                 candles_payload,
                 channel_payload,
                 levels_payload,
+                chart_context_payload,
                 liqmap_payload,
                 home_v2,
                 journal_payload,
@@ -1410,6 +1411,9 @@ class Handler(BaseHTTPRequestHandler):
                 data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim)
             elif u.path == "/api/v2/channel":
                 data = channel_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
+            elif u.path == "/api/v2/chart_context":
+                data = chart_context_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", _q("dir") or "", _q("zlo"), _q("zhi"),
+                                             [x for x in (_q("tp1"), _q("tp2"), _q("tp3")) if x])
             elif u.path == "/api/v2/levels":
                 data = levels_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
             elif u.path == "/api/v2/liqmap":

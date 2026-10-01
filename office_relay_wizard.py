@@ -7321,6 +7321,18 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(_pine_parity_once())
 
+    async def _ui_check_once() -> None:   # одноразова перевірка Mini App на живих даних (новини українською, статуси джерел, шари графіка по ТФ); результат — у БД
+        await asyncio.sleep(540)
+        try:
+            import office_ui_check
+
+            if await asyncio.to_thread(office_ui_check.run_once, db_path):
+                print("[ui-check] виконано й записано в БД (LAUNCH_DIAG)")
+        except Exception as exc_uc:  # noqa: BLE001
+            print(f"[ui-check] помилка: {type(exc_uc).__name__}: {exc_uc}")
+
+    asyncio.create_task(_ui_check_once())
+
     # Одноразові запуски replay і аналізу RR (OFFICE_REPLAY_ON_START / OFFICE_RR_ANALYSIS_ON_START) виконано 2026-09-30, результати — у docs/state-notes; хуки прибрано.
     # Повторити вручну: office_replay.run_all() / office_rr_analysis.run(<db>) на машині з доступом до БД і до архіву data.binance.vision.
 

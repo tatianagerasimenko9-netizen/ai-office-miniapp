@@ -462,10 +462,22 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
                 human["context"] = context_for(str(row.get("symbol") or ""), str(row.get("direction") or ""))
             except Exception:  # noqa: BLE001
                 human["context"] = None
-            try:  # макрокалендар (безкоштовне джерело): найближча важлива новина й чи діє блок входу; лише коли увімкнено OFFICE_CALENDAR_BLOCK=1
-                from office_calendar import block_enabled, summary as _cal_summary
+            try:  # статуси джерел даних ОКРЕМО (стакан / ліквідації / новини); лише відображення
+                from office_data_sources import sources_for
 
-                human["news"] = _cal_summary() if block_enabled() else None
+                src = sources_for(str(row.get("symbol") or ""), str(row.get("direction") or ""), row.get("zone_lo"), row.get("zone_hi"), _db())
+                if isinstance(human.get("context"), dict):
+                    human["context"]["sources"] = src
+                    human["context"]["not_connected"] = [x["name"] for x in src if x["state"] != "on"]
+                else:
+                    human["context"] = {"notes": [], "unchecked": [], "not_connected": [x["name"] for x in src if x["state"] != "on"], "sources": src, "freshness": [], "rule_note": ""}
+            except Exception:  # noqa: BLE001
+                pass
+            try:  # макрокалендар: лише українською, час Київ; лише коли увімкнено OFFICE_CALENDAR_BLOCK=1
+                from office_calendar import block_enabled
+                from office_news_ua import news_view
+
+                human["news"] = news_view(ticker=str(row.get("symbol") or "BTC")) if block_enabled() else None
             except Exception:  # noqa: BLE001
                 human["news"] = None
     except Exception as exc:  # noqa: BLE001
@@ -994,6 +1006,83 @@ def channel_payload(symbol: str, tf: str) -> Dict[str, Any]:
     return {**ch, "symbol": str(symbol or "").upper(), "tf": pack.get("tf")}
 
 
+def _f2(v: Any) -> Optional[float]:
+    try:
+        return None if v is None or v == "" else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def chart_context_payload(symbol: str, tf: str, direction: str = "", zone_lo: Any = None, zone_hi: Any = None, tps: Any = ()) -> Dict[str, Any]:
+    """Шари основного графіка, що потрібні для ручної угоди: регресійний канал, FVG і сильна свічка (лише ЯКЩО актуальні для зони сценарію), PDH/PDL (лише якщо важливі).
+    Лише закриті свічки вибраного ТФ (майбутнього не підглядаємо). OB, дзеркальні й внутрішні рівні на графік не віддаємо — Лев використовує їх усередині."""
+    from office_regression_channel import regression_channel
+    from office_smc import fvgs
+    from office_trade_steer import _bars, atr_wilder, last_strong_candle, plan_strong_candle_ote
+
+    pack = candles_payload(symbol, tf, 300)
+    rows = [c for c in (pack.get("candles") or []) if isinstance(c, dict) and c.get("time")]
+    out: Dict[str, Any] = {"ok": bool(rows), "symbol": str(symbol or "").upper(), "tf": pack.get("tf"), "data_status": pack.get("data_status"),
+                           "channel": None, "fvg": None, "strong_candle": None, "previous": {}, "note": "контекст графіка, не вхід"}
+    if len(rows) < 12:
+        return out
+    closed = rows[:-1]                       # остання свічка формується: у розрахунки не беремо
+    # --- регресійний канал (виправлена математика office_regression_channel)
+    n = min(100, len(closed))
+    ch = regression_channel(closed, length=n, deviation=2.0, closed_only=False) if n >= 10 else {"ok": False}
+    if ch.get("ok"):
+        ch = {k: ch[k] for k in ("slope", "length", "deviation", "mid_start", "mid_end", "upper_start", "upper_end", "lower_start", "lower_end")}
+        ch["start_time"], ch["end_time"] = closed[-n]["time"], closed[-1]["time"]
+        ch["ok"] = True
+        out["channel"] = ch
+    side = str(direction or "").upper()
+    zlo, zhi = _f2(zone_lo), _f2(zone_hi)
+    bars = _bars(closed)
+    atr = atr_wilder(bars) if len(bars) >= 15 else None
+    if side not in ("LONG", "SHORT") or zlo is None or zhi is None or not atr:
+        return out
+    if zlo > zhi:
+        zlo, zhi = zhi, zlo
+    tol = 0.5 * atr
+    # --- FVG: той самий бік, не закритий повністю, перетинає зону входу
+    try:
+        best = None
+        for g in fvgs(bars, atr):
+            if g["side"] != side or g["state"] == "FILLED":
+                continue
+            if g["lo"] <= zhi + tol and g["hi"] >= zlo - tol and (best is None or g["idx"] > best["idx"]):
+                best = g
+        if best:
+            out["fvg"] = {"lo": best["lo"], "hi": best["hi"], "state": best["state"], "from_time": closed[max(0, best["idx"] - 1)]["time"]}
+    except Exception:  # noqa: BLE001
+        out["fvg"] = None
+    # --- сильна свічка: її зона відкату 62–79% збігається із зоною сценарію
+    try:
+        sc = last_strong_candle(bars, direction=side)
+        plan = plan_strong_candle_ote(direction=side, candles=bars) if sc else {}
+        if sc and plan.get("data_status") == "DATA_OK":
+            olo, ohi = float(plan["ote_lo"]), float(plan["ote_hi"])
+            if olo <= zhi + tol and ohi >= zlo - tol:
+                t = next((r["time"] for r in closed if str(r.get("ts") or "") == sc.get("ts")), None)
+                if t:
+                    out["strong_candle"] = {"time": t, "high": float(sc["high"]), "low": float(sc["low"]), "ote_lo": olo, "ote_hi": ohi}
+    except Exception:  # noqa: BLE001
+        out["strong_candle"] = None
+    # --- PDH/PDL лише якщо це ціль/межа цього сценарію
+    if not _fixture_on():
+        try:
+            import office_levels as lv
+            from office_market_data import fetch_candles
+
+            prev = lv.previous_levels(fetch_candles(symbol, "1d", 5), fetch_candles(symbol, "1w", 4))
+            marks = [zlo, zhi] + [x for x in (_f2(t) for t in (tps or ())) if x is not None]
+            tolp = max(tol, (zlo + zhi) / 2 * 0.004)
+            out["previous"] = {k: v for k, v in prev.items() if k in ("PDH", "PDL") and v is not None and any(abs(v - m) <= tolp for m in marks)}
+        except Exception:  # noqa: BLE001
+            out["previous"] = {}
+    return out
+
+
 def levels_payload(symbol: str, tf: str) -> Dict[str, Any]:
     """Шар «Рівні Лева» для графіка: зони рівнів (кластери свінгів, дзеркальні) і PDH/PDL/PWH/PWL — ті самі правила, що й у підтвердженнях (office_levels).
     Лише найближчі до ціни зони; немає свічок → чесно порожньо."""
@@ -1194,7 +1283,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/chart_context", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:
