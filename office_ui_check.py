@@ -31,6 +31,16 @@ def _done(db: str) -> bool:
     return False
 
 
+def _strings(o: Any) -> List[str]:
+    if isinstance(o, str):
+        return [o]
+    if isinstance(o, dict):
+        return [x for v in o.values() for x in _strings(v)]
+    if isinstance(o, (list, tuple)):
+        return [x for v in o for x in _strings(v)]
+    return []
+
+
 def _pick(cards: List[Dict[str, Any]]) -> Dict[str, Any]:
     live = [c for c in cards if str((c.get("status") or {}).get("group") or "") in ("live", "watch")]
     pool = live or cards
@@ -58,8 +68,7 @@ def run_once(db: str, printer=print) -> bool:
             hm = det.get("human") or {}
             ctx = hm.get("context") or {}
             news = hm.get("news")
-            text = json.dumps(news, ensure_ascii=False) if news else ""
-            lat = sorted(set(_LAT.findall(re.sub(r"BTC|ETH|SOL", "", text))))
+            lat = sorted(set(_LAT.findall(re.sub(r"BTC|ETH|SOL", "", " ".join(_strings(news))))))   # лише ТЕКСТИ для користувача, не ключі JSON
             lv = hm.get("levels") or {}
             put("ui_check", {"symbol": sc.get("symbol"), "direction": sc.get("direction"), "scenario_id": sid, "state": (hm.get("state_ua") or ""),
                              "news": news, "news_latin_letters": lat, "sources": ctx.get("sources"), "not_connected": ctx.get("not_connected")})

@@ -55,7 +55,7 @@ snap = {"at": now - 120, "stream": {"connected": True, "started_at": now - 5 * 3
                     "ETHUSDT": {"count": 0, "long_liq_usd": 0.0, "short_liq_usd": 0.0, "buckets": []}}}
 log_event(db, "LIQ_MAP", snap)
 l = ds_.liq_source("BTCUSDT", "LONG", 83450, 83900, db, now=now)
-check("ліквідації ON, з підсумками, періодом і висновком для LONG", l["state"] == "on" and "3,2 млн $" in l["text"] and "400 тис $" in l["text"] and "за останні 5 год" in l["text"]
+check("ліквідації ON, з підсумками, періодом і висновком для LONG", l["state"] == "on" and "3,2 млн $" in l["text"] and "400 тис $" in l["text"] and "За останні 5 год" in l["text"]
       and "Купівля ризикованіша" in l["text"] and "Біля зони входу вже були ліквідації лонгів" in l["text"] and "нічого не блокує" in l["text"], l["text"])
 s_ = ds_.liq_source("BTCUSDT", "SHORT", 86000, 86200, db, now=now)
 check("для SHORT висновок інший: переважали лонги → збігається з напрямком продажу", "збігається з напрямком продажу" in s_["text"], s_["text"])
@@ -67,6 +67,7 @@ init_office_db(db2)
 check("потік ще нічого не записав → OFF із причиною", ds_.liq_source("BTCUSDT", "LONG", 1, 2, db2, now=now)["state"] == "off")
 
 # --- новини
+check("речення в тексті ліквідацій починаються з великої літери", all(x.strip()[:1].isupper() or not x.strip() for x in l["text"].split(". ")), l["text"])
 check("новини ON, коли календар підключено", ds_.news_source()["state"] == "on")
 
 # --- окремі статуси (головне): стакан OFF не тягне за собою ліквідації
