@@ -57,6 +57,32 @@ check("еталон детермінований", all(o1[k] == o2[k] for k in (
 pine, stats = pp.compare(bars2, warmup=250, step=5)
 check("звірка рахує всі патерни", len(stats) == 12 and all(s["bars"] > 0 for s in stats.values()))
 
+# продакшн-азійський рендж = Pine на кожному барі (остання сесія, не всі доби)
+import office_ict_hunter as _hunter  # noqa: E402
+
+_b3 = pp.synthetic(n_days=6, seed=11)
+_ref3 = ref.run(_b3)
+_bad = 0
+_chk = 0
+for _i in range(96, len(_b3), 7):
+    _rows = [{"ts": b["ts"].isoformat(), "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"], "volume": b["volume"]} for b in _b3[: _i + 1]]
+    _ar = _hunter._asia_range(_rows)
+    _pa, _pl = _ref3["asian_high"][_i], _ref3["asian_low"][_i]
+    _chk += 1
+    if _pa is None or _ar["high"] is None:
+        _bad += 0 if (_pa is None and _ar["high"] is None) else 1
+    elif abs(_ar["high"] - _pa) > 1e-9 or abs(_ar["low"] - _pl) > 1e-9:
+        _bad += 1
+check("азійський рендж Python = Pine на кожному перевіреному барі", _chk > 50 and _bad == 0, f"розбіжностей {_bad} з {_chk}")
+# дві доби з різним рівнем: береться остання сесія, а не мінімум усіх діб
+_two = []
+_t = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+for _i in range(96 * 2):
+    _lvl = 100.0 if _i < 96 else 150.0
+    _two.append({"ts": (_t + timedelta(minutes=15 * _i)).isoformat(), "open": _lvl, "high": _lvl + 1, "low": _lvl - 1, "close": _lvl, "volume": 1.0})
+_ar2 = _hunter._asia_range(_two)
+check("дві доби: рендж останньої сесії (150±1), не мінімум 99", _ar2 == {"high": 151.0, "low": 149.0}, str(_ar2))
+
 # одноразова звірка на «реальних» свічках: архів підставлено, результат у БД, повтору нема
 import io  # noqa: E402
 import json  # noqa: E402
