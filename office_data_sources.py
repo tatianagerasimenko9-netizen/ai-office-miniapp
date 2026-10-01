@@ -61,7 +61,7 @@ def liq_source(symbol: str, direction: str, zone_lo: Any, zone_hi: Any, db: Opti
     if isinstance(started, (int, float)) and started:
         hours = max(0.1, min(24.0, (now - float(started)) / 3600.0))
     win = f"{hours:.0f}" if hours >= 1 else "менше години"
-    span = f"за останні {win} год" if hours >= 1 else "відколи запущено потік (менше години)"
+    span = f"За останні {win} год" if hours >= 1 else "Відколи запущено потік (менше години)"
     longs, shorts, cnt = float(real.get("long_liq_usd") or 0), float(real.get("short_liq_usd") or 0), int(real.get("count") or 0)
     if cnt == 0:
         return {**base, "state": ON, "text": f"Потік ліквідацій працює. {span}: помітних ліквідацій цієї монети немає."}
