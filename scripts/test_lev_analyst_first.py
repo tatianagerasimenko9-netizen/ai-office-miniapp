@@ -197,13 +197,14 @@ def main() -> int:
         return _fail(f"missing indicators must not stop Lev {ok_miss}")
     print("OK відсутність індикаторів не зупиняє сетап Лева")
 
+    # Pump/Hunter вимкнено (office_indicator_gate) — суперечність від активного індикатора (канал) і далі веде до WAIT.
     contra = dict(_neutral_stances("LONG"))
-    contra["ict_hunter"] = indicator_stance(
+    contra["channel"] = indicator_stance(
         lev_direction="LONG",
         connected=True,
         signal=True,
         indicator_direction="SHORT",
-        reason="Hunter SHORT проти LONG Лева",
+        reason="канал: ціна біля верхньої межі",
     )
     wait = finalize_lev(draft, contra)
     if wait.get("send") or wait.get("action") != ACTION_WAIT:

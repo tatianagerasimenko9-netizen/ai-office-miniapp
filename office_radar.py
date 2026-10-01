@@ -390,7 +390,9 @@ def evaluate_radar(
             card = dict(card)
             card["size_line"] = sized["line"]
             card["stop_pct"] = sized.get("stop_pct")
-        hunt = evaluate_ict_hunter(candles=m15_candles, timeframe="M15", daily=daily_candles)
+        from office_indicator_gate import is_active as _ind_active
+
+        hunt = evaluate_ict_hunter(candles=m15_candles, timeframe="M15", daily=daily_candles) if _ind_active("ict_hunter") else {}
         if hunt.get("ok"):
             card = dict(card)
             card["hunter_score"] = hunt.get("score")
