@@ -71,7 +71,7 @@ check("news_view: під час паузи blocked=True", vb["blocked"] is True)
 vq = nu.news_view(ticker="BTC", now=ts + 3600)
 check("після події — важливих новин немає, українською", vq["item"] is None and "новин" in vq["note"] and not LAT.search(vq["note"]), str(vq))
 cal.set_events_for_tests(None)
-cal._CACHE["fail_at"] = datetime.now(timezone.utc).timestamp()
+cal._CACHE["fail_at"] = now      # «щойно був збій» відносно тестового часу — джерело не смикаємо, мережі в тесті немає
 vu = nu.news_view(ticker="BTC", now=now)
 check("календар недоступний → чесна українська примітка", vu["status"] == "DATA_UNAVAILABLE" and not LAT.search(vu["note"]), str(vu))
 
