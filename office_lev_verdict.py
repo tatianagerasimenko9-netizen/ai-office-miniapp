@@ -185,6 +185,7 @@ def draft_lev_scenario(
     candidates_long: Any = None,
     candidates_short: Any = None,
     market_context: Optional[Dict[str, Any]] = None,
+    target_levels: Any = None,
 ) -> Dict[str, Any]:
     """Власний сценарій Лева ДО індикаторів. Обидва напрямки, не підганяти під LONG."""
     ctx = dict(market_context or {})
@@ -245,10 +246,17 @@ def draft_lev_scenario(
     wide = widen_sl_to_atr_h1(entry=entry, sl=sl, direction=side, atr_h1=atr_h1) if entry and sl else {}
     if wide.get("ok"):
         sl = _f(wide.get("sl"))
-    tp1 = _tp_from_rr(direction=side, entry=entry, sl=sl) if entry is not None and sl is not None else None
-    rr = None
-    if entry is not None and sl is not None and tp1 is not None and abs(entry - sl) > 0:
-        rr = abs(tp1 - entry) / abs(entry - sl)
+    tp1 = tp2 = rr = None
+    tgt: Dict[str, Any] = {}
+    if entry is not None and sl is not None:
+        import office_lev_targets as _lt
+        from office_desk_card import min_tp1_pct as _min_tp1
+
+        tgt = _lt.pick_targets(direction=side, entry=entry, sl=sl, levels=target_levels, min_tp1_pct=_min_tp1(symbol),
+                               candles_m15=candles_m15, candles_h1=candles_h1, candles_h4=candles_h4,
+                               candles_d1=candles_d1, candles_w=candles_w)
+        if tgt.get("ok"):
+            tp1, tp2, rr = tgt["tp1"], tgt["tp2"], tgt["rr"]
 
     atr_cls = classify_atr_day_used(day_used_pct)
     liq = sl_in_liquidity_pool(direction=side, sl=sl, candles=candles_h1 or candles_m15)
@@ -274,7 +282,10 @@ def draft_lev_scenario(
         "entry": entry,
         "sl": sl,
         "tp1": tp1,
+        "tp2": tp2,
         "rr": rr,
+        "target_why": [tgt.get("why1") or "", tgt.get("why2") or ""] if tgt.get("ok") else [],
+        "target_reject": "" if tgt.get("ok") or not tgt else str(tgt.get("reason") or ""),
         "zone_lo": primary.get("zone_lo"),
         "zone_hi": primary.get("zone_hi"),
         "confirmation": primary.get("confirm_wait") or primary.get("confirms") or [],
@@ -557,7 +568,7 @@ def finalize_lev(
         recheck = "після зниження day_used або нової D1 — перерахунок, не авто-вхід"
     elif entry is None or sl is None or tp1 is None:
         action = ACTION_SKIP
-        reason = "немає entry/SL/TP1 зі структури"
+        reason = str(draft.get("target_reject") or "") or "немає entry/SL/TP1 зі структури"
     elif rr is not None and rr + 1e-12 < MIN_RR:
         action = ACTION_SKIP
         reason = f"RR {rr:.2f} < {MIN_RR} — структурний стоп не розширюємо"
@@ -623,6 +634,7 @@ def finalize_lev(
         "entry": entry,
         "sl": sl,
         "tp1": tp1,
+        "tp2": _f(draft.get("tp2")),
         "confluence": draft.get("confluence"),
         "alternative": draft.get("alternative"),
         "db_status": (
@@ -656,6 +668,7 @@ def lev_cycle(
     pine_alerts: Any = None,
     stances: Optional[Dict[str, Any]] = None,
     risk_context: Optional[Dict[str, Any]] = None,
+    target_levels: Any = None,
 ) -> Dict[str, Any]:
     """Повний цикл: сценарій Лева, потім індикатори, потім рішення."""
     draft = draft_lev_scenario(
@@ -674,6 +687,7 @@ def lev_cycle(
         candidates_long=candidates_long,
         candidates_short=candidates_short,
         market_context=market_context,
+        target_levels=target_levels,
     )
     st = stances
     if st is None:
