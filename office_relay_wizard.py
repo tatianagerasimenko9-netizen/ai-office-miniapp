@@ -6425,10 +6425,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     tp2=None,
                                     rr=None,
                                     status="WATCHING",
-                                            analysis_note=(
-                                        f"{res.reason or 'T6 radar watching'}\n"
-                                        f"{format_radar_liq_summary(BTC_FORCE_ORDER_BOOK)}"
-                                    )[:2000],
+                                    analysis_note=(res.reason or "T6 radar watching")[:2000],
                                 )
                                 print(f"[radar] WATCHING {symbol} {res.level_price}")
                         if res.status == "SIGNAL":
@@ -6825,6 +6822,18 @@ EV позитивне: {prob.get('ev_positive', '')}
                     except Exception:
                         pass
                     print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
+                    try:
+                        from office_market_data import fetch_funding_rate, fetch_open_interest
+
+                        oi = fetch_open_interest("BTCUSDT") or {}
+                        fr = fetch_funding_rate("BTCUSDT") or {}
+                        oi_s = oi.get("oi") if isinstance(oi, dict) else None
+                        fr_s = fr.get("funding_rate_pct") if isinstance(fr, dict) else None
+                        oi_txt = "DATA_UNAVAILABLE" if oi_s is None else str(oi_s)
+                        fr_txt = "DATA_UNAVAILABLE" if fr_s is None else f"{fr_s}"
+                        print(f"[oi] BTCUSDT OI={oi_txt} funding={fr_txt}")
+                    except Exception as exc_oi:
+                        print(f"[oi] BTCUSDT OI=DATA_UNAVAILABLE funding=DATA_UNAVAILABLE ({type(exc_oi).__name__})")
                 except Exception as exc_liq:
                     print(f"[liq] snapshot failed: {exc_liq}")
             except Exception as exc:
