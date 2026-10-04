@@ -93,3 +93,19 @@ T.record_plan(db, scenario_id="SCN|R|LONG|H1|1", symbol="RUSDT", direction="LONG
 assert T.rejected_recently(db, "SCN|R|LONG|H1|1", "Причина А") and not T.rejected_recently(db, "SCN|R|LONG|H1|1", "Інша причина")
 assert not T.rejected_recently(db, "SCN|R|LONG|H1|1", "Причина А", within_sec=0.0, now=NOW + 5)
 print("test_p0c_ready_then_now: OK")
+
+# --- регресія машини станів: повторна перевірка вже READY-сценарію не робить його CANCELLED (реальна машина станів)
+from office_alert_gate import apply_setup_event, get_setup_state  # noqa: E402
+
+k = "SCN|SM|SHORT|H1|1"
+apply_setup_event(k, "CONFIRMED", ltf_ok=True)
+assert get_setup_state(k)["state"] == "CONFIRMED"
+dup_same = {"scenario_id": k}
+apply_setup_event(k, RC.dup_setup_event(dup_same, k), ltf_ok=True)
+assert get_setup_state(k)["state"] == "CONFIRMED", get_setup_state(k)           # той самий сценарій: лишається READY
+k2 = "SCN|SM|SHORT|H1|2"
+apply_setup_event(k2, "ZONE_REACHED")
+apply_setup_event(k2, RC.dup_setup_event({"scenario_id": k}, k2), ltf_ok=True)
+assert get_setup_state(k2)["state"] == "CANCELLED", get_setup_state(k2)          # інший scenario_id тієї ж ідеї: скасовується
+assert RC.dup_setup_event(None, k) == "CANCELLED"
+print("test_p0c state-machine regression: OK")

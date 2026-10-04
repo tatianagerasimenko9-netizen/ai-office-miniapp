@@ -6942,10 +6942,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         _dup = await asyncio.to_thread(_rc.find_duplicate, db_path, symbol=sym_f, direction=_dir_c, entry=plan_px, scenario_id=okey)
                         if _dup:   # та сама незавершена ідея вже показана: другий READY не шлемо (інший scenario_id/basis ідею не змінює)
                             print(f"[confluence] confirm {key}: дубль незавершеної ідеї {_dup.get('scenario_id')} (вхід {_dup.get('entry')}) — мовчу")
-                            if str(_dup.get("scenario_id") or "") == okey:   # той самий сценарій уже має READY: його стан лишається CONFIRMED, а не «скасовано»
-                                apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
-                            else:
-                                apply_setup_event(okey, "CANCELLED")
+                            apply_setup_event(okey, _rc.dup_setup_event(_dup, okey), ltf_ok=True)   # той самий сценарій уже має READY → CONFIRMED, а не «скасовано»
                             live_drop(key)
                             continue
                         _valid_c = _lc.valid_until_ts(_now_c, _tf_c2)

@@ -122,3 +122,8 @@ def find_duplicate(db: str, *, symbol: str, direction: str, entry: Any, scenario
         if same_idea(p, symbol=symbol, direction=direction, entry=entry):
             return p
     return None
+
+
+def dup_setup_event(dup: Optional[Dict[str, Any]], scenario_id: str) -> str:
+    """Подія машини станів для заблокованого дубля: той самий сценарій уже має READY → лишається CONFIRMED; інший scenario_id тієї ж ідеї → CANCELLED."""
+    return "CONFIRMED" if dup and str(dup.get("scenario_id") or "") == str(scenario_id or "") else "CANCELLED"
