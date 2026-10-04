@@ -706,7 +706,7 @@ function readyTop(hm,s){
   const r=hm.ready, side_=hm.action_ua==='Продаж'?'S':'L', lvl=r.levels||[];
   const sideTxt_=hm.action_ua==='Продаж'?'SHORT':'LONG', dot=hm.action_ua==='Продаж'?'🔴':'🟢';
   const cells=[`<div><span>Вхід за планом</span><b>${esc(r.entry)}</b>${r.max_entry?`<small>не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${esc(r.max_entry)}</small>`:''}</div>`]
-    .concat(lvl.map(x=>`<div class="${x.k==='sl'?'sl':'tp'}"><span>${esc(x.label)}</span><b>${esc(x.px)}</b>${x.pct!=null?`<small>${x.k==='sl'?'−':'+'}${String(x.pct).replace('.',',')}%</small>`:''}</div>`));
+    .concat(lvl.map(x=>`<div class="${x.k==='sl'?'sl':'tp'}"><span>${esc(x.label)}</span><b>${esc(x.px)}</b>${x.pct!=null?`<small>${x.k==='sl'?'−':'+'}${String(x.pct).replace('.',',')}%${x.why?` · ${esc(x.why)}`:''}</small>`:''}</div>`));
   const rr=r.rr_net!=null?`RR на момент сигналу: до TP1 ${Number(r.rr_net).toFixed(2)}${r.rr_weighted!=null?` · зважений ${Number(r.rr_weighted).toFixed(2)}`:''} (після комісій)`:'';
   const nm=r.setup&&r.setup.name?esc(r.setup.name):'Підтвердження для цього сигналу не збережене (збереження почалося пізніше)';
   const now=hm.now||{};

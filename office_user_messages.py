@@ -193,7 +193,7 @@ def _pct_txt(price: Any, entry: Any, sign: str) -> str:
 
 
 def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
-                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: Any = "") -> str:
+                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: Any = "", tp3_why: str = "") -> str:
     """Готовий сигнал для Telegram — коротко: висновок, сетап (з реально збережених підстав), ринок і рух монети проти BTC, тиждень, рівні.
     «Чому» з цифрами — у Mini App (з того самого збереженого знімка). Рядки ринку є, лише коли їх реально пораховано. Немає запису про
     підтвердження — чесно «підтвердження не збережене», назву не вигадуємо."""
@@ -219,7 +219,14 @@ def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
         ent = f"{_n(a)}–{_n(b)}"
     L.append(f"Вхід {ent}")
     L.append(f"SL {_n(sl)}" + _pct_txt(sl, entry, "−"))
-    tps = [f"TP{i} {_n(price_of(v))}" + _pct_txt(price_of(v), entry, "+") for i, v in ((1, tp1), (2, tp2), (3, tp3)) if price_of(v) is not None]
+    tps = []
+    for i, v in ((1, tp1), (2, tp2), (3, tp3)):
+        if price_of(v) is None:
+            continue
+        t_ = f"TP{i} {_n(price_of(v))}" + _pct_txt(price_of(v), entry, "+")
+        if i == 3 and tp3_why:   # далека ціль завжди з підписом, звідки вона: не просто число
+            t_ = t_[:-1] + f", {tp3_why})" if t_.endswith(")") else t_ + f" ({tp3_why})"
+        tps.append(t_)
     L.append(" · ".join(tps))
     if size_usdt:
         L.append(f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else ""))

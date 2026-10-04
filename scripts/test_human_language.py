@@ -51,3 +51,9 @@ for _ in range(200):
     c = M.ready_signal(symbol="XUSDT", direction=d, entry=100.0, sl=98.0 if d == "LONG" else 102.0, tp1=104.0 if d == "LONG" else 96.0, setup=st["name"], why=st["why"])
     assert not LG.problems(c), (ts, LG.problems(c), c)
 print("test_human_language: OK")
+
+# далека ціль — завжди з підписом, звідки вона
+c3 = M.ready_signal(symbol="ALGOUSDT", direction="SHORT", entry=0.13038, sl=0.133196, tp1=0.12469, tp2=0.12231, tp3=0.10278, tp3_why="мінімум минулого тижня")
+assert "TP3 0,10278 (+21,2%, мінімум минулого тижня)" in c3, c3
+assert RC.gate_snapshot(direction="SHORT", entry=0.13038, sl=0.133196, tp1=0.12469, tp2=0.12231, tp3=0.10278, tp3_why="x")["tp3_why"] == "x"
+print("test_human_language: TP3 з підписом OK")
