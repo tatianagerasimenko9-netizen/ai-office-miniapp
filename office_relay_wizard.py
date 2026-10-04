@@ -6969,7 +6969,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                              max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_valid_c,
                                              rejected=False, confirm_msg_id=confirm_msg_id,
                                              gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
-                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f)))
+                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu)))
                         except Exception as exc_tr:
                             print(f"[track] record plan failed: {exc_tr}")
                         try:

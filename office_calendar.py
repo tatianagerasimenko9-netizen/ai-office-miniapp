@@ -183,6 +183,20 @@ def entry_block(now: Optional[float] = None) -> Optional[str]:
             f"і {_env_int('OFFICE_CALENDAR_AFTER_MIN', 15)} хв після виходу нові плани не відкриваємо.")
 
 
+def news_check(now: Optional[float] = None) -> tuple:
+    """(state, detail) для перевірки «Немає новини перед входом» — з ТОГО Ж календаря, що й статус джерела. state: OK | FAIL | UNAVAILABLE."""
+    if not block_enabled():
+        return "UNAVAILABLE", "календар новин вимкнено в налаштуваннях"
+    now = time.time() if now is None else now
+    data = load(now)
+    if data["status"] != "DATA_OK":
+        return "UNAVAILABLE", "календар новин зараз недоступний"
+    why = entry_block(now)
+    if why:
+        return "FAIL", why
+    return "OK", f"важливих новин у вікні −{_env_int('OFFICE_CALENDAR_BEFORE_MIN', 30)}/+{_env_int('OFFICE_CALENDAR_AFTER_MIN', 15)} хв немає"
+
+
 def summary(now: Optional[float] = None) -> Dict[str, Any]:
     """Статус джерела, чи є блок зараз, найближча важлива подія (назви — українською; Mini App показує office_news_ua.news_view)."""
     now = time.time() if now is None else now

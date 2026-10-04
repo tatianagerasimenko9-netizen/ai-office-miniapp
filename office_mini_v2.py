@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from office_bridge import _fetchall, is_confirmed_position_row, signal_get_active
 from office_confluence import lifecycle_from_status, scenario_story
-from office_desk_card import is_legacy_desk_range, MAJORS, MAJORS_TP1_PCT, ALTS_TP1_PCT, MIN_SL_ATR_H1
+from office_desk_card import is_legacy_desk_range, is_major_symbol, MAJORS, MAJORS_TP1_PCT, ALTS_TP1_PCT, MIN_SL_ATR_H1
 from office_mini_v1 import (
     DATA_UNAVAILABLE,
     _complete_levels,
@@ -83,7 +83,7 @@ def potential_tp1(*, entry: Any, tp1: Any, sl: Any, symbol: str = "") -> Dict[st
     rr = None
     if s is not None and abs(e - s) > 1e-12:
         rr = abs(t - e) / abs(e - s)
-    maj = str(symbol or "").upper() in MAJORS
+    maj = is_major_symbol(symbol)
     need = MAJORS_TP1_PCT if maj else ALTS_TP1_PCT
     ok = pct + 1e-9 >= need and (rr is None or rr + 1e-9 >= float(MIN_RR))
     return {"pct": round(pct, 3), "rr": None if rr is None else round(rr, 2), "ok_filter": ok, "min_pct": need}
@@ -477,7 +477,13 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             thesis = None
     human = None
     try:
-        human = _human_view({**row, "_has_position": True} if pos else row, thesis, events)
+        try:
+            import office_signal_track as _trk
+
+            _plan = _trk.plan_for(_db(), sid)
+        except Exception:  # noqa: BLE001
+            _plan = None
+        human = _human_view({**row, "_has_position": True} if pos else row, thesis, events, plan=_plan)
         if human and not _fixture_on():
             try:  # довідковий контекст: не впливає на стан і рішення
                 from office_market_context import context_for
@@ -545,7 +551,7 @@ def _watch_as_row(sid: str):
     return row, thesis
 
 
-def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: List[Dict[str, Any]], plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Людський стан сценарію (єдина логіка зі Telegram): свіжа ціна + цілі за рівнями + суворі умови готовності."""
     from office_lev_watch import check_plan
     from office_scenario_state import build
@@ -571,16 +577,16 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
             return f"Ціни зараз з резервного ринку ({source_ua(other)}), а не з ф'ючерсів Binance — готовий план входу не підтверджую."
         return check_plan(*a, **k)
 
-    v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=_check)
+    v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=_check, plan=plan)
     if other:
         v["data_source"] = other
         v["data_source_ua"] = f"Дані з резервного ринку: {source_ua(other)}. Спостереження триває, план входу — лише за ф'ючерсними свічками Binance."
-    if v.get("state") == "READY":
-        try:  # цілі 2/3 від фактичного входу, а не від середини зони
+    if v.get("state") == "READY" and not plan:
+        try:  # цілі 2/3 від фактичного входу, а не від середини зони (лише для рядків без збереженого плану)
             entry = float(v_entry(row))
             lv2 = levels(m15=fetch_candles(sym, "15m", 96), daily=fetch_candles(sym, "1d", 20), weekly=fetch_candles(sym, "1w", 4))
             tg = structural_targets(direction=str(row.get("direction") or ""), entry=entry, tp1=tp1, lv=lv2)
-            v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=_check)
+            v = build(row, thesis=thesis, price=price, targets=tg, events=events, plan_check=_check, plan=plan)
         except Exception:  # noqa: BLE001
             pass
     return v
@@ -592,6 +598,15 @@ def v_entry(row: Dict[str, Any]) -> float:
     return float(_confirmed_px(row))
 
 
+def _news_check() -> Optional[tuple]:
+    try:
+        import office_calendar as cal
+
+        return cal.news_check()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:
     """Перевірки перед входом за поточною ціною (M1). Не ордер, рішень не змінює."""
     from office_execution_check import execution_checks
@@ -600,7 +615,7 @@ def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]
     pack = candles_payload(sym, "M1", 20)
     last = (pack.get("candles") or [None])[-1]
     fresh = pack.get("data_status") == "DATA_OK" and not pack.get("fixture")
-    maj = sym.upper() in MAJORS
+    maj = is_major_symbol(sym)
     res = execution_checks(
         symbol=sym,
         direction=str(card.get("direction") or ""),
@@ -613,6 +628,7 @@ def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]
         has_open_position=has_open_position,
         min_rr=float(MIN_RR),
         min_tp1_pct=float(MAJORS_TP1_PCT if maj else ALTS_TP1_PCT),
+        news=_news_check(),
     )
     res["price_display"] = format_px((last or {}).get("close"), sym) if last else ""
     res["price_source"] = "fixture" if pack.get("fixture") else pack.get("source")

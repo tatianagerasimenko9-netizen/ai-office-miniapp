@@ -148,6 +148,24 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
     return written
 
 
+def plan_for(db: str, scenario_id: str) -> Optional[Dict[str, Any]]:
+    """Канонічний знімок готового плану сценарію: останній НЕвідхилений доставлений SIGNAL_PLAN (єдине джерело для Telegram, Mini App і статистики)."""
+    from office_bridge import _fetchall
+
+    try:
+        rows = _fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = ? AND signal_id = ? ORDER BY id DESC LIMIT 20", (EV_PLAN, scenario_id))
+    except Exception:  # noqa: BLE001
+        return None
+    for r in rows or []:
+        try:
+            p = json.loads(r[0]) if isinstance(r[0], str) else dict(r[0] or {})
+        except (TypeError, ValueError):
+            continue
+        if not p.get("rejected") and p.get("confirm_msg_id"):
+            return p
+    return None
+
+
 def milestone_since(db: str) -> float:
     """Момент першого запуску відстеження подій сценарію: старіші READY історичні — по них повідомлень не шлемо (без лавини після деплою)."""
     from office_bridge import log_event

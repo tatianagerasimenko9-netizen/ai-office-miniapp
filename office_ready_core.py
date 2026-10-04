@@ -57,7 +57,7 @@ def message_targets(*, direction: str, entry: Any, tp1: Any, tp2: Any, tp3_struc
 
 
 def gate_snapshot(*, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any, tp3: Any = None, max_entry: Any = None,
-                  min_tp1_pct: Any = None, plan_bad: str = "") -> Dict[str, Any]:
+                  min_tp1_pct: Any = None, plan_bad: str = "", confirm: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Усі входи й виходи гейта на момент READY: за ними рішення відтворюється без жодних зовнішніх даних."""
     import office_alert_gate as g
 
@@ -67,7 +67,13 @@ def gate_snapshot(*, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any, tp
     return {"direction": str(direction or "").upper(), "entry": e, "sl": s_, "tp1": t1, "tp2": t2, "tp3": _f(tp3), "max_entry": _f(max_entry),
             "risk_pct": round(risk, 4) if risk is not None else None, "rr_net": rr.get("rr_net"), "rr_weighted": rr.get("rr_weighted"),
             "rr_rule": g.rr_rule(), "fee_round_trip_pct": g.fee_round_trip_pct(), "min_tp1_pct": _f(min_tp1_pct), "gate_reject": plan_bad or "",
-            "shown_tps": [x for x in (t1, t2, _f(tp3)) if x is not None]}
+            "shown_tps": [x for x in (t1, t2, _f(tp3)) if x is not None], "confirm": confirm or None}
+
+
+def confirm_basis(fu: Dict[str, Any]) -> Dict[str, Any]:
+    """Чим саме підтверджено вхід (follow_setup): теги LTF, спосіб (закриття в зоні / ретест після пробою), деталь, ціна підтвердження."""
+    return {"mode": "retest" if fu.get("need_retest") is False and "ретест" in str(fu.get("detail") or "") and "після пробою" in str(fu.get("detail") or "") else "inside_zone",
+            "tags": [str(x) for x in (fu.get("confirms") or [])][:6], "detail": str(fu.get("detail") or fu.get("reason") or "")[:200], "price": _f(fu.get("price"))}
 
 
 # ------------------------------------------------------------------ ідентичність ідеї
