@@ -56,7 +56,7 @@ nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#0F1621;borde
 nav button{min-height:48px;flex:1;border:0;background:transparent;padding:6px 2px;font-size:11px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px}
 nav button i{font-style:normal;font-size:17px;line-height:1}
 nav button.on{color:var(--txt);font-weight:600}nav button.on i{filter:none}
-.chart{height:320px;width:100%;border-radius:14px;background:#0E141D;border:1px solid var(--line);overflow:hidden}
+.chart{height:300px;width:100%;border-radius:14px;background:#0E141D;border:1px solid var(--line);overflow:hidden}
 .chart.full{position:fixed;inset:env(safe-area-inset-top) 0 var(--navh) 0;height:auto;z-index:15;border-radius:0}
 .table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mut);font-weight:500;font-size:11px}
@@ -82,6 +82,27 @@ details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0
 .btn.warn{border-color:var(--short);color:var(--short)}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .msg{margin:8px 0;font-size:13px}.msg.bad{color:var(--short)}.msg.ok{color:var(--long)}
+
+/* READY-картка: торгова ієрархія (що → чому → де → чи можна зараз) */
+.rh{border-radius:16px;padding:12px;margin:0 0 8px;border:1px solid var(--line);background:var(--card)}
+.rh.S{border-color:#5a2a33}.rh.L{border-color:#1f5a4a}
+.rh .rt1{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.rh .rt1 b{font-size:19px}.rh .rt1 span{font-weight:700;font-size:13px}
+.rh .rst{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);margin-top:2px}
+.rh .rnm{font-size:15px;font-weight:600;margin:6px 0 0;line-height:1.3}
+.rh .rg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:8px}
+.rh .rg div{background:var(--raise);border-radius:10px;padding:6px 8px;min-width:0}
+.rh .rg span{display:block;font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.rh .rg b{display:block;font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.rh .rg small{color:var(--mut);font-weight:500;font-size:11px}
+.rh .rg .sl b{color:var(--short)}.rh .rg .tp b{color:var(--long)}
+.nowbar{border-radius:14px;padding:8px 12px;margin:0 0 8px;font-size:14px;line-height:1.4;border:1px solid var(--line);background:var(--card)}
+.nowbar.g{border-color:var(--long)}.nowbar.r{border-color:var(--short)}.nowbar.w{border-color:var(--watch)}.nowbar.n{border-color:var(--neu)}
+.nowbar b{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.prog{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.prog span{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--mut)}
+.prog span.on{border-color:var(--long);color:var(--long)}.prog span.stop{border-color:var(--short);color:var(--short)}
+.why{margin:0;padding:0;list-style:none}.why li{padding:5px 0;font-size:14px;line-height:1.4}.why li:before{content:"✓ ";color:var(--long)}
+.srcs{display:flex;gap:6px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -186,6 +207,7 @@ async function office(){
   setHealth(okFeeds===marks.length&&marks.length?'ok':(okFeeds?'warn':'bad'), okFeeds===marks.length&&marks.length?'дані актуальні':(okFeeds?'дані частково':'дані недоступні'));
   const ch=b.change_24h; const chTxt=(ch==null)?'—':((ch>0?'+':'')+Number(ch).toFixed(2)+'%');
   app.innerHTML=`
+    <div class="card" id="mktbox"><div class="mut">📊 РИНОК ЗАРАЗ</div><div class="mut" style="margin-top:6px">Збираю цифри ринку…</div></div>
     <div class="card">
       <div class="mut">Що зараз важливо</div>
       <p style="margin:6px 0 0;font-size:15px;line-height:1.5">${live.length?`${live.length} ${live.length===1?'сценарій потребує':'сценарії потребують'} уваги.`:'Підтверджених планів немає — «сьогодні без входу» теж рішення.'}
@@ -220,6 +242,15 @@ async function office(){
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
+  (async()=>{ /* ринок зараз: цифри збираються у фоні на сервері — питаємо до 6 разів */
+    for(let i=0;i<6;i++){ const box=$('mktbox'); if(!box||T0!==RT) return;
+      let m=null; try{ m=await j('/api/v2/market'); }catch(e){ if(e.stale) return; m=null; }
+      if(m&&m.ok&&!m.pending){ const ls=m.lines||[];
+        box.innerHTML=ls.length>1?`<div class="mut">${esc(ls[0])}</div><div style="margin-top:6px;line-height:1.5"><b>${esc(ls[1])}</b>${ls.slice(2,-1).map(x=>`<div>${esc(x)}</div>`).join('')}</div><div style="margin-top:6px"><b>${esc(ls[ls.length-1])}</b></div><div class="mut" style="margin-top:6px">Не підключено: ${esc((m.not_connected||[]).join(', '))}. Це інформація, на сигнали не впливає.</div>`:`<div class="mut">📊 РИНОК ЗАРАЗ</div><div style="margin-top:6px">Даних для висновку замало.</div>`;
+        return; }
+      await new Promise(r=>setTimeout(r,3000)); }
+    const b2=$('mktbox'); if(b2) b2.innerHTML='<div class="mut">📊 РИНОК ЗАРАЗ</div><div style="margin-top:6px">Цифри ринку тимчасово недоступні.</div>';
+  })();
   (async()=>{ const box=$('watchbox'); if(!box) return;
     try{ const r=await j('/api/v2/watches');
       if(!r.ok){ box.innerHTML='<div class="mut">Дані про відстеження недоступні.</div>'; return; }
@@ -584,8 +615,9 @@ async function paintChart(el, s){
     vol.priceScale().applyOptions({scaleMargins:{top:.85,bottom:0}});
     vol.setData(candles.map(c=>({time:c.time,value:c.volume||0,color:'#243244'})));
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
-    line(lv.zone_lo,'#5DA9FF','зона',2); line(lv.zone_hi,'#5DA9FF','зона',2);
-    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2); line(lv.tp3,'#27C99A','TP3',2); line(lv.entry,'#E8EDF4','вхід',1);
+    const zl=(s.__objs&&s.__objs.includes('level'))?'рівень · зона':(s.__objs&&s.__objs.includes('block'))?'блок · зона':'зона';
+    line(lv.zone_lo,'#5DA9FF',zl,2); line(lv.zone_hi,'#5DA9FF',zl,2);
+    line(lv.sl,'#F36B78','SL'); line(lv.tp1,'#27C99A','TP1'); line(lv.tp2,'#27C99A','TP2',2); line(lv.tp3,'#27C99A','TP3',2); line(lv.entry,'#E8EDF4',s.__ready_ts?'вхід за планом':'вхід',1);
     /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
        OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
     const shown=['зона','SL','TP'];
@@ -600,7 +632,7 @@ async function paintChart(el, s){
     const lastT=candles[candles.length-1].time;
     const seg=(t0,v0,t1,v1,o)=>{const ln=chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));
       ln.setData(t0===t1?[{time:t0,value:v0}]:[{time:t0,value:v0},{time:t1,value:v1}]); return ln;};
-    if(cx&&cx.ok&&S.layers.ch&&cx.channel){
+    if(cx&&cx.ok&&S.layers.ch&&cx.channel&&(!s.__objs||s.__objs.includes('channel'))){
       const c=cx.channel;
       seg(c.start_time,c.mid_start,c.end_time,c.mid_end,{color:'#7DA7D9',lineWidth:2});
       seg(c.start_time,c.upper_start,c.end_time,c.upper_end,{color:'#6F96C4',lineWidth:1,lineStyle:2});
@@ -608,20 +640,26 @@ async function paintChart(el, s){
       shown.push('канал');
     }
     if(cx&&cx.ok&&S.layers.ctx){
-      if(cx.fvg){
+      if(cx.fvg&&(!s.__objs||s.__objs.includes('fvg'))){
         seg(cx.fvg.from_time,cx.fvg.hi,lastT,cx.fvg.hi,{color:'#B48CFF',lineStyle:2,title:'FVG',lastValueVisible:true});
         seg(cx.fvg.from_time,cx.fvg.lo,lastT,cx.fvg.lo,{color:'#B48CFF',lineStyle:2});
         shown.push('FVG');
       }
-      if(cx.strong_candle){
+      if(cx.strong_candle&&(!s.__objs||s.__objs.includes('candle'))){
         const sc=cx.strong_candle, long_=String(s.direction||'').toUpperCase()!=='SHORT';
         series.setMarkers([{time:sc.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'}]);
         seg(sc.time,sc.ote_hi,lastT,sc.ote_hi,{color:'#4DB8F3',lineStyle:2,title:'відкат 62–79%',lastValueVisible:true});
         seg(sc.time,sc.ote_lo,lastT,sc.ote_lo,{color:'#4DB8F3',lineStyle:2});
         shown.push('сильна свічка');
       }
-      Object.entries(cx.previous||{}).forEach(([k,v])=>{series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}); shown.push(k);});
+      if(!s.__objs) Object.entries(cx.previous||{}).forEach(([k,v])=>{series.createPriceLine({price:v,color:'#E0B84D',title:k,lineStyle:1,lineWidth:1}); shown.push(k);});
     }
+    if(s.__ready_ts){ // момент підтвердження плану на графіку (стрілка на свічці)
+      const rc=candles.filter(c=>c.time<=s.__ready_ts).slice(-1)[0];
+      if(rc){ const long_=String(s.direction||'').toUpperCase()!=='SHORT';
+        const mk=[{time:rc.time,position:long_?'belowBar':'aboveBar',color:'#E8EDF4',shape:long_?'arrowUp':'arrowDown',text:'План підтверджено'}];
+        if(cx&&cx.strong_candle&&(!s.__objs||s.__objs.includes('candle'))) mk.unshift({time:cx.strong_candle.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'});
+        series.setMarkers(mk.sort((a,b)=>a.time-b.time)); shown.push('момент плану'); } }
     window.__chartLayers=shown; S.cx=cx;
     chart.timeScale().fitContent();
   } else { usingLW=false; let cx=null; if(S.layers.ch){ try{ const q=new URLSearchParams({symbol,tf}); cx=await j('/api/v2/chart_context?'+q.toString()); }catch(e){ if(e&&e.stale) return null; } } drawFallback(el,candles,lv,cx); window.__chartLayers=['зона','SL','TP'].concat(cx&&cx.channel?['канал']:[]); }
@@ -663,6 +701,38 @@ function execHtml(x){
     <div class="mut" style="margin-top:6px">${esc(x.text)}</div></div>`;
 }
 
+
+function readyTop(hm,s){
+  const r=hm.ready, side_=hm.action_ua==='Продаж'?'S':'L', lvl=r.levels||[];
+  const sideTxt_=hm.action_ua==='Продаж'?'SHORT':'LONG', dot=hm.action_ua==='Продаж'?'🔴':'🟢';
+  const cells=[`<div><span>Вхід за планом</span><b>${esc(r.entry)}</b>${r.max_entry?`<small>не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${esc(r.max_entry)}</small>`:''}</div>`]
+    .concat(lvl.map(x=>`<div class="${x.k==='sl'?'sl':'tp'}"><span>${esc(x.label)}</span><b>${esc(x.px)}</b>${x.pct!=null?`<small>${x.k==='sl'?'−':'+'}${String(x.pct).replace('.',',')}%${x.why?` · ${esc(x.why)}`:''}</small>`:''}</div>`));
+  const rr=r.rr_net!=null?`RR на момент сигналу: до TP1 ${Number(r.rr_net).toFixed(2)}${r.rr_weighted!=null?` · зважений ${Number(r.rr_weighted).toFixed(2)}`:''} (після комісій)`:'';
+  const nm=r.setup&&r.setup.name?esc(r.setup.name):'Підтвердження для цього сигналу не збережене (збереження почалося пізніше)';
+  const now=hm.now||{};
+  const nowCls=now.paused?'w':now.eligible===true?'g':now.eligible===false?'r':'n';
+  const nowTxt=now.paused?`<strong>${esc(now.paused.title)}</strong> ${esc(now.paused.reason)} ${esc(now.paused.action)}`:now.eligible===true?'🟢 Умови для входу за цим планом ще чинні.':now.eligible===false?`🔴 Новий вхід зараз не розглядати: ${now.reasons.map(esc).join('; ')}.`:'⚪ Чи можна входити зараз — не перевірено (немає свіжої ціни).';
+  const pr=hm.progress;
+  const prog=pr?`<div class="prog">${pr.steps.map(x=>`<span class="${x.done?'on':''}">${x.done?'✓ ':''}${esc(x.label)}</span>`).join('')}${pr.stop?'<span class="stop">Досягнуто стоп-рівня сценарію</span>':''}${pr.expired?'<span class="stop">Строк вийшов, входу не було</span>':''}</div>`:'';
+  return `<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
+    <div class="rh ${side_}"><div class="rt1"><b>${dot} ${esc(hm.ticker)}</b><span class="${side_}">${sideTxt_}</span></div>
+      <div class="rst">План підтверджено · ${esc(r.at_stamp)} (Київ)</div>
+      <div class="rnm">${nm}</div>
+      <div class="rg">${cells.join('')}</div>
+      <div class="mut" style="margin-top:6px">${rr?esc(rr)+' · ':''}${r.valid_until?`увійти можна до ${esc(r.valid_until)} (Київ)`:''}</div></div>
+    <div class="nowbar ${nowCls}"><b>Зараз${now.price?` · ціна ${esc(now.price)}`:''}</b>${nowTxt}${now.rr_net!=null?`<div class="mut" style="margin-top:4px">RR від поточної ціни: до TP1 ${Number(now.rr_net).toFixed(2)}${now.rr_weighted!=null?` · зважений ${Number(now.rr_weighted).toFixed(2)}`:''}. Це не скасовує вже підтверджений сигнал.</div>`:''}</div>
+    ${prog}`;
+}
+function readyBottom(hm){
+  const r=hm.ready, why=(r.setup&&r.setup.why)||[];
+  const src=((hm.context&&hm.context.sources)||[]).map(x=>`<span class="pill ${x.state==='on'?'ok':'watch'}">${esc(x.name)} ${x.state==='on'?'●':'○'}</span>`).join('');
+  return `${why.length?`<div class="sec"><h3>Чому Лев дав сигнал</h3><ul class="why">${why.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${r.confirm_ua?`<div class="mut" style="margin-top:6px">Підтвердження: ${esc(r.confirm_ua)}</div>`:''}</div>`:''}
+    ${r.market?`<div class="sec"><h3>Ринок на момент сигналу</h3>${[].concat(r.market.lines||[],r.market.calendar||[]).map(x=>`<div class="mut">${esc(x)}</div>`).join('')}</div>`:''}
+    ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
+    ${src?`<div class="sec"><h3>Джерела</h3><div class="srcs">${src}</div><div class="mut" style="margin-top:6px">Деталі по кожному — у «Технічних деталях» нижче.</div></div>`:''}
+    ${hm.news?`<div class="sec"><h3>Новини</h3>${newsHtml(hm.news)}</div>`:''}`;
+}
+
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
   const T0=++RT;
@@ -675,6 +745,7 @@ async function openSc(id){
   const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
   const kv=(k,v,cls)=>`<div class="kv"><span>${esc(k)}</span><b class="${cls||''}">${esc(v||NA)}</b></div>`;
   const hm=d.human;
+  if(hm&&hm.ready){ s.__objs=(hm.ready.setup&&hm.ready.setup.name)?hm.ready.setup.objects:null; s.__ready_ts=hm.ready.at; } else { s.__objs=null; s.__ready_ts=null; }
   if(hm&&hm.levels){ s.tp1=hm.levels.tp1; s.tp2=hm.levels.tp2; s.tp3=hm.levels.tp3; s.entry_px=hm.levels.entry; if(hm.levels.sl!=null) s.sl=hm.levels.sl; }
   const humanHtml=hm?`<div class="card">
       <div class="top"><span class="sym">${esc(hm.ticker)}</span><span class="side ${side(s.direction)}">${esc(hm.action_ua)}</span></div>
@@ -684,13 +755,21 @@ async function openSc(id){
       <div class="kv"><span>Ціна</span><b>${hm.price_fresh?esc(hm.price):'свіжої ціни немає'}</b></div>
       <div class="kv"><span>Ціну перевірено</span><b>${hm.price_fresh?ago(hm.price_as_of):'—'}</b></div>
       <div class="kv"><span>Сценарій оновлено</span><b>${hm.updated_at?hhmm(hm.updated_at):'—'}</b></div></div>
+    ${hm.ready?`<div class="sec"><h3>План на момент сигналу · ${esc(hm.ready.at_stamp)} (Київ)</h3>
+      ${kv('Вхід за планом',hm.ready.entry+(hm.ready.max_entry?` (не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${hm.ready.max_entry})`:''))}
+      ${hm.ready.rr_net!=null?kv('RR на момент сигналу',`до TP1 ${Number(hm.ready.rr_net).toFixed(2)}${hm.ready.rr_weighted!=null?` · зважений ${Number(hm.ready.rr_weighted).toFixed(2)}`:''} (після комісій)`):''}
+      ${hm.ready.confirm_ua?kv('Що підтвердило вхід',hm.ready.confirm_ua):(hm.ready.confirm_detail?kv('Що підтвердило вхід',hm.ready.confirm_detail):'<div class="mut">Дані про підтвердження для цього сигналу не збережені (збереження почалося пізніше).</div>')}
+      ${hm.ready.valid_until?kv('Увійти за цим планом можна до',hm.ready.valid_until+' (Київ)'):''}</div>`:''}
+    ${hm.now?`<div class="sec"><h3>Зараз</h3>
+      ${hm.now.paused?`<p>${esc(hm.now.paused.title)}. ${esc(hm.now.paused.reason)} ${esc(hm.now.paused.action)}</p>`:hm.now.eligible===true?'<p>Вхід за цим планом ще можна розглядати.</p>':hm.now.eligible===false?`<p>Новий вхід зараз не розглядати: ${hm.now.reasons.map(esc).join('; ')}.</p>`:'<p>Чи можна входити зараз — не перевірено (немає свіжої ціни).</p>'}
+      ${hm.now.rr_net!=null?`<div class="mut">RR від поточної ціни ${esc(hm.now.price||'')}: до TP1 ${Number(hm.now.rr_net).toFixed(2)}${hm.now.rr_weighted!=null?` · зважений ${Number(hm.now.rr_weighted).toFixed(2)}`:''}. Це не скасовує сигнал, який уже було підтверджено.</div>`:''}</div>`:''}
     ${hm.wait?`<div class="sec"><h3>Чого чекаємо</h3><p>${esc(hm.wait)}</p></div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
     ${hm.plan?`<div class="sec"><h3>План угоди</h3>${kv('Вхід',hm.plan.entry+(hm.plan.max_entry?` (не ${hm.action_ua==='Продаж'?'нижче':'вище'} ${hm.plan.max_entry})`:''))}${kv('Стоп',hm.plan.stop,'S')}${kv('Ціль 1',hm.plan.tp1,'L')}${kv('Ціль 2',hm.plan.tp2,'L')}${kv('Ціль 3',hm.plan.tp3,'L')}
       ${hm.size&&hm.size.usdt?`<div class="kv"><span>Позиція</span><b>${esc(Math.round(hm.size.usdt))} USDT · ризик ${esc(Math.round(hm.size.risk_usd))} $</b></div>`:''}
-      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Діє до ${esc(hm.plan.valid_until)} (Київ) — верхня межа; раніше знімається, якщо ідея зламана (закриття H1 за рівнем, злам структури, ціль без входу, ціна за межею входу).</div>`:''}</div>`:''}
+      <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Увійти за планом можна до ${esc(hm.plan.valid_until)} (Київ) — верхня межа; раніше знімається, якщо ідея зламана (закриття H1 за рівнем, злам структури, ціль без входу, ціна за межею входу).</div>`:''}</div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
-    ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
+    ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${x.mark?esc(x.mark)+' ':''}${esc(x.text)}</div>`).join('')}${hm.context.verdict?`<div style="margin-top:6px"><b>${esc(hm.context.verdict)}</b></div>`:''}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}
       ${(hm.context.sources||[]).length?`<div class="mut" style="margin-top:8px">Джерела даних:</div>`+(hm.context.sources||[]).map(x=>`<div class="kv"><span><span class="dot ${x.state==='on'?'ok':'warn'}"></span> ${esc(x.name)}</span><b>${x.state==='on'?'підключено':'вимкнено'}</b></div><div class="mut" style="margin:0 0 6px">${esc(x.text)}</div>`).join(''):`<div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>`}
       ${(hm.context.freshness||[]).length?`<div class="mut" style="margin-top:6px">Дані станом на: ${(hm.context.freshness||[]).map(f=>esc(f.name)+' — '+(f.as_of&&f.fresh?new Date(f.as_of*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжих')).join('; ')}.</div>`:''}
@@ -699,9 +778,20 @@ async function openSc(id){
     ${hm.next?`<div class="sec"><h3>Що Лев зробить далі</h3><p>${esc(hm.next)}</p></div>`:''}
     ${(hm.history||[]).length?`<div class="sec"><h3>Що було</h3><div class="tl">${hm.history.map(x=>`<div><span class="mut num">${hhmm(x.ts)}</span> — ${esc(x.text)}</div>`).join('')}</div></div>`:''}`
     :`<div class="card err"><b>Не вдалося скласти зрозумілий висновок</b><div class="mut">Технічні дані нижче, у розділі «Для перевірки». Не вважай цей сценарій готовим планом.</div></div>`;
-  app.innerHTML=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
-    ${humanHtml}
-    <details class="dbg"><summary>Для перевірки (технічні дані)</summary>
+  const isReady=!!(hm&&hm.ready);
+  const chartBlock=`<div id="chart" class="chart"></div>
+    <div class="mut" id="asof" style="margin:6px 0 6px"></div>
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+    <div class="chips" id="lay">
+      <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
+      <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
+      <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
+      <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
+      <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>`;
+  const iopenBlock='<div class="acts" style="margin:0 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>';
+  const dbgBlock=`<details class="dbg"><summary>${isReady?'Технічні деталі':'Для перевірки (технічні дані)'}</summary>
+    ${isReady?humanHtml.replace('<button class="back" id="back"','<button class="back" id="back_x"'):''}
     <div class="card">
       <div class="top"><span class="sym">${esc(s.symbol)}</span><span class="side ${side(s.direction)}">${sideTxt(s.direction)}</span>${pill(st)}</div>
       <div style="margin-top:6px;font-size:14px">${esc(st.text||'')}</div>
@@ -716,18 +806,14 @@ async function openSc(id){
     </div>
     ${execHtml(d.execution)}
     <div class="sec"><h3>Журнал подій</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає.</div>'}</div>
-    </details>
-    <div class="acts" style="margin:0 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>
-    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
-    <div class="chips" id="lay">
-      <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
-      <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
-      <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
-      <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
-      <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
-      <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
-    <div id="chart" class="chart"></div>
-    <div class="mut" id="asof" style="margin:6px 0 12px"></div>
+    </details>`;
+  app.innerHTML=isReady
+    ? `${readyTop(hm,s)}${chartBlock}${iopenBlock}${readyBottom(hm)}${dbgBlock}`
+    : `<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
+    ${humanHtml}
+    ${dbgBlock}
+    ${iopenBlock}
+    ${chartBlock}
 `;
   $('back').onclick=()=>{killPoll(); go('scenarios');};
   $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,

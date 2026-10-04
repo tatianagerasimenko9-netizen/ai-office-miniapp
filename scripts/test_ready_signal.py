@@ -17,11 +17,11 @@ from office_alert_gate import max_entry_price, net_rr  # noqa: E402
 # --- формат: LONG і SHORT
 lg = M.ready_signal(symbol="AKEUSDT", direction="LONG", entry=0.030259, sl=0.029568, tp1=0.031621, tp2={"price": 0.032086, "why": "x"}, tp3=None,
                     max_entry=0.03035, size_usdt=438, risk_usd=10, valid_until="02:40")
-assert lg.splitlines()[0] == "🟢 LONG · AKE · ПЛАН ГОТОВИЙ ✅", lg
-assert "Вхід: 0,030259 $ (не вище 0,03035" in lg and "Стоп: 0,029568 $" in lg and "TP1: 0,031621 $" in lg and "TP2: 0,032086 $" in lg, lg
-assert "TP3" not in lg and "Позиція 438 USDT · ризик 10 $" in lg and "⏳ Діє до 02:40 (Київ)" in lg, lg
+assert lg.splitlines()[0] == "🟢 LONG · AKE · ГОТОВО", lg
+assert "Вхід 0,030259–0,03035" in lg and "SL 0,029568" in lg and "TP1 0,031621" in lg and "TP2 0,032086" in lg, lg
+assert "TP3" not in lg and "Позиція 438 USDT · ризик 10 $" in lg and "⏳ до 02:40 (Київ)" in lg, lg
 sh = M.ready_signal(symbol="SNXXUSDT", direction="SHORT", entry=0.5, sl=0.52, tp1=0.46, tp3={"price": 0.4, "why": "x"}, max_entry=0.4896)
-assert sh.splitlines()[0] == "🔴 SHORT · SNXX · ПЛАН ГОТОВИЙ ✅" and "(не нижче" in sh and "TP3: 0,4" in sh and "TP2" not in sh, sh
+assert sh.splitlines()[0] == "🔴 SHORT · SNXX · ГОТОВО" and "–" in sh.split("Вхід ")[1].split("\n")[0] and "TP3 0,4" in sh and "TP2" not in sh, sh
 for txt in (lg, sh):
     for bad in ("ЗАРАЗ", "ПІДСТАВА", "СКАСОВУЄМО", "Це аналіз", "умови виконано", "ордер"):
         assert bad not in txt, (bad, txt)
@@ -54,7 +54,7 @@ assert v2["state"] == "NOT_READY" and any("межею входу" in m for m in 
 vs = S.build({**row("SHORT", 0.5, 0.52, 0.46, 0.498, 0.505), "symbol": "SNXXUSDT"}, thesis=TH, price={**FRESH, "price": 0.5}, plan_check=check_plan, now=NOW)
 assert vs["state"] == "READY" and vs["icon"] == "🔴" and vs["state_ua"].startswith("SHORT"), vs
 txt = M.render_human(v)
-assert txt.splitlines()[0] == "🟢 LONG · AKE · ПЛАН ГОТОВИЙ ✅" and "ЗАРАЗ" not in txt, txt
+assert txt.splitlines()[0] == "🟢 LONG · AKE · ГОТОВО" and "ЗАРАЗ" not in txt, txt
 
 # --- мовчазне відстеження: свічки після підтвердження
 T0 = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc).timestamp()

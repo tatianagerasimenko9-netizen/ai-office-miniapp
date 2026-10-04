@@ -434,6 +434,28 @@ def scenarios_payload(*, watching: bool = False) -> Dict[str, Any]:
     }
 
 
+def market_payload() -> Dict[str, Any]:
+    """«📊 РИНОК ЗАРАЗ»: перевага ринку з чесних лічильників + активні плани. Свічки збираються у фоні; поки їх немає — pending."""
+    import office_market_bias as mb
+    import office_market_view as mv
+
+    mv.refresh_async()
+    base = mv.cached()
+    if not base or not base.get("market"):
+        return {"ok": True, "pending": not base, "lines": [], "data_status": "PENDING" if not base else "DATA_UNAVAILABLE"}
+    port = None
+    try:
+        import office_ready_core as rc
+
+        port = mb.portfolio([p for p in rc.unfinished_ready(_db())
+                             if not rc.is_expired(p.get("valid_until_ts"))])
+    except Exception:  # noqa: BLE001
+        port = None
+    m = base["market"]
+    return {"ok": True, "pending": False, "bias": m["bias"], "lines": mb.brief_lines(m, port), "built_at": base.get("built_at"),
+            "not_connected": mb.NOT_CONNECTED, "data_status": "DATA_OK"}
+
+
 def scenario_detail(sid: str) -> Dict[str, Any]:
     sid = str(sid or "").strip()
     if not sid:
@@ -463,9 +485,15 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         pos = False
         pos_known = None
     card = scenario_card(row, has_position=pos)
+    try:
+        import office_signal_track as _trk
+
+        _plan = _trk.plan_for(_db(), sid)   # канонічний знімок доставленого READY (одна істина для Telegram, Mini App і трекера)
+    except Exception:  # noqa: BLE001
+        _plan = None
     execution = None
     if (card.get("status") or {}).get("group") != "done":
-        execution = execution_payload(card, has_open_position=pos_known)
+        execution = execution_payload(card, has_open_position=pos_known, tp2=(_plan or {}).get("tp2") if _plan else row.get("tp2"))
     events = scenario_events(sid)
     thesis = watch_thesis
     if thesis is None:
@@ -477,12 +505,6 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             thesis = None
     human = None
     try:
-        try:
-            import office_signal_track as _trk
-
-            _plan = _trk.plan_for(_db(), sid)
-        except Exception:  # noqa: BLE001
-            _plan = None
         human = _human_view({**row, "_has_position": True} if pos else row, thesis, events, plan=_plan)
         if human and not _fixture_on():
             try:  # довідковий контекст: не впливає на стан і рішення
@@ -580,6 +602,7 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
     v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=_check, plan=plan)
     if other:
         v["data_source"] = other
+        _pause_now(v, sym, other)
         v["data_source_ua"] = f"Дані з резервного ринку: {source_ua(other)}. Спостереження триває, план входу — лише за ф'ючерсними свічками Binance."
     if v.get("state") == "READY" and not plan:
         try:  # цілі 2/3 від фактичного входу, а не від середини зони (лише для рядків без збереженого плану)
@@ -590,6 +613,29 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
         except Exception:  # noqa: BLE001
             pass
     return v
+
+
+def _pause_now(v: Dict[str, Any], sym: str, other: str) -> None:
+    """Готовий план лишається готовим (знімок не змінюється), але «Зараз» стає ПРИЗУПИНЕНО: джерело даних тимчасово не ф'ючерси Binance."""
+    from office_market_data import fallback_info, source_ua
+
+    nw = v.get("now")
+    if not isinstance(nw, dict):
+        return
+    fi = fallback_info(sym) or {}
+    since = ""
+    try:
+        from office_ready_core import kyiv_stamp
+
+        since = kyiv_stamp(float(fi["since"])).split(" ")[-1] if fi.get("since") else ""
+    except Exception:  # noqa: BLE001
+        since = ""
+    nw["eligible"] = None
+    nw["paused"] = {"title": "⚠️ ПЛАН ПРИЗУПИНЕНО",
+                    "reason": f"Ф'ючерси Binance недоступні{(' з ' + since) if since else ''}; зараз ціни тільки зі спота ({source_ua(other)})." if "spot" in other else
+                              f"Ф'ючерси Binance недоступні{(' з ' + since) if since else ''}; зараз ціни з іншого ринку ({source_ua(other)}).",
+                    "action": "Новий вхід не підтверджуємо. Рівні плану (вхід, стоп, цілі) не змінилися.", "since": fi.get("since")}
+    nw["reasons"] = []
 
 
 def v_entry(row: Dict[str, Any]) -> float:
@@ -607,7 +653,7 @@ def _news_check() -> Optional[tuple]:
         return None
 
 
-def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:
+def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool], tp2: Any = None) -> Dict[str, Any]:
     """Перевірки перед входом за поточною ціною (M1). Не ордер, рішень не змінює."""
     from office_execution_check import execution_checks
 
@@ -629,6 +675,7 @@ def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]
         min_rr=float(MIN_RR),
         min_tp1_pct=float(MAJORS_TP1_PCT if maj else ALTS_TP1_PCT),
         news=_news_check(),
+        tp2=tp2,
     )
     res["price_display"] = format_px((last or {}).get("close"), sym) if last else ""
     res["price_source"] = "fixture" if pack.get("fixture") else pack.get("source")
@@ -653,10 +700,20 @@ def scenario_events(sid: str) -> List[Dict[str, Any]]:
         rows = []
     out = []
     for r in rows or []:
+        typ = r[1]
+        if typ in ("SIGNAL_PLAN", "SCENARIO_MILESTONE"):
+            try:
+                pl = json.loads(r[3]) if isinstance(r[3], str) else dict(r[3] or {})
+            except (TypeError, ValueError):
+                pl = {}
+            if typ == "SIGNAL_PLAN" and pl.get("rejected"):
+                typ = "SIGNAL_PLAN_REJECTED"   # внутрішній запис: гейт не пропустив, у Telegram нічого не йшло
+            elif typ == "SCENARIO_MILESTONE":
+                typ = "MILESTONE_" + str(pl.get("level") or "")
         out.append(
             {
                 "ts": r[0],
-                "type": r[1],
+                "type": typ,
                 "scenario_id": r[2],
                 "source": "office_events",
             }
@@ -1323,7 +1380,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/chart_context", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/market", "/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/chart_context", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:

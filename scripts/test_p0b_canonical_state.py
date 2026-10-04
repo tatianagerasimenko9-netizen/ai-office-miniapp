@@ -51,7 +51,7 @@ v2 = SS.build({**row, "status": "EXPIRED"}, thesis=thesis, price=price, plan_che
 assert v2["state"] == "EXPIRED", v2["state"]
 # ціна за межею входу → неактуально, навіть із знімком
 v3 = SS.build(row, thesis=thesis, price={**price, "price": 0.1300}, plan_check=ok_check, plan=plan)
-assert v3["state"] == "NOT_READY" and any("межею входу" in m for m in v3["missing"]), v3
+assert v3["state"] == "READY" and v3["now"]["eligible"] is False and any("межею входу" in m for m in v3["now"]["reasons"]), v3   # P0c: READY історичний, «зараз» окремо
 
 # новини: перевірка перед входом береться з того ж календаря, що й статус джерела
 cal.set_events_for_tests(cal.parse([]), at=NOW)

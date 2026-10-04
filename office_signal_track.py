@@ -154,6 +154,25 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
     return written
 
 
+def rejected_recently(db: str, scenario_id: str, reason: str, within_sec: float = 6 * 3600, now: Optional[float] = None) -> bool:
+    """Той самий відхилений план (та сама причина) цього сценарію вже записано нещодавно — не дублюємо запис після кожного рестарту."""
+    from office_bridge import _fetchall
+
+    now = time.time() if now is None else now
+    try:
+        rows = _fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = ? AND signal_id = ? ORDER BY id DESC LIMIT 5", (EV_PLAN, scenario_id))
+    except Exception:  # noqa: BLE001
+        return False
+    for r in rows or []:
+        try:
+            p = json.loads(r[0]) if isinstance(r[0], str) else dict(r[0] or {})
+        except (TypeError, ValueError):
+            continue
+        if p.get("rejected") and str(p.get("reason") or "")[:200] == str(reason or "")[:200] and now - float(p.get("confirmed_ts") or 0) < within_sec:
+            return True
+    return False
+
+
 def plan_for(db: str, scenario_id: str) -> Optional[Dict[str, Any]]:
     """Канонічний знімок готового плану сценарію: останній НЕвідхилений доставлений SIGNAL_PLAN (єдине джерело для Telegram, Mini App і статистики)."""
     from office_bridge import _fetchall
@@ -207,6 +226,17 @@ def _levels_of(res: Dict[str, Any]) -> List[str]:
     return lv
 
 
+def _prio():
+    try:
+        from office_market_data import priority
+
+        return priority()
+    except Exception:  # noqa: BLE001
+        import contextlib
+
+        return contextlib.nullcontext()
+
+
 def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача."""
@@ -238,7 +268,8 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             tf, tfs = "5m", 300.0
             lim = min(1000, int(age // 300) + 20)
         try:
-            candles = fetch(p["symbol"], tf, lim)
+            with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
+                candles = fetch(p["symbol"], tf, lim)
         except Exception:  # noqa: BLE001
             continue
         if not isinstance(candles, list) or not candles:

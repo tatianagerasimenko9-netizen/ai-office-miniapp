@@ -179,41 +179,69 @@ def _dir_head(direction: str) -> tuple:
     return ("🟢", "LONG") if long_ else ("🔴", "SHORT")
 
 
+def _pct_txt(price: Any, entry: Any, sign: str) -> str:
+    """«(−1,0%)» — скільки це в % від входу: стоп — збиток (−), цілі — прибуток (+), для LONG і SHORT однаково."""
+    try:
+        p, e = float(price), float(entry)
+        if e <= 0:
+            return ""
+        v = abs(p - e) / e * 100.0
+        txt = (f"{v:.2f}" if v < 10 else f"{v:.1f}").replace(".", ",")
+        return f" ({sign}{txt}%)"
+    except (TypeError, ValueError):
+        return ""
+
+
 def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
-                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "") -> str:
-    """Готовий сигнал для Telegram — лише торгові цифри. Колір і слово — за НАПРЯМКОМ (не за готовністю). Пояснення, підстави,
-    рівні, умови скасування — у Mini App/БД. TP2/TP3 — лише якщо підтверджені; аргументи цін — числа (dict {'price'} теж приймаємо)."""
+                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: Any = "", tp3_why: str = "") -> str:
+    """Готовий сигнал для Telegram — коротко: висновок, сетап (з реально збережених підстав), ринок і рух монети проти BTC, тиждень, рівні.
+    «Чому» з цифрами — у Mini App (з того самого збереженого знімка). Рядки ринку є, лише коли їх реально пораховано. Немає запису про
+    підтвердження — чесно «підтвердження не збережене», назву не вигадуємо."""
+    def _n(v: Any) -> str:
+        return _px(v, symbol).replace(" $", "")
+
     def price_of(x: Any) -> Any:
         return x.get("price") if isinstance(x, dict) else x
 
     dot, word = _dir_head(direction)
     long_ = word == "LONG"
-    ent = f"Вхід: {_px(entry, symbol)}"
+    L = [f"{dot} {word} · {ticker(symbol)} · ГОТОВО"]
+    if setup is not None and (setup or why is not None):
+        name = str(setup or "").split(" · ", 1)[-1] if setup else ""
+        L.append(f"Сетап: {name}" if name else "Сетап: підтвердження для цього сигналу не збережене")
+    if isinstance(market, (list, tuple)):
+        L += [str(x) for x in market if str(x).strip()]
+    elif market:
+        L.append(f"Ринок: {market}")
+    ent = _n(entry)
     if max_entry is not None:
-        ent += f" (не {'вище' if long_ else 'нижче'} {_px(max_entry, symbol)})"
-    L = [f"{dot} {word} · {ticker(symbol)} · ПЛАН ГОТОВИЙ ✅", "", ent, f"Стоп: {_px(sl, symbol)}", f"TP1: {_px(tp1, symbol)}"]
-    if price_of(tp2) is not None:
-        L.append(f"TP2: {_px(price_of(tp2), symbol)}")
-    if price_of(tp3) is not None:
-        L.append(f"TP3: {_px(price_of(tp3), symbol)}")
+        a, b = (entry, max_entry) if long_ else (max_entry, entry)
+        ent = f"{_n(a)}–{_n(b)}"
+    L.append(f"Вхід {ent}")
+    L.append(f"SL {_n(sl)}" + _pct_txt(sl, entry, "−"))
+    tps = []
+    for i, v in ((1, tp1), (2, tp2), (3, tp3)):
+        if price_of(v) is None:
+            continue
+        t_ = f"TP{i} {_n(price_of(v))}" + _pct_txt(price_of(v), entry, "+")
+        if i == 3 and tp3_why:   # далека ціль завжди з підписом, звідки вона: не просто число
+            t_ = t_[:-1] + f", {tp3_why})" if t_.endswith(")") else t_ + f" ({tp3_why})"
+        tps.append(t_)
+    L.append(" · ".join(tps))
     if size_usdt:
-        L += ["", f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else "")]
+        L.append(f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else ""))
     if valid_until:
-        L.append(("" if size_usdt else "") + f"⏳ Діє до {valid_until} (Київ)")
+        L.append(f"⏳ до {valid_until} (Київ)")
     return "\n".join(L)
 
 
 def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None) -> str:
-    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/SL). Не твердить, що угоду відкрито чи закрито: це лише рух ціни відносно рівнів плану."""
-    dot, word = _dir_head(direction)
+    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП). Не твердить, що угоду відкрито чи закрито: це лише рух ціни відносно рівнів плану."""
     lv = str(level or "").upper()
-    what = "стоп-рівня сценарію" if lv == "SL" else f"{lv} сценарію"
-    mark = "⚠️" if lv == "SL" else "🎯"
-    L = [f"{mark} {word} · {ticker(symbol)} · ціна досягла {what}"]
-    if price is not None:
-        L.append(f"Рівень: {_px(price, symbol)}")
-    L.append("Це рух ринку по плану, а не стан твоєї угоди.")
-    return "\n".join(L)
+    px_ = f"Ціна дійшла до {_px(price, symbol)}." if price is not None else "Ціна дійшла до цього рівня."
+    if lv == "SL":
+        return f"❌ {ticker(symbol)} · СТОП\n{px_} Сценарій не спрацював.\nЦе рух ринку за планом, а не стан твоєї угоди."
+    return f"🎯 {ticker(symbol)} · ЦІЛЬ {lv[-1:]}\n{px_}\nЦе рух ринку за планом, а не стан твоєї угоди."
 
 
 def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,

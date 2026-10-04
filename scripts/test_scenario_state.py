@@ -37,7 +37,7 @@ v = S.build(ROW, thesis=THESIS, price=FRESH, plan_check=check_plan)
 assert v["state"] == "WAIT" and v["icon"] == "🟡" and "не купувати" in v["headline"] and "вища" in v["headline"], v
 assert "0,30028–0,30525 $" in v["wait"] and "15-хвилинному" in v["wait"] and "0,29531" in v["cancel"] and "нижче" in v["cancel"], v
 assert "plan" not in v and v["prelim"][0].startswith("Ціль 1: 0,3139") and "немає обґрунтованої" in v["prelim"][1]
-assert "не підтверджено" in v["next"], "без перевіреної доставки не обіцяємо «напишу сам»"
+assert "не підтверджено" not in v["next"] and "Telegram" in v["next"], "автодоставка READY підтверджена на живих подіях — застарілого застереження немає"
 assert not BAD.search(texts(v)), BAD.search(texts(v)).group(0)
 
 # 2. Немає рівня скасування й умови підтвердження → «План не готовий» з переліком (а не «план активний»)

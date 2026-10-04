@@ -6922,6 +6922,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                         if plan_bad:  # умови збіглися, але плану для входу немає: внутрішній стан, у Telegram не шлемо; результат відстежуємо мовчки
                             if okey not in _CONFIRM_REJECT_LOGGED:
                                 _CONFIRM_REJECT_LOGGED.add(okey)
+                                if await asyncio.to_thread(_trk.rejected_recently, db_path, okey, str(plan_bad)[:200]):
+                                    continue
                                 print(f"[confluence] confirm без готового плану {key}: {plan_bad} — мовчу, стан лише в Mini App")
                                 try:
                                     _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
@@ -6940,16 +6942,31 @@ EV позитивне: {prob.get('ev_positive', '')}
                         _dup = await asyncio.to_thread(_rc.find_duplicate, db_path, symbol=sym_f, direction=_dir_c, entry=plan_px, scenario_id=okey)
                         if _dup:   # та сама незавершена ідея вже показана: другий READY не шлемо (інший scenario_id/basis ідею не змінює)
                             print(f"[confluence] confirm {key}: дубль незавершеної ідеї {_dup.get('scenario_id')} (вхід {_dup.get('entry')}) — мовчу")
-                            apply_setup_event(okey, "CANCELLED")
+                            apply_setup_event(okey, _rc.dup_setup_event(_dup, okey), ltf_ok=True)   # той самий сценарій уже має READY → CONFIRMED, а не «скасовано»
                             live_drop(key)
                             continue
                         _valid_c = _lc.valid_until_ts(_now_c, _tf_c2)
                         _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
+                        _gate_snap = _rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
+                                                       max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu),
+                                                       tp3_why=(((tgt or {}).get("tp3") or {}).get("why") or "") if _tp3_m is not None else "")
+                        _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
+                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
+                        _mctx: Dict[str, Any] = {}
+                        try:   # ринок і календарна структура на момент сигналу: лише з реальних свічок; збій → рядків просто немає
+                            import office_market_view as _mview
+
+                            _mctx = await asyncio.wait_for(asyncio.to_thread(_mview.for_signal, sym_f, _dir_c, _now_c), timeout=20.0) or {}
+                            if _mctx.get("snapshot"):
+                                _gate_snap["context"] = _mctx["snapshot"]
+                        except Exception as exc_mv:
+                            print(f"[market] контекст сигналу недоступний {sym_f}: {exc_mv}")
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             _msgs.ready_signal(
                                 symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
-                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
+                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e, setup=str(_story.get("name") or ""), why=_story.get("why") or [], tp3_why=_gate_snap.get("tp3_why") or "",
+                                market=(list(_mctx.get("lines") or []) + list(_mctx.get("calendar") or [])) or "",
                                 size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
                                 risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
                                 valid_until=_rc.kyiv_stamp(_valid_c)),
@@ -6969,8 +6986,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                              tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
                                              max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_valid_c,
                                              rejected=False, confirm_msg_id=confirm_msg_id,
-                                             gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
-                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu)))
+                                             gate=_gate_snap)
                         except Exception as exc_tr:
                             print(f"[track] record plan failed: {exc_tr}")
                         try:

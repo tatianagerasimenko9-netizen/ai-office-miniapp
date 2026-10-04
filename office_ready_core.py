@@ -57,7 +57,7 @@ def message_targets(*, direction: str, entry: Any, tp1: Any, tp2: Any, tp3_struc
 
 
 def gate_snapshot(*, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any, tp3: Any = None, max_entry: Any = None,
-                  min_tp1_pct: Any = None, plan_bad: str = "", confirm: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                  min_tp1_pct: Any = None, plan_bad: str = "", confirm: Optional[Dict[str, Any]] = None, tp3_why: str = "") -> Dict[str, Any]:
     """Усі входи й виходи гейта на момент READY: за ними рішення відтворюється без жодних зовнішніх даних."""
     import office_alert_gate as g
 
@@ -67,7 +67,7 @@ def gate_snapshot(*, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any, tp
     return {"direction": str(direction or "").upper(), "entry": e, "sl": s_, "tp1": t1, "tp2": t2, "tp3": _f(tp3), "max_entry": _f(max_entry),
             "risk_pct": round(risk, 4) if risk is not None else None, "rr_net": rr.get("rr_net"), "rr_weighted": rr.get("rr_weighted"),
             "rr_rule": g.rr_rule(), "fee_round_trip_pct": g.fee_round_trip_pct(), "min_tp1_pct": _f(min_tp1_pct), "gate_reject": plan_bad or "",
-            "shown_tps": [x for x in (t1, t2, _f(tp3)) if x is not None], "confirm": confirm or None}
+            "shown_tps": [x for x in (t1, t2, _f(tp3)) if x is not None], "confirm": confirm or None, "tp3_why": tp3_why or ""}
 
 
 def confirm_basis(fu: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,3 +122,25 @@ def find_duplicate(db: str, *, symbol: str, direction: str, entry: Any, scenario
         if same_idea(p, symbol=symbol, direction=direction, entry=entry):
             return p
     return None
+
+
+def dup_setup_event(dup: Optional[Dict[str, Any]], scenario_id: str) -> str:
+    """Подія машини станів для заблокованого дубля: той самий сценарій уже має READY → лишається CONFIRMED; інший scenario_id тієї ж ідеї → CANCELLED."""
+    return "CONFIRMED" if dup and str(dup.get("scenario_id") or "") == str(scenario_id or "") else "CANCELLED"
+
+
+def story_for(*, symbol: str, direction: str, confirm: Optional[Dict[str, Any]], gate: Optional[Dict[str, Any]], entry: Any, zone_lo: Any, zone_hi: Any, tf: str = "H1") -> Dict[str, Any]:
+    """Назва сетапу й причини для Telegram І Mini App з одного місця: лише з реально збережених підстав (gate.confirm) + цифри зони входу."""
+    import office_setup_story as su
+    from office_price_format import format_px
+
+    conf = confirm or {}
+    zt = ""
+    lo, hi = _f(zone_lo), _f(zone_hi)
+    if lo is not None and hi is not None:
+        a, b = (lo, hi) if lo <= hi else (hi, lo)
+        zt = f"{format_px(a, symbol)}–{format_px(b, symbol)}".replace(".", ",")
+    et = format_px(entry, symbol).replace(".", ",") if _f(entry) is not None else ""
+    g = gate or {}
+    return su.build(conf.get("tags") or [], conf.get("mode"), direction, rr_net=g.get("rr_net"), rr_weighted=g.get("rr_weighted"),
+                    tf="M5" if str(tf or "").upper() in ("M15", "M5") else "M15", entry_txt=et, zone_txt=zt)
