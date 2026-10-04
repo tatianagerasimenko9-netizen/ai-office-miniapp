@@ -157,3 +157,24 @@ def lines(snap: Dict[str, Any], name: str = "") -> List[str]:
         side = "вище" if m["dist_open_pct"] >= 0 else "нижче"
         out.append(f"{who}на {abs(m['dist_open_pct']):.2f}% {side} Monthly Open ({_px(m['open'])})".replace(".", ",") + ".")
     return out
+
+
+def _hm_short(sec: float) -> str:
+    sec = max(0.0, sec)
+    d, rem = divmod(int(sec), 86400)
+    h, m = divmod(rem, 3600)
+    m //= 60
+    return f"{d}д {h}г" if d >= 1 else f"{h}г {m:02d}хв"
+
+
+def week_line(snap: Dict[str, Any], name: str = "BTC") -> str:
+    """«Тиждень: BTC +1,06% від відкриття · до закриття 6г 24хв» (+ місяць, якщо до його закриття ≤ 3 днів). Порожньо, якщо даних немає."""
+    w, m = snap.get("week") or {}, snap.get("month") or {}
+    parts = []
+    if w.get("dist_open_pct") is not None:
+        parts.append(f"{name} {_pct(w['dist_open_pct']).replace('+', '+')} від відкриття".replace("%", "%"))
+    if w.get("hours_to_close") is not None:
+        parts.append(f"до закриття {_hm_short(w['hours_to_close'] * 3600)}")
+    if m.get("hours_to_close") is not None and m["hours_to_close"] <= 72:
+        parts.append(f"місяця {_hm_short(m['hours_to_close'] * 3600)}")
+    return ("Тиждень: " + " · ".join(parts)) if parts else ""

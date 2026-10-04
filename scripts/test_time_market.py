@@ -107,7 +107,7 @@ check(ln2[0].startswith("Ринок: перевага LONG") and any("сильн
 al2 = mb.alignment(m_long, direction="SHORT", coin="ALGO", coin_1h=dn, btc_1h=up)
 check(al2["state"] == "COUNTER" and mb.signal_lines(m_long, al2)[-1].startswith("Напрямок: проти ринку"), al2)
 check(mb.alignment(m_mix, direction="LONG", coin="X", coin_1h=up, btc_1h=up)["state"] == "MIXED", "змішаний")
-check(mb.alignment(m_long, direction="LONG", coin="X", coin_1h=up, btc_1h=up, corr_btc=0.1)["state"] == "INDEPENDENT", "незалежна монета")
+check(mb.alignment(m_long, direction="LONG", coin="X", coin_1h=up, btc_1h=up, corr_btc=0.1)["state"] == "WITH" and mb.alignment(m_long, direction="LONG", coin="X", coin_1h=up, btc_1h=up, corr_btc=0.1)["weak_corr"], "слабка кореляція не змінює стан")
 check(mb.signal_lines({"bias": "UNKNOWN"}, al) == [], "немає висновку про ринок — рядків немає")
 
 # кореляція
@@ -154,14 +154,36 @@ check(abs(mr["btc_4h"] - 0.16) < 0.01, mr["btc_4h"])
 brr = mb.brief_lines(mr)
 check(brr[1] == "Перевага: ЗМІШАНА" and brr[-1] == "Висновок: чіткої переваги немає.", brr)
 
-# ---- картка READY із реальними рядками ринку: порядок і зміст
+# ---- картка READY (коротка): сетап, ринок, рух монети проти BTC, тиждень, рівні, час
 import office_user_messages as um  # noqa: E402
 
 al3 = mb.alignment(mr, direction="LONG", coin="SOON", coin_1h=flat(0.47), btc_1h=flat(0.08), bph=4)
-card = um.ready_signal(symbol="SOONUSDT", direction="LONG", entry=0.3617, sl=0.35426, tp1=0.3729, tp2=0.3809, valid_until="05.10 20:35",
-                       setup="Спадний клин", why=["Вхід 0,3617 — у зоні 0,3614–0,3622"], market=mb.signal_lines(mr, al3) + ts.lines(s, "BTC"))
-check("Ринок: перевага ЗМІШАНА (2 за LONG, 0 за SHORT, 2 без руху — із 4)" in card and "Напрямок: ринок змішаний, переваги немає" in card, card)
-check(card.index("Ринок:") < card.index("Вхід:"), "ринок — до рівнів")
-for t in card.split("\n"):
+cl = mb.card_lines(mr, al3)
+check(cl[0] == "Ринок: 🟡 без переваги — 2 LONG / 0 SHORT / 2 нейтр.", cl)
+check(cl[1].startswith("BTC 1г: ") and "· SOON: " in cl[1], cl)
+wk = {"week": {"dist_open_pct": 1.06, "hours_to_close": 6 + 24 / 60}, "month": {"hours_to_close": 700}}
+check(ts.week_line(wk, "BTC") == "Тиждень: BTC +1,06% від відкриття · до закриття 6г 24хв", ts.week_line(wk, "BTC"))
+check(ts.week_line({"week": {}, "month": {}}) == "", "без даних рядка немає")
+card = um.ready_signal(symbol="SOONUSDT", direction="LONG", entry=0.3617, sl=0.354258, tp1=0.3729, tp2=0.3809, max_entry=0.36322, valid_until="05.10 20:35",
+                       setup="спадний клин", why=["Вхід 0,3617 — у зоні"], market=cl + [ts.week_line(wk, "BTC")])
+lines = card.split("\n")
+check(lines[0] == "🟢 LONG · SOON · ГОТОВО" and lines[1] == "Сетап: спадний клин" and lines[2].startswith("Ринок: 🟡 без переваги"), lines[:3])
+check("Вхід 0,3617–0,36322" in card or "Вхід 0,3617–0,3632" in card, card)
+import re as _re
+check(_re.search(r"SL 0,354\d* \(−2,06%\)", card) and "TP1 0,3729 (+3,10%) · TP2 0,3809 (+5,31%)" in card, card)
+check(len(lines) <= 9 and "Чому" not in card and "кореляц" not in card.lower() and "незалежно" not in card, (len(lines), card))
+for t in lines:
     check(not lang.problems(t), (t, lang.problems(t)))
+# за/проти ринку — лише коли ринок має перевагу
+alw = mb.alignment(m_long, direction="LONG", coin="SOON", coin_1h=up, btc_1h=up, bph=1)
+check(mb.card_lines(m_long, alw)[0].endswith("· ✅ за ринком") and mb.card_lines(m_long, alw)[0].startswith("Ринок: 🟢 перевага LONG"), mb.card_lines(m_long, alw))
+alc = mb.alignment(m_long, direction="SHORT", coin="ALGO", coin_1h=dn, btc_1h=up, bph=1)
+check(mb.card_lines(m_long, alc)[0].endswith("· ⚠️ проти ринку"), mb.card_lines(m_long, alc))
 print(card)
+
+if fails:
+    print("FAIL:")
+    for f in fails:
+        print("  ", f)
+    sys.exit(1)
+print("OK card: коротка картка, без кореляції й «Чому», ринок за/проти лише при переваги")
