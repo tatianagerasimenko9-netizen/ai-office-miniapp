@@ -7457,6 +7457,10 @@ EV позитивне: {prob.get('ev_positive', '')}
         while True:
             try:
                 for m in await asyncio.to_thread(trk.pending_milestones, db_path):
+                    if m.get("silent"):   # ENTRY / EXPIRED: життя сценарію для статистики, без Telegram
+                        await asyncio.to_thread(trk.record_milestone, db_path, m, None)
+                        print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
+                        continue
                     mid = await send_proactive(
                         EVENT_TRADE_UPDATE,
                         _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price")),
@@ -7471,7 +7475,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")
             except Exception as exc_ms:
                 print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
-            await asyncio.sleep(120)
+            await asyncio.sleep(45)
 
     asyncio.create_task(monitor_scenario_milestones())
 

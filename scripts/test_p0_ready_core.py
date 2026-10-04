@@ -127,7 +127,8 @@ candles = [cd(1, 99.5, 100.5), cd(2, 100, 104.5), cd(3, 101, 108), cd(4, 97, 103
 fetch = lambda s, tf, n: candles  # noqa: E731
 got = T.pending_milestones(db2, fetch, now_ts=c0 + 900 * 6)
 lv = [(m["symbol"], m["level"], m["confirm_msg_id"]) for m in got if m["symbol"] == "MSUSDT"]
-assert lv == [("MSUSDT", "TP1", 556), ("MSUSDT", "TP2", 556), ("MSUSDT", "SL", 556)], lv
+assert lv == [("MSUSDT", "ENTRY", 556), ("MSUSDT", "TP1", 556), ("MSUSDT", "TP2", 556), ("MSUSDT", "SL", 556)], lv
+assert [m["silent"] for m in got if m["symbol"] == "MSUSDT"] == [True, False, False, False]   # ENTRY лише в БД
 assert not [m for m in got if m["symbol"] == "HISTUSDT"] and {m["symbol"] for m in got} <= {"MSUSDT", "GRUSDT"}
 for m in got:
     T.record_milestone(db2, m, 1)
@@ -149,7 +150,7 @@ T.record_plan(db3, scenario_id="SCN|SS|SHORT|H1|1", symbol="SSUSDT", direction="
               valid_until_ts=s3 + 86400, confirm_msg_id=9)
 cs = [{"ts": s3 + 1 + 900 * i, "open": 50, "high": h, "low": l, "close": 50} for i, (h, l) in enumerate([(50.2, 49.8), (50.5, 49.9), (51.5, 50)], start=1)]
 g3 = T.pending_milestones(db3, lambda *a: cs, now_ts=s3 + 1 + 900 * 6)
-assert [m["level"] for m in g3] == ["SL"], g3
+assert [m["level"] for m in g3] == ["ENTRY", "SL"], g3
 
 # deep-link: сценарій знаходиться за id і коли він за межею «останніх 200»
 db4 = str(Path(tempfile.mkdtemp()) / "d.db")

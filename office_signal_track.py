@@ -52,7 +52,7 @@ def record_plan(db: str, *, scenario_id: str, symbol: str, direction: str, tf: s
                             "reason": reason, "confirm_msg_id": confirm_msg_id, "gate": gate or None}, scenario_id)
 
 
-def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None) -> Dict[str, Any]:
+def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None, tf_sec: float = TF_SEC) -> Dict[str, Any]:
     """Результат плану за свічками (за зростанням часу). Консервативно: у свічці, що зачепила і стоп, і ціль, — спершу стоп;
     у свічці заповнення входу цілі не зараховуються. status: PENDING (ще йде), NOT_FILLED, STOP, TP1/TP2/TP3 (найвища досягнута), OPEN_TIMEOUT."""
     now = time.time() if now_ts is None else now_ts
@@ -68,7 +68,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None)
     for c in candles if isinstance(candles, list) else []:
         t0 = _ts((c or {}).get("ts"))
         hi, lo = _f(c.get("high")), _f(c.get("low"))
-        if t0 is None or hi is None or lo is None or t0 + TF_SEC <= t_conf or t0 + TF_SEC > now:
+        if t0 is None or hi is None or lo is None or t0 + tf_sec <= t_conf or t0 + tf_sec > now or (tf_sec <= 300 and t0 < t_conf):
             continue   # до підтвердження або свічка ще не закрита
         if not filled:
             if t0 >= t_valid:
@@ -80,23 +80,23 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None)
                 mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
                 mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
                 if stop_hit:
-                    return {**out, "status": "STOP", "stopped": True, "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+                    return {**out, "status": "STOP", "stopped": True, "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
             continue
         mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
         mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
         stop_hit = (lo <= sl) if long_ else (hi >= sl)
         if stop_hit:
             res = out["reached"][-1] if out["reached"] else "STOP"
-            return {**out, "status": res, "stopped": True, "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+            return {**out, "status": res, "stopped": True, "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
         for name, lvl in tps:
             if name not in out["reached"] and ((hi >= lvl) if long_ else (lo <= lvl)):
                 out["reached"].append(name)
         if tps and tps[-1][0] in out["reached"]:
-            return {**out, "status": tps[-1][0], "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+            return {**out, "status": tps[-1][0], "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
         if now - float(out["filled_at"]) > MAX_TRACK_SEC:
             return {**out, "status": out["reached"][-1] if out["reached"] else "OPEN_TIMEOUT", "result_at": now,
                     "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
-    if not filled and now > t_valid + TF_SEC:
+    if not filled and now > t_valid + tf_sec:
         return {**out, "status": "NOT_FILLED", "result_at": t_valid}
     out.update(mfe_pct=round(mfe, 3) if filled else None, mae_pct=round(mae, 3) if filled else None)
     return out
@@ -183,10 +183,27 @@ def milestone_since(db: str) -> float:
 
 
 _MS_DONE: set = set()   # плани, що завершені й повністю відпрацьовані в цьому процесі (не тягнемо свічки знову)
+_MS_LAST: Dict[Any, float] = {}   # останній огляд плану (для рідшого огляду старих планів)
+FRESH_SEC = 25 * 3600           # молодші плани дивимось по 1m свічках (до 1500 шт. ≈ 25 год), старші — по 5m (до 1000 шт. ≈ 83 год)
+OLD_RECHECK_SEC = 600
+SILENT_LEVELS = ("ENTRY", "EXPIRED")   # лише запис у БД (життя сценарію й статистика); у Telegram не йдуть
+
+
+def _levels_of(res: Dict[str, Any]) -> List[str]:
+    lv: List[str] = []
+    if res.get("filled_at") is not None:
+        lv.append("ENTRY")
+    lv += list(res.get("reached") or [])
+    if res.get("stopped"):
+        lv.append("SL")
+    if res.get("status") == "NOT_FILLED":
+        lv.append("EXPIRED")
+    return lv
 
 
 def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Нові події рівнів для доставлених READY (від появи функції): TP1/TP2/TP3 і SL, кожна — один раз. Це подія СЦЕНАРІЮ за ринком, а не закриття угоди."""
+    """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
+    Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача."""
     if fetch is None:
         from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
     now = time.time() if now_ts is None else now_ts
@@ -200,27 +217,32 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
         if (sid, ct) in _MS_DONE:
             continue
-        if all((sid, ct, lv) in seen for lv in ("TP1", "TP2", "TP3", "SL")):
-            continue
         if now > float(p.get("valid_until_ts") or 0) + MAX_TRACK_SEC + 3600:
             continue
+        age = now - float(ct or 0)
+        fresh = age < FRESH_SEC
+        if not fresh and now - _MS_LAST.get((sid, ct), 0.0) < OLD_RECHECK_SEC:
+            continue
+        _MS_LAST[(sid, ct)] = now
+        tf, lim, tfs = ("1m", 1500, 60.0) if fresh else ("5m", 1000, 300.0)
         try:
-            candles = fetch(p["symbol"], "15m", 300)
+            candles = fetch(p["symbol"], tf, lim)
         except Exception:  # noqa: BLE001
             continue
         if not isinstance(candles, list) or not candles:
             continue
-        res = simulate(p, candles, now)
-        levels = list(res.get("reached") or []) + (["SL"] if res.get("stopped") else [])
-        if res["status"] not in ("PENDING", "INVALID") and all((sid, ct, lv) in seen for lv in levels):
+        res = simulate(p, candles, now, tf_sec=tfs)
+        levels = _levels_of(res)
+        terminal = res["status"] not in ("PENDING", "INVALID")
+        if terminal and all((sid, ct, lv) in seen for lv in levels):
             _MS_DONE.add((sid, ct))
             continue
         for lv in levels:
             if (sid, ct, lv) in seen:
                 continue
-            price = p.get({"TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl"}[lv])
+            price = p.get({"ENTRY": "entry", "TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl", "EXPIRED": "entry"}[lv])
             out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv,
-                        "price": price, "confirm_msg_id": p.get("confirm_msg_id")})
+                        "price": price, "confirm_msg_id": p.get("confirm_msg_id"), "silent": lv in SILENT_LEVELS})
     return out
 
 
