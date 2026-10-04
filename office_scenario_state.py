@@ -361,7 +361,7 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
         x = _f(x)
         return round(abs(x - e0) / e0 * 100.0, 2) if (x is not None and e0) else None
 
-    ready["levels"] = [{"k": k, "label": lab, "px": px(plan.get(k), sym), "pct": _pct(plan.get(k)), "raw": _f(plan.get(k))}
+    ready["levels"] = [{"k": k, "label": lab, "px": px(plan.get(k), sym), "pct": _pct(plan.get(k)), "raw": _f(plan.get(k)), "why": (g.get("tp3_why") or None) if k == "tp3" else None}
                        for k, lab in (("sl", "Стоп"), ("tp1", "TP1"), ("tp2", "TP2"), ("tp3", "TP3")) if _f(plan.get(k)) is not None]
     now_v: Dict[str, Any] = {"eligible": None, "reasons": [], "price": px(price, sym) if fresh else None}
     if not fresh or price is None:
