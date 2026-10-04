@@ -253,6 +253,8 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
     v.update(state=state, state_ua=title, icon=icon, tone=tone, missing=missing)
     if frozen and state == "READY":
         v["ready"], v["now"] = _ready_then(frozen, side, sym, p, fresh, lo, hi, plan_check)
+    if frozen and state in ("READY", "DONE", "EXPIRED", "CANCELLED"):
+        v["progress"] = _progress(events or [], frozen)
     tf_txt = TF_UA.get(ctf or "M15", "15-хвилинному")
     if state == "WAIT":
         if p is not None and hi is not None and ((side != "SHORT" and p > hi) or (side == "SHORT" and lo is not None and p < lo)):
@@ -289,11 +291,9 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
     elif state in ("WAIT", "IN_ZONE", "NOT_READY"):
         v["cancel"] = "Рівень скасування система не визначила — його потрібно уточнити, а не вважати попередній стоп готовим правилом."
     if state in ("WAIT", "IN_ZONE"):
-        v["next"] = ("Лев перевіряє умову в наступних циклах і напише, коли ціна дійде до зони, з'явиться підтвердження або план скасується."
-                     if notify_verified() else
-                     "Лев перевіряє умову в наступних циклах. Автоматичне повідомлення ще не підтверджено на живій події — заглядай сюди.")
+        v["next"] = "Лев перевіряє умову в наступних циклах. Коли з'явиться підтверджений план, він прийде в Telegram."
     elif state == "READY":
-        v["next"] = "Лев напише, якщо план втратить чинність." if notify_verified() else "Слідкуй за рівнем скасування. Автоматичне повідомлення ще не підтверджено на живій події."
+        v["next"] = "Лев напише в Telegram, коли ціна досягне TP1, TP2, TP3 або стоп-рівня сценарію."
     elif state in ("CANCELLED", "EXPIRED", "DONE"):
         v["next"] = "Новий план з'явиться, коли Лев знайде нову можливість."
     if state != "READY" and state not in ("CANCELLED", "EXPIRED", "DONE", "NO_DATA"):
@@ -307,6 +307,16 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         v["prelim"] = prelim
         v["prelim_note"] = "Попередньо. Не для входу. Стоп, ризик і потенціал покажемо після підтвердження й конкретної ціни входу."
     return v
+
+
+def _progress(events: List[Dict[str, Any]], plan: Dict[str, Any]) -> Dict[str, Any]:
+    """READY → TP1 → TP2 → TP3 або СТОП — лише за фактичними подіями сценарію (рух ринку за планом, не стан угоди користувача)."""
+    done = {str(e.get("type") or "")[10:] for e in events if str(e.get("type") or "").startswith("MILESTONE_")}
+    steps = [{"k": "READY", "label": "План підтверджено", "done": True}]
+    for k in ("TP1", "TP2", "TP3"):
+        if _f(plan.get(k.lower())) is not None:
+            steps.append({"k": k, "label": k, "done": k in done})
+    return {"steps": steps, "stop": "SL" in done, "note": "Це рух ринку за планом, а не стан твоєї угоди."}
 
 
 def _plain_confirms(tags: List[str]) -> str:
@@ -335,6 +345,22 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
              "rr_net": g.get("rr_net"), "rr_weighted": g.get("rr_weighted"), "rr_rule": g.get("rr_rule"), "risk_pct": g.get("risk_pct"),
              "confirm_tags": conf.get("tags") or [], "confirm_ua": _plain_confirms(conf.get("tags") or []), "confirm_mode": conf.get("mode"), "confirm_detail": conf.get("detail"),
              "valid_until": kyiv_stamp(float(plan["valid_until_ts"])) if _f(plan.get("valid_until_ts")) else None}
+    try:
+        import office_setup_story as _su
+
+        st = _su.build(conf.get("tags") or [], conf.get("mode"), side, rr_net=g.get("rr_net"), rr_weighted=g.get("rr_weighted"),
+                       tf="M5" if str(plan.get("tf") or "").upper() in ("M15", "M5") else "M15")
+    except Exception:  # noqa: BLE001
+        st = {"name": None, "why": [], "objects": []}
+    ready["setup"] = st
+    e0 = _f(plan.get("entry"))
+
+    def _pct(x: Any) -> Optional[float]:
+        x = _f(x)
+        return round(abs(x - e0) / e0 * 100.0, 2) if (x is not None and e0) else None
+
+    ready["levels"] = [{"k": k, "label": lab, "px": px(plan.get(k), sym), "pct": _pct(plan.get(k)), "raw": _f(plan.get(k))}
+                       for k, lab in (("sl", "Стоп"), ("tp1", "TP1"), ("tp2", "TP2"), ("tp3", "TP3")) if _f(plan.get(k)) is not None]
     now_v: Dict[str, Any] = {"eligible": None, "reasons": [], "price": px(price, sym) if fresh else None}
     if not fresh or price is None:
         return ready, now_v
@@ -346,14 +372,21 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
         me = max_entry_price(side, sl, t1, t2)
         if me is not None and ((side != "SHORT" and price > me) or (side == "SHORT" and price < me)):
             reasons.append(f"ціна вже за межею входу ({px(me, sym)})")
+        if lo is not None and hi is not None:
+            if price < min(lo, hi):
+                reasons.append("ціна вже нижче зони входу")
+            elif price > max(lo, hi):
+                reasons.append("ціна вже вище зони входу")
         gg = rr_gate(price, sl, t1, t2)
         now_v["rr_net"], now_v["rr_weighted"] = gg.get("rr_net"), gg.get("rr_weighted")
-        if not gg.get("ok") and gg.get("reason"):
-            reasons.append(str(gg["reason"]).rstrip("."))
+        if not gg.get("ok") and gg.get("rr_net") is not None:
+            reasons.append(f"RR від поточної ціни нижчий за правило гейта (до TP1 {gg['rr_net']:.2f}, зважений {gg['rr_weighted']:.2f})".replace(".", ","))
         if plan_check:
             bad = plan_check(sym, side, {"entry": price, "sl": sl, "tp1": t1, "tp2": t2}, lo, hi)
-            if bad and str(bad).rstrip(".") not in reasons and "Потенціал" not in str(bad):
+            if bad and "Потенціал" not in str(bad) and "Ціль надто близько" not in str(bad):   # RR/простір уже названо коротко вище
                 reasons.append(str(bad).rstrip("."))
+            elif bad and "Ціль надто близько" in str(bad):
+                reasons.append("до TP1 залишилось менше мінімального простору")
     except Exception:  # noqa: BLE001
         now_v["eligible"] = None
         return ready, now_v

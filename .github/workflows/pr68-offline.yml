@@ -142,6 +142,8 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Mini App browser smoke (phone/desktop, XSS, error/loading states)
         run: python scripts/ui_smoke_mini_v2.py
+      - name: READY-картка (ієрархія, «зараз», прогрес, телефон/десктоп)
+        run: python scripts/ui_ready_card.py
 
   postgres-integration:
     runs-on: ubuntu-latest
