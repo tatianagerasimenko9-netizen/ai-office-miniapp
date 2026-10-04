@@ -463,9 +463,15 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         pos = False
         pos_known = None
     card = scenario_card(row, has_position=pos)
+    try:
+        import office_signal_track as _trk
+
+        _plan = _trk.plan_for(_db(), sid)   # канонічний знімок доставленого READY (одна істина для Telegram, Mini App і трекера)
+    except Exception:  # noqa: BLE001
+        _plan = None
     execution = None
     if (card.get("status") or {}).get("group") != "done":
-        execution = execution_payload(card, has_open_position=pos_known)
+        execution = execution_payload(card, has_open_position=pos_known, tp2=(_plan or {}).get("tp2") if _plan else row.get("tp2"))
     events = scenario_events(sid)
     thesis = watch_thesis
     if thesis is None:
@@ -477,12 +483,6 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
             thesis = None
     human = None
     try:
-        try:
-            import office_signal_track as _trk
-
-            _plan = _trk.plan_for(_db(), sid)
-        except Exception:  # noqa: BLE001
-            _plan = None
         human = _human_view({**row, "_has_position": True} if pos else row, thesis, events, plan=_plan)
         if human and not _fixture_on():
             try:  # довідковий контекст: не впливає на стан і рішення
@@ -607,7 +607,7 @@ def _news_check() -> Optional[tuple]:
         return None
 
 
-def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]) -> Dict[str, Any]:
+def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool], tp2: Any = None) -> Dict[str, Any]:
     """Перевірки перед входом за поточною ціною (M1). Не ордер, рішень не змінює."""
     from office_execution_check import execution_checks
 
@@ -629,6 +629,7 @@ def execution_payload(card: Dict[str, Any], *, has_open_position: Optional[bool]
         min_rr=float(MIN_RR),
         min_tp1_pct=float(MAJORS_TP1_PCT if maj else ALTS_TP1_PCT),
         news=_news_check(),
+        tp2=tp2,
     )
     res["price_display"] = format_px((last or {}).get("close"), sym) if last else ""
     res["price_source"] = "fixture" if pack.get("fixture") else pack.get("source")
@@ -653,10 +654,20 @@ def scenario_events(sid: str) -> List[Dict[str, Any]]:
         rows = []
     out = []
     for r in rows or []:
+        typ = r[1]
+        if typ in ("SIGNAL_PLAN", "SCENARIO_MILESTONE"):
+            try:
+                pl = json.loads(r[3]) if isinstance(r[3], str) else dict(r[3] or {})
+            except (TypeError, ValueError):
+                pl = {}
+            if typ == "SIGNAL_PLAN" and pl.get("rejected"):
+                typ = "SIGNAL_PLAN_REJECTED"   # внутрішній запис: гейт не пропустив, у Telegram нічого не йшло
+            elif typ == "SCENARIO_MILESTONE":
+                typ = "MILESTONE_" + str(pl.get("level") or "")
         out.append(
             {
                 "ts": r[0],
-                "type": r[1],
+                "type": typ,
                 "scenario_id": r[2],
                 "source": "office_events",
             }

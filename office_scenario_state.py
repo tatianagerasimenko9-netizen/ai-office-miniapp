@@ -31,7 +31,8 @@ EVENT_UA = {
     "SIGNAL_ENTRY": "Лев склав план", "THESIS_VERSION": "Лев оновив план", "ZONE_REACHED": "Ціна досягла зони",
     "HIT_ENTRY": "Ціна досягла зони", "CONFIRMED": "Підтвердження отримано", "SCENARIO_CONFIRMED": "Підтвердження отримано",
     "CANCELLED": "План скасовано", "INVALIDATED": "План скасовано", "SCENARIO_EXPIRED": "Час очікування минув",
-    "EXPIRED": "Час очікування минув", "SIGNAL_PLAN": "План готовий і надіслано в Telegram",
+    "EXPIRED": "Час очікування минув", "SIGNAL_PLAN": "План готовий і надіслано в Telegram", "MILESTONE_TP1": "Ціна досягла TP1 сценарію", "MILESTONE_TP2": "Ціна досягла TP2 сценарію",
+    "MILESTONE_TP3": "Ціна досягла TP3 сценарію", "MILESTONE_SL": "Ціна досягла стоп-рівня сценарію",
 }
 
 
@@ -165,7 +166,7 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         state = "EXPIRED"
     elif status in ("HIT_SL", "HIT_TP1", "HIT_TP2", "CLOSED"):
         state = "DONE"
-    elif _too_old(row, now):
+    elif (frozen and _f(frozen.get("valid_until_ts")) and (now or datetime.now(timezone.utc)).timestamp() > float(frozen["valid_until_ts"])) or (not frozen and _too_old(row, now)):
         state = "EXPIRED"          # строк дії сценарію минув, навіть якщо статус у базі ще не оновлено
     elif not fresh:
         state = "NO_DATA"
@@ -188,11 +189,11 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 missing.append("немає стопа")
             if tp1 is None:
                 missing.append("немає цілі 1")
-            if not missing and plan_check:
+            if not missing and plan_check and not frozen:   # для доставленого READY гейт уже пройдено в момент сигналу; «зараз» рахуємо окремо (v["now"])
                 bad = plan_check(sym, side, plan, lo, hi)
                 if bad:
                     missing.append(bad)
-            if not missing:   # ціна вже за межею входу (RR після комісій < мінімуму) — сигнал неактуальний
+            if not missing and not frozen:   # ціна вже за межею входу (RR після комісій < мінімуму) — сигнал неактуальний
                 from office_alert_gate import max_entry_price
 
                 _me = max_entry_price(side, sl, tp1, _tp2)
@@ -250,6 +251,8 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         icon = "🔴" if side == "SHORT" else "🟢"
         title = f"{'SHORT' if side == 'SHORT' else 'LONG'} · {title}"
     v.update(state=state, state_ua=title, icon=icon, tone=tone, missing=missing)
+    if frozen and state == "READY":
+        v["ready"], v["now"] = _ready_then(frozen, side, sym, p, fresh, lo, hi, plan_check)
     tf_txt = TF_UA.get(ctf or "M15", "15-хвилинному")
     if state == "WAIT":
         if p is not None and hi is not None and ((side != "SHORT" and p > hi) or (side == "SHORT" and lo is not None and p < lo)):
@@ -263,6 +266,9 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         v["headline"] = "Зараз не входити. План ще не готовий: " + "; ".join(m.rstrip(".") for m in missing) + "."
     elif state == "OBSERVE":
         v["headline"] = "Плану ще немає: Лев лише стежить за рівнем. Входити не можна."
+    elif state == "READY" and v.get("ready"):
+        v["headline"] = f"План підтверджено о {v['ready']['at_hhmm']} (Київ). " + ("Вхід за цим планом ще можна розглядати." if v["now"]["eligible"] is True else
+                        ("Новий вхід за цим планом зараз не розглядати." if v["now"]["eligible"] is False else "Чи можна входити зараз — не перевірено (немає свіжої ціни)."))
     elif state == "READY":
         v["headline"] = "Умови виконано. Рішення про вхід — твоє, ордер Офіс не ставить."
     elif state == "CANCELLED":
@@ -301,6 +307,59 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         v["prelim"] = prelim
         v["prelim_note"] = "Попередньо. Не для входу. Стоп, ризик і потенціал покажемо після підтвердження й конкретної ціни входу."
     return v
+
+
+def _plain_confirms(tags: List[str]) -> str:
+    try:
+        from office_user_messages import plain_confirms
+
+        return plain_confirms([str(t) for t in tags])
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float], fresh: bool, lo: Optional[float], hi: Optional[float], plan_check) -> tuple:
+    """READY (історичний перехід, незмінний знімок) ≠ можливість увійти ЗАРАЗ (жива перевірка тим самим правилом гейта від поточної ціни)."""
+    from office_ready_core import kyiv_stamp
+
+    g = plan.get("gate") or {}
+    conf = g.get("confirm") or {}
+    ts = _f(plan.get("confirmed_ts"))
+    try:
+        from zoneinfo import ZoneInfo
+
+        hhmm = datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Kyiv")).strftime("%H:%M") if ts else ""
+    except Exception:  # noqa: BLE001
+        hhmm = ""
+    ready = {"at": ts, "at_hhmm": hhmm, "at_stamp": kyiv_stamp(ts) if ts else "", "entry": px(plan.get("entry"), sym), "max_entry": px(plan.get("max_entry"), sym) if plan.get("max_entry") else None,
+             "rr_net": g.get("rr_net"), "rr_weighted": g.get("rr_weighted"), "rr_rule": g.get("rr_rule"), "risk_pct": g.get("risk_pct"),
+             "confirm_tags": conf.get("tags") or [], "confirm_ua": _plain_confirms(conf.get("tags") or []), "confirm_mode": conf.get("mode"), "confirm_detail": conf.get("detail"),
+             "valid_until": kyiv_stamp(float(plan["valid_until_ts"])) if _f(plan.get("valid_until_ts")) else None}
+    now_v: Dict[str, Any] = {"eligible": None, "reasons": [], "price": px(price, sym) if fresh else None}
+    if not fresh or price is None:
+        return ready, now_v
+    reasons: List[str] = []
+    try:
+        from office_alert_gate import max_entry_price, rr_gate
+
+        sl, t1, t2 = _f(plan.get("sl")), _f(plan.get("tp1")), _f(plan.get("tp2"))
+        me = max_entry_price(side, sl, t1, t2)
+        if me is not None and ((side != "SHORT" and price > me) or (side == "SHORT" and price < me)):
+            reasons.append(f"ціна вже за межею входу ({px(me, sym)})")
+        gg = rr_gate(price, sl, t1, t2)
+        now_v["rr_net"], now_v["rr_weighted"] = gg.get("rr_net"), gg.get("rr_weighted")
+        if not gg.get("ok") and gg.get("reason"):
+            reasons.append(str(gg["reason"]).rstrip("."))
+        if plan_check:
+            bad = plan_check(sym, side, {"entry": price, "sl": sl, "tp1": t1, "tp2": t2}, lo, hi)
+            if bad and str(bad).rstrip(".") not in reasons and "Потенціал" not in str(bad):
+                reasons.append(str(bad).rstrip("."))
+    except Exception:  # noqa: BLE001
+        now_v["eligible"] = None
+        return ready, now_v
+    now_v["reasons"] = reasons
+    now_v["eligible"] = not reasons
+    return ready, now_v
 
 
 def list_label(row: Dict[str, Any]) -> Dict[str, str]:

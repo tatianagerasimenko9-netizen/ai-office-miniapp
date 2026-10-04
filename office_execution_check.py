@@ -39,6 +39,7 @@ def execution_checks(
     min_rr: float,
     min_tp1_pct: float,
     news: Optional[tuple] = None,
+    tp2: Any = None,
 ) -> Dict[str, Any]:
     side = str(direction or "").upper()
     lo, hi, s, t, px = _f(zone_lo), _f(zone_hi), _f(sl), _f(tp1), _f(price)
@@ -68,9 +69,17 @@ def execution_checks(
                            else ("ціна в зоні входу" if in_zone else "ціна ще не в зоні")))
         risk = abs(fill - s)
         reward = abs(t - fill)
-        rr = reward / risk if risk > 0 else 0.0
-        checks.append(_chk("rr", f"RR ≥ 1:{min_rr:g} від фактичної ціни", "OK" if rr + 1e-9 >= min_rr else "FAIL",
-                           f"RR 1:{rr:.2f} від {'ціни' if in_zone else 'межі зони'}"))
+        # RR — за ТИМ САМИМ правилом, що й гейт READY (office_alert_gate.rr_gate: комісії, зважений RR при записаному TP2), а не «до TP1 без комісій»
+        from office_alert_gate import rr_gate
+
+        g = rr_gate(fill, s, t, _f(tp2))
+        if g.get("rr_net") is None:
+            checks.append(_chk("rr", "RR за правилом гейта від фактичної ціни", "UNAVAILABLE", "не вдалося порахувати"))
+        else:
+            tail = f"; зважений {g['rr_weighted']:.2f}" if g.get("rule") == "weighted" and _f(tp2) is not None else ""
+            checks.append(_chk("rr", "RR за правилом гейта від фактичної ціни", "OK" if g["ok"] else "FAIL",
+                               f"RR після комісій до TP1 {g['rr_net']:.2f}{tail} (від {'ціни' if in_zone else 'межі зони'}); потрібно: " +
+                               ("зважений ≥ 1,5 і до TP1 ≥ 1,0" if g.get("rule") == "weighted" and _f(tp2) is not None else f"≥ {min_rr:g}")))
         pct = reward / fill * 100 if fill else 0.0
         checks.append(_chk("space", f"Простір до TP1 ≥ {min_tp1_pct:g}%", "OK" if pct + 1e-9 >= min_tp1_pct else "FAIL",
                            f"до TP1 {pct:.2f}%"))

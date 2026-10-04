@@ -6922,6 +6922,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                         if plan_bad:  # умови збіглися, але плану для входу немає: внутрішній стан, у Telegram не шлемо; результат відстежуємо мовчки
                             if okey not in _CONFIRM_REJECT_LOGGED:
                                 _CONFIRM_REJECT_LOGGED.add(okey)
+                                if await asyncio.to_thread(_trk.rejected_recently, db_path, okey, str(plan_bad)[:200]):
+                                    continue
                                 print(f"[confluence] confirm без готового плану {key}: {plan_bad} — мовчу, стан лише в Mini App")
                                 try:
                                     _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
