@@ -160,7 +160,7 @@ import office_user_messages as um  # noqa: E402
 al3 = mb.alignment(mr, direction="LONG", coin="SOON", coin_1h=flat(0.47), btc_1h=flat(0.08), bph=4)
 card = um.ready_signal(symbol="SOONUSDT", direction="LONG", entry=0.3617, sl=0.35426, tp1=0.3729, tp2=0.3809, valid_until="05.10 20:35",
                        setup="Спадний клин", why=["Вхід 0,3617 — у зоні 0,3614–0,3622"], market=mb.signal_lines(mr, al3) + ts.lines(s, "BTC"))
-check("Ринок: перевага ЗМІШАНА (2 за LONG, 0 за SHORT із 4)" in card and "Напрямок: ринок змішаний, переваги немає" in card, card)
+check("Ринок: перевага ЗМІШАНА (2 за LONG, 0 за SHORT, 2 без руху — із 4)" in card and "Напрямок: ринок змішаний, переваги немає" in card, card)
 check(card.index("Ринок:") < card.index("Вхід:"), "ринок — до рівнів")
 for t in card.split("\n"):
     check(not lang.problems(t), (t, lang.problems(t)))
