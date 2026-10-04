@@ -434,6 +434,28 @@ def scenarios_payload(*, watching: bool = False) -> Dict[str, Any]:
     }
 
 
+def market_payload() -> Dict[str, Any]:
+    """«📊 РИНОК ЗАРАЗ»: перевага ринку з чесних лічильників + активні плани. Свічки збираються у фоні; поки їх немає — pending."""
+    import office_market_bias as mb
+    import office_market_view as mv
+
+    mv.refresh_async()
+    base = mv.cached()
+    if not base or not base.get("market"):
+        return {"ok": True, "pending": not base, "lines": [], "data_status": "PENDING" if not base else "DATA_UNAVAILABLE"}
+    port = None
+    try:
+        import office_ready_core as rc
+
+        port = mb.portfolio([p for p in rc.unfinished_ready(_db())
+                             if not rc.is_expired(p.get("valid_until_ts"))])
+    except Exception:  # noqa: BLE001
+        port = None
+    m = base["market"]
+    return {"ok": True, "pending": False, "bias": m["bias"], "lines": mb.brief_lines(m, port), "built_at": base.get("built_at"),
+            "not_connected": mb.NOT_CONNECTED, "data_status": "DATA_OK"}
+
+
 def scenario_detail(sid: str) -> Dict[str, Any]:
     sid = str(sid or "").strip()
     if not sid:
@@ -1358,7 +1380,7 @@ def risk_payload() -> Dict[str, Any]:
 
 
 _DB_PROBE: Dict[str, Any] = {"ts": 0.0, "ok": True}
-DB_FREE_PATHS = ("/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/chart_context", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
+DB_FREE_PATHS = ("/api/v2/market", "/api/v2/lev", "/api/v2/watches", "/api/v2/candles", "/api/v2/channel", "/api/v2/chart_context", "/api/v2/levels", "/api/v2/session", "/api/v2/settings")
 
 
 def db_alive(*, ttl: float = 5.0) -> bool:

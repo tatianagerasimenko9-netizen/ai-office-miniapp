@@ -1380,6 +1380,7 @@ class Handler(BaseHTTPRequestHandler):
                 session_payload,
                 scenario_detail,
                 scenarios_payload,
+                market_payload,
                 settings_payload,
                 trade_detail,
                 trades_payload,
@@ -1399,6 +1400,8 @@ class Handler(BaseHTTPRequestHandler):
                         "order_authorized": False}
             elif u.path == "/api/v2/home":
                 data = home_v2()
+            elif u.path == "/api/v2/market":
+                data = market_payload()
             elif u.path == "/api/v2/scenarios":
                 data = scenarios_payload(watching=_q("watching") in ("1", "true"))
             elif u.path == "/api/v2/scenario":

@@ -86,3 +86,30 @@ def for_signal(symbol: str, direction: str, now: Optional[float] = None) -> Dict
         return {"lines": lines, "calendar": cal, "snapshot": snap}
     except Exception:  # noqa: BLE001
         return {}
+
+
+_BUILDING = {"on": False}
+
+
+def cached() -> Optional[Dict[str, Any]]:
+    """Останній зібраний стан ринку без мережі (або None)."""
+    with _LOCK:
+        return _CACHE["v"] or None
+
+
+def refresh_async(max_age: float = TTL_SEC) -> None:
+    """Оновити стан ринку у фоні, якщо він застарів: запит Mini App не чекає на десятки запитів до біржі."""
+    now = time.time()
+    with _LOCK:
+        if _BUILDING["on"] or (_CACHE["v"] is not None and now - _CACHE["at"] < max_age):
+            return
+        _BUILDING["on"] = True
+
+    def run() -> None:
+        try:
+            build_market(time.time(), force=True)
+        finally:
+            with _LOCK:
+                _BUILDING["on"] = False
+
+    threading.Thread(target=run, name="market-view", daemon=True).start()
