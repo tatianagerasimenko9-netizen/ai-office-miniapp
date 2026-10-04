@@ -193,7 +193,7 @@ def _pct_txt(price: Any, entry: Any, sign: str) -> str:
 
 
 def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
-                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: str = "") -> str:
+                 size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: Any = "") -> str:
     """Готовий сигнал для Telegram: висновок → сетап (з реально збережених підстав) → 1–2 причини з цифрами → ринок (лише якщо його реально рахує модуль) → ціни з відстанню у %.
     Просто й українською, без жаргону. Немає запису про підтвердження — чесно «підтвердження не збережене», назву не вигадуємо.
     TP2/TP3 — лише якщо підтверджені; аргументи цін — числа (dict {'price'} теж приймаємо)."""
@@ -212,7 +212,9 @@ def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
         wl = [str(x) for x in (why or []) if str(x).strip()]
         if wl:
             L.append("Чому: " + "; ".join(wl[:2]))
-        if market:
+        if isinstance(market, (list, tuple)):   # готові рядки «Ринок / BTC / монета / Напрямок» з office_market_bias.signal_lines
+            L += [str(x) for x in market if str(x).strip()]
+        elif market:
             L.append(f"Ринок: {market}")
         L.append("")
     L += [ent, f"Стоп: {_px(sl, symbol)}" + _pct_txt(sl, entry, "−"), f"TP1: {_px(tp1, symbol)}" + _pct_txt(tp1, entry, "+")]

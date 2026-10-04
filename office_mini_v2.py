@@ -580,6 +580,7 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
     v = build(row, thesis=thesis, price=price, targets=targets, events=events, plan_check=_check, plan=plan)
     if other:
         v["data_source"] = other
+        _pause_now(v, sym, other)
         v["data_source_ua"] = f"Дані з резервного ринку: {source_ua(other)}. Спостереження триває, план входу — лише за ф'ючерсними свічками Binance."
     if v.get("state") == "READY" and not plan:
         try:  # цілі 2/3 від фактичного входу, а не від середини зони (лише для рядків без збереженого плану)
@@ -590,6 +591,29 @@ def _human_view(row: Dict[str, Any], thesis: Optional[Dict[str, Any]], events: L
         except Exception:  # noqa: BLE001
             pass
     return v
+
+
+def _pause_now(v: Dict[str, Any], sym: str, other: str) -> None:
+    """Готовий план лишається готовим (знімок не змінюється), але «Зараз» стає ПРИЗУПИНЕНО: джерело даних тимчасово не ф'ючерси Binance."""
+    from office_market_data import fallback_info, source_ua
+
+    nw = v.get("now")
+    if not isinstance(nw, dict):
+        return
+    fi = fallback_info(sym) or {}
+    since = ""
+    try:
+        from office_ready_core import kyiv_stamp
+
+        since = kyiv_stamp(float(fi["since"])).split(" ")[-1] if fi.get("since") else ""
+    except Exception:  # noqa: BLE001
+        since = ""
+    nw["eligible"] = None
+    nw["paused"] = {"title": "⚠️ ПЛАН ПРИЗУПИНЕНО",
+                    "reason": f"Ф'ючерси Binance недоступні{(' з ' + since) if since else ''}; зараз ціни тільки зі спота ({source_ua(other)})." if "spot" in other else
+                              f"Ф'ючерси Binance недоступні{(' з ' + since) if since else ''}; зараз ціни з іншого ринку ({source_ua(other)}).",
+                    "action": "Новий вхід не підтверджуємо. Рівні плану (вхід, стоп, цілі) не змінилися.", "since": fi.get("since")}
+    nw["reasons"] = []
 
 
 def v_entry(row: Dict[str, Any]) -> float:

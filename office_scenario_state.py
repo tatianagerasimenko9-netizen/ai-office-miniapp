@@ -353,6 +353,8 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
     except Exception:  # noqa: BLE001
         st = {"name": None, "why": [], "objects": []}
     ready["setup"] = st
+    ctx = g.get("context") or {}   # ринок і календар НА МОМЕНТ сигналу (збережено разом зі знімком; нічого не перераховуємо)
+    ready["market"] = {"lines": list(ctx.get("lines") or []), "calendar": list(ctx.get("calendar") or [])} if (ctx.get("lines") or ctx.get("calendar")) else None
     e0 = _f(plan.get("entry"))
 
     def _pct(x: Any) -> Optional[float]:
