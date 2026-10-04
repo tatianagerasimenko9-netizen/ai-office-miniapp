@@ -162,6 +162,14 @@ PLAIN_CONFIRM = {
 }
 
 
+# Фігури, чиї формальні критерії (Булковскі) у коді ще НЕ перевірені: користувачу — «схоже на …», а не «підтверджено». Прибрати, коли Pattern Engine 2.0 дасть статус CONFIRMED.
+UNVERIFIED_PATTERNS = ("double_top", "double_bottom", "triple_top", "triple_bottom", "head_shoulders", "inverse_head_shoulders", "ascending_triangle", "descending_triangle",
+                       "symmetrical_triangle", "rectangle", "rising_wedge", "falling_wedge", "flag", "pennant")
+for _k in UNVERIFIED_PATTERNS:
+    if _k in PLAIN_CONFIRM and not PLAIN_CONFIRM[_k].startswith("схоже на "):
+        PLAIN_CONFIRM[_k] = "схоже на " + PLAIN_CONFIRM[_k]
+
+
 def plain_confirms(names: List[str]) -> str:
     out = [PLAIN_CONFIRM.get(str(n).lower(), "") for n in names or []]
     return ", ".join(x for x in out if x)
