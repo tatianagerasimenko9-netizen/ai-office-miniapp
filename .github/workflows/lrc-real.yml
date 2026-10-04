@@ -1,5 +1,6 @@
 name: LRC real-data parity (research, read-only)
 on:
+  workflow_dispatch:
   push:
     branches: [claude/lrc-audit]
     paths: [".github/workflows/lrc-real.yml", "scripts/lrc_parity.py"]
