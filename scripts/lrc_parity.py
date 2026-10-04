@@ -142,9 +142,9 @@ def fetch_closes(symbol, interval, day):
 
 def real_main():
     day0 = (datetime.now(timezone.utc) - timedelta(days=3)).date()
-    days = [(day0 - timedelta(days=k)).isoformat() for k in (2, 1, 0)]
+    days = [(day0 - timedelta(days=k)).isoformat() for k in (5, 4, 3, 2, 1, 0)]
     print(f"{'symbol':8} {'end_ts':20} {'slope(pine)':>14} {'slope(office)':>14} {'max_rel_diff':>13}")
-    worst = 0.0
+    worst, compared = 0.0, 0
     for sym in ("BTCUSDT", "ETHUSDT", "SOLUSDT", "ONEUSDT", "LTCUSDT"):
         rows = []
         for d in days:
@@ -161,8 +161,12 @@ def real_main():
             p, o = pine_channel(w), office_channel(w)
             d = max(abs(p[k] - o[k]) / max(1.0, abs(p[k])) for k in FIELDS)
             worst = max(worst, d)
+            compared += 1
             print(f"{sym:8} {datetime.fromtimestamp(rows[end][0] / 1000, tz=timezone.utc).strftime('%m-%d %H:%M'):20} {p['slope']:14.8g} {o['slope']:14.8g} {d:13.3e}")
-    print("МАКС. ВІДНОСНА РІЗНИЦЯ (реальні дані):", f"{worst:.3e}")
+    if not compared:
+        print("НЕМАЄ ДАНИХ: жодного порівняння не виконано")
+        return 2
+    print(f"ПОРІВНЯНО ВІКОН: {compared}; МАКС. ВІДНОСНА РІЗНИЦЯ (реальні дані): {worst:.3e}")
     return 0 if worst < 1e-9 else 1
 
 
