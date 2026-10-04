@@ -142,6 +142,17 @@ msg = mb.reassess_message(mem, "🔴 SHORT підтверджено", plans, r)
 check("⚠️ КОНТЕКСТ ЗМІНИВСЯ" in msg and "Із 6 активних SHORT:" in msg and "4 проти нового контексту" in msg and "2 лишаються чинними" in msg, msg)
 check(mb.reassess({"state": "NEUTRAL", "side": None}, plans)["against"] == [], "без активної переваги нічого не «проти»")
 
+
+# ---------- стан не залипає: підтвердження без свіжих доказів старіє
+mc = mb.new_memory()
+mc.update(state="CONFIRMED", side="SHORT", since=1000.0, confirm=99.5, invalid=100.7, n_side=3)
+fl = feats(price=99.0, atr15_pct=0.2)    # ціна далеко за рівнем, доказів немає
+m_a, tr_a = mb.step(mc, fl, 1000.0 + 600)
+check(tr_a is not None and tr_a["to"]["state"] == "LATE", "поки свіже — LATE")
+m_b, tr_b = mb.step(mc, fl, 1000.0 + mb.HOLD_SEC + 60)
+m_b, tr_b = mb.step(m_b, fl, 1000.0 + mb.HOLD_SEC + 120)
+check(tr_b is not None and tr_b["to"]["state"] == "NEUTRAL" and "застаріло" in tr_b["reasons"][0], tr_b)
+
 if fails:
     print("FAIL:")
     for x in fails:

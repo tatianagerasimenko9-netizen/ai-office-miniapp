@@ -17,6 +17,7 @@ import office_brain_features as bf
 NEUTRAL = "NEUTRAL"
 ETH_REL_PP = 0.3          # ETH слабший/сильніший за BTC за 60 хв щонайменше на стільки п.п. — ознака ризику (гіпотеза)
 LATE_ATR_MULT = 1.0       # рух за рівнем підтвердження більший за стільки ATR(15m) — гнатися пізно
+HOLD_SEC = 7200          # ПІДТВЕРДЖЕНО/ЗАПІЗНІЛО/СЛАБШАЄ/РОЗВОРОТ без ≥2 свіжих доказів старіє й скидається в «переваги немає» (знайдено дослідженням: без цього стан залипав місяцями)
 CONFIRM_STEPS = 2         # новий стан (крім скасування/підтвердження) має втриматись стільки перевірок поспіль
 HISTORY_MAX = 200
 STATES = ("NEUTRAL", "ACCUM", "SHIFT", "CONFIRMED", "LATE", "WEAKENING", "REVERSAL")
@@ -116,13 +117,14 @@ def _beyond(side: str, price: float, level: Optional[float], above_is_short: boo
     return price < level if side == "SHORT" else price > level
 
 
-def _raw(mem: Dict[str, Any], f: Dict[str, Any], ev: Dict[str, List[Dict[str, str]]]) -> Tuple[str, Optional[str], str, bool]:
+def _raw(mem: Dict[str, Any], f: Dict[str, Any], ev: Dict[str, List[Dict[str, str]]], now: float = 0.0) -> Tuple[str, Optional[str], str, bool]:
     """(стан, сторона, пояснення, негайно). «Негайно» — без очікування CONFIRM_STEPS: скасування, підтвердження, запізнення."""
     price = f["price"]
     nL, nS = len(ev["LONG"]), len(ev["SHORT"])
     cur, cs = mem["state"], mem["side"]
     opp = "LONG" if cs == "SHORT" else "SHORT"
-    if cur != NEUTRAL and cs:
+    stale = bool(cur in ("CONFIRMED", "LATE", "WEAKENING", "REVERSAL") and cs and mem.get("since") and now and now - float(mem["since"]) > HOLD_SEC and len(ev[cs]) < 2)
+    if cur != NEUTRAL and cs and not stale:
         # скасування: ціна пішла за рівень, що ламає гіпотезу
         inv = mem.get("invalid")
         if inv is not None and _beyond(opp, price, inv):
@@ -152,6 +154,8 @@ def _raw(mem: Dict[str, Any], f: Dict[str, Any], ev: Dict[str, List[Dict[str, st
         return "WEAKENING", cs, f"доказів за {cs} лишилось {len(ev[cs])}", False
     if cur in ("WEAKENING", "REVERSAL") and cs and len(ev[cs]) >= 1:
         return cur, cs, "", False
+    if stale:
+        return NEUTRAL, None, f"підтвердження застаріло: минуло понад {int(HOLD_SEC // 60)} хв без свіжих доказів", False
     return NEUTRAL, None, "переваги немає", False
 
 
@@ -161,7 +165,7 @@ def step(mem: Dict[str, Any], f: Dict[str, Any], now: float) -> Tuple[Dict[str, 
     if not f.get("ok"):
         return m, None
     ev = evidence(f)
-    state, side, why, now_ = _raw(m, f, ev)
+    state, side, why, now_ = _raw(m, f, ev, now)
     if state == m["state"] and side == m["side"]:
         m["pending"] = None
         m["n_side"] = len(ev[side]) if side else 0

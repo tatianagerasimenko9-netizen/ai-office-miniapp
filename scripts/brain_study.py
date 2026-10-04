@@ -200,11 +200,17 @@ def main():
             continue
         row = {"i": i, "day": day, "S": {e["key"] for e in ev["SHORT"]}, "L": {e["key"] for e in ev["LONG"]}, "state": (mem["state"], mem["side"]), "lab": {}}
         px = close1[i]
+        row["lead"] = {}
         for h in HORIZONS:
-            hi = high1[i + 1:i + 1 + h].max() / px - 1.0
-            lo = 1.0 - low1[i + 1:i + 1 + h].min() / px
+            hs = high1[i + 1:i + 1 + h] / px - 1.0
+            ls_ = 1.0 - low1[i + 1:i + 1 + h] / px
+            hi, lo = hs.max(), ls_.max()
             thr = K * sg * math.sqrt(h)
-            row["lab"][h] = ("up" if hi >= thr and hi > lo else "down" if lo >= thr and lo > hi else None)
+            lab = ("up" if hi >= thr and hi > lo else "down" if lo >= thr and lo > hi else None)
+            row["lab"][h] = lab
+            if lab:   # скільки хвилин від моменту ознаки до першого проходу порога
+                arr = hs if lab == "up" else ls_
+                row["lead"][h] = int(np.argmax(arr >= thr)) + 1
         samples.append(row)
         n_iter += 1
     print(f"[study] зразків {len(samples)}, переходів стану {len(trans)}, {time.time() - t0:.0f} с", flush=True)
@@ -220,7 +226,10 @@ def stats(rows, pred, h):
         return None
     dn = sum(1 for r in sel if r["lab"][h] == "down") / n
     up = sum(1 for r in sel if r["lab"][h] == "up") / n
-    return {"n": n, "p_down": dn, "p_up": up, "base_down": base_dn, "base_up": base_up, "lift_down": dn / base_dn if base_dn else None, "lift_up": up / base_up if base_up else None}
+    leads_dn = [r["lead"][h] for r in sel if r["lab"][h] == "down" and h in r["lead"]]
+    leads_up = [r["lead"][h] for r in sel if r["lab"][h] == "up" and h in r["lead"]]
+    return {"n": n, "p_down": dn, "p_up": up, "base_down": base_dn, "base_up": base_up, "lift_down": dn / base_dn if base_dn else None, "lift_up": up / base_up if base_up else None,
+            "lead_down": (sum(leads_dn) / len(leads_dn)) if leads_dn else None, "lead_up": (sum(leads_up) / len(leads_up)) if leads_up else None}
 
 
 def boot_ci(rows, pred, h, which, B_=300, seed=7):
@@ -246,7 +255,9 @@ def fmt(s, which):
     p = s["p_" + which]
     b = s["base_" + which]
     l_ = s["lift_" + which]
-    return f"n={s['n']:>5} P={p * 100:4.1f}% (база {b * 100:4.1f}%) lift={l_:.2f}" if l_ else f"n={s['n']}"
+    wrong = s["p_up" if which == "down" else "p_down"]
+    lead = s.get("lead_" + which)
+    return (f"n={s['n']:>5} вірно {p * 100:4.1f}% (база {b * 100:4.1f}%) lift={l_:.2f} хибно {wrong * 100:4.1f}% без руху {(1 - p - wrong) * 100:4.1f}% випередж.≈{lead:.0f}хв" if (l_ and lead) else f"n={s['n']}")
 
 
 def report(samples, trans, btc1):

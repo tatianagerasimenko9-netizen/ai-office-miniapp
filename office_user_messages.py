@@ -194,38 +194,37 @@ def _pct_txt(price: Any, entry: Any, sign: str) -> str:
 
 def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
                  size_usdt: Any = None, risk_usd: Any = None, valid_until: str = "", setup: str = "", why: Any = None, market: Any = "") -> str:
-    """Готовий сигнал для Telegram: висновок → сетап (з реально збережених підстав) → 1–2 причини з цифрами → ринок (лише якщо його реально рахує модуль) → ціни з відстанню у %.
-    Просто й українською, без жаргону. Немає запису про підтвердження — чесно «підтвердження не збережене», назву не вигадуємо.
-    TP2/TP3 — лише якщо підтверджені; аргументи цін — числа (dict {'price'} теж приймаємо)."""
+    """Готовий сигнал для Telegram — коротко: висновок, сетап (з реально збережених підстав), ринок і рух монети проти BTC, тиждень, рівні.
+    «Чому» з цифрами — у Mini App (з того самого збереженого знімка). Рядки ринку є, лише коли їх реально пораховано. Немає запису про
+    підтвердження — чесно «підтвердження не збережене», назву не вигадуємо."""
+    def _n(v: Any) -> str:
+        return _px(v, symbol).replace(" $", "")
+
     def price_of(x: Any) -> Any:
         return x.get("price") if isinstance(x, dict) else x
 
     dot, word = _dir_head(direction)
     long_ = word == "LONG"
-    ent = f"Вхід: {_px(entry, symbol)}"
-    if max_entry is not None:
-        ent += f" (не {'вище' if long_ else 'нижче'} {_px(max_entry, symbol)})"
-    L = [f"{dot} {word} · {ticker(symbol)} · ПЛАН ГОТОВИЙ ✅", ""]
+    L = [f"{dot} {word} · {ticker(symbol)} · ГОТОВО"]
     if setup is not None and (setup or why is not None):
         name = str(setup or "").split(" · ", 1)[-1] if setup else ""
         L.append(f"Сетап: {name}" if name else "Сетап: підтвердження для цього сигналу не збережене")
-        wl = [str(x) for x in (why or []) if str(x).strip()]
-        if wl:
-            L.append("Чому: " + "; ".join(wl[:2]))
-        if isinstance(market, (list, tuple)):   # готові рядки «Ринок / BTC / монета / Напрямок» з office_market_bias.signal_lines
-            L += [str(x) for x in market if str(x).strip()]
-        elif market:
-            L.append(f"Ринок: {market}")
-        L.append("")
-    L += [ent, f"Стоп: {_px(sl, symbol)}" + _pct_txt(sl, entry, "−"), f"TP1: {_px(tp1, symbol)}" + _pct_txt(tp1, entry, "+")]
-    if price_of(tp2) is not None:
-        L.append(f"TP2: {_px(price_of(tp2), symbol)}" + _pct_txt(price_of(tp2), entry, "+"))
-    if price_of(tp3) is not None:
-        L.append(f"TP3: {_px(price_of(tp3), symbol)}" + _pct_txt(price_of(tp3), entry, "+"))
+    if isinstance(market, (list, tuple)):
+        L += [str(x) for x in market if str(x).strip()]
+    elif market:
+        L.append(f"Ринок: {market}")
+    ent = _n(entry)
+    if max_entry is not None:
+        a, b = (entry, max_entry) if long_ else (max_entry, entry)
+        ent = f"{_n(a)}–{_n(b)}"
+    L.append(f"Вхід {ent}")
+    L.append(f"SL {_n(sl)}" + _pct_txt(sl, entry, "−"))
+    tps = [f"TP{i} {_n(price_of(v))}" + _pct_txt(price_of(v), entry, "+") for i, v in ((1, tp1), (2, tp2), (3, tp3)) if price_of(v) is not None]
+    L.append(" · ".join(tps))
     if size_usdt:
-        L += ["", f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else "")]
+        L.append(f"Позиція {int(round(float(size_usdt))):,} USDT".replace(",", " ") + (f" · ризик {float(risk_usd):.0f} $" if risk_usd else ""))
     if valid_until:
-        L.append(("" if size_usdt else "") + f"⏳ Діє до {valid_until} (Київ)")
+        L.append(f"⏳ до {valid_until} (Київ)")
     return "\n".join(L)
 
 
