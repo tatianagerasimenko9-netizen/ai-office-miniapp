@@ -236,12 +236,12 @@ def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
 
 
 def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None) -> str:
-    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП). Не твердить, що угоду відкрито чи закрито: це лише рух ціни відносно рівнів плану."""
+    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП): без пояснень про стан угоди, лише факт і рівень."""
     lv = str(level or "").upper()
-    px_ = f"Ціна дійшла до {_px(price, symbol)}." if price is not None else "Ціна дійшла до цього рівня."
+    px_ = f"Ціна досягла {_px(price, symbol)}." if price is not None else "Ціна досягла рівня плану."
     if lv == "SL":
-        return f"❌ {ticker(symbol)} · СТОП\n{px_} Сценарій не спрацював.\nЦе рух ринку за планом, а не стан твоєї угоди."
-    return f"🎯 {ticker(symbol)} · ЦІЛЬ {lv[-1:]}\n{px_}\nЦе рух ринку за планом, а не стан твоєї угоди."
+        return f"❌ {ticker(symbol)} · СТОП\n{px_}\nСценарій завершено по SL."
+    return f"🎯 {ticker(symbol)} · {lv}\n{px_}"
 
 
 def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,
