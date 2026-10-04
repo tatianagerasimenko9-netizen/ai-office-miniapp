@@ -5,15 +5,16 @@ on:
 permissions:
   contents: read
 jobs:
-  phase:
+  brain2:
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install numpy
-      - name: Фаза руху на ~60 монетах × 6 міс.
-        run: python -u scripts/phase_study.py 2>&1 | tee phase_out.txt
+      - name: Market Brain v2 — ранні ознаки, початок руху, випередження
+        working-directory: scripts
+        run: python -u brain_study2.py 2>&1 | tee ../brain2_out.txt
       - uses: actions/upload-artifact@v4
-        with: {name: phase-study, path: phase_out.txt}
+        with: {name: brain2, path: brain2_out.txt}
