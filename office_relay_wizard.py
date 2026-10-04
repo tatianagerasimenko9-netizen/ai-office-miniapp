@@ -852,14 +852,18 @@ async def fetch_binance_futures_ticker(session: aiohttp.ClientSession, symbol: s
 
     if backoff_left() > 0:
         raise RuntimeError(f"binance backoff {backoff_left():.0f}s")
-    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
-    params = {"symbol": symbol.upper()}
-    async with session.get(url, params=params) as resp:
-        if resp.status in (418, 429):
-            note_rate_limited(resp.headers.get("Retry-After"))
-        if resp.status != 200:
-            raise RuntimeError(f"ticker status {resp.status}")
-        data = await resp.json()
+    import office_ws_ticker as _wst
+
+    data = _wst.get(symbol)   # один WebSocket-потік замість запиту по кожній монеті (OFFICE_WS_TICKER=1); немає даних → REST як раніше
+    if data is None:
+        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        params = {"symbol": symbol.upper()}
+        async with session.get(url, params=params) as resp:
+            if resp.status in (418, 429):
+                note_rate_limited(resp.headers.get("Retry-After"))
+            if resp.status != 200:
+                raise RuntimeError(f"ticker status {resp.status}")
+            data = await resp.json()
     last = float(data.get("lastPrice") or 0.0)
     high = float(data.get("highPrice") or 0.0)
     low = float(data.get("lowPrice") or 0.0)

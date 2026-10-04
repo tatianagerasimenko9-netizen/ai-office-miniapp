@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import office_ws_klines as _ws
+import office_ws_ticker as _ws_ticker
 
 
 JSONLike = Union[Dict[str, Any], List[Any]]
@@ -58,7 +59,7 @@ _CACHE_LOCK = threading.Lock()
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
     return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
-            "ws": _ws.stats() if _ws.enabled() else "off"}
+            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off"}
 
 
 def backoff_left() -> float:
@@ -1111,7 +1112,7 @@ def _ticker_24h_change_pct(symbol: str) -> float:
         sym = str(symbol or "").upper().strip()
         if not sym.endswith("USDT"):
             sym = f"{sym}USDT"
-        data = _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": sym})
+        data = _ws_ticker.get(sym) or _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": sym})
         if isinstance(data, dict):
             return float(data.get("priceChangePercent") or 0.0)
     except Exception:
@@ -1884,7 +1885,7 @@ def fetch_liquidations_proxy(symbol: str) -> Dict[str, Any]:
         sym = str(symbol or "").upper().strip()
         if not sym:
             return {}
-        data = _http_get_json(
+        data = _ws_ticker.get(sym) or _http_get_json(
             "https://fapi.binance.com/fapi/v1/ticker/24hr",
             {"symbol": sym},
         )
