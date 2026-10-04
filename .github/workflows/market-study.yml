@@ -1,0 +1,29 @@
+name: market-study (read-only)
+on:
+  push:
+    branches: [claude/market-study]
+permissions:
+  contents: read
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Ринок на момент READY
+        run: python scripts/market_study_ready.py study/plans.json > study/out.json || true
+      - name: Production (лише GET) — стан ALGO і джерело свічок
+        run: |
+          B=https://ai-office-miniapp.onrender.com
+          curl -s --max-time 40 "$B/api/v2/scenario?id=SCN%7CALGOUSDT%7CSHORT%7CH1%7C7c3ebff7233ba2e2" > study/algo_scenario.json || true
+          curl -s --max-time 40 "$B/api/v2/candles?symbol=ALGOUSDT&tf=M1&limit=5" > study/algo_candles.json || true
+          curl -s --max-time 40 "$B/api/v2/candles?symbol=ALGOUSDT&tf=M15&limit=5" > study/algo_candles15.json || true
+      - uses: actions/upload-artifact@v4
+        with: {name: market-study, path: study}
+      - name: Друк
+        run: |
+          cat study/out.json | head -c 60000
+          echo ----; head -c 6000 study/algo_scenario.json
+          echo; echo ----; head -c 1500 study/algo_candles.json
