@@ -132,10 +132,11 @@ def caption(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: 
 # ------------------------------------------------------------------ картинка
 BG, FG, GRID = "#0f1420", "#e8ecf3", "#1f2735"
 UP, DOWN, YEL, TPC, SLC = "#2ebd85", "#e5534b", "#f2c230", "#2ebd85", "#e5534b"
+EVC = "#7aa2ff"   # докази сетапу (фігура, рівень, FVG тощо): синій, щоб не плутати із зоною входу (жовта), SL (червоний) і TP (зелений)
 
 
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
-           ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
+           ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
         import matplotlib
@@ -190,6 +191,57 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         ax.vlines(i, l, h, color=col, linewidth=1.6, zorder=3)
         ax.add_patch(Rectangle((i - 0.33, min(o, cl)), 0.66, max(abs(cl - o), rng * 0.0015), facecolor=col, edgecolor=col, zorder=4))
     labels = []   # (y, text, colour, bold)
+    from office_patterns import _ts as _tsf
+
+    tt = [_tsf(c.get("ts")) for c in cs]
+    step = None
+    if all(t is not None for t in tt) and n > 2:
+        diffs = sorted(tt[i + 1] - tt[i] for i in range(n - 1))
+        step = diffs[len(diffs) // 2] or None
+
+    def x_of(t: Any) -> Optional[float]:
+        return None if (step is None or t is None) else (float(t) - tt[0]) / step
+
+    drawn_ev: List[str] = []
+    for it in (evidence or [])[:3]:   # докази цього READY: лише те, що дало підтвердження (office_ready_evidence)
+        try:
+            kind, lab, dw = str(it.get("kind")), str(it.get("label") or ""), it.get("draw")
+            if dw == "lines":
+                chan = kind == "channel_edge"
+                for ln in it.get("lines") or []:
+                    x0, x1 = x_of(ln["t0"]), x_of(ln["t1"])
+                    if x0 is None or x1 is None or x1 == x0:
+                        continue
+                    slope_ = (float(ln["p1"]) - float(ln["p0"])) / (x1 - x0)
+                    xs, xe = max(x0, -1.0), n - 0.5
+                    ya, yb = float(ln["p0"]) + slope_ * (xs - x0), float(ln["p0"]) + slope_ * (xe - x0)
+                    mid = chan and ln.get("role") == "mid"
+                    ax.plot([xs, xe], [ya, yb], color=EVC, linewidth=1.4 if chan else 2.6, linestyle=":" if mid else "-", alpha=0.75 if chan else 0.95, zorder=5)
+                xl = n * 0.55
+                ln0 = (it.get("lines") or [None])[0]
+                if ln0 and lab:
+                    x0, x1 = x_of(ln0["t0"]), x_of(ln0["t1"])
+                    if x0 is not None and x1 not in (None, x0):
+                        yl = float(ln0["p0"]) + (float(ln0["p1"]) - float(ln0["p0"])) / (x1 - x0) * (xl - x0)
+                        ax.text(xl, yl + rng * 0.03, lab, color=EVC, fontsize=17, fontweight="bold", ha="center", zorder=9)
+            elif dw == "band":
+                xs = max(-1.0, x_of(it.get("t0")) or -1.0)
+                ax.add_patch(Rectangle((xs, float(it["lo"])), n + 1 - xs, max(float(it["hi"]) - float(it["lo"]), rng * 0.006), facecolor=EVC, alpha=0.16, edgecolor=EVC,
+                                       linewidth=1.2, linestyle="--", zorder=1))
+                if lab:
+                    ax.text(xs + 0.6, float(it["hi"]) + rng * 0.008, lab, color=EVC, fontsize=17, fontweight="bold", va="bottom", zorder=9)
+            elif dw == "hline":
+                xs = max(-1.0, x_of(it.get("t0")) or -1.0)
+                ax.plot([xs, n - 0.5], [float(it["price"])] * 2, color=EVC, linewidth=2.0, linestyle="--", zorder=5)
+                if lab:
+                    ax.text(xs + 0.6, float(it["price"]) + rng * 0.008, lab, color=EVC, fontsize=17, fontweight="bold", va="bottom", zorder=9)
+            elif dw == "marker" and x_of(it.get("t")) is not None:
+                ax.scatter([x_of(it["t"])], [float(it["price"])], s=150, marker="v" if short else "^", color=EVC, edgecolors=BG, zorder=9)
+                if lab:
+                    ax.text(x_of(it["t"]) - 1.0, float(it["price"]) + (rng * 0.03 if short else -rng * 0.05), lab, color=EVC, fontsize=17, fontweight="bold", ha="right", zorder=9)
+            drawn_ev.append(kind)
+        except Exception:  # noqa: BLE001
+            continue
 
     def hline(y: float, col: str, ls: str = "-", lw: float = 2.0) -> None:
         ax.axhline(y, color=col, linestyle=ls, linewidth=lw, zorder=2, alpha=0.95)
@@ -237,4 +289,4 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     plt.close(fig)
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
-            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level)}}
+            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev}}

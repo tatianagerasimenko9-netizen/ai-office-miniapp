@@ -6980,6 +6980,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _gate_snap["phase30_sigma"] = _sig30
                         except Exception as exc_ph:
                             print(f"[card] фаза недоступна {sym_f}: {exc_ph}")
+                        try:   # докази цього READY (фігура/рівень/FVG/канал…) із тих самих детекторів; зберігаються у знімку й малюються на картці
+                            import office_ready_evidence as _evd
+
+                            _ev = _evd.build(_m15 if isinstance(_m15, list) else [], _dir_c, st.get("zone_lo"), st.get("zone_hi"), list(_cf.get("tags") or []))
+                            _gate_snap["evidence"] = _ev.get("items") or []
+                            if _ev.get("missing"):
+                                _gate_snap["evidence_missing"] = _ev["missing"]
+                        except Exception as exc_ev:
+                            print(f"[card] докази недоступні {sym_f}: {type(exc_ev).__name__}: {exc_ev}")
                         _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
                         _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, zone=_gate_snap.get("zone"),
@@ -6991,7 +7000,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                             _lvl = next((t for t in (_cf.get("tags") or []) if t in _card.LEVEL_TAGS), None)
                             _img = await asyncio.to_thread(
                                 _card.render, symbol=sym_f, direction=_dir_c, candles=(_m15 if isinstance(_m15, list) else []), entry=plan_px, zone=_gate_snap.get("zone"),
-                                sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, key_level=(plan_px if _lvl else None),
+                                sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, evidence=_gate_snap.get("evidence") or None,
+                                key_level=(plan_px if (_lvl and not _gate_snap.get("evidence")) else None),
                                 path=os.path.join(tempfile.gettempdir(), f"ready_{sym_f}_{int(_now_c)}.png"))
                         except Exception as exc_img:
                             _img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
