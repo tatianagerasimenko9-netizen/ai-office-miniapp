@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - name: Ринок на момент READY
-        run: python scripts/market_study_ready.py study/plans.json > study/out.txt || true
+        run: python scripts/market_study_ready.py study/plans.json > study/out.txt 2> study/err.txt || true; tail -15 study/err.txt
       - name: Коротко
         run: |
           python - <<'PY'
