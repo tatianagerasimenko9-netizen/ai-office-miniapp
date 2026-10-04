@@ -137,6 +137,25 @@ def _note_weight(headers: Any) -> None:
         _HEALTH["weight_pauses"] = _HEALTH.get("weight_pauses", 0) + 1
 
 
+def _count_rest(url: str, params: Dict[str, Any]) -> None:
+    """Облік REST-навантаження ЦЬОГО процесу: запити за типом (klines по ТФ, інші — за назвою) і оцінка витраченої ваги (klines: limit<100 → 1,
+    <500 → 2, <1000 → 5, інакше 10). Лічильник ваги в заголовку Binance — на весь IP (web + worker), цей — лише наш процес."""
+    try:
+        path = url.split("fapi.binance.com", 1)[1].split("?", 1)[0]
+        if path.endswith("/klines"):
+            lim = int((params or {}).get("limit") or 500)
+            w = 1 if lim < 100 else 2 if lim < 500 else 5 if lim < 1000 else 10
+            key = "klines_" + str((params or {}).get("interval") or "?")
+        else:
+            w = 1
+            key = path.rsplit("/", 1)[-1]
+        rb = _HEALTH.setdefault("rest_by", {})
+        rb[key] = rb.get(key, 0) + 1
+        _HEALTH["weight_est"] = _HEALTH.get("weight_est", 0) + w
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
     global _BACKOFF_UNTIL
     now = time.time()
@@ -156,6 +175,7 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
     if "fapi.binance.com" in url:
         _pace_fapi()
         _HEALTH["fapi_calls"] = _HEALTH.get("fapi_calls", 0) + 1   # скільки запитів офіс зробив у fapi (WebSocket мав би їх майже прибрати)
+        _count_rest(url, params)
     try:
         with urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
