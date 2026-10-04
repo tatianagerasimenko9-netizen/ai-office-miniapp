@@ -1,0 +1,242 @@
+"""Telegram-картка «План готовий»: короткий вертикальний текст + чиста картинка-графік з тих самих цифр плану.
+
+Текст читається за 3–5 секунд: напрям і монета, «Чому» (1–2 речення з цифрами), вхід, стоп, цілі, ризик, строк. Без ринкових рядків.
+Картинку малюємо самі (matplotlib), лише з даних сценарію: свічки, зона входу (жовта), SL, TP1–TP3, ціна READY, ключовий рівень."""
+from __future__ import annotations
+
+import hashlib
+from typing import Any, Dict, List, Optional
+
+TEMPLATE_VERSION = "ready-card-v2"
+PHASE_WARN_SIGMA = 3.0   # у Telegram фазу показуємо лише від 3σ за 30 хв; нормальна фаза мовчить
+
+LEVEL_TAGS = ("level_retest", "level_hold", "level_false_break", "sweep_pool", "sfp", "spring", "upthrust", "spring_test", "upthrust_test",
+              "double_top", "double_bottom", "triple_top", "triple_bottom", "head_shoulders", "inverse_head_shoulders")
+
+
+def _f(v: Any) -> Optional[float]:
+    try:
+        x = None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if x is None or x != x else x
+
+
+def _price(v: Any) -> Optional[float]:
+    return _f(v.get("price") if isinstance(v, dict) else v)
+
+
+def _num(v: Any, symbol: str) -> str:
+    from office_price_format import format_px
+
+    x = _f(v)
+    return "—" if x is None else format_px(x, symbol).replace(".", ",")
+
+
+def _zone(entry: Any, max_entry: Any, direction: str):
+    e, m = _f(entry), _f(max_entry)
+    if e is None:
+        return None, None
+    if m is None:
+        return e, e
+    return (min(e, m), max(e, m))
+
+
+def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: str, entry: Any, zone_lo: Any = None, zone_hi: Any = None) -> str:
+    """1–2 коротких речення з цифрами: що саме сталося з ціною (а не назва патерну). Лише з реально збережених тегів."""
+    short = str(direction or "").upper() == "SHORT"
+    ts = [str(t) for t in (tags or [])]
+    et = _num(entry, symbol)
+    lo, hi = _f(zone_lo), _f(zone_hi)
+    zt = f"{_num(min(lo, hi), symbol)}–{_num(max(lo, hi), symbol)}" if lo is not None and hi is not None else et
+    down, up = "вниз", "вгору"
+    way = down if short else up
+    back = up if short else down
+    has = lambda *k: next((t for t in k if t in ts), None)  # noqa: E731
+    first = ""
+    if has("level_retest", "level_hold"):
+        first = f"Ціна повернулась до {et} і відбилась {way}."
+    elif has("level_false_break"):
+        first = f"Ціна коротко пробила {et} і повернулась назад."
+    elif has("sweep_pool", "sfp"):
+        first = f"Ціну {'підняли над' if short else 'опустили під'} {et}, зняли стопи і повернули {way}."
+    elif has("upthrust", "upthrust_test"):
+        first = f"Ціна коротко вийшла над {zt} і повернулась під зону."
+    elif has("spring", "spring_test"):
+        first = f"Ціна коротко вийшла під {zt} і повернулась над зону."
+    elif has("fvg_retest"):
+        first = f"Ціна повернулась у розрив {zt} і відбилась {way}."
+    elif has("ob_retest"):
+        first = f"Ціна відбилась {way} від зони {zt}, звідки почався попередній рух."
+    elif has("breaker_retest"):
+        first = f"Ціна відбилась {way} від зони {zt}, яку раніше пробили."
+    elif has("double_top", "double_bottom", "triple_top", "triple_bottom", "head_shoulders", "inverse_head_shoulders"):
+        first = f"Фігура розвороту біля {et}: закриття за лінією шиї, рух {way}."
+    elif has("choch", "bos"):
+        first = f"Рух на малих свічках змінив напрямок {way}, зона {zt} утримується."
+    elif has("ote"):
+        first = f"Після різкого руху ціна відкотилась у зону {zt}."
+    elif has("displacement"):
+        first = f"Був різкий рух {way}, ціна тримається біля {et}."
+    elif next((t for t in ts if t in ("flag", "pennant", "ascending_triangle", "descending_triangle", "symmetrical_triangle", "rectangle", "rising_wedge", "falling_wedge")), None):
+        first = f"Ціна вийшла з фігури {way} і тримається біля {et}."
+    elif has("channel_edge"):
+        first = f"Ціна біля краю лінії тренду {et} і відбилась {way}."
+    elif mode == "retest":
+        first = f"Ціна пробила зону {zt} і повернулась до неї."
+    else:
+        first = f"Свічка закрилась у зоні входу {zt}."
+    second = ""
+    if has("engulf", "engulfing_ctx"):
+        second = "Підтвердила розворотна свічка."
+    elif has("pin_bar"):
+        second = "Підтвердила свічка з довгою тінню."
+    elif has("inside_bar_break"):
+        second = "Підтвердив вихід із вузької свічки."
+    return (first + (" " + second if second else "")).strip()
+
+
+def phase_sigma(closes_5m: Any, direction: str) -> Optional[float]:
+    try:
+        import office_phase as ph
+
+        return ph.sigma_extension([float(c["close"] if isinstance(c, dict) else c) for c in (closes_5m or [])], direction)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def caption(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
+            risk_usd: Any = None, valid_until: str = "", why: str = "", sigma30: Optional[float] = None) -> str:
+    from office_user_messages import _dir_head, _pct_txt, ticker
+
+    dot, word = _dir_head(direction)
+    L = [f"{dot} {word} · {ticker(symbol)}"]
+    if why:
+        L.append(f"Чому: {why}")
+    L.append("")
+    lo, hi = _zone(entry, max_entry, direction)
+    z = _num(lo, symbol) if lo == hi else f"{_num(lo, symbol)}–{_num(hi, symbol)}"
+    L.append(f"Вхід: {z}")
+    L.append(f"Стоп: {_num(sl, symbol)}" + _pct_txt(sl, entry, "−"))
+    for i, v in ((1, tp1), (2, tp2), (3, tp3)):
+        p = _price(v)
+        if p is not None:
+            L.append(f"TP{i}: {_num(p, symbol)}" + _pct_txt(p, entry, "+"))
+    if risk_usd:
+        L.append(f"Ризик: {float(risk_usd):.0f} $")
+    if sigma30 is not None and sigma30 >= PHASE_WARN_SIGMA:
+        L.append("⚠️ Рух уже розтягнутий: " + f"{sigma30:.1f}".replace(".", ",") + "σ за 30 хв.")
+    if valid_until:
+        L.append(f"⏳ до {valid_until}")
+    return "\n".join(L)
+
+
+# ------------------------------------------------------------------ картинка
+BG, FG, GRID = "#0f1420", "#e8ecf3", "#1f2735"
+UP, DOWN, YEL, TPC, SLC = "#2ebd85", "#e5534b", "#f2c230", "#2ebd85", "#e5534b"
+
+
+def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, max_entry: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
+           ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
+    """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Rectangle
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"matplotlib: {type(exc).__name__}"}
+    from office_user_messages import _dir_head, ticker
+
+    cs = [c for c in (candles or []) if all(_f(c.get(k)) is not None for k in ("open", "high", "low", "close"))][-96:]
+    if len(cs) < 12:
+        return {"ok": False, "reason": "мало свічок"}
+    short = str(direction or "").upper() == "SHORT"
+    e, sl_, t1, t2, t3 = _f(entry), _f(sl), _price(tp1), _price(tp2), _price(tp3)
+    zlo, zhi = _zone(entry, max_entry, direction)
+    if e is None or sl_ is None:
+        return {"ok": False, "reason": "немає входу/стопа"}
+    hi_c, lo_c = max(float(c["high"]) for c in cs), min(float(c["low"]) for c in cs)
+    core = [hi_c, lo_c, e, sl_] + [x for x in (t1, t2, zlo, zhi) if x is not None]
+    top, bot = max(core), min(core)
+    span = max(top - bot, e * 0.002)
+    t3_edge = False
+    if t3 is not None:
+        if abs(t3 - e) <= 1.6 * span:
+            top, bot = max(top, t3), min(bot, t3)
+        else:
+            t3_edge = True
+    pad = (top - bot) * 0.08
+    y0, y1 = bot - pad, top + pad
+    rng = y1 - y0
+    n = len(cs)
+    fig = plt.figure(figsize=(width_px / 100, height_px / 100), dpi=100, facecolor=BG)
+    ax = fig.add_axes([0.02, 0.05, 0.55, 0.80], facecolor=BG)
+    ax.set_xlim(-1, n + 1)
+    ax.set_ylim(y0, y1)
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    # зона входу — жовта, мінімум 1,4% висоти, щоб її було видно
+    zl, zh = zlo, zhi
+    mh = rng * 0.014
+    if zh - zl < mh:
+        mid = (zh + zl) / 2
+        zl, zh = mid - mh / 2, mid + mh / 2
+    ax.add_patch(Rectangle((-1, zl), n + 2, zh - zl, facecolor=YEL, alpha=0.30, edgecolor=YEL, linewidth=1.2, zorder=1))
+    for i, c in enumerate(cs):
+        o, h, l, cl = (float(c[k]) for k in ("open", "high", "low", "close"))
+        col = UP if cl >= o else DOWN
+        ax.vlines(i, l, h, color=col, linewidth=1.6, zorder=3)
+        ax.add_patch(Rectangle((i - 0.33, min(o, cl)), 0.66, max(abs(cl - o), rng * 0.0015), facecolor=col, edgecolor=col, zorder=4))
+    labels = []   # (y, text, colour, bold)
+
+    def hline(y: float, col: str, ls: str = "-", lw: float = 2.0) -> None:
+        ax.axhline(y, color=col, linestyle=ls, linewidth=lw, zorder=2, alpha=0.95)
+
+    if key_level is not None and _f(key_level) is not None and y0 < float(key_level) < y1 and abs(float(key_level) - e) > rng * 0.02:
+        hline(float(key_level), "#8b96a8", "--", 1.4)
+        labels.append((float(key_level), key_label, "#8b96a8", False))
+    hline(sl_, SLC)
+    sp = abs(sl_ - e) / e * 100
+    labels.append((sl_, f"SL  {_num(sl_, symbol)}", SLC, True))
+    for k, v in ((1, t1), (2, t2), (3, t3)):
+        if v is None or (k == 3 and t3_edge):
+            continue
+        hline(v, TPC)
+        labels.append((v, f"TP{k}  {_num(v, symbol)}", TPC, True))
+    if t3_edge:
+        up = (t3 > e)
+        ax.annotate("", xy=(n * 0.5, y1 - rng * 0.005 if up else y0 + rng * 0.005), xytext=(n * 0.5, (y1 if up else y0) + (-rng * 0.07 if up else rng * 0.07)),
+                    arrowprops=dict(arrowstyle="-|>", color=TPC, lw=3), zorder=6)
+        labels.append((y1 - rng * 0.02 if up else y0 + rng * 0.02, f"TP3  {_num(t3, symbol)}", TPC, True))
+    labels.append(((zlo + zhi) / 2, "ВХІД  " + (_num(zlo, symbol) if zlo == zhi else f"{_num(zlo, symbol)}–{_num(zhi, symbol)}"), YEL, True))
+    rp = _f(ready_price)
+    if rp is not None and y0 < rp < y1:
+        ax.scatter([n - 1], [rp], s=120, color="#ffffff", edgecolors=BG, linewidths=2, zorder=7)
+        labels.append((rp, f"READY  {_num(rp, symbol)}", "#ffffff", True))
+    # підписи справа без накладання: мінімальний крок 6,5% висоти
+    gap = rng * 0.065
+    labels.sort(key=lambda t: t[0])
+    ys: List[float] = []
+    for y, *_ in labels:
+        ys.append(y if not ys else max(y, ys[-1] + gap))
+    over = ys[-1] - (y1 - rng * 0.01) if ys else 0
+    if over > 0:
+        ys = [v - over for v in ys]
+    for i in range(len(ys) - 2, -1, -1):   # якщо зсув вгору/вниз зіткнув — розсуваємо назад
+        ys[i] = min(ys[i], ys[i + 1] - gap)
+    for (y, txt, col, bold), yy in zip(labels, ys):
+        ax.annotate(txt, xy=(n + 1, y), xytext=(n + 3.2, yy), color=col, fontsize=20, fontweight="bold" if bold else "normal", va="center", annotation_clip=False,
+                    arrowprops=dict(arrowstyle="-", color=col, lw=1.2, alpha=0.8, shrinkA=0, shrinkB=0), zorder=8)
+    dot, word = _dir_head(direction)
+    fig.text(0.03, 0.935, f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34, fontweight="bold", va="center")
+    fig.text(0.97, 0.935, f"стоп {sp:.1f}%".replace(".", ","), color=FG, fontsize=22, va="center", ha="right")
+    fig.text(0.03, 0.015, "15 хв · аналіз, не ордер", color="#6b778c", fontsize=14, va="bottom")
+    fig.savefig(path, facecolor=BG, dpi=100)
+    plt.close(fig)
+    data = open(path, "rb").read()
+    return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level)}}

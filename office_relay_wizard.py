@@ -3080,6 +3080,7 @@ async def run() -> None:
         position_open: bool = False,
         canonical_id: str = "",
         scenario_event: str = "",
+        photo_path: str = "",
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
@@ -3182,10 +3183,10 @@ async def run() -> None:
         skip_text = False
         ledger_committed = not ledger_enabled or not dedup_key
         try:
-            if ev == EVENT_SIGNAL_ENTRY:
+            if ev == EVENT_SIGNAL_ENTRY or photo_path:
                 sym = str(symbol or "").upper().strip() or _extract_first_usdt_symbol(_strip_agent_tag(message))
                 try:
-                    drawn = _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
+                    drawn = {"ok": True, "path": photo_path} if photo_path else _render_entry_chart(sym, str(direction or ""), _strip_agent_tag(message))
                 except Exception as exc_ch:
                     print(f"[chart] render failed {sym}: {type(exc_ch).__name__}: {exc_ch}")
                     drawn = {}
@@ -6897,6 +6898,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             print(f"[confluence] confirm hold {key}: {cg.get('reason')}")
                             continue
                         plan_px = fu.get("price") or px_f
+                        _m15: Any = []
                         try:
                             _m15, _d1, _w1 = await asyncio.gather(asyncio.to_thread(fetch_candles, sym_f, "15m", 96), asyncio.to_thread(fetch_candles, sym_f, "1d", 20),
                                                                   asyncio.to_thread(fetch_candles, sym_f, "1w", 4))
@@ -6965,21 +6967,59 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _gate_snap["context"] = _mctx["snapshot"]
                         except Exception as exc_mv:
                             print(f"[market] контекст сигналу недоступний {sym_f}: {exc_mv}")
+                        import office_ready_card as _card
+
+                        _cf = _gate_snap.get("confirm") or {}
+                        _risk = (float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None
+                        _sig30 = None
+                        try:   # фаза руху: у Telegram лише коли рух уже розтягнутий (≥3σ за 30 хв)
+                            _c5 = await asyncio.to_thread(fetch_candles, sym_f, "5m", 330)
+                            _sig30 = _card.phase_sigma(_c5 if isinstance(_c5, list) else [], _dir_c)
+                            if _sig30 is not None:
+                                _gate_snap["phase30_sigma"] = _sig30
+                        except Exception as exc_ph:
+                            print(f"[card] фаза недоступна {sym_f}: {exc_ph}")
+                        _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
+                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
+                        _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
+                                             risk_usd=_risk, valid_until=_rc.kyiv_stamp(_valid_c), why=_why, sigma30=_sig30)
+                        _img: Dict[str, Any] = {}
+                        try:
+                            import tempfile
+
+                            _lvl = next((t for t in (_cf.get("tags") or []) if t in _card.LEVEL_TAGS), None)
+                            _img = await asyncio.to_thread(
+                                _card.render, symbol=sym_f, direction=_dir_c, candles=(_m15 if isinstance(_m15, list) else []), entry=plan_px, max_entry=_max_e,
+                                sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, key_level=(plan_px if _lvl else None),
+                                path=os.path.join(tempfile.gettempdir(), f"ready_{sym_f}_{int(_now_c)}.png"))
+                        except Exception as exc_img:
+                            _img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
+                        if not _img.get("ok"):
+                            print(f"[card] картинка не побудована {sym_f}: {_img.get('reason')} — шлемо лише текст")
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
-                            _msgs.ready_signal(
-                                symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
-                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e, setup=str(_story.get("name") or ""), why=_story.get("why") or [], tp3_why=_gate_snap.get("tp3_why") or "",
-                                market=(list(_mctx.get("lines") or []) + list(_mctx.get("calendar") or [])) or "",
-                                size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
-                                risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
-                                valid_until=_rc.kyiv_stamp(_valid_c)),
+                            _cap,
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
                             canonical_id=okey,
                             scenario_event="CONFIRM",
+                            photo_path=str(_img.get("path") or "") if _img.get("ok") else "",
                         )
+                        try:   # аудит: що саме пішло в Telegram (текст і картинка), без секретів
+                            import base64
+                            import hashlib
+
+                            _blob = base64.b64encode(open(_img["path"], "rb").read()).decode() if _img.get("ok") and _img.get("size", 0) <= 220000 else ""
+                            log_event(db_path, "TELEGRAM_READY_SENT", {
+                                "scenario_id": okey, "symbol": sym_f, "direction": _dir_c, "template_version": _card.TEMPLATE_VERSION,
+                                "snapshot_ts": _now_c, "snapshot_sha": hashlib.sha256(json.dumps(_gate_snap, sort_keys=True, default=str).encode()).hexdigest()[:16],
+                                "message_type": "photo" if _img.get("ok") else "text", "telegram_msg_id": confirm_msg_id, "delivered": bool(confirm_msg_id),
+                                "media_ok": bool(_img.get("ok")) and bool(confirm_msg_id), "image_error": None if _img.get("ok") else _img.get("reason"),
+                                "text": _cap, "image_sha256": _img.get("sha256"), "image_size": _img.get("size"), "image_drawn": _img.get("drawn"), "image_png_b64": _blob,
+                            }, signal_id=okey)
+                        except Exception as exc_au:
+                            print(f"[card] audit failed: {type(exc_au).__name__}: {exc_au}")
                         if not confirm_msg_id:
                             print(f"[confluence] CONFIRM delivery not verified {okey}: keep pending for retry")
                             continue

@@ -36,7 +36,7 @@ assert "Сетап" not in legacy
 # події сценарію
 for lv in ("TP1", "TP2", "TP3", "SL"):
     ev = M.scenario_event(symbol="SYRUPUSDT", direction="SHORT", level=lv, price=0.26038)
-    assert not LG.problems(ev) and "Ціна дійшла до 0,26038" in ev, ev
+    assert not LG.problems(ev) and "Ціна досягла 0,26038" in ev, ev
 # довільні набори підстав: будь-яка комбінація проходить лінт
 import random  # noqa: E402
 from office_confluence import FORMAL_TAGS  # noqa: E402
