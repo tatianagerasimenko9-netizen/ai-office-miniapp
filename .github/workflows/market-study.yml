@@ -13,17 +13,19 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - name: Ринок на момент READY
-        run: python scripts/market_study_ready.py study/plans.json > study/out.json || true
-      - name: Production (лише GET) — стан ALGO і джерело свічок
+        run: python scripts/market_study_ready.py study/plans.json > study/out.txt || true
+      - name: Коротко
         run: |
-          B=https://ai-office-miniapp.onrender.com
-          curl -s --max-time 40 "$B/api/v2/scenario?id=SCN%7CALGOUSDT%7CSHORT%7CH1%7C7c3ebff7233ba2e2" > study/algo_scenario.json || true
-          curl -s --max-time 40 "$B/api/v2/candles?symbol=ALGOUSDT&tf=M1&limit=5" > study/algo_candles.json || true
-          curl -s --max-time 40 "$B/api/v2/candles?symbol=ALGOUSDT&tf=M15&limit=5" > study/algo_candles15.json || true
+          python - <<'PY'
+          import json,re
+          t=open('study/out.txt').read()
+          js=t.split('\n==== CARD')[0]
+          d=json.loads(js)
+          for p in d['plans']:
+              m=p['market']; a=p['alignment']
+              print(p['symbol'],p['direction'],'src',p['coin_src'],'| ринок',m['bias'],m['long'],'/',m['short'],'з',m['checked'],'|',[f['text'] for f in m['facts']],'| проти BTC',a['state'],a['coin_1h'],a['btc_1h'],a['rel_pp'],'corr',a['corr_btc'])
+          print('---')
+          print('\n==== CARD'+ '\n==== CARD'.join(t.split('\n==== CARD')[1:]))
+          PY
       - uses: actions/upload-artifact@v4
         with: {name: market-study, path: study}
-      - name: Друк
-        run: |
-          cat study/out.json | head -c 60000
-          echo ----; head -c 6000 study/algo_scenario.json
-          echo; echo ----; head -c 1500 study/algo_candles.json

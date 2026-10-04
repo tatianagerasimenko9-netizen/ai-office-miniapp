@@ -1,4 +1,4 @@
-[{"symbol":"ALGOUSDT","direction":"SHORT","t":1791135264.7,"entry":0.13038},
- {"symbol":"MERLUSDT","direction":"LONG","t":1791135320.0,"entry":0.03138},
- {"symbol":"XMRUSDT","direction":"LONG","t":1791135325.0,"entry":547.05},
- {"symbol":"SOONUSDT","direction":"LONG","t":1791135350.8,"entry":0.3617}]
+[{"symbol":"ALGOUSDT","direction":"SHORT","t":1791135264.7,"entry":0.13038,"sl":0.133195855,"tp1":0.12469,"tp2":0.12231,"tp3":0.10278,"max_entry":0.12935166,"tags":["level_hold"],"zone_lo":0.12924512,"zone_hi":0.13231},
+ {"symbol":"MERLUSDT","direction":"LONG","t":1791135320.0,"entry":0.03138,"sl":0.031077862,"tp1":0.03292,"tags":["falling_wedge","spring","level_retest","sfp"],"zone_lo":0.03134,"zone_hi":0.03207},
+ {"symbol":"XMRUSDT","direction":"LONG","t":1791135325.0,"entry":547.05,"sl":537.175825,"tp1":563.92,"max_entry":547.326,"tags":["ote"],"zone_lo":538.26,"zone_hi":548.24},
+ {"symbol":"SOONUSDT","direction":"LONG","t":1791135350.8,"entry":0.3617,"sl":0.354258,"tp1":0.3729,"tp2":0.3809,"max_entry":0.36322,"tags":["falling_wedge"],"zone_lo":0.3614,"zone_hi":0.3622}]
