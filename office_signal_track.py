@@ -166,6 +166,10 @@ def plan_for(db: str, scenario_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+_PROC_START = time.time()
+MILESTONE_GRACE_SEC = 900   # READY, підтверджені незадовго до запуску відстеження (доставка могла затриматись), теж відстежуємо
+
+
 def milestone_since(db: str) -> float:
     """Момент першого запуску відстеження подій сценарію: старіші READY історичні — по них повідомлень не шлемо (без лавини після деплою)."""
     from office_bridge import log_event
@@ -173,7 +177,7 @@ def milestone_since(db: str) -> float:
     ev = _events(db, EV_MILESTONE_ON)
     if ev:
         return float(ev[0]["p"].get("since") or 0.0)
-    now = time.time()
+    now = min(time.time(), _PROC_START)   # момент старту процесу, а не першого циклу: цикл може стартувати із запізненням
     log_event(db, EV_MILESTONE_ON, {"since": now}, "")
     return now
 
@@ -191,7 +195,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     out: List[Dict[str, Any]] = []
     for ev in _events(db, EV_PLAN):
         p = ev["p"]
-        if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since:
+        if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue
         sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
         if (sid, ct) in _MS_DONE:
