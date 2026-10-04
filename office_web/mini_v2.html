@@ -633,12 +633,12 @@ async function paintChart(el, s){
     const lastT=candles[candles.length-1].time;
     const seg=(t0,v0,t1,v1,o)=>{const ln=chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));
       ln.setData(t0===t1?[{time:t0,value:v0}]:[{time:t0,value:v0},{time:t1,value:v1}]); return ln;};
-    if(cx&&cx.ok&&S.layers.ch&&cx.channel&&(!s.__objs||s.__objs.includes('channel'))){
+    if(cx&&cx.ok&&S.layers.ch&&cx.channel){   /* Канал — живий аналітичний шар: показуємо, коли перемикач увімкнено, незалежно від того, чи був він причиною READY (фільтр __objs для нього прибрано) */
       const c=cx.channel;
-      seg(c.start_time,c.mid_start,c.end_time,c.mid_end,{color:'#7DA7D9',lineWidth:2});
+      seg(c.start_time,c.mid_start,c.end_time,c.mid_end,{color:'#7DA7D9',lineWidth:2,title:'канал '+(c.length||'?')+' св.',lastValueVisible:true});
       seg(c.start_time,c.upper_start,c.end_time,c.upper_end,{color:'#6F96C4',lineWidth:1,lineStyle:2});
       seg(c.start_time,c.lower_start,c.end_time,c.lower_end,{color:'#6F96C4',lineWidth:1,lineStyle:2});
-      shown.push('канал');
+      shown.push('канал'+(c.length&&c.length<100?' (лише '+c.length+' св. замість 100)':''));
     }
     if(cx&&cx.ok&&S.layers.ctx){
       if(cx.fvg&&(!s.__objs||s.__objs.includes('fvg'))){

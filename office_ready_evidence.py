@@ -10,11 +10,13 @@ from typing import Any, Dict, List, Optional
 MAX_ITEMS = 3
 PATTERNS = ("head_shoulders", "inverse_head_shoulders", "ascending_triangle", "descending_triangle", "symmetrical_triangle", "rectangle", "rising_wedge",
             "falling_wedge", "flag", "pennant")
-LABELS = {"head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "трикутник", "descending_triangle": "трикутник",
+MULTI = ("double_top", "double_bottom", "triple_top", "triple_bottom")
+LABELS = {"double_top": "подвійна вершина", "double_bottom": "подвійне дно", "triple_top": "потрійна вершина", "triple_bottom": "потрійне дно",
+          "head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "трикутник", "descending_triangle": "трикутник",
           "symmetrical_triangle": "трикутник", "rectangle": "коридор", "rising_wedge": "клин", "falling_wedge": "клин", "flag": "прапор", "pennant": "вимпел",
           "level_retest": "рівень", "level_hold": "рівень", "level_false_break": "рівень", "fvg_retest": "FVG", "ob_retest": "OB", "breaker_retest": "breaker",
           "sweep_pool": "зняли стопи", "bos": "BOS", "choch": "CHoCH", "channel_edge": "канал", "ote": "OTE", "displacement": "сильна свічка"}
-PRIORITY = list(PATTERNS) + ["level_retest", "level_hold", "level_false_break", "channel_edge", "fvg_retest", "ob_retest", "breaker_retest", "sweep_pool", "choch", "bos", "ote", "displacement"]
+PRIORITY = list(PATTERNS) + list(MULTI) + ["level_retest", "level_hold", "level_false_break", "channel_edge", "fvg_retest", "ob_retest", "breaker_retest", "sweep_pool", "choch", "bos", "ote", "displacement"]
 
 
 def _f(v: Any) -> Optional[float]:
@@ -32,13 +34,14 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
     rows = closed_only([r for r in (candles or []) if isinstance(r, dict)], now_ts)
     ts = [str(t) for t in (tags or [])]
     want = [t for t in PRIORITY if t in ts]
+    unsupported = [t for t in ts if t not in PRIORITY]   # теги підтвердження без модуля геометрії (upthrust, spring, sfp, engulf, pin_bar…): на картці їх немає, і це записується
     zl, zh = _f(zone_lo), _f(zone_hi)
     if zl is not None and zh is not None and zl > zh:
         zl, zh = zh, zl
     items: List[Dict[str, Any]] = []
     missing: List[str] = []
     if len(rows) < 12:
-        return {"items": [], "missing": want, "reason": "мало свічок"}
+        return {"items": [], "missing": want, "unsupported": unsupported, "reason": "мало свічок"}
 
     def t_at(i: int) -> Optional[float]:
         return _ts(rows[max(0, min(len(rows) - 1, int(i)))].get("ts"))
@@ -61,6 +64,17 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
                               "anchors": [{"t": ln[k], "price": ln["p" + k[1]], "role": "кінець лінії межі"} for ln in p["lines"] for k in ("t0", "t1")],
                               "proof_complete": False, "proof_note": "детектор віддає лише кінці ліній; свінги/дотики, через які їх проведено, не збережені (Pattern Engine 2.0)"}
                         break
+            elif kind in MULTI:
+                from office_patterns import find_multi
+
+                res = find_multi(candles, direction=side, n=3 if kind.startswith("triple") else 2, zone_lo=zl, zone_hi=zh, now_ts=now_ts)
+                if res and res["kind"] == kind and res.get("confirmed") and res.get("confirm"):
+                    pts = [{"t": _ts(x["ts"]), "price": float(x["price"])} for x in res["extremes"]]
+                    it = {"kind": kind, "draw": "multi", "points": pts, "neckline": float(res["neckline"]), "t_confirm": _ts(res["confirm"]["ts"]),
+                          "close": float(res["confirm"]["close"]), "detector": "office_patterns.find_multi",
+                          "rule": "екстремуми на одному рівні в допуску, розрив ≥3 свічок; підтвердження — закриття за лінією шиї",
+                          "anchors": [{"t": x["t"], "price": x["price"], "role": f"екстремум {i + 1}"} for i, x in enumerate(pts)]
+                                     + [{"t": _ts(res["confirm"]["ts"]), "price": float(res["confirm"]["close"]), "role": "закриття за шиєю"}], "proof_complete": True}
             elif kind in ("level_retest", "level_hold", "level_false_break"):
                 import office_levels as lv
 
@@ -162,25 +176,37 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
             items.append(it)
         else:
             missing.append(kind)
-    return {"items": items, "missing": missing}
+    return {"items": items, "missing": missing, "unsupported": unsupported}
 
 
 # ------------------------------------------------------------------ знімок графіка та аудит
 CHART_BARS = 96
 
 
-def freeze_chart(candles: Any, decided_ts: float, tf: str = "15m") -> Dict[str, Any]:
-    """Свічки, на яких прийнято рішення READY: точні OHLCV із часом і джерелом. Картка малює ТІЛЬКИ їх; доказ рахується з них же."""
-    import hashlib
-    import json
-
+def freeze_chart(candles: Any, decided_ts: float, tf: str = "15m", symbol: str = "") -> Dict[str, Any]:
+    """Свічки, на яких прийнято рішення READY: точні OHLCV із часом і джерелом + походження (provenance), щоб знімок можна було незалежно звірити з архівом біржі.
+    Картка малює ТІЛЬКИ ці свічки; доказ рахується з них же."""
     from office_patterns import _ts
 
     rows = [r for r in (candles or []) if isinstance(r, dict) and _ts(r.get("ts")) is not None and all(_f(r.get(k)) is not None for k in ("open", "high", "low", "close"))][-CHART_BARS:]
     data = [[_ts(r["ts"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]), _f(r.get("volume"))] for r in rows]
-    srcs = sorted({str(r.get("src")) for r in rows if r.get("src")})
-    return {"tf": tf, "source": ",".join(srcs) or "unknown", "decided_ts": float(decided_ts), "n": len(data), "range": [data[0][0], data[-1][0]] if data else None,
-            "candles": data, "sha256": ohlc_sha(data)}
+    srcs: Dict[str, int] = {}
+    for r in rows:
+        k = str(r.get("src") or "unknown")
+        srcs[k] = srcs.get(k, 0) + 1
+    step = (data[-1][0] - data[-2][0]) if len(data) >= 2 else None
+    futures = set(srcs) == {"binance_futures"}
+    exch = "Binance USDT-M Futures" if futures else ("змішане/запасне джерело: " + ",".join(sorted(srcs)))
+    return {"tf": tf, "source": ",".join(sorted(srcs)) or "unknown", "decided_ts": float(decided_ts), "n": len(data), "range": [data[0][0], data[-1][0]] if data else None,
+            "candles": data, "sha256": ohlc_sha(data),
+            "provenance": {"exchange": exch, "symbol": str(symbol or "").upper(), "interval": tf, "step_sec": step, "source_counts": srcs,
+                           "open_time_first": data[0][0] if data else None, "open_time_last": data[-1][0] if data else None,
+                           "close_time_last": (data[-1][0] + step) if (data and step) else None,
+                           "last_candle_forming": bool(data and step and data[-1][0] + step > float(decided_ts)),
+                           "received_ts": float(decided_ts), "hash_algo": "sha256 над [open_time,o,h,l,c,volume] (див. ohlc_sha)",
+                           "endpoint": "GET /fapi/v1/klines (REST) або kline-потік; які саме свічки прийшли REST, а які з WS, у знімку не позначено" if futures else None,
+                           "archive_check": "data.binance.vision/data/futures/um/daily/klines/{SYMBOL}/{interval}/ (після закінчення доби) — scripts/verify_snapshot_vs_archive.py",
+                           "known_gaps": ["не збережено, REST чи WS дав кожну свічку", "час фактичного HTTP-запиту/повідомлення не збережено: received_ts — момент заморожування знімка"]}}
 
 
 def ohlc_sha(data: Any) -> str:
