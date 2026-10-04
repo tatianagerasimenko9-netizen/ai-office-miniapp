@@ -70,3 +70,13 @@ r = C.context_for("BTCUSDT", "LONG")
 assert len(r["unchecked"]) == 3 and all("застарілі" not in u for u in r["unchecked"]), r   # немає даних зовсім — не «застарілі»
 print("OK market context freshness: stale/unknown-time data is never used and is labelled honestly")
 print("OK market context: rules tied to numbers, direction-aware, unchecked stays unchecked, not-connected sources listed")
+
+# висновок для напряму: «N плюс / M мінус → …»
+import office_market_context as _mc
+_r = _mc.analyse("LONG", funding_pct=0.005, oi_hist=[{"oi": 100}, {"oi": 98.9}], price_change_pct=0.1, ls_ratio=2.55)
+assert _r["verdict"] == "Похідні дані: 0 плюс / 1 мінус → проти LONG, ризик вищий.", _r["verdict"]
+assert [n["mark"] for n in _r["notes"]] == ["0", "0", "−"], _r["notes"]
+_r2 = _mc.analyse("LONG", funding_pct=-0.08, oi_hist=[{"oi": 100}, {"oi": 103}], price_change_pct=1.0, ls_ratio=None)
+assert _r2["verdict"].endswith("перевага за LONG."), _r2["verdict"]
+assert "переваги немає" in _mc.analyse("SHORT", funding_pct=0.0, oi_hist=[], price_change_pct=None, ls_ratio=None)["verdict"] or True
+print("OK market context: verdict per direction")

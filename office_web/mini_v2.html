@@ -96,7 +96,7 @@ details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0
 .rh .rg small{color:var(--mut);font-weight:500;font-size:11px}
 .rh .rg .sl b{color:var(--short)}.rh .rg .tp b{color:var(--long)}
 .nowbar{border-radius:14px;padding:8px 12px;margin:0 0 8px;font-size:14px;line-height:1.4;border:1px solid var(--line);background:var(--card)}
-.nowbar.g{border-color:var(--long)}.nowbar.r{border-color:var(--short)}.nowbar.n{border-color:var(--neu)}
+.nowbar.g{border-color:var(--long)}.nowbar.r{border-color:var(--short)}.nowbar.w{border-color:var(--watch)}.nowbar.n{border-color:var(--neu)}
 .nowbar b{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
 .prog{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
 .prog span{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--mut)}
@@ -700,8 +700,8 @@ function readyTop(hm,s){
   const rr=r.rr_net!=null?`RR на момент сигналу: до TP1 ${Number(r.rr_net).toFixed(2)}${r.rr_weighted!=null?` · зважений ${Number(r.rr_weighted).toFixed(2)}`:''} (після комісій)`:'';
   const nm=r.setup&&r.setup.name?esc(r.setup.name):'Підтвердження для цього сигналу не збережене (збереження почалося пізніше)';
   const now=hm.now||{};
-  const nowCls=now.eligible===true?'g':now.eligible===false?'r':'n';
-  const nowTxt=now.eligible===true?'🟢 Умови для входу за цим планом ще чинні.':now.eligible===false?`🔴 Новий вхід зараз не розглядати: ${now.reasons.map(esc).join('; ')}.`:'⚪ Чи можна входити зараз — не перевірено (немає свіжої ціни).';
+  const nowCls=now.paused?'w':now.eligible===true?'g':now.eligible===false?'r':'n';
+  const nowTxt=now.paused?`<strong>${esc(now.paused.title)}</strong> ${esc(now.paused.reason)} ${esc(now.paused.action)}`:now.eligible===true?'🟢 Умови для входу за цим планом ще чинні.':now.eligible===false?`🔴 Новий вхід зараз не розглядати: ${now.reasons.map(esc).join('; ')}.`:'⚪ Чи можна входити зараз — не перевірено (немає свіжої ціни).';
   const pr=hm.progress;
   const prog=pr?`<div class="prog">${pr.steps.map(x=>`<span class="${x.done?'on':''}">${x.done?'✓ ':''}${esc(x.label)}</span>`).join('')}${pr.stop?'<span class="stop">Досягнуто стоп-рівня сценарію</span>':''}${pr.expired?'<span class="stop">Строк вийшов, входу не було</span>':''}</div>`:'';
   return `<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
@@ -717,6 +717,7 @@ function readyBottom(hm){
   const r=hm.ready, why=(r.setup&&r.setup.why)||[];
   const src=((hm.context&&hm.context.sources)||[]).map(x=>`<span class="pill ${x.state==='on'?'ok':'watch'}">${esc(x.name)} ${x.state==='on'?'●':'○'}</span>`).join('');
   return `${why.length?`<div class="sec"><h3>Чому Лев дав сигнал</h3><ul class="why">${why.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${r.confirm_ua?`<div class="mut" style="margin-top:6px">Підтвердження: ${esc(r.confirm_ua)}</div>`:''}</div>`:''}
+    ${r.market?`<div class="sec"><h3>Ринок на момент сигналу</h3>${[].concat(r.market.lines||[],r.market.calendar||[]).map(x=>`<div class="mut">${esc(x)}</div>`).join('')}</div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
     ${src?`<div class="sec"><h3>Джерела</h3><div class="srcs">${src}</div><div class="mut" style="margin-top:6px">Деталі по кожному — у «Технічних деталях» нижче.</div></div>`:''}
     ${hm.news?`<div class="sec"><h3>Новини</h3>${newsHtml(hm.news)}</div>`:''}`;
@@ -750,7 +751,7 @@ async function openSc(id){
       ${hm.ready.confirm_ua?kv('Що підтвердило вхід',hm.ready.confirm_ua):(hm.ready.confirm_detail?kv('Що підтвердило вхід',hm.ready.confirm_detail):'<div class="mut">Дані про підтвердження для цього сигналу не збережені (збереження почалося пізніше).</div>')}
       ${hm.ready.valid_until?kv('Увійти за цим планом можна до',hm.ready.valid_until+' (Київ)'):''}</div>`:''}
     ${hm.now?`<div class="sec"><h3>Зараз</h3>
-      ${hm.now.eligible===true?'<p>Вхід за цим планом ще можна розглядати.</p>':hm.now.eligible===false?`<p>Новий вхід зараз не розглядати: ${hm.now.reasons.map(esc).join('; ')}.</p>`:'<p>Чи можна входити зараз — не перевірено (немає свіжої ціни).</p>'}
+      ${hm.now.paused?`<p>${esc(hm.now.paused.title)}. ${esc(hm.now.paused.reason)} ${esc(hm.now.paused.action)}</p>`:hm.now.eligible===true?'<p>Вхід за цим планом ще можна розглядати.</p>':hm.now.eligible===false?`<p>Новий вхід зараз не розглядати: ${hm.now.reasons.map(esc).join('; ')}.</p>`:'<p>Чи можна входити зараз — не перевірено (немає свіжої ціни).</p>'}
       ${hm.now.rr_net!=null?`<div class="mut">RR від поточної ціни ${esc(hm.now.price||'')}: до TP1 ${Number(hm.now.rr_net).toFixed(2)}${hm.now.rr_weighted!=null?` · зважений ${Number(hm.now.rr_weighted).toFixed(2)}`:''}. Це не скасовує сигнал, який уже було підтверджено.</div>`:''}</div>`:''}
     ${hm.wait?`<div class="sec"><h3>Чого чекаємо</h3><p>${esc(hm.wait)}</p></div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
@@ -758,7 +759,7 @@ async function openSc(id){
       ${hm.size&&hm.size.usdt?`<div class="kv"><span>Позиція</span><b>${esc(Math.round(hm.size.usdt))} USDT · ризик ${esc(Math.round(hm.size.risk_usd))} $</b></div>`:''}
       <div class="mut" style="margin-top:6px">${esc(hm.plan.potential)}</div>${hm.plan.valid_until?`<div class="mut" style="margin-top:6px">Увійти за планом можна до ${esc(hm.plan.valid_until)} (Київ) — верхня межа; раніше знімається, якщо ідея зламана (закриття H1 за рівнем, злам структури, ціль без входу, ціна за межею входу).</div>`:''}</div>`:''}
     ${hm.prelim?`<div class="sec"><h3>Попередньо. Не для входу</h3>${hm.prelim.map(x=>`<div class="mut">${esc(x)}</div>`).join('')}<div class="mut" style="margin-top:6px">${esc(hm.prelim_note)}</div></div>`:''}
-    ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${esc(x.text)}</div>`).join('')}
+    ${hm.context?`<div class="sec"><h3>Що ще перевірив Лев</h3>${(hm.context.notes||[]).map(x=>`<div class="mut">${x.mark?esc(x.mark)+' ':''}${esc(x.text)}</div>`).join('')}${hm.context.verdict?`<div style="margin-top:6px"><b>${esc(hm.context.verdict)}</b></div>`:''}
       ${(hm.context.unchecked||[]).length?`<div class="mut" style="margin-top:6px">Не вдалося перевірити: ${esc(hm.context.unchecked.join(', '))}.</div>`:''}
       ${(hm.context.sources||[]).length?`<div class="mut" style="margin-top:8px">Джерела даних:</div>`+(hm.context.sources||[]).map(x=>`<div class="kv"><span><span class="dot ${x.state==='on'?'ok':'warn'}"></span> ${esc(x.name)}</span><b>${x.state==='on'?'підключено':'вимкнено'}</b></div><div class="mut" style="margin:0 0 6px">${esc(x.text)}</div>`).join(''):`<div class="mut" style="margin-top:6px">Лев поки не бачить: ${esc((hm.context.not_connected||[]).join(', '))}.</div>`}
       ${(hm.context.freshness||[]).length?`<div class="mut" style="margin-top:6px">Дані станом на: ${(hm.context.freshness||[]).map(f=>esc(f.name)+' — '+(f.as_of&&f.fresh?new Date(f.as_of*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжих')).join('; ')}.</div>`:''}

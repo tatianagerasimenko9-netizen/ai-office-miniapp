@@ -140,3 +140,28 @@ if fails:
         print("  ", f)
     sys.exit(1)
 print("OK time/market: Weekly/Monthly/Quarterly, фази, перетини, лічильники, відповідність, портфель, огляд, мова")
+
+# ---- реальний випадок 04.10 17:35 UTC (MERL/XMR/SOON): BTC 4 год +0,16%, ETH +0,10%, BTC +1,07% від Weekly Open, 12 із 20 монет ростуть
+def flat(total_pct, n=40):
+    return [{"close": 100.0 * (1 + total_pct / 100.0 * max(0, i - (n - 17)) / 16.0) if i >= n - 17 else 100.0, "open": 100.0, "high": 100.0, "low": 100.0, "ts": "x"} for i in range(n)]
+
+
+bk = {f"U{i}": flat(0.8) for i in range(12)}
+bk.update({f"D{i}": flat(-0.5) for i in range(8)})
+mr = mb.assess(btc_1h=flat(0.16), eth_1h=flat(0.10), basket_1h=bk, btc_week_dist_pct=1.07, bph=4)
+check(mr["bias"] == "MIXED" and mr["long"] == 2 and mr["short"] == 0 and mr["checked"] == 4, ("2 із 4 за LONG без відриву більшості — це не «перевага LONG»", mr))
+check(abs(mr["btc_4h"] - 0.16) < 0.01, mr["btc_4h"])
+brr = mb.brief_lines(mr)
+check(brr[1] == "Перевага: ЗМІШАНА" and brr[-1] == "Висновок: чіткої переваги немає.", brr)
+
+# ---- картка READY із реальними рядками ринку: порядок і зміст
+import office_user_messages as um  # noqa: E402
+
+al3 = mb.alignment(mr, direction="LONG", coin="SOON", coin_1h=flat(0.47), btc_1h=flat(0.08), bph=4)
+card = um.ready_signal(symbol="SOONUSDT", direction="LONG", entry=0.3617, sl=0.35426, tp1=0.3729, tp2=0.3809, valid_until="05.10 20:35",
+                       setup="Спадний клин", why=["Вхід 0,3617 — у зоні 0,3614–0,3622"], market=mb.signal_lines(mr, al3) + ts.lines(s, "BTC"))
+check("Ринок: перевага ЗМІШАНА (2 за LONG, 0 за SHORT із 4)" in card and "Напрямок: ринок змішаний, переваги немає" in card, card)
+check(card.index("Ринок:") < card.index("Вхід:"), "ринок — до рівнів")
+for t in card.split("\n"):
+    check(not lang.problems(t), (t, lang.problems(t)))
+print(card)

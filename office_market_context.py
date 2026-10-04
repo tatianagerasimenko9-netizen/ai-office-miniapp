@@ -62,7 +62,7 @@ def analyse(direction: str, *, funding_pct: Optional[float], oi_hist: List[Dict[
             notes.append({"tone": "good" if long_ else "bad", "text": f"Фандинг від'ємний ({f}): багато хто вже в шортах. " +
                           ("Це працює на купівлю: шорти можуть закриватися." if long_ else "Продаж ризикованіший — можливе різке закриття шортів.")})
         else:
-            notes.append({"tone": "n", "text": f"Фандинг помірний ({f}) — перекосу натовпу немає."})
+            notes.append({"tone": "n", "text": f"Фандинг {f}: перекосу натовпу немає."})
     # 2. Відкритий інтерес + ціна (~3 год)
     oi_chg = None
     if len(oi_hist) >= 2 and _f(oi_hist[0].get("oi")) and _f(oi_hist[-1].get("oi")):
@@ -81,16 +81,28 @@ def analyse(direction: str, *, funding_pct: Optional[float], oi_hist: List[Dict[
         elif dn and oi_chg <= -OI_MOVE_PCT:
             notes.append({"tone": "good" if long_ else "bad", "text": f"Ціна падає, відкритий інтерес впав ({o}): це закриття лонгів, падіння може вичерпатись."})
         else:
-            notes.append({"tone": "n", "text": f"Відкритий інтерес майже не змінився ({o}) — нових великих позицій немає."})
+            notes.append({"tone": "n", "text": f"Відкритий інтерес {o}: нових великих позицій немає, рух не підтверджений новими грошима."})
     # 3. Співвідношення покупців і продавців
     if ls_ratio is None:
         unchecked.append("співвідношення покупців і продавців")
     else:
         r = f"{ls_ratio:.2f}".replace(".", ",")
         if ls_ratio >= LS_CROWD_HI:
-            notes.append({"tone": "bad" if long_ else "good", "text": f"Покупців значно більше, ніж продавців ({r}): натовп у купівлі."})
+            notes.append({"tone": "bad" if long_ else "good", "text": f"Покупців у {r} раза більше, ніж продавців: " + ("для LONG це мінус — натовп у купівлі, ризик переповненого LONG." if long_ else "для SHORT це плюс — натовп у купівлі вразливий.")})
         elif ls_ratio <= LS_CROWD_LO:
-            notes.append({"tone": "good" if long_ else "bad", "text": f"Продавців значно більше, ніж покупців ({r}): натовп у продажі."})
+            notes.append({"tone": "good" if long_ else "bad", "text": f"Покупців лише {r} від кількості продавців: " + ("для LONG це плюс — натовп у продажі може розвернутись." if long_ else "для SHORT це мінус — ризик переповненого SHORT.")})
+    for n in notes:   # що це означає саме для цього напрямку: плюс / мінус / нейтрально
+        n["mark"] = "+" if n["tone"] == "good" else "−" if n["tone"] == "bad" else "0"
+    g, b = sum(1 for n in notes if n["tone"] == "good"), sum(1 for n in notes if n["tone"] == "bad")
+    side = "LONG" if long_ else "SHORT"
+    if not notes:
+        verdict = "Похідних даних для висновку немає."
+    elif g > b:
+        verdict = f"Похідні дані: {g} плюс / {b} мінус → перевага за {side}."
+    elif b > g:
+        verdict = f"Похідні дані: {g} плюс / {b} мінус → проти {side}, ризик вищий."
+    else:
+        verdict = f"Похідні дані: {g} плюс / {b} мінус → переваги немає."
     nc = list(NOT_CONNECTED)
     try:
         from office_calendar import block_enabled
@@ -99,7 +111,7 @@ def analyse(direction: str, *, funding_pct: Optional[float], oi_hist: List[Dict[
             nc = [x for x in nc if "новини" not in x]
     except Exception:  # noqa: BLE001
         pass
-    return {"notes": notes, "unchecked": unchecked, "not_connected": nc,
+    return {"notes": notes, "verdict": verdict, "plus": g, "minus": b, "unchecked": unchecked, "not_connected": nc,
             "rule_note": "Це пояснення, а не сигнал: ці показники не блокують і не змінюють рішення Лева."}
 
 

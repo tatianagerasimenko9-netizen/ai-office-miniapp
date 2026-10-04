@@ -6951,11 +6951,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                                                        max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu))
                         _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
+                        _mctx: Dict[str, Any] = {}
+                        try:   # ринок і календарна структура на момент сигналу: лише з реальних свічок; збій → рядків просто немає
+                            import office_market_view as _mview
+
+                            _mctx = await asyncio.wait_for(asyncio.to_thread(_mview.for_signal, sym_f, _dir_c, _now_c), timeout=20.0) or {}
+                            if _mctx.get("snapshot"):
+                                _gate_snap["context"] = _mctx["snapshot"]
+                        except Exception as exc_mv:
+                            print(f"[market] контекст сигналу недоступний {sym_f}: {exc_mv}")
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             _msgs.ready_signal(
                                 symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
                                 tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e, setup=str(_story.get("name") or ""), why=_story.get("why") or [],
+                                market=(list(_mctx.get("lines") or []) + list(_mctx.get("calendar") or [])) or "",
                                 size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
                                 risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
                                 valid_until=_rc.kyiv_stamp(_valid_c)),

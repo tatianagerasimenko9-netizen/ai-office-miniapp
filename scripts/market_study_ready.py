@@ -95,6 +95,13 @@ def main():
             cache[sym] = any_src(sym, "1m", t_min)
         return cache[sym]
 
+    c15cache = {}
+
+    def cache15(sym, t):
+        if sym not in c15cache:
+            c15cache[sym] = any_src(sym, "15m", t_min - 22 * 3600)
+        return c15cache[sym]
+
     btc, ethr = m1("BTCUSDT"), m1("ETHUSDT")
     bsk = {s: m1(s + "USDT") for s in mb.BASKET if s != "ETH"}
     dly_btc, _ = any_src("BTCUSDT", "1d", time.time() - 110 * 86400)
@@ -112,7 +119,9 @@ def main():
         ts_btc = tstruct.snapshot(t, pb, [c for c in dly_btc if c["t"] <= t + 86400], hourly=[c for c in hr_btc if c["t"] <= t])
         market = mb.assess(btc_1h=bs, eth_1h=es, basket_1h=basket, btc_week_dist_pct=ts_btc["week"]["dist_open_pct"])
         cs = hourly_series(coin_rows, t)
-        corr = mb.corr([{"close": r["close"]} for r in coin_rows if r["t"] <= t][-120:][::5], [{"close": r["close"]} for r in rows_b if r["t"] <= t][-120:][::5])
+        c15, _s15 = any_src(sym, "15m", t - 26 * 3600)
+        b15, _sb15 = cache15("BTCUSDT", t)
+        corr = mb.corr([r for r in c15 if r["t"] <= t][-48:], [r for r in b15 if r["t"] <= t][-48:], n=47) if c15 and b15 else None
         al = mb.alignment(market, direction=p["direction"], coin=sym[:-4], coin_1h=cs, btc_1h=bs, corr_btc=corr)
         dly_coin, dsrc = any_src(sym, "1d", time.time() - 110 * 86400)
         ts_coin = tstruct.snapshot(t, px_at(coin_rows, t), [c for c in dly_coin if c["t"] <= t + 86400])
@@ -130,7 +139,28 @@ def main():
                      "week_dist": ts_coin["week"]["dist_open_pct"], "month_dist": ts_coin["month"]["dist_open_pct"], "daily_src": dsrc},
             "market": {k: market[k] for k in ("bias", "long", "short", "checked", "facts", "breadth")},
             "alignment": al, "sessions": ts_btc["sessions"], "weekday": ts_btc["weekday"]})
+    import office_ready_core as rc  # noqa: E402
+    import office_user_messages as um  # noqa: E402
+
+    for pl, src in zip(result["plans"], PLANS):
+        if not src.get("sl"):
+            continue
+        gate = rc.gate_snapshot(direction=src["direction"], entry=src["entry"], sl=src["sl"], tp1=src["tp1"], tp2=src.get("tp2"), tp3=src.get("tp3"),
+                                confirm={"mode": "inside_zone", "tags": src.get("tags") or [], "detail": "", "price": src["entry"]})
+        story = rc.story_for(symbol=src["symbol"], direction=src["direction"], confirm=gate["confirm"], gate=gate, entry=src["entry"],
+                             zone_lo=src.get("zone_lo"), zone_hi=src.get("zone_hi"), tf="H1")
+        m = pl["market"]
+        mk = {"bias": m["bias"], "long": m["long"], "short": m["short"], "checked": m["checked"]}
+        lines = mb.signal_lines(mk, pl["alignment"])
+        cal = tstruct.lines({"week": {"close_in": pl["btc"]["week_close_in"], "dist_open_pct": pl["btc"]["week_dist"], "open": pl["btc"]["week_open"], "hours_to_close": 6},
+                             "month": {"close_in": pl["btc"]["month_close_in"], "dist_open_pct": pl["btc"]["month_dist"], "open": pl["btc"]["month_open"], "hours_to_close": 999}}, "BTC")
+        pl["card"] = um.ready_signal(symbol=src["symbol"], direction=src["direction"], entry=src["entry"], sl=src["sl"], tp1=src["tp1"], tp2=src.get("tp2"), tp3=src.get("tp3"),
+                                     max_entry=src.get("max_entry"), setup=str(story.get("name") or ""), why=story.get("why") or [], market=lines + cal,
+                                     valid_until=rc.kyiv_stamp(src["t"] + 86400))
     print(json.dumps(result, ensure_ascii=False, indent=1))
+    for pl in result["plans"]:
+        if pl.get("card"):
+            print("\n==== CARD", pl["symbol"], "====\n" + pl["card"])
 
 
 if __name__ == "__main__":

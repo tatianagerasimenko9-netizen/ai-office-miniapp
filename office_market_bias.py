@@ -63,13 +63,14 @@ def _vote(x: Optional[float]) -> int:
     return 1 if x > 0 else -1
 
 
-def assess(*, btc_1h: Any, eth_1h: Any, basket_1h: Optional[Dict[str, Any]] = None, btc_week_dist_pct: Optional[float] = None) -> Dict[str, Any]:
-    """Перевага ринку за 1-годинними свічками BTC, ETH і кошика великих монет (4 год і 1 год) та положенням BTC щодо Weekly Open."""
-    b1, b4 = ret_pct(btc_1h, 1), ret_pct(btc_1h, 4)
-    e4 = ret_pct(eth_1h, 4)
+def assess(*, btc_1h: Any, eth_1h: Any, basket_1h: Optional[Dict[str, Any]] = None, btc_week_dist_pct: Optional[float] = None, bph: int = 1) -> Dict[str, Any]:
+    """Перевага ринку за свічками BTC, ETH і кошика великих монет (4 год і 1 год) та положенням BTC щодо Weekly Open.
+    bph — скільки свічок у годині (1 для 1h, 4 для 15m): зміну беремо рівно за 1 і 4 години."""
+    b1, b4 = ret_pct(btc_1h, bph), ret_pct(btc_1h, 4 * bph)
+    e4 = ret_pct(eth_1h, 4 * bph)
     up = down = n = 0
     for _, cs in (basket_1h or {}).items():
-        r = ret_pct(cs, 4)
+        r = ret_pct(cs, 4 * bph)
         if r is None:
             continue
         n += 1
@@ -93,9 +94,9 @@ def assess(*, btc_1h: Any, eth_1h: Any, basket_1h: Optional[Dict[str, Any]] = No
     shorts = sum(1 for f in facts if f["vote"] < 0)
     if not facts:
         bias = "UNKNOWN"
-    elif longs - shorts >= LEAD_MIN:
+    elif longs - shorts >= LEAD_MIN and longs * 2 > len(facts):   # перевага = відрив і більшість усіх перевірених ознак (а не лише двоє з чотирьох)
         bias = "LONG"
-    elif shorts - longs >= LEAD_MIN:
+    elif shorts - longs >= LEAD_MIN and shorts * 2 > len(facts):
         bias = "SHORT"
     else:
         bias = "MIXED"
@@ -106,10 +107,10 @@ def assess(*, btc_1h: Any, eth_1h: Any, basket_1h: Optional[Dict[str, Any]] = No
 BIAS_UA = {"LONG": "LONG", "SHORT": "SHORT", "MIXED": "ЗМІШАНА", "UNKNOWN": "не визначена"}
 
 
-def alignment(market: Dict[str, Any], *, direction: str, coin: str, coin_1h: Any, btc_1h: Any, corr_btc: Optional[float] = None) -> Dict[str, Any]:
+def alignment(market: Dict[str, Any], *, direction: str, coin: str, coin_1h: Any, btc_1h: Any, corr_btc: Optional[float] = None, bph: int = 1) -> Dict[str, Any]:
     """Сигнал проти ринку: WITH / COUNTER / MIXED / INDEPENDENT + порівняння руху монети з BTC за 1 год."""
     d = str(direction or "").upper()
-    c1, b1 = ret_pct(coin_1h, 1), ret_pct(btc_1h, 1)
+    c1, b1 = ret_pct(coin_1h, bph), ret_pct(btc_1h, bph)
     rel = round(c1 - b1, 2) if c1 is not None and b1 is not None else None
     bias = market.get("bias")
     if corr_btc is not None and corr_btc < INDEP_CORR:
@@ -132,7 +133,7 @@ def signal_lines(market: Dict[str, Any], al: Dict[str, Any]) -> List[str]:
         out.append(f"{al['coin']} 1 год: {_txt(al['coin_1h'])}")
     if al.get("rel_pp") is not None:
         word = "сильніший" if al["rel_pp"] >= 0 else "слабший"
-        out.append(f"{al['coin']} {word} за BTC на {abs(al['rel_pp']):.1f} п.п.".replace(".", ","))
+        out.append(f"{al['coin']} {word} за BTC на {abs(al['rel_pp']):.1f}".replace(".", ",") + " п.п.")
     out.append({"WITH": "Напрямок: разом із ринком ✅", "COUNTER": "Напрямок: проти ринку ⚠️", "MIXED": "Напрямок: ринок змішаний, переваги немає",
                 "INDEPENDENT": f"Напрямок: монета рухається незалежно від BTC (кореляція {str(al.get('corr_btc')).replace('.', ',')})"}[al["state"]])
     return out
@@ -163,5 +164,5 @@ def brief_lines(market: Dict[str, Any], port: Optional[Dict[str, Any]] = None) -
         if port.get("warning"):
             out.append(port["warning"])
     out.append({"LONG": "Висновок: ринок зараз більше підтримує LONG.", "SHORT": "Висновок: ринок зараз більше підтримує SHORT.",
-                "MIXED": "Висновок: чіткої переваги немає, ознаки розходяться."}[market["bias"]])
+                "MIXED": "Висновок: чіткої переваги немає."}[market["bias"]])
     return out

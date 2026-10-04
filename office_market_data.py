@@ -193,7 +193,12 @@ def _note_src(sym: str, rows: Any) -> None:
     try:
         src = (rows[-1] or {}).get("src") if isinstance(rows, list) and rows else None
         if src and src != FUTURES_SRC:
-            _FALLBACK_AT[sym] = (time.time(), src)
+            prev = _FALLBACK_AT.get(sym)
+            now = time.time()
+            since = prev[2] if prev and len(prev) > 2 and now - prev[0] <= 1800.0 else now
+            if since == now:   # початок епізоду: один рядок у логу, щоб потім можна було відновити, коли саме зник ф'ючерсний ринок
+                print(f"[data] fallback {sym}: свічки не з ф'ючерсів Binance, джерело {src}", flush=True)
+            _FALLBACK_AT[sym] = (now, src, since)
     except Exception:  # noqa: BLE001
         pass
 
@@ -206,6 +211,17 @@ def fallback_recent(symbol: str, within: float = 1800.0) -> Optional[str]:
     v = _FALLBACK_AT.get(sym)
     if v and time.time() - v[0] <= within:
         return v[1]
+    return None
+
+
+def fallback_info(symbol: str, within: float = 1800.0) -> Optional[Dict[str, Any]]:
+    """{src, since, last}: звідки зараз свічки й з якого моменту (unix) це триває; None — ф'ючерси Binance."""
+    sym = str(symbol or "").upper().strip()
+    if sym and not sym.endswith("USDT"):
+        sym += "USDT"
+    v = _FALLBACK_AT.get(sym)
+    if v and time.time() - v[0] <= within:
+        return {"src": v[1], "since": v[2] if len(v) > 2 else v[0], "last": v[0]}
     return None
 
 
