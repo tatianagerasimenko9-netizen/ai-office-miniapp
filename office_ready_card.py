@@ -202,6 +202,26 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     def x_of(t: Any) -> Optional[float]:
         return None if (step is None or t is None) else (float(t) - tt[0]) / step
 
+    renderer = fig.canvas.get_renderer()
+    placed: List[Any] = []        # зайняті прямокутники підписів (екранні координати): жоден підпис не лягає на інший
+    skipped: List[str] = []
+
+    def put(txt: str, color: str, cands: List[Any]) -> bool:
+        """Ставить підпис у першому кандидаті, де він повністю в межах графіка й не перетинає вже поставлені; немає чистого місця → без підпису (геометрія лишається)."""
+        for x, y, ha, va in cands:
+            t = ax.text(x, y, txt, color=color, fontsize=17, fontweight="bold", ha=ha, va=va, zorder=9)
+            bb = t.get_window_extent(renderer).expanded(1.06, 1.3)
+            if ax.bbox.x0 <= bb.x0 and bb.x1 <= ax.bbox.x1 and ax.bbox.y0 <= bb.y0 and bb.y1 <= ax.bbox.y1 and not any(bb.overlaps(o) for o in placed):
+                placed.append(bb)
+                return True
+            t.remove()
+        skipped.append(txt)
+        return False
+
+    def spots(x_left: float, y: float, dy: float) -> List[Any]:
+        """Кандидати для підпису біля горизонтального об'єкта: ліворуч/праворуч, над/під."""
+        return [(x_left, y + dy, "left", "bottom"), (n - 1.0, y + dy, "right", "bottom"), (x_left, y - dy, "left", "top"), (n - 1.0, y - dy, "right", "top")]
+
     drawn_ev: List[str] = []
     for it in (evidence or [])[:3]:   # докази цього READY: лише те, що дало підтвердження (office_ready_evidence)
         try:
@@ -217,28 +237,36 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
                     ya, yb = float(ln["p0"]) + slope_ * (xs - x0), float(ln["p0"]) + slope_ * (xe - x0)
                     mid = chan and ln.get("role") == "mid"
                     ax.plot([xs, xe], [ya, yb], color=EVC, linewidth=1.4 if chan else 2.6, linestyle=":" if mid else "-", alpha=0.75 if chan else 0.95, zorder=5)
-                xl = n * 0.55
                 ln0 = (it.get("lines") or [None])[0]
                 if ln0 and lab:
                     x0, x1 = x_of(ln0["t0"]), x_of(ln0["t1"])
                     if x0 is not None and x1 not in (None, x0):
-                        yl = float(ln0["p0"]) + (float(ln0["p1"]) - float(ln0["p0"])) / (x1 - x0) * (xl - x0)
-                        ax.text(xl, yl + rng * 0.03, lab, color=EVC, fontsize=17, fontweight="bold", ha="center", zorder=9)
+                        slope0 = (float(ln0["p1"]) - float(ln0["p0"])) / (x1 - x0)
+                        cands = [(max(x0, 0.0) - 0.8, float(ln0["p0"]) + slope0 * (max(x0, 0.0) - x0), "right", "center")]   # зліва від початку лінії — там зазвичай порожньо
+                        xa, xb = max(x0, 0.0), min(max(x0, x1), n - 1.0)   # лише там, де лінія реально видна на графіку
+                        for fr in (0.5, 0.3, 0.7, 0.15, 0.85):
+                            xl = xa + (xb - xa) * fr
+                            yl = float(ln0["p0"]) + (float(ln0["p1"]) - float(ln0["p0"])) / (x1 - x0) * (xl - x0)
+                            cands += [(xl, yl + rng * 0.03, "center", "bottom"), (xl, yl - rng * 0.03, "center", "top")]
+                        put(lab, EVC, cands)
             elif dw == "band":
                 xs = max(-1.0, x_of(it.get("t0")) or -1.0)
                 ax.add_patch(Rectangle((xs, float(it["lo"])), n + 1 - xs, max(float(it["hi"]) - float(it["lo"]), rng * 0.006), facecolor=EVC, alpha=0.16, edgecolor=EVC,
                                        linewidth=1.2, linestyle="--", zorder=1))
                 if lab:
-                    ax.text(xs + 0.6, float(it["hi"]) + rng * 0.008, lab, color=EVC, fontsize=17, fontweight="bold", va="bottom", zorder=9)
+                    cands = [(xs + 0.6, float(it["hi"]) + rng * 0.008, "left", "bottom"), (n - 1.0, float(it["hi"]) + rng * 0.008, "right", "bottom"),
+                             (xs + 0.6, float(it["lo"]) - rng * 0.008, "left", "top"), (n - 1.0, float(it["lo"]) - rng * 0.008, "right", "top")]
+                    put(lab, EVC, cands)
             elif dw == "hline":
                 xs = max(-1.0, x_of(it.get("t0")) or -1.0)
                 ax.plot([xs, n - 0.5], [float(it["price"])] * 2, color=EVC, linewidth=2.0, linestyle="--", zorder=5)
                 if lab:
-                    ax.text(xs + 0.6, float(it["price"]) + rng * 0.008, lab, color=EVC, fontsize=17, fontweight="bold", va="bottom", zorder=9)
+                    put(lab, EVC, spots(xs + 0.6, float(it["price"]), rng * 0.008))
             elif dw == "marker" and x_of(it.get("t")) is not None:
                 ax.scatter([x_of(it["t"])], [float(it["price"])], s=150, marker="v" if short else "^", color=EVC, edgecolors=BG, zorder=9)
                 if lab:
-                    ax.text(x_of(it["t"]) - 1.0, float(it["price"]) + (rng * 0.03 if short else -rng * 0.05), lab, color=EVC, fontsize=17, fontweight="bold", ha="right", zorder=9)
+                    xm, pm = x_of(it["t"]), float(it["price"])
+                    put(lab, EVC, [(xm - 1.0, pm, "right", "center"), (xm + 1.0, pm, "left", "center"), (xm, pm + rng * 0.04, "center", "bottom"), (xm, pm - rng * 0.04, "center", "top")])
             drawn_ev.append(kind)
         except Exception:  # noqa: BLE001
             continue
@@ -250,7 +278,6 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         hline(float(key_level), "#8b96a8", "--", 1.4)
         labels.append((float(key_level), key_label, "#8b96a8", False))
     hline(sl_, SLC)
-    sp = abs(sl_ - e) / e * 100
     labels.append((sl_, f"SL  {_num(sl_, symbol)}", SLC, True))
     for k, v in ((1, t1), (2, t2), (3, t3)):
         if v is None or (k == 3 and t3_edge):
@@ -278,15 +305,30 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         ys = [v - over for v in ys]
     for i in range(len(ys) - 2, -1, -1):   # якщо зсув вгору/вниз зіткнув — розсуваємо назад
         ys[i] = min(ys[i], ys[i + 1] - gap)
+    right_boxes: List[Any] = []
     for (y, txt, col, bold), yy in zip(labels, ys):
-        ax.annotate(txt, xy=(n + 1, y), xytext=(n + 3.2, yy), color=col, fontsize=20, fontweight="bold" if bold else "normal", va="center", annotation_clip=False,
+        ann = ax.annotate(txt, xy=(n + 1, y), xytext=(n + 3.2, yy), color=col, fontsize=20, fontweight="bold" if bold else "normal", va="center", annotation_clip=False,
                     arrowprops=dict(arrowstyle="-", color=col, lw=1.2, alpha=0.8, shrinkA=0, shrinkB=0), zorder=8)
+        right_boxes.append((txt, ann))
     dot, word = _dir_head(direction)
     fig.text(0.03, 0.935, f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34, fontweight="bold", va="center")
-    fig.text(0.97, 0.935, f"стоп {sp:.1f}%".replace(".", ","), color=FG, fontsize=22, va="center", ha="right")
     fig.text(0.03, 0.015, "15 хв · аналіз, не ордер", color="#6b778c", fontsize=14, va="bottom")
+    from matplotlib.text import Text as _Text
+
+    fig.canvas.draw()   # позиції підписів-анотацій уточнюються лише під час малювання
+    for _ in range(8):   # довгі ціни (дешеві монети): зменшуємо шрифт підписів справа, доки все не вміститься
+        if not right_boxes or max(_Text.get_window_extent(a, renderer).x1 for _t, a in right_boxes) <= fig.bbox.width - 8:
+            break
+        for _t, a in right_boxes:
+            a.set_fontsize(max(11.0, a.get_fontsize() - 1.5))
+        fig.canvas.draw()
+    fh = fig.bbox.height
+    boxes = [("ev", *(b.x0, fh - b.y1, b.x1, fh - b.y0)) for b in placed]   # екранні (піксельні) прямокутники підписів: перевірка «нічого не накладається»
+    for txt, ann in right_boxes:
+        b = _Text.get_window_extent(ann, renderer)
+        boxes.append((txt, b.x0, fh - b.y1, b.x1, fh - b.y0))
     fig.savefig(path, facecolor=BG, dpi=100)
     plt.close(fig)
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
-            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev}}
+            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "size_px": [width_px, height_px]}}
