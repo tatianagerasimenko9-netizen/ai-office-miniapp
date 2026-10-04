@@ -52,7 +52,7 @@ def record_plan(db: str, *, scenario_id: str, symbol: str, direction: str, tf: s
                             "reason": reason, "confirm_msg_id": confirm_msg_id, "gate": gate or None}, scenario_id)
 
 
-def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None, tf_sec: float = TF_SEC) -> Dict[str, Any]:
+def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None, tf_sec: float = TF_SEC, live_tail: bool = False) -> Dict[str, Any]:
     """Результат плану за свічками (за зростанням часу). Консервативно: у свічці, що зачепила і стоп, і ціль, — спершу стоп;
     у свічці заповнення входу цілі не зараховуються. status: PENDING (ще йде), NOT_FILLED, STOP, TP1/TP2/TP3 (найвища досягнута), OPEN_TIMEOUT."""
     now = time.time() if now_ts is None else now_ts
@@ -68,7 +68,9 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
     for c in candles if isinstance(candles, list) else []:
         t0 = _ts((c or {}).get("ts"))
         hi, lo = _f(c.get("high")), _f(c.get("low"))
-        if t0 is None or hi is None or lo is None or t0 + tf_sec <= t_conf or t0 + tf_sec > now or (tf_sec <= 300 and t0 < t_conf):
+        if t0 is None or hi is None or lo is None or t0 + tf_sec <= t_conf or (tf_sec <= 300 and t0 < t_conf):
+            continue
+        if t0 + tf_sec > now and not (live_tail and filled):   # свічка ще формується: для вже відкритого входу її high/low (торкання TP/SL) беремо одразу — торкання не скасовується
             continue   # до підтвердження або свічка ще не закрита
         if not filled:
             if t0 >= t_valid:
@@ -188,7 +190,7 @@ def milestone_since(db: str) -> float:
 
 _MS_DONE: set = set()   # плани, що завершені й повністю відпрацьовані в цьому процесі (не тягнемо свічки знову)
 _MS_LAST: Dict[Any, float] = {}   # останній огляд плану (для рідшого огляду старих планів)
-FRESH_SEC = 25 * 3600           # молодші плани дивимось по 1m свічках (до 1500 шт. ≈ 25 год), старші — по 5m (до 1000 шт. ≈ 83 год)
+FRESH_SEC = 6 * 3600            # молодші плани дивимось по 1m свічках (≤ ~375 шт., вага запиту 2), старші — по 5m (до 1000 шт. ≈ 83 год)
 OLD_RECHECK_SEC = 600
 SILENT_LEVELS = ("ENTRY", "EXPIRED")   # лише запис у БД (життя сценарію й статистика); у Telegram не йдуть
 
@@ -228,7 +230,13 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         if not fresh and now - _MS_LAST.get((sid, ct), 0.0) < OLD_RECHECK_SEC:
             continue
         _MS_LAST[(sid, ct)] = now
-        tf, lim, tfs = ("1m", 1500, 60.0) if fresh else ("5m", 1000, 300.0)
+        # Мінімальне навантаження на Binance REST (вага запиту росте з limit): беремо рівно стільки свічок, скільки минуло від READY (+запас)
+        if fresh:
+            tf, tfs = "1m", 60.0
+            lim = min(1500, int(age // 60) + 15)
+        else:
+            tf, tfs = "5m", 300.0
+            lim = min(1000, int(age // 300) + 20)
         try:
             candles = fetch(p["symbol"], tf, lim)
         except Exception:  # noqa: BLE001
@@ -238,7 +246,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         src = str((candles[-1] or {}).get("src") or "binance_futures") if isinstance(candles[-1], dict) else "binance_futures"
         if src != "binance_futures":   # резервний ринок (спот/Bybit) має базис: TP/SL за ним не фіксуємо, чекаємо свічки ф'ючерсів Binance
             continue
-        res = simulate(p, candles, now, tf_sec=tfs)
+        res = simulate(p, candles, now, tf_sec=tfs, live_tail=True)
         levels = _levels_of(res)
         terminal = res["status"] not in ("PENDING", "INVALID")
         if terminal and all((sid, ct, lv) in seen for lv in levels):

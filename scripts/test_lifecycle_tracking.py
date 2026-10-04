@@ -48,7 +48,8 @@ ms = run({"VVVUSDT": cv}, T0 + 3 * 60 + 1)
 assert levels(ms, "VVVUSDT") == ["ENTRY", "SL"], ms     # SL зафіксовано на 3-й хвилині, не через 15 хв
 assert [m["silent"] for m in ms if m["symbol"] == "VVVUSDT"] == [True, False]
 # ще не закрита свічка не зараховується (усередині 2-ї хвилини SL ще не видно)
-assert levels(run({"VVVUSDT": cv}, T0 + 90), "VVVUSDT") == ["ENTRY"], "незакрита свічка SL не дає"
+assert levels(run({"VVVUSDT": cv}, T0 + 90), "VVVUSDT") == ["ENTRY", "SL"], "SL у свічці, що формується, після входу фіксується одразу (торкання не скасовується)"
+assert levels(run({"VVVUSDT": cv[:1]}, T0 + 30), "VVVUSDT") == [], "вхід у ще формованій свічці не фіксуємо"
 
 # 2) LONG: вхід → TP1 → TP2 (wick без закриття теж торкання)
 plan("SCN|L|LONG|H1|1", "LLLUSDT", "LONG", 100.0, 98.0, [104.0, 107.0])
@@ -95,16 +96,16 @@ assert len(seen) == len(set(seen))
 plan("SCN|N|LONG|H1|1", "NEWUSDT", "LONG", 100.0, 98.0, [104.0], ts=BASE + 5)
 tfs = []
 run({}, BASE + 120, tfs)
-assert ("NEWUSDT", "1m", 1500) in tfs, tfs
+assert any(x[0] == "NEWUSDT" and x[1] == "1m" and x[2] <= 40 for x in tfs), tfs   # limit ≈ вік плану + запас (мала вага запиту)
 T._MS_LAST.clear()
 old_fresh = T.FRESH_SEC
 T.FRESH_SEC = 60.0
 tfs2 = []
 run({}, BASE + 3600, tfs2)
-assert ("NEWUSDT", "5m", 1000) in tfs2 and ("NEWUSDT", "1m", 1500) not in tfs2, tfs2
+assert any(x[0] == "NEWUSDT" and x[1] == "5m" for x in tfs2) and not any(x[0] == "NEWUSDT" and x[1] == "1m" for x in tfs2), tfs2
 tfs3 = []
 run({}, BASE + 3600 + 30, tfs3)
-assert ("NEWUSDT", "5m", 1000) not in tfs3, "старі плани не частіше за інтервал"
+assert not any(x[0] == "NEWUSDT" and x[1] == "5m" for x in tfs3), "старі плани не частіше за інтервал"
 T.FRESH_SEC = old_fresh
 # 10) джерело: TP/SL лише за свічками ф'ючерсів Binance; резервний ринок (спот/Bybit) подій не дає; touched_ts і src записуються
 plan("SCN|B|SHORT|H1|1", "BYBUSDT", "SHORT", 50.0, 51.0, [48.0], ts=BASE + 7)
@@ -119,4 +120,13 @@ assert sl_ev["touched_ts"] == BASE + 7 + 60 and sl_ev["src"] == "binance_futures
 T.record_milestone(db, sl_ev, 5)
 rec = [e for e in T._events(db, T.EV_MILESTONE) if e["p"].get("symbol") == "BYBUSDT" and e["p"].get("level") == "SL"][0]["p"]
 assert rec["touched_ts"] == sl_ev["touched_ts"] and rec["src"] == "binance_futures"
+# 11) торкання SL у свічці, що ще формується, після вже відкритого входу фіксується одразу; вхід у формованій свічці — ні
+plan("SCN|F|SHORT|H1|1", "FORMUSDT", "SHORT", 30.0, 30.6, [28.0], ts=BASE + 9)
+cf_closed = c1(BASE + 9, [(30.0, 30.1, 29.9, 30.0)])           # закрита свічка: вхід
+cf_forming = c1(BASE + 9 + 60, [(30.0, 30.7, 29.95, 30.5)])     # формується (now усередині неї): high >= SL
+now_f = BASE + 9 + 60 + 20
+assert levels(run({"FORMUSDT": cf_closed + cf_forming}, now_f), "FORMUSDT") == ["ENTRY", "SL"], "формована свічка після входу дає SL негайно"
+plan("SCN|F2|SHORT|H1|1", "FORM2USDT", "SHORT", 30.0, 30.6, [28.0], ts=BASE + 11)
+only_forming = c1(BASE + 11, [(30.0, 30.7, 29.9, 30.5)])
+assert levels(run({"FORM2USDT": only_forming}, BASE + 11 + 20), "FORM2USDT") == [], "вхід у формованій свічці не фіксуємо (порядок торкань невідомий)"
 print("test_lifecycle_tracking: OK")
