@@ -6910,6 +6910,17 @@ EV позитивне: {prob.get('ev_positive', '')}
                             tgt = {}
                         import office_ready_core as _rc
 
+                        _nf = _rc.non_futures_sources(ltf, _m15)
+                        if _nf:   # READY підтверджується лише на свічках Binance USDT-M Futures; запасне джерело не може підвищити сценарій до READY (вже виданий READY не переписуємо)
+                            _hk = f"nofut|{okey}"
+                            if _hk not in _CONFIRM_REJECT_LOGGED:
+                                _CONFIRM_REJECT_LOGGED.add(_hk)
+                                print(f"[confluence] confirm {key}: свічки не з Binance Futures ({', '.join(_nf)}) — READY не видаю, сценарій лишається в очікуванні")
+                                try:
+                                    log_event(db_path, "READY_HELD_NON_FUTURES", {"scenario_id": okey, "symbol": sym_f, "sources": _nf}, signal_id=okey)
+                                except Exception:
+                                    pass
+                            continue
                         _tp2_m, _tp3_m = _rc.message_targets(direction=str(st.get("direction") or ""), entry=plan_px, tp1=st.get("tp1"), tp2=st.get("tp2"),
                                                              tp3_structural=((tgt or {}).get("tp3") or {}).get("price"))
                         try:
