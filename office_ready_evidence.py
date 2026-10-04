@@ -80,7 +80,8 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
                 r120 = rows[-120:]
                 for g in smc.fvgs(r120, a)[-6:]:
                     if g["side"] == side and g["state"] == "MITIGATED" and lo_ <= g["hi"] and hi_ >= g["lo"] and g["idx"] < len(r120) - 3:
-                        it = {"kind": kind, "draw": "band", "lo": g["lo"], "hi": g["hi"], "t0": _ts(r120[max(0, g["idx"] - 1)].get("ts"))}
+                        it = {"kind": kind, "draw": "band", "lo": g["lo"], "hi": g["hi"], "t0": _ts(r120[max(0, g["idx"] - 1)].get("ts")), "t1": _ts(r120[-1].get("ts")),
+                              "direction": g["side"], "status": g["state"]}   # t0 — перша свічка трійки, t1 — остання закрита свічка (ретест)
                         break
             elif kind in ("ob_retest", "breaker_retest"):
                 lo_, hi_ = float(rows[-1]["low"]), float(rows[-1]["high"])
@@ -91,15 +92,27 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
                         break
             elif kind == "sweep_pool":
                 r120 = rows[-120:]
-                for s_ in smc.sweeps(r120, smc.liquidity_pools(r120, a), since=len(r120) - 6):
+                pools = smc.liquidity_pools(r120, a)
+                for s_ in smc.sweeps(r120, pools, since=len(r120) - 6):
                     if s_["side"] == side:
-                        it = {"kind": kind, "draw": "hline", "price": s_["level"], "t0": _ts(r120[max(0, s_["idx"] - 15)].get("ts")), "mark_t": _ts(r120[s_["idx"]].get("ts"))}
+                        pool = next((p_ for p_ in pools.get(s_["pool"], []) if p_["level"] == s_["level"]), None)
+                        c_ = r120[s_["idx"]]
+                        high_ = s_["pool"] == "BSL"
+                        it = {"kind": kind, "draw": "sweep", "price": s_["level"], "pool": s_["pool"], "type": "high" if high_ else "low",
+                              "t0": _ts(r120[pool["first"]].get("ts")) if pool else _ts(r120[max(0, s_["idx"] - 15)].get("ts")),
+                              "t_sweep": _ts(c_.get("ts")), "extreme": float(c_["high"] if high_ else c_["low"]), "close": float(c_["close"]),
+                              "touches": pool["touches"] if pool else None}
                         break
             elif kind in ("bos", "choch"):
                 r120 = rows[-120:]
+                hi_sw, lo_sw = smc.swings(r120)
                 for e in smc.structure(r120)["events"]:
                     if e["side"] == side and e["kind"] == kind and e["idx"] >= len(r120) - 4:
-                        it = {"kind": kind, "draw": "hline", "price": e["level"], "t0": _ts(r120[max(0, e["idx"] - 12)].get("ts"))}
+                        sw = hi_sw[-1] if side == "LONG" else lo_sw[-1]   # структурний свінг, за який закрилась свічка (як у office_smc.structure)
+                        if abs(sw[1] - e["level"]) > 1e-12:
+                            break
+                        it = {"kind": kind, "draw": "break", "price": e["level"], "t0": _ts(r120[sw[0]].get("ts")), "t_break": _ts(r120[e["idx"]].get("ts")),
+                              "close": float(r120[e["idx"]]["close"])}
                         break
             elif kind == "ote":
                 rng = smc.dealing_range(rows[-120:])

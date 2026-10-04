@@ -100,6 +100,7 @@ def check_card(name, res, expect_ev):
     check("SL" in names and "TP1" in names and "READY" in names and "ВХІД" in names, f"{name}: базові підписи на місці: {names}")
     check(set(d["evidence"]) == set(expect_ev), f"{name}: докази {d['evidence']} ≠ {expect_ev}")
     check(d["sl"] is not None and not math.isnan(d["sl"]), f"{name}: SL намальовано")
+    check(all(x <= 90.0 for x in d["label_dist_px"]), f"{name}: підписи не далі 90 px від своєї геометрії: {d['label_dist_px']}")
 
 
 # 1) flag + рівень: SHORT; прапор — з реального детектора на 96 свічках
@@ -121,13 +122,31 @@ rows2 = noise_rows(96, 100.0, 0.003)
 rows2 = [dict(c, ts=(T0 + timedelta(minutes=15 * i)).isoformat()) for i, c in enumerate(rows2)]
 tb = T0.timestamp()
 last = rows2[-1]["close"]
-items2 = [{"kind": "fvg_retest", "label": "FVG", "draw": "band", "lo": last * 0.998, "hi": last * 1.002, "t0": tb + 15 * 15 * 60 * 3},
-          {"kind": "sweep_pool", "label": "зняли стопи", "draw": "hline", "price": last * 1.003, "t0": tb + 15 * 60 * 40},
-          {"kind": "bos", "label": "BOS", "draw": "hline", "price": last * 0.9985, "t0": tb + 15 * 60 * 55}]
+items2 = [{"kind": "fvg_retest", "label": "FVG", "draw": "band", "lo": last * 0.998, "hi": last * 1.002, "t0": tb + 900 * 45, "t1": tb + 900 * 95, "direction": "SHORT", "status": "MITIGATED"},
+          {"kind": "sweep_pool", "label": "зняли стопи", "draw": "sweep", "price": last * 1.003, "pool": "BSL", "type": "high", "t0": tb + 900 * 40, "t_sweep": tb + 900 * 90,
+           "extreme": last * 1.006, "close": last * 1.001},
+          {"kind": "bos", "label": "BOS", "draw": "break", "price": last * 0.9985, "t0": tb + 900 * 55, "t_break": tb + 900 * 80, "close": last * 0.997}]
 r2 = rc.render(symbol="TESTUSDT", direction="SHORT", candles=rows2,
                entry=last, zone=[last * 0.999, last * 1.001], sl=last * 1.015, tp1=last * 0.97, tp2=last * 0.95, ready_price=last, evidence=items2,
                path=os.path.join(tempfile.gettempdir(), "ctl_fvg_sweep.png"))
 check_card("fvg+sweep+bos", r2, ["fvg_retest", "sweep_pool", "bos"])
+# 2b) sweep із реального детектора: рівень, тінь, закриття назад
+sw_rows = []
+for i in range(40):
+    base = 100 + 0.2 * ((i % 3) - 1)
+    h, l, o, c = base + 0.4, base - 0.4, base - 0.1, base + 0.1
+    if i in (10, 20):
+        h = 105
+    if i == 36:
+        h, c, o = 106, 103.2, 104.5
+    sw_rows.append({"ts": (T0 + timedelta(minutes=15 * i)).isoformat(), "open": o, "high": h, "low": l, "close": c})
+e_sw = ev.build(sw_rows, "SHORT", 103, 106, ["sweep_pool"])
+it_sw = e_sw["items"][0] if e_sw["items"] else {}
+check(it_sw.get("draw") == "sweep" and it_sw.get("price") == 105.0 and it_sw.get("extreme") == 106.0 and it_sw.get("close") == 103.2 and it_sw.get("type") == "high"
+      and it_sw.get("t0") and it_sw.get("t_sweep"), f"sweep: рівень, тип, екстремум, закриття, час: {e_sw}")
+r_sw = rc.render(symbol="TESTUSDT", direction="SHORT", candles=sw_rows, entry=103.0, zone=[102.5, 103.5], sl=106.5, tp1=100.0, ready_price=103.0, evidence=e_sw["items"],
+                 path=os.path.join(tempfile.gettempdir(), "ctl_sweep_real.png"))
+check_card("sweep(real)", r_sw, ["sweep_pool"])
 # 3) channel_edge — канал із реального детектора
 rows3 = []
 for i in range(120):
