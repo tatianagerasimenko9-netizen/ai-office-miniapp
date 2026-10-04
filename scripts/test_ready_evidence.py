@@ -212,7 +212,7 @@ r_dt = rc.render(symbol="TESTUSDT", direction="SHORT", candles=ev.candles_from_c
                  path=os.path.join(tempfile.gettempdir(), "ctl_double_top.png"))
 check_card("double_top", r_dt, ["double_top"])
 w_ = rc.short_why(tags=["double_top", "upthrust", "engulf"], mode=None, direction="SHORT", symbol="TESTUSDT", entry=105, zone_lo=104, zone_hi=106, prefer=["double_top"])
-check("Фігура розвороту" in w_ and "вийшла над" not in w_, f"«Чому» пояснює намальоване (подвійна вершина), а не upthrust: {w_}")
+check("фігуру розвороту" in w_ and "вийшла над" not in w_, f"«Чому» пояснює намальоване (подвійна вершина), а не upthrust: {w_}")
 w2_ = rc.short_why(tags=["double_top", "upthrust"], mode=None, direction="SHORT", symbol="TESTUSDT", entry=105, zone_lo=104, zone_hi=106)
 check("вийшла над" in w2_, "без prefer поведінка не змінилась")
 # 3) channel_edge — канал із реального детектора
