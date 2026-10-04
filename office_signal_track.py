@@ -226,6 +226,17 @@ def _levels_of(res: Dict[str, Any]) -> List[str]:
     return lv
 
 
+def _prio():
+    try:
+        from office_market_data import priority
+
+        return priority()
+    except Exception:  # noqa: BLE001
+        import contextlib
+
+        return contextlib.nullcontext()
+
+
 def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача."""
@@ -257,7 +268,8 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             tf, tfs = "5m", 300.0
             lim = min(1000, int(age // 300) + 20)
         try:
-            candles = fetch(p["symbol"], tf, lim)
+            with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
+                candles = fetch(p["symbol"], tf, lim)
         except Exception:  # noqa: BLE001
             continue
         if not isinstance(candles, list) or not candles:

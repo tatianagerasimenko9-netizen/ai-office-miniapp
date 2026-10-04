@@ -43,7 +43,9 @@ class RateLimited(Exception):
         self.retry_after = float(retry_after)
 
 
-_BACKOFF_UNTIL = 0.0
+_BACKOFF_UNTIL = 0.0       # справжня пауза: 429/418 від Binance або вага ≥ _WEIGHT_HARD — для всіх
+_SOFT_UNTIL = 0.0          # власна пауза ваги (≥ _WEIGHT_SOFT): проходять лише запити «життя READY» (priority())
+_PRIORITY = threading.local()
 _HEALTH: Dict[str, Any] = {"ok": 0, "errors": 0, "rate_limited": 0, "stale_served": 0, "last_429_at": None}
 _CANDLE_TTL = {"1m": 20, "3m": 30, "5m": 45, "15m": 60, "30m": 90, "1h": 180, "2h": 300, "4h": 600, "1d": 1800, "1w": 3600}
 _MAX_STALE = {"1m": 20 * 60, "3m": 20 * 60, "5m": 20 * 60, "15m": 30 * 60, "30m": 60 * 60, "1h": 3 * 3600, "2h": 6 * 3600,
@@ -55,13 +57,13 @@ _CACHE_LOCK = threading.Lock()
 
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
-    return {**_HEALTH, "backoff_left_sec": max(0.0, round(_BACKOFF_UNTIL - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
+    return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
             "ws": _ws.stats() if _ws.enabled() else "off"}
 
 
 def backoff_left() -> float:
     """Скільки секунд ще діє загальна пауза після 429 (для aiohttp-запитів worker, що не йдуть через _http_get_json)."""
-    return max(0.0, _BACKOFF_UNTIL - time.time())
+    return max(0.0, max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time())
 
 
 def note_rate_limited(retry_after: Any = None) -> None:
@@ -75,8 +77,21 @@ def note_rate_limited(retry_after: Any = None) -> None:
     _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()
 
 
+class priority:
+    """Контекст «життя READY»: дрібні запити свічок не чекають на власну паузу ваги (вона лише з 1800 із 2400), але поважають справжню паузу
+    (429/418 або вага ≥ 2200). Затримка TP/SL подій не має залежати від того, скільки ваги з'їли скани."""
+
+    def __enter__(self) -> "priority":
+        _PRIORITY.on = True
+        return self
+
+    def __exit__(self, *a: Any) -> None:
+        _PRIORITY.on = False
+
+
 def reset_market_cache() -> None:
-    global _BACKOFF_UNTIL
+    global _BACKOFF_UNTIL, _SOFT_UNTIL
+    _SOFT_UNTIL = 0.0
     with _CACHE_LOCK:
         _CANDLE_CACHE.clear()
     _BACKOFF_UNTIL = 0.0
@@ -88,6 +103,7 @@ _RAMP_GAP = 0.25
 _FAPI_LAST = 0.0
 _FAPI_GAP = 0.06            # ≥60 мс між запитами до fapi (~16/с): рівномірний потік замість пачки на старті
 _WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
+_WEIGHT_HARD = 2200         # після цього пауза для всіх, включно з «життям READY»
 _WEIGHT_LAST: Dict[str, Any] = {"used": None, "at": 0.0}
 _PACE_LOCK = threading.Lock()
 
@@ -104,7 +120,7 @@ def _pace_fapi() -> None:
 
 def _note_weight(headers: Any) -> None:
     """Витрачена вага за хвилину з відповіді Binance: наближаємось до ліміту → коротка пауза, поки хвилина не мине (до 429 не доводимо)."""
-    global _BACKOFF_UNTIL
+    global _BACKOFF_UNTIL, _SOFT_UNTIL
     try:
         used = int(headers.get("X-MBX-USED-WEIGHT-1M")) if headers is not None else None
     except (TypeError, ValueError):
@@ -114,7 +130,10 @@ def _note_weight(headers: Any) -> None:
     _WEIGHT_LAST.update(used=used, at=time.time())
     if used >= _WEIGHT_SOFT:
         pause = 60.0 - (time.time() % 60.0)
-        _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + pause)
+        if used >= _WEIGHT_HARD:
+            _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + pause)
+        else:
+            _SOFT_UNTIL = max(_SOFT_UNTIL, time.time() + pause)
         _HEALTH["weight_pauses"] = _HEALTH.get("weight_pauses", 0) + 1
 
 
@@ -123,6 +142,8 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
     now = time.time()
     if "fapi.binance.com" in url and now < _BACKOFF_UNTIL:
         raise RateLimited(_BACKOFF_UNTIL - now)
+    if "fapi.binance.com" in url and now < _SOFT_UNTIL and not getattr(_PRIORITY, "on", False):
+        raise RateLimited(_SOFT_UNTIL - now)
     qs = urlencode(params)
     full_url = f"{url}?{qs}" if qs else url
     req = Request(
