@@ -5,16 +5,12 @@ on:
 permissions:
   contents: read
 jobs:
-  brain2:
+  prodcheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
-      - run: pip install numpy
-      - name: Market Brain v2 — ранні ознаки, початок руху, випередження
-        working-directory: scripts
-        run: python -u brain_study2.py 2>&1 | tee ../brain2_out.txt
-      - uses: actions/upload-artifact@v4
-        with: {name: brain2, path: brain2_out.txt}
+      - name: Production Mini App після deploy #113 (лише GET)
+        run: python scripts/prod_check.py
