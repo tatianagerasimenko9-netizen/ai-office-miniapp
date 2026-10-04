@@ -71,8 +71,9 @@ def for_signal(symbol: str, direction: str, now: Optional[float] = None) -> Dict
         al = None
         if len(c15) >= 17 and _fresh(c15, now, 900):
             al = mb.alignment(base["market"], direction=direction, coin=coin, coin_1h=c15, btc_1h=base["btc15"], corr_btc=mb.corr(c15, base["btc15"]), bph=4)
-        lines = mb.signal_lines(base["market"], al) if al else []
-        cal = tstruct.lines(base["btc_time"], "BTC")
+        lines = mb.card_lines(base["market"], al) if al else []
+        wl = tstruct.week_line(base["btc_time"], "BTC")
+        cal = [wl] if wl else []
         coin_ts = None
         try:
             coin_ts = tstruct.snapshot(now, c15[-1]["close"], _c(coin + "USDT", "1d", 120)) if c15 else None

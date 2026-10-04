@@ -20,11 +20,13 @@ story = RC.story_for(symbol="SYRUPUSDT", direction="SHORT", confirm=gate["confir
 card = M.ready_signal(symbol="SYRUPUSDT", direction="SHORT", entry=0.25779, sl=0.260378, tp1=0.23599, tp2=0.22235, tp3=0.19808, max_entry=0.24843,
                       size_usdt=391, risk_usd=10, valid_until="05.10 18:28", setup=story["name"], why=story["why"])
 assert not LG.problems(card), LG.problems(card)
-assert LG.max_lines_ok(card, 13), card
+assert LG.max_lines_ok(card, 9), card
 lines = card.splitlines()
-assert lines[0] == "🔴 SHORT · SYRUP · ПЛАН ГОТОВИЙ ✅"
-assert "Сетап: рівень утримано біля краю лінії тренду" in card and "Чому: Вхід 0,25779 — у зоні 0,25535–0,25913" in card, card
-assert "Стоп: 0,260378 $ (−1,00%)" in card and "TP1: 0,23599 $ (+8,46%)" in card and "⏳ Діє до 05.10 18:28 (Київ)" in card, card
+assert lines[0] == "🔴 SHORT · SYRUP · ГОТОВО"
+assert "Сетап: рівень утримано біля краю лінії тренду" in card and "Чому" not in card, card   # «Чому» з цифрами — у Mini App
+assert "Вхід 0,24843–0,25779" in card and "SL 0,260378 (−1,00%)" in card, card
+assert "TP1 0,23599 (+8,46%) · TP2 0,22235 (+13,7%) · TP3 0,19808 (+23,2%)" in card, card
+assert "Позиція 391 USDT · ризик 10 $" in card and "⏳ до 05.10 18:28 (Київ)" in card, card
 # немає збережених підстав → чесно, без вигаданої назви
 none = M.ready_signal(symbol="OLDUSDT", direction="LONG", entry=2.0, sl=1.94, tp1=2.1, setup="", why=[])
 assert "Сетап: підтвердження для цього сигналу не збережене" in none and not LG.problems(none), none

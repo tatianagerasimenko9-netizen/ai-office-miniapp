@@ -113,13 +113,12 @@ def alignment(market: Dict[str, Any], *, direction: str, coin: str, coin_1h: Any
     c1, b1 = ret_pct(coin_1h, bph), ret_pct(btc_1h, bph)
     rel = round(c1 - b1, 2) if c1 is not None and b1 is not None else None
     bias = market.get("bias")
-    if corr_btc is not None and corr_btc < INDEP_CORR:
-        state = "INDEPENDENT"
-    elif bias in ("LONG", "SHORT"):
+    if bias in ("LONG", "SHORT"):
         state = "WITH" if bias == d else "COUNTER"
     else:
         state = "MIXED"
-    return {"state": state, "coin": coin, "coin_1h": c1, "btc_1h": b1, "rel_pp": rel, "corr_btc": corr_btc, "bias": bias}
+    # кореляція на ~47 вимірах шумна: зберігаємо для дослідження, але користувачу як факт НЕ показуємо
+    return {"state": state, "coin": coin, "coin_1h": c1, "btc_1h": b1, "rel_pp": rel, "corr_btc": corr_btc, "weak_corr": corr_btc is not None and corr_btc < INDEP_CORR, "bias": bias}
 
 
 def signal_lines(market: Dict[str, Any], al: Dict[str, Any]) -> List[str]:
@@ -141,6 +140,27 @@ def signal_lines(market: Dict[str, Any], al: Dict[str, Any]) -> List[str]:
             out.append(f"{al['coin']} {word} за BTC на {abs(al['rel_pp']):.1f}".replace(".", ",") + " п.п.")
     out.append({"WITH": "Напрямок: разом із ринком ✅", "COUNTER": "Напрямок: проти ринку ⚠️", "MIXED": "Напрямок: ринок змішаний, переваги немає",
                 "INDEPENDENT": f"Напрямок: монета рухається незалежно від BTC (кореляція {str(al.get('corr_btc')).replace('.', ',').replace('-', '−')})"}[al["state"]])
+    return out
+
+
+def card_lines(market: Dict[str, Any], al: Optional[Dict[str, Any]]) -> List[str]:
+    """Два рядки для Telegram-картки: «Ринок: …» і «BTC 1г: … · МОНЕТА: … → …». Нічого, чого немає в даних."""
+    if not market or market.get("bias") in (None, "UNKNOWN"):
+        return []
+    flat_n = (market.get("checked") or 0) - market.get("long", 0) - market.get("short", 0)
+    icon = {"LONG": "🟢 перевага LONG", "SHORT": "🔴 перевага SHORT"}.get(market["bias"], "🟡 без переваги")
+    line = f"Ринок: {icon} — {market.get('long', 0)} LONG / {market.get('short', 0)} SHORT / {flat_n} нейтр."
+    if al and al.get("state") == "WITH":
+        line += " · ✅ за ринком"
+    elif al and al.get("state") == "COUNTER":
+        line += " · ⚠️ проти ринку"
+    out = [line]
+    if al and al.get("btc_1h") is not None and al.get("coin_1h") is not None:
+        rel = al.get("rel_pp")
+        tail = ""
+        if rel is not None:
+            tail = (" → так само" if abs(rel) < 0.15 else f" → {'сильніша' if rel > 0 else 'слабша'} на {abs(rel):.1f}".replace(".", ",") + " п.п.")
+        out.append(f"BTC 1г: {_txt(al['btc_1h'])} · {al['coin']}: {_txt(al['coin_1h'])}{tail}")
     return out
 
 
