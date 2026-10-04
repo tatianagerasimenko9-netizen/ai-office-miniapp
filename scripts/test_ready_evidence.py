@@ -174,6 +174,47 @@ fl_gate = {"chart": ev.freeze_chart(rows1[-96:], T0.timestamp() + 10 ** 7, "15m"
 fl_gate["evidence"] = ev.build(ev.candles_from_chart(fl_gate["chart"]), "SHORT", 101.5, 102.5, ["flag"], now_ts=T0.timestamp() + 10 ** 7)["items"]
 afl = ev.audit(fl_gate)
 check(afl and afl[0]["proof_complete"] is False and afl[0]["proof_note"], f"прапор: неповний доказ позначений (детектор не віддає свінги): {afl}")
+# 2d) походження знімка + звірка з «архівом» (синтетичний архів) і виявлення розбіжності
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import verify_snapshot_vs_archive as va  # noqa: E402
+
+ch2 = ev.freeze_chart(sw_rows, decided, "15m", symbol="TESTUSDT")
+pv = ch2["provenance"]
+check(pv["exchange"] == "Binance USDT-M Futures" and pv["symbol"] == "TESTUSDT" and pv["interval"] == "15m" and pv["step_sec"] == 900 and pv["received_ts"] == decided
+      and pv["close_time_last"] == ch2["range"][1] + 900 and pv["last_candle_forming"] is False and pv["known_gaps"], f"provenance: {pv}")
+arch = {round(c[0]): tuple(c[1:6]) for c in ch2["candles"]}
+check(all(r["status"] == "OK" for r in va.compare(ch2["candles"], arch, 5)), "звірка з архівом: збігається")
+arch_bad = dict(arch)
+k0 = round(ch2["candles"][0][0])
+arch_bad[k0] = (arch[k0][0], arch[k0][1] + 0.5) + arch[k0][2:]
+check(any(r["status"] == "DIFF" for r in va.compare(ch2["candles"], arch_bad, 5)), "розбіжність OHLC з архівом виявляється")
+check(any(r["status"] == "NO_ARCHIVE_ROW" for r in va.compare(ch2["candles"], {}, 3)), "немає рядка архіву — чесно NO_ARCHIVE_ROW")
+check(ev.freeze_chart(sw_rows[:-1] + [dict(sw_rows[-1], src="bybit_linear")], decided, "15m", symbol="X")["provenance"]["exchange"].startswith("змішане"), "запасне джерело не видається за Binance Futures")
+# 2e) подвійна вершина (office_patterns.find_multi): реальні екстремуми + шия + свічка підтвердження; теги без геометрії записуються як unsupported; «Чому» = те, що намальовано
+pts_ = [(0, 100), (10, 105), (15, 98), (20, 105), (32, 96)]
+cl_ = []
+for (a_, pa_), (b_, pb_) in zip(pts_, pts_[1:]):
+    for k_ in range(a_ if not cl_ else a_ + 1, b_ + 1):
+        cl_.append(pa_ + (pb_ - pa_) * (k_ - a_) / (b_ - a_))
+dt_rows = [{"ts": (T0 + timedelta(minutes=15 * i)).isoformat(), "open": c + 0.05, "high": c + 0.3, "low": c - 0.3, "close": c, "src": "binance_futures"} for i, c in enumerate(cl_)]
+now_dt = T0.timestamp() + len(dt_rows) * 900 + 5
+e_dt = ev.build(dt_rows, "SHORT", 104, 106, ["double_top", "upthrust", "engulf"], now_ts=now_dt)
+it_dt = e_dt["items"][0] if e_dt["items"] else {}
+check(it_dt.get("draw") == "multi" and len(it_dt.get("points", [])) == 2 and it_dt.get("proof_complete") is True and it_dt.get("detector") == "office_patterns.find_multi",
+      f"double_top: екстремуми, шия, підтвердження: {e_dt}")
+check(e_dt["unsupported"] == ["upthrust", "engulf"], f"теги без геометрії записані: {e_dt['unsupported']}")
+chart_dt = ev.freeze_chart(dt_rows, now_dt, "15m", symbol="TESTUSDT")
+gate_dt = {"chart": chart_dt, "evidence": e_dt["items"]}
+check(ev.verify(gate_dt, "SHORT", [104, 106], ["double_top", "upthrust", "engulf"])["ok"], "double_top відтворюється з frozen-свічок")
+ad_ = ev.audit(gate_dt)
+check(ad_[0]["anchors_on_real_candles"] is True and ad_[0]["proof_complete"] is True and all(a["candle_exists"] and a["price_within_candle"] for a in ad_[0]["anchors"]), f"аудит double_top: {ad_}")
+r_dt = rc.render(symbol="TESTUSDT", direction="SHORT", candles=ev.candles_from_chart(chart_dt), entry=105.0, zone=[104, 106], sl=106.8, tp1=96.0, ready_price=105.0, evidence=e_dt["items"],
+                 path=os.path.join(tempfile.gettempdir(), "ctl_double_top.png"))
+check_card("double_top", r_dt, ["double_top"])
+w_ = rc.short_why(tags=["double_top", "upthrust", "engulf"], mode=None, direction="SHORT", symbol="TESTUSDT", entry=105, zone_lo=104, zone_hi=106, prefer=["double_top"])
+check("фігуру розвороту" in w_ and "вийшла над" not in w_, f"«Чому» пояснює намальоване (подвійна вершина), а не upthrust: {w_}")
+w2_ = rc.short_why(tags=["double_top", "upthrust"], mode=None, direction="SHORT", symbol="TESTUSDT", entry=105, zone_lo=104, zone_hi=106)
+check("вийшла над" in w2_, "без prefer поведінка не змінилась")
 # 3) channel_edge — канал із реального детектора
 rows3 = []
 for i in range(120):

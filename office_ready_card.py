@@ -40,10 +40,13 @@ def _zone(entry: Any, zone: Any):
     return entry_zone(entry, zone)
 
 
-def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: str, entry: Any, zone_lo: Any = None, zone_hi: Any = None) -> str:
+def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: str, entry: Any, zone_lo: Any = None, zone_hi: Any = None, prefer: Any = None) -> str:
     """1–2 коротких речення з цифрами: що саме сталося з ціною (а не назва патерну). Лише з реально збережених тегів."""
     short = str(direction or "").upper() == "SHORT"
     ts = [str(t) for t in (tags or [])]
+    if prefer:   # «Чому» пояснює те, що реально намальовано на картці (докази з геометрією), а не довільний тег
+        pf = [t for t in ts if t in {str(x) for x in prefer}]
+        ts = pf or ts
     et = _num(entry, symbol)
     lo, hi = _f(zone_lo), _f(zone_hi)
     zt = f"{_num(min(lo, hi), symbol)}–{_num(max(lo, hi), symbol)}" if lo is not None and hi is not None else et
@@ -69,7 +72,7 @@ def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: s
     elif has("breaker_retest"):
         first = f"Ціна відбилась {way} від зони {zt}, яку раніше пробили."
     elif has("double_top", "double_bottom", "triple_top", "triple_bottom", "head_shoulders", "inverse_head_shoulders"):
-        first = f"Фігура розвороту біля {et}: закриття за лінією шиї, рух {way}."
+        first = f"Схоже на фігуру розвороту біля {et}: закриття за лінією шиї, рух {way}."
     elif has("choch", "bos"):
         first = f"Рух на малих свічках змінив напрямок {way}, зона {zt} утримується."
     elif has("ote"):
@@ -77,7 +80,7 @@ def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: s
     elif has("displacement"):
         first = f"Був різкий рух {way}, ціна тримається біля {et}."
     elif next((t for t in ts if t in ("flag", "pennant", "ascending_triangle", "descending_triangle", "symmetrical_triangle", "rectangle", "rising_wedge", "falling_wedge")), None):
-        first = f"Ціна вийшла з фігури {way} і тримається біля {et}."
+        first = f"Схоже на фігуру продовження: ціна вийшла {way} і тримається біля {et}."
     elif has("channel_edge"):
         first = f"Ціна біля краю лінії тренду {et} і відбилась {way}."
     elif mode == "retest":
@@ -260,6 +263,12 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
                 block(x_of(it["t_sweep"]), float(it["extreme"]))
             elif it.get("draw") == "marker" and x_of(it.get("t")) is not None:
                 block(x_of(it["t"]), float(it["price"]))
+            elif it.get("draw") == "multi":
+                for p_ in it.get("points") or []:
+                    if x_of(p_.get("t")) is not None:
+                        block(x_of(p_["t"]), float(p_["price"]))
+                if x_of(it.get("t_confirm")) is not None:
+                    block(x_of(it["t_confirm"]), float(it["close"]))
         except Exception:  # noqa: BLE001
             continue
     drawn_ev: List[str] = []
@@ -329,6 +338,21 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
                     d_ = rng * 0.035
                     put(lab, EVC, [(xw - 1.0, pr + (d_ if above else -d_), "right", "bottom" if above else "top"), (xw + 1.5, pr + (d_ if above else -d_), "left", "bottom" if above else "top"),
                                    (xw - 1.0, pr - (d_ if above else -d_), "right", "top" if above else "bottom")], [(xs, pr), (xw, pr), (xw, ex)])
+            elif dw == "multi":   # подвійна/потрійна вершина або дно: реальні екстремуми + лінія шиї + свічка підтвердження
+                pts = [(x_of(p_["t"]), float(p_["price"])) for p_ in it.get("points") or []]
+                if not pts or any(px_ is None for px_, _ in pts):
+                    continue
+                neck, xc = float(it["neckline"]), x_of(it.get("t_confirm"))
+                ax.plot([max(pts[0][0], -1.0), min((xc if xc is not None else n - 1) + 2.0, n - 0.5)], [neck, neck], color=EVC, linewidth=2.2, linestyle="--", zorder=5)
+                for px_, py_ in pts:
+                    ax.scatter([px_], [py_], s=110, marker="v" if short else "^", color=EVC, edgecolors=BG, zorder=8)
+                if xc is not None:
+                    ax.scatter([xc], [float(it["close"])], s=130, color=EVC, edgecolors=BG, linewidths=2, zorder=8)
+                if lab:
+                    xm = (pts[0][0] + pts[-1][0]) / 2
+                    ytop = max(p_[1] for p_ in pts)
+                    put(lab, EVC, [(xm, ytop + rng * 0.035, "center", "bottom"), (xm, ytop - rng * 0.035, "center", "top"), (pts[0][0] - 0.8, ytop, "right", "center")],
+                        [(px_, py_) for px_, py_ in pts] + [(xm, neck)])
             elif dw == "marker" and x_of(it.get("t")) is not None:
                 ax.scatter([x_of(it["t"])], [float(it["price"])], s=150, marker="v" if short else "^", color=EVC, edgecolors=BG, zorder=9)
                 if lab:

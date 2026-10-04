@@ -6994,16 +6994,19 @@ EV позитивне: {prob.get('ev_positive', '')}
                         try:   # докази цього READY: свічки знімка заморожуються, докази рахуються з НИХ, картка малює ТІЛЬКИ їх
                             import office_ready_evidence as _evd
 
-                            _chart = _evd.freeze_chart(_m15 if isinstance(_m15, list) else [], _now_c, "15m")
+                            _chart = _evd.freeze_chart(_m15 if isinstance(_m15, list) else [], _now_c, "15m", symbol=sym_f)
                             _gate_snap["chart"] = _chart
                             _ev = _evd.build(_evd.candles_from_chart(_chart), _dir_c, st.get("zone_lo"), st.get("zone_hi"), list(_cf.get("tags") or []), now_ts=_now_c)
                             _gate_snap["evidence"] = _ev.get("items") or []
                             if _ev.get("missing"):
                                 _gate_snap["evidence_missing"] = _ev["missing"]
+                            if _ev.get("unsupported"):
+                                _gate_snap["evidence_unsupported"] = _ev["unsupported"]   # теги без модуля геометрії: чесно записано, що їх на картці немає
                         except Exception as exc_ev:
                             print(f"[card] докази недоступні {sym_f}: {type(exc_ev).__name__}: {exc_ev}")
                         _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
-                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
+                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"),
+                                               prefer=[x.get("kind") for x in (_gate_snap.get("evidence") or [])])
                         _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, zone=_gate_snap.get("zone"),
                                              risk_usd=_risk, valid_until=_rc.kyiv_stamp(_valid_c), why=_why, sigma30=_sig30)
                         _img: Dict[str, Any] = {}
@@ -7041,7 +7044,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 "message_type": "photo" if _img.get("ok") else "text", "telegram_msg_id": confirm_msg_id, "delivered": bool(confirm_msg_id),
                                 "media_ok": bool(_img.get("ok")) and bool(confirm_msg_id), "image_error": None if _img.get("ok") else _img.get("reason"),
                                 "text": _cap, "chart_sha256": (_gate_snap.get("chart") or {}).get("sha256"), "drawn_ohlc_sha256": (_img.get("drawn") or {}).get("ohlc_sha"),
-                                "chart_source": (_gate_snap.get("chart") or {}).get("source"), "chart_range": (_gate_snap.get("chart") or {}).get("range"),
+                                "chart_source": (_gate_snap.get("chart") or {}).get("source"), "chart_provenance": (_gate_snap.get("chart") or {}).get("provenance"), "chart_range": (_gate_snap.get("chart") or {}).get("range"),
                                 "evidence_audit": _evd.audit(_gate_snap), "evidence_verify": _evd.verify(_gate_snap, _dir_c, _gate_snap.get("zone"), list(_cf.get("tags") or [])),
                                 "image_sha256": _img.get("sha256"), "image_size": _img.get("size"), "image_drawn": _img.get("drawn"), "image_png_b64": _blob,
                             }, signal_id=okey)
