@@ -55,6 +55,12 @@ a0 = R.atr_h1(hist, T)
 future = hist + mk(T, [(100, 150, 50, 100)] * 12)
 assert a0 and abs(R.atr_h1(future, T) - a0) < 1e-9 and 1.9 < a0 < 2.1, a0
 assert R.bucket(0.4) == "<0.5 ATR" and R.bucket(0.8) == "0.75–1.0" and R.bucket(2.0) == ">1.5 ATR" and R.bucket(None) == "немає ATR"
+# горизонт 24 год без цензури: TP1 першим → h24=TP1; стоп першим → STOP; недостатньо даних → None
+assert R.simulate(row, c, T + 10 * 3600)["h24"] is None
+cc = mk(T, [(100, 100.5, 99.5, 100), (100, 105, 100, 104)] + [(104, 104.5, 103.5, 104)] * 400)
+assert R.simulate(row, cc, T + 40 * 3600)["h24"] == "TP1"
+cs2 = mk(T, [(100, 100.5, 99.5, 100), (100, 100, 97, 98)] + [(98, 99, 97, 98)] * 400)
+assert R.simulate(row, cs2, T + 40 * 3600)["h24"] == "STOP"
 # повний прогін на синтетичних даних
 rows = [dict(row, t=T + 3600 * 40), dict(rs, t=T + 3600 * 40, sym="AAAUSDT")]
 day = lambda sym, d: hist + mk(T, [(100, 100.5, 99.5, 100)] * 2 + [(100, 105, 100, 104)] * 600)  # noqa: E731

@@ -110,7 +110,7 @@ def simulate(row: Dict[str, Any], c5: List[Candle], data_end: float) -> Dict[str
     e, sl = row["entry"], row["sl"]
     tps = [(n, row[k]) for n, k in (("TP1", "tp1"), ("TP2", "tp2"), ("TP3", "tp3")) if row.get(k) is not None]
     t0 = row["t"]
-    res: Dict[str, Any] = {"fill": False, "first": "NONE", "best": None, "mfe": 0.0, "mae": 0.0, "resolved": False, "stop_then_dir": None, "t_fill": None, "t_end": None}
+    res: Dict[str, Any] = {"fill": False, "first": "NONE", "best": None, "mfe": 0.0, "mae": 0.0, "resolved": False, "stop_then_dir": None, "t_fill": None, "t_end": None, "t_first": None}
     if not e or sl is None or not tps:
         res["first"] = "INVALID"
         return res
@@ -129,13 +129,15 @@ def simulate(row: Dict[str, Any], c5: List[Candle], data_end: float) -> Dict[str
                 res["mfe"] = max(res["mfe"], ((h - e) if long_ else (e - l)) / e * 100)
                 res["mae"] = max(res["mae"], ((e - l) if long_ else (h - e)) / e * 100)
                 if (l <= sl) if long_ else (h >= sl):
-                    res.update(first="STOP", best=None, resolved=True, t_end=ts)
+                    res.update(first="STOP", best=None, resolved=True, t_end=ts, t_first=ts)
                     t_stop = ts
                     break
             continue
         res["mfe"] = max(res["mfe"], ((h - e) if long_ else (e - l)) / e * 100)
         res["mae"] = max(res["mae"], ((e - l) if long_ else (h - e)) / e * 100)
         if (l <= sl) if long_ else (h >= sl):
+            if res["t_first"] is None:
+                res["t_first"] = ts
             res.update(first=("STOP" if not reached else reached[0] + "_THEN_STOP"), best=(reached[-1] if reached else None), resolved=True, t_end=ts)
             t_stop = ts
             break
@@ -144,6 +146,7 @@ def simulate(row: Dict[str, Any], c5: List[Candle], data_end: float) -> Dict[str
                 reached.append(n)
                 if res["first"] == "NONE":
                     res["first"] = n
+                    res["t_first"] = ts
         if tps[-1][0] in reached:
             res.update(best=reached[-1], resolved=True, t_end=ts)
             break
@@ -155,6 +158,15 @@ def simulate(row: Dict[str, Any], c5: List[Candle], data_end: float) -> Dict[str
     if not res["fill"] and not res["resolved"]:
         res["first"] = "NO_FILL" if data_end - t0 > FILL_WINDOW_SEC else "NONE"
         res["resolved"] = res["first"] == "NO_FILL"
+    # Горизонт 24 год від сигналу без цензури: лише якщо дані покривають увесь горизонт. Що було першим серед {стоп, TP1} за 24 год
+    if res["fill"] and data_end >= t0 + 24 * 3600:
+        tf_ = res["t_first"]
+        if tf_ is not None and tf_ - t0 <= 24 * 3600:
+            res["h24"] = "STOP" if res["first"].startswith("STOP") else "TP1"
+        else:
+            res["h24"] = "НІЧОГО"
+    else:
+        res["h24"] = None
     if t_stop is not None and row.get("tp1") is not None:
         t1 = row["tp1"]
         after = [x for x in c5 if t_stop < x[0] <= t_stop + AFTER_STOP_SEC]
@@ -208,7 +220,10 @@ def summarize(rows: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
         stop1 = [r for r in res if r["first"] == "STOP"]
         tp1 = [r for r in res if r["first"] in ("TP1", "TP2", "TP3") or r["first"].endswith("_THEN_STOP")]
         std = [r for r in stop1 if r["stop_then_dir"] is not None]
-        out.append({"група": k, "n": len(rs), "заповнено": len(filled), "розв'язано": len(res), "STOP першим %": round(100 * len(stop1) / len(res), 1) if res else None,
+        h = [r for r in filled if r.get("h24")]
+        out.append({"група": k, "n": len(rs), "h24_n": len(h), "h24 STOP %": round(100 * sum(1 for r in h if r["h24"] == "STOP") / len(h), 1) if h else None,
+                    "h24 TP1 %": round(100 * sum(1 for r in h if r["h24"] == "TP1") / len(h), 1) if h else None,
+                    "h24 нічого %": round(100 * sum(1 for r in h if r["h24"] == "НІЧОГО") / len(h), 1) if h else None, "заповнено": len(filled), "розв'язано": len(res), "STOP першим %": round(100 * len(stop1) / len(res), 1) if res else None,
                     "TP1 до стопа %": round(100 * len(tp1) / len(res), 1) if res else None,
                     "STOP_THEN_DIRECTION %": round(100 * sum(1 for r in std if r["stop_then_dir"]) / len(std), 1) if std else None,
                     "MAE середня %": round(sum(r["mae"] for r in filled) / len(filled), 2) if filled else None,
