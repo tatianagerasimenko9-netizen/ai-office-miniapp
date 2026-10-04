@@ -85,6 +85,20 @@ def entry_zone(entry: Any, zone: Any) -> tuple:
     return e, e
 
 
+FUTURES_SRC = "binance_futures"
+
+
+def non_futures_sources(*series: Any) -> list:
+    """Джерела свічок, що НЕ є Binance USDT-M Futures (запасні: спот Vision, Bybit…). Рядок без позначки джерела не вважається запасним (WS-потік фʼючерсів)."""
+    bad = set()
+    for rows in series:
+        for r in (rows if isinstance(rows, list) else []):
+            src = r.get("src") if isinstance(r, dict) else None
+            if src and src != FUTURES_SRC:
+                bad.add(str(src))
+    return sorted(bad)
+
+
 def confirm_basis(fu: Dict[str, Any]) -> Dict[str, Any]:
     """Чим саме підтверджено вхід (follow_setup): теги LTF, спосіб (закриття в зоні / ретест після пробою), деталь, ціна підтвердження."""
     return {"mode": "retest" if fu.get("need_retest") is False and "ретест" in str(fu.get("detail") or "") and "після пробою" in str(fu.get("detail") or "") else "inside_zone",
