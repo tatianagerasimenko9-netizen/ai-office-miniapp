@@ -103,6 +103,27 @@ def lifecycle_for_row(row: Dict[str, Any], *, has_position: bool = False) -> Dic
     )
 
 
+def _signal_row_by_id(sid: str) -> Optional[Dict[str, Any]]:
+    """Сценарій за id напряму з БД, незалежно від віку (історія й посилання з Telegram не зникають, коли рядок вийшов за «останні N»)."""
+    try:
+        rows = _fetchall(
+            _db(),
+            """
+            SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
+                   status, ts_created, ts_updated, outcome, analysis_note
+            FROM office_signals WHERE signal_id = ? LIMIT 1
+            """,
+            (sid,),
+        )
+    except Exception:
+        return None
+    if not rows:
+        return None
+    r = rows[0]
+    keys = ("signal_id", "symbol", "direction", "entry_low", "entry_high", "sl", "tp1", "tp2", "rr", "status", "ts_created", "ts_updated", "outcome", "analysis_note")
+    return dict(zip(keys, r))
+
+
 def _signal_rows(limit: int = 80, *, all_status: bool = False) -> List[Dict[str, Any]]:
     try:
         if all_status:
@@ -425,6 +446,8 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
         if str(r.get("signal_id")) == sid:
             row = r
             break
+    if row is None and not sid.startswith("W-"):
+        row = _signal_row_by_id(sid)
     if row is None or is_legacy_desk_range(row):
         return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["сценарій"]}
     pos = False

@@ -434,6 +434,10 @@ def _gate_outbound_core(
         return {**deny, "reason": "ENTRY_PERMISSION не через вільний текст"}
     if intent_u in (INTENT_ADD, "ADD", "ADD_ON", "SCALE_IN", "REVERSAL"):
         return {**deny, "reason": "добір/переворот не автоматичний у Telegram"}
+    if intent_u == "SCENARIO_EVENT":
+        if entry_lang or pos_lang:
+            return {**deny, "reason": "подія сценарію не може наказувати ордер"}
+        return {"send": True, "reason": "подія рівня сценарію (рух ринку)", "opens_position": False}
     if intent_u in (INTENT_CONFIRM, "CONFIRM"):
         if entry_lang or pos_lang:
             return {**deny, "reason": "CONFIRMED-картка не може наказувати ордер"}

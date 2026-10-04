@@ -1941,6 +1941,9 @@ def journal_latest_feedback_case(db_path: str, *, symbol: str) -> Dict[str, Any]
     }
 
 
+FROZEN_READY_STATUSES = ("CONFIRMED", "HIT_TP1", "HIT_TP2")   # після «Плану готовий» вхід/стоп/цілі рядка не перезаписує жоден наступний скан
+
+
 def signal_upsert(
     db_path: str,
     *,
@@ -1975,6 +1978,7 @@ def signal_upsert(
             status = excluded.status,
             ts_updated = excluded.ts_updated,
             analysis_note = excluded.analysis_note
+        WHERE office_signals.status NOT IN ('CONFIRMED', 'HIT_TP1', 'HIT_TP2')
         """,
         (
             signal_id,
@@ -2076,7 +2080,7 @@ def signal_refresh_scenario(
         """
         UPDATE office_signals
         SET entry_low = ?, entry_high = ?, ts_updated = ?
-        WHERE signal_id = ?
+        WHERE signal_id = ? AND status NOT IN ('CONFIRMED', 'HIT_TP1', 'HIT_TP2')
         """,
         (entry_low, entry_high, _now_iso(), signal_id),
     )

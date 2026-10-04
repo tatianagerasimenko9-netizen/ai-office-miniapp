@@ -203,6 +203,19 @@ def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
     return "\n".join(L)
 
 
+def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None) -> str:
+    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/SL). Не твердить, що угоду відкрито чи закрито: це лише рух ціни відносно рівнів плану."""
+    dot, word = _dir_head(direction)
+    lv = str(level or "").upper()
+    what = "стоп-рівня сценарію" if lv == "SL" else f"{lv} сценарію"
+    mark = "⚠️" if lv == "SL" else "🎯"
+    L = [f"{mark} {word} · {ticker(symbol)} · ціна досягла {what}"]
+    if price is not None:
+        L.append(f"Рівень: {_px(price, symbol)}")
+    L.append("Це рух ринку по плану, а не стан твоєї угоди.")
+    return "\n".join(L)
+
+
 def confirm_card(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Optional[Dict[str, Any]] = None,
                  tp3: Optional[Dict[str, Any]] = None, cancel: Any = None, why: str = "", bad: Optional[str] = None,
                  valid_until: str = "", max_entry: Any = None, size_usdt: Any = None, risk_usd: Any = None) -> str:

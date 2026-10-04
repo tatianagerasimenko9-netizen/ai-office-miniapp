@@ -271,6 +271,8 @@ def outbound_allowed(*, event_type: str = "", kind: str = "", intent: str = "", 
     kd = str(kind or "").strip().upper()
     if it == "CONFIRM" and kd == "CONFIRM":
         return True
+    if it == "SCENARIO_EVENT" and kd == "SCENARIO_EVENT":
+        return True   # рух ринку до TP/SL показаного плану — не залежить від кнопки «Я відкрила угоду»
     if it == "POSITION_MANAGE" and bool(confirmed_position) and bool(position_open):
         return True
     return False

@@ -157,8 +157,8 @@ def main() -> int:
         row = signal_get_active(db)[0]
         if prep.get("send") or prep.get("scenario_id") != sid or row.get("status") != "CONFIRMED":
             return _fail(("redetection reset lifecycle", prep, row))
-        if abs(float(row.get("entry_low") or 0) - 75610.0) > 1e-6:
-            return _fail(("zone drift not refreshed", row))
+        if abs(float(row.get("entry_low") or 0) - 75610.0) <= 1e-6:   # P0: після READY зона замороженa, дрейф її не оновлює
+            return _fail(("confirmed zone must stay frozen", row))
 
         reset_alert_gate()
         hydrate_alert_gate_from_db(db)

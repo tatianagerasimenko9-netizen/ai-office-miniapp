@@ -61,7 +61,7 @@ b = nu.describe(ev, ticker="BTC", now=in_win)
 check("під час паузи: blocked і «Зараз діє пауза»", b["blocked"] and "Зараз діє пауза" in b["text"], b["text"])
 
 # 6. news_view: календар → лише українське, без англійської назви в JSON
-cal.set_events_for_tests(cal.parse([{"title": "Average Hourly Earnings m/m", "country": "USD", "date": "2026-10-02T12:30:00+00:00", "impact": "High"}]), at=now)
+cal.set_events_for_tests(cal.parse([{"title": "Average Hourly Earnings m/m", "country": "USD", "date": "2026-10-02T12:30:00+00:00", "impact": "High"}]), at=ts + 3600)   # свіжий кеш для всіх now у тесті: без мережі в CI
 v = nu.news_view(ticker="BTCUSDT", now=now)
 blob = json.dumps(v, ensure_ascii=False)
 check("news_view: DATA_OK, є пункт", v["status"] == "DATA_OK" and v["item"] and v["item"]["headline"].endswith("— 15:30"), blob)
