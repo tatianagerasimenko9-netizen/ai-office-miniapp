@@ -32,7 +32,7 @@ EVENT_UA = {
     "HIT_ENTRY": "Ціна досягла зони", "CONFIRMED": "Підтвердження отримано", "SCENARIO_CONFIRMED": "Підтвердження отримано",
     "CANCELLED": "План скасовано", "INVALIDATED": "План скасовано", "SCENARIO_EXPIRED": "Час очікування минув",
     "EXPIRED": "Час очікування минув", "SIGNAL_PLAN": "План готовий і надіслано в Telegram", "MILESTONE_TP1": "Ціна досягла TP1 сценарію", "MILESTONE_TP2": "Ціна досягла TP2 сценарію",
-    "MILESTONE_TP3": "Ціна досягла TP3 сценарію", "MILESTONE_SL": "Ціна досягла стоп-рівня сценарію",
+    "MILESTONE_TP3": "Ціна досягла TP3 сценарію", "MILESTONE_ENTRY": "Ціна торкнулась входу за планом", "MILESTONE_EXPIRED": "Строк плану вийшов, входу не було", "MILESTONE_SL": "Ціна досягла стоп-рівня сценарію",
 }
 
 
@@ -310,13 +310,14 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
 
 
 def _progress(events: List[Dict[str, Any]], plan: Dict[str, Any]) -> Dict[str, Any]:
-    """READY → TP1 → TP2 → TP3 або СТОП — лише за фактичними подіями сценарію (рух ринку за планом, не стан угоди користувача)."""
+    """Підтверджено → вхід торкнуто → TP1 → TP2 → TP3 або СТОП / строк вийшов — лише за фактичними подіями сценарію (рух ринку за планом, не стан угоди користувача)."""
     done = {str(e.get("type") or "")[10:] for e in events if str(e.get("type") or "").startswith("MILESTONE_")}
-    steps = [{"k": "READY", "label": "План підтверджено", "done": True}]
+    steps = [{"k": "READY", "label": "План підтверджено", "done": True}, {"k": "ENTRY", "label": "Вхід", "done": "ENTRY" in done}]
     for k in ("TP1", "TP2", "TP3"):
         if _f(plan.get(k.lower())) is not None:
             steps.append({"k": k, "label": k, "done": k in done})
-    return {"steps": steps, "stop": "SL" in done, "note": "Це рух ринку за планом, а не стан твоєї угоди."}
+    return {"steps": steps, "stop": "SL" in done, "expired": "EXPIRED" in done,
+            "note": "Це рух ринку за планом, а не стан твоєї угоди."}
 
 
 def _plain_confirms(tags: List[str]) -> str:
@@ -346,10 +347,9 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
              "confirm_tags": conf.get("tags") or [], "confirm_ua": _plain_confirms(conf.get("tags") or []), "confirm_mode": conf.get("mode"), "confirm_detail": conf.get("detail"),
              "valid_until": kyiv_stamp(float(plan["valid_until_ts"])) if _f(plan.get("valid_until_ts")) else None}
     try:
-        import office_setup_story as _su
+        from office_ready_core import story_for
 
-        st = _su.build(conf.get("tags") or [], conf.get("mode"), side, rr_net=g.get("rr_net"), rr_weighted=g.get("rr_weighted"),
-                       tf="M5" if str(plan.get("tf") or "").upper() in ("M15", "M5") else "M15")
+        st = story_for(symbol=sym, direction=side, confirm=conf, gate=g, entry=plan.get("entry"), zone_lo=lo, zone_hi=hi, tf=str(plan.get("tf") or "H1"))
     except Exception:  # noqa: BLE001
         st = {"name": None, "why": [], "objects": []}
     ready["setup"] = st

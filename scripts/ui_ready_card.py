@@ -144,7 +144,7 @@ async def run(base: str, cases: dict, chromium, shots, lwc: str) -> list:
                     problems.append(f"{vname}/{name}: немає вердикту «зараз»")
                 if name == "longok" and top["nowCls"].split()[-1] != "g":
                     problems.append(f"{vname}/{name}: ціна = вхід, очікувався зелений «зараз», а є {top['nowCls']}")
-                if name == "syrup" and "рівень утримано біля краю каналу" not in top["nm"]:
+                if name == "syrup" and "рівень утримано біля краю лінії тренду" not in top["nm"]:
                     problems.append(f"{vname}/{name}: назва сетапу: {top['nm']!r}")
                 if name == "spx" and top["cells"] != 5:
                     problems.append(f"{vname}/{name}: очікувалось 5 клітинок (вхід, SL, TP1, TP2, TP3), а є {top['cells']}")

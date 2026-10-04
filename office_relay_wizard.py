@@ -6947,11 +6947,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                             continue
                         _valid_c = _lc.valid_until_ts(_now_c, _tf_c2)
                         _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
+                        _gate_snap = _rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
+                                                       max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu))
+                        _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
+                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             _msgs.ready_signal(
                                 symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
-                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
+                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e, setup=str(_story.get("name") or ""), why=_story.get("why") or [],
                                 size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
                                 risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
                                 valid_until=_rc.kyiv_stamp(_valid_c)),
@@ -6971,8 +6975,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                              tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
                                              max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_valid_c,
                                              rejected=False, confirm_msg_id=confirm_msg_id,
-                                             gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
-                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu)))
+                                             gate=_gate_snap)
                         except Exception as exc_tr:
                             print(f"[track] record plan failed: {exc_tr}")
                         try:

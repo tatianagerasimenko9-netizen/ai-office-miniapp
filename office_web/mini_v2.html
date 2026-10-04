@@ -98,8 +98,8 @@ details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0
 .nowbar{border-radius:14px;padding:8px 12px;margin:0 0 8px;font-size:14px;line-height:1.4;border:1px solid var(--line);background:var(--card)}
 .nowbar.g{border-color:var(--long)}.nowbar.r{border-color:var(--short)}.nowbar.n{border-color:var(--neu)}
 .nowbar b{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-.prog{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
-.prog span{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:4px 10px;color:var(--mut)}
+.prog{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.prog span{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--mut)}
 .prog span.on{border-color:var(--long);color:var(--long)}.prog span.stop{border-color:var(--short);color:var(--short)}
 .why{margin:0;padding:0;list-style:none}.why li{padding:5px 0;font-size:14px;line-height:1.4}.why li:before{content:"✓ ";color:var(--long)}
 .srcs{display:flex;gap:6px;flex-wrap:wrap}
@@ -703,7 +703,7 @@ function readyTop(hm,s){
   const nowCls=now.eligible===true?'g':now.eligible===false?'r':'n';
   const nowTxt=now.eligible===true?'🟢 Умови для входу за цим планом ще чинні.':now.eligible===false?`🔴 Новий вхід зараз не розглядати: ${now.reasons.map(esc).join('; ')}.`:'⚪ Чи можна входити зараз — не перевірено (немає свіжої ціни).';
   const pr=hm.progress;
-  const prog=pr?`<div class="prog">${pr.steps.map(x=>`<span class="${x.done?'on':''}">${x.done?'✓ ':''}${esc(x.label)}</span>`).join('')}${pr.stop?'<span class="stop">Досягнуто стоп-рівня сценарію</span>':''}</div>`:'';
+  const prog=pr?`<div class="prog">${pr.steps.map(x=>`<span class="${x.done?'on':''}">${x.done?'✓ ':''}${esc(x.label)}</span>`).join('')}${pr.stop?'<span class="stop">Досягнуто стоп-рівня сценарію</span>':''}${pr.expired?'<span class="stop">Строк вийшов, входу не було</span>':''}</div>`:'';
   return `<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
     <div class="rh ${side_}"><div class="rt1"><b>${dot} ${esc(hm.ticker)}</b><span class="${side_}">${sideTxt_}</span></div>
       <div class="rst">План підтверджено · ${esc(r.at_stamp)} (Київ)</div>

@@ -127,3 +127,20 @@ def find_duplicate(db: str, *, symbol: str, direction: str, entry: Any, scenario
 def dup_setup_event(dup: Optional[Dict[str, Any]], scenario_id: str) -> str:
     """Подія машини станів для заблокованого дубля: той самий сценарій уже має READY → лишається CONFIRMED; інший scenario_id тієї ж ідеї → CANCELLED."""
     return "CONFIRMED" if dup and str(dup.get("scenario_id") or "") == str(scenario_id or "") else "CANCELLED"
+
+
+def story_for(*, symbol: str, direction: str, confirm: Optional[Dict[str, Any]], gate: Optional[Dict[str, Any]], entry: Any, zone_lo: Any, zone_hi: Any, tf: str = "H1") -> Dict[str, Any]:
+    """Назва сетапу й причини для Telegram І Mini App з одного місця: лише з реально збережених підстав (gate.confirm) + цифри зони входу."""
+    import office_setup_story as su
+    from office_price_format import format_px
+
+    conf = confirm or {}
+    zt = ""
+    lo, hi = _f(zone_lo), _f(zone_hi)
+    if lo is not None and hi is not None:
+        a, b = (lo, hi) if lo <= hi else (hi, lo)
+        zt = f"{format_px(a, symbol)}–{format_px(b, symbol)}".replace(".", ",")
+    et = format_px(entry, symbol).replace(".", ",") if _f(entry) is not None else ""
+    g = gate or {}
+    return su.build(conf.get("tags") or [], conf.get("mode"), direction, rr_net=g.get("rr_net"), rr_weighted=g.get("rr_weighted"),
+                    tf="M5" if str(tf or "").upper() in ("M15", "M5") else "M15", entry_txt=et, zone_txt=zt)

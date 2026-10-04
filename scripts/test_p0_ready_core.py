@@ -134,8 +134,8 @@ for m in got:
     T.record_milestone(db2, m, 1)
 assert T.pending_milestones(db2, fetch, now_ts=c0 + 900 * 6) == []   # вдруге нічого
 msg = M.scenario_event(symbol="MSUSDT", direction="LONG", level="SL", price=98)
-assert "стоп-рівня сценарію" in msg and "закрит" not in msg.lower() and "MS" in msg
-assert "TP1 сценарію" in M.scenario_event(symbol="MSUSDT", direction="LONG", level="TP1", price=104)
+assert "СТОП" in msg and "Сценарій не спрацював" in msg and "закрит" not in msg.lower() and "MS" in msg
+assert "ЦІЛЬ 1" in M.scenario_event(symbol="MSUSDT", direction="LONG", level="TP1", price=104)
 import office_alert_gate as G  # noqa: E402
 from office_telegram_policy import outbound_allowed  # noqa: E402
 assert G.gate_outbound_telegram(intent="SCENARIO_EVENT", text=msg, event_type="TRADE_UPDATE", db_path=db2, symbol="MSUSDT", direction="LONG")["send"]

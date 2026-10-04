@@ -11,35 +11,36 @@ STRUCT = [
     ("level_retest", ("ретест рівня", "Ціна повернулась до рівня і відбилась (ретест)", "level")),
     ("level_hold", ("рівень утримано", "Рівень утримано — ціна не пройшла крізь нього", "level")),
     ("level_false_break", ("хибний пробій рівня", "Хибний пробій рівня з поверненням", "level")),
-    ("fvg_retest", ("повернення до FVG", "Ціна повернулась до незаповненого розриву (FVG) і відреагувала", "fvg")),
-    ("ob_retest", ("реакція від блоку (OB)", "Реакція від блоку, звідки йшов рух (order block)", "block")),
-    ("breaker_retest", ("реакція від breaker", "Реакція від зламаного блоку (breaker)", "block")),
-    ("sweep_pool", ("зняття ліквідності", "Зняли ліквідність за рівнем і повернулись назад", "level")),
-    ("sfp", ("хибний пробій і повернення (SFP)", "Хибний пробій екстремуму з поверненням у діапазон (SFP)", "level")),
-    ("spring", ("spring Вайкоффа", "Хибний прокол вниз і повернення (spring)", "level")),
-    ("upthrust", ("upthrust Вайкоффа", "Хибний прокол вгору і повернення (upthrust)", "level")),
-    ("spring_test", ("тест spring", "Тест після spring", "level")),
-    ("upthrust_test", ("тест upthrust", "Тест після upthrust", "level")),
-    ("choch", ("зміна характеру (CHoCH)", "Зміна характеру руху на молодшому таймфреймі (CHoCH)", "level")),
-    ("bos", ("злам структури (BOS)", "Злам структури на молодшому таймфреймі (BOS)", "level")),
+    ("fvg_retest", ("повернення в розрив між свічками", "Ціна повернулась у розрив між свічками, який не заповнили, і відбилась", "fvg")),
+    ("ob_retest", ("відбиття від зони, звідки почався рух", "Ціна відбилась від зони, звідки почався попередній рух", "block")),
+    ("breaker_retest", ("відбиття від зламаної зони", "Ціна відбилась від зони, яку раніше пробили", "block")),
+    ("sweep_pool", ("прокол за стопи й повернення", "Ціну різко повели за рівень, де стоять чужі стопи, і повернули назад", "level")),
+    ("sfp", ("прокол за стопи й повернення", "Ціна коротко вийшла за екстремум і повернулась назад", "level")),
+    ("spring", ("прокол вниз і повернення", "Ціна коротко пробила низ і повернулась назад", "level")),
+    ("upthrust", ("прокол вгору і повернення", "Ціна коротко пробила верх і повернулась назад", "level")),
+    ("spring_test", ("повторна перевірка низу", "Ціна повторно перевірила низ після проколу", "level")),
+    ("upthrust_test", ("повторна перевірка верху", "Ціна повторно перевірила верх після проколу", "level")),
+    ("choch", ("зміна напрямку руху", "Рух на малому таймфреймі змінив напрямок", "level")),
+    ("bos", ("злам останньої опори", "Ціна зламала останню опору на малому таймфреймі", "level")),
     ("double_top", ("подвійна вершина", "Подвійна вершина підтверджена закриттям за лінією шиї", "level")),
     ("double_bottom", ("подвійне дно", "Подвійне дно підтверджено закриттям за лінією шиї", "level")),
     ("triple_top", ("потрійна вершина", "Потрійна вершина підтверджена закриттям", "level")),
     ("triple_bottom", ("потрійне дно", "Потрійне дно підтверджено закриттям", "level")),
     ("head_shoulders", ("голова і плечі", "Фігура «голова і плечі» підтверджена", "level")),
     ("inverse_head_shoulders", ("перевернута голова і плечі", "Фігура «перевернута голова і плечі» підтверджена", "level")),
-    ("displacement", ("сильний імпульс", "Сильний імпульсний рух у бік сценарію", "candle")),
-    ("ote", ("зона OTE", "Ціна в зоні оптимального відкату (OTE)", "candle")),
-    ("exhaustion", ("виснаження руху", "Рух виснажується", "candle")),
+    ("displacement", ("різкий рух у бік сценарію", "Був різкий рух у бік сценарію", "candle")),
+    ("ote", ("відкат у зону входу", "Ціна відкотилась у зону, де зазвичай продовжують рух", "candle")),
+    ("exhaustion", ("рух вичерпується", "Рух вичерпується: кожен наступний ривок слабший", "candle")),
 ]
-PATTERN = {"flag": "прапор", "pennant": "вимпел", "ascending_triangle": "висхідний трикутник", "descending_triangle": "низхідний трикутник",
+PATTERN = {"flag": "прапор: коротка пауза в русі", "pennant": "вимпел: звужена пауза в русі", "ascending_triangle": "висхідний трикутник", "descending_triangle": "низхідний трикутник",
            "symmetrical_triangle": "симетричний трикутник", "rectangle": "прямокутник", "rising_wedge": "висхідний клин", "falling_wedge": "спадний клин"}
-TRIGGER = {"engulf": ("поглинання", "Розворотна свічка-поглинання"), "engulfing_ctx": ("поглинання", "Розворотна свічка-поглинання"),
-           "pin_bar": ("пін-бар", "Пін-бар біля зони"), "inside_bar_break": ("пробій inside bar", "Пробій після inside bar")}
+TRIGGER = {"engulf": ("розворотна свічка", "Розворотна свічка, що перекрила попередню"), "engulfing_ctx": ("розворотна свічка", "Розворотна свічка, що перекрила попередню"),
+           "pin_bar": ("свічка з довгою тінню", "Свічка з довгою тінню біля зони"), "inside_bar_break": ("вихід із вузької свічки", "Ціна вийшла за межі вузької свічки")}
 CHANNEL = "channel_edge"
 
 
-def build(tags: List[str], mode: Optional[str], direction: str, *, rr_net: Any = None, rr_weighted: Any = None, tf: str = "M15") -> Dict[str, Any]:
+def build(tags: List[str], mode: Optional[str], direction: str, *, rr_net: Any = None, rr_weighted: Any = None, tf: str = "M15",
+          entry_txt: str = "", zone_txt: str = "") -> Dict[str, Any]:
     """{'name', 'why': [≤4], 'objects': [...]} або name=None, коли підтвердження не збережено."""
     side = "SHORT" if str(direction or "").upper() == "SHORT" else "LONG"
     ts = [str(t) for t in (tags or [])]
@@ -50,39 +51,41 @@ def build(tags: List[str], mode: Optional[str], direction: str, *, rr_net: Any =
     trig = next((TRIGGER[t] for t in ts if t in TRIGGER), None)
     chan = CHANNEL in ts
     if mode == "retest" and main is None:
-        core = "пробій зони і ретест"
+        core = "пробій зони і повернення до неї"
     elif main:
         core = main[1][0]
     elif pat:
-        core = f"фігура продовження ({pat})"
+        core = f"продовження руху ({pat.split(':')[0]})"
     elif trig:
         core = trig[0]
     elif chan:
-        core = "реакція від краю каналу"
+        core = "відбиття від краю лінії тренду"
     else:
         core = "підтвердження на молодшому таймфреймі"
     name = f"{side} · {core}"
-    if chan and core != "реакція від краю каналу":
-        name += " біля краю каналу"
+    if chan and core != "відбиття від краю лінії тренду":
+        name += " біля краю лінії тренду"
     if pat and main:
-        name += f" після фігури ({pat})"
+        name += f" після паузи в русі ({pat.split(':')[0]})"
     if trig and main:
         name += f" + {trig[0]}"
     why: List[str] = []
     if main:
         why.append(main[1][1])
+    if entry_txt and zone_txt:
+        why.insert(0, f"Вхід {entry_txt} — у зоні {zone_txt}")
     if pat and not main:
-        why.append(f"Фігура продовження: {pat}")
+        why.append(f"Після паузи в русі: {pat}")
     if chan:
-        why.append("Ціна біля краю регресійного каналу")
+        why.append("Ціна біля краю лінії тренду (регресійний канал)")
     if trig:
         why.append(trig[1])
     if mode == "retest":
-        why.append("Пробій зони з ретестом окремими свічками")
+        why.append("Ціна пробила зону й повернулась до неї окремою свічкою")
     else:
-        why.append(f"Закриття свічки {tf} усередині зони входу")
+        why.append(f"Свічка {tf} закрилась усередині зони входу")
     if rr_net is not None:
-        why.append(f"Потенціал достатній: до TP1 {float(rr_net):.2f}" + (f", зважений {float(rr_weighted):.2f}" if rr_weighted is not None else "") + " (після комісій)")
+        why.append(("Вигода до втрати: " + f"{float(rr_net):.2f}".replace(".", ",") + " до TP1" + (f", {float(rr_weighted):.2f}".replace(".", ",") + " із TP2" if rr_weighted is not None else "") + " (після комісій)"))
     objs: List[str] = []
     if main and main[1][2] not in objs:
         objs.append(main[1][2])
