@@ -114,6 +114,8 @@ since = T.milestone_since(db2)
 assert since > NOW - 5
 T.record_plan(db2, scenario_id="SCN|MS|LONG|H1|1b", symbol="MSUSDT", direction="LONG", tf="H1", entry=100, sl=98, tp1=104, tp2=107, tp3=110,
               confirmed_ts=since + 1, valid_until_ts=since + 86400, confirm_msg_id=556)
+T.record_plan(db2, scenario_id="SCN|GR|LONG|H1|1", symbol="GRUSDT", direction="LONG", tf="H1", entry=100, sl=98, tp1=104, confirmed_ts=since - 300,
+              valid_until_ts=since + 86400, confirm_msg_id=557)   # доставка затрималась: підтверджено за 5 хв до запуску відстеження — теж відстежуємо
 c0 = since + 1
 
 
@@ -124,8 +126,9 @@ def cd(i, lo, hi):
 candles = [cd(1, 99.5, 100.5), cd(2, 100, 104.5), cd(3, 101, 108), cd(4, 97, 103)]   # вхід, TP1, TP2, потім стоп
 fetch = lambda s, tf, n: candles  # noqa: E731
 got = T.pending_milestones(db2, fetch, now_ts=c0 + 900 * 6)
-lv = [(m["symbol"], m["level"], m["confirm_msg_id"]) for m in got]
+lv = [(m["symbol"], m["level"], m["confirm_msg_id"]) for m in got if m["symbol"] == "MSUSDT"]
 assert lv == [("MSUSDT", "TP1", 556), ("MSUSDT", "TP2", 556), ("MSUSDT", "SL", 556)], lv
+assert not [m for m in got if m["symbol"] == "HISTUSDT"] and {m["symbol"] for m in got} <= {"MSUSDT", "GRUSDT"}
 for m in got:
     T.record_milestone(db2, m, 1)
 assert T.pending_milestones(db2, fetch, now_ts=c0 + 900 * 6) == []   # вдруге нічого

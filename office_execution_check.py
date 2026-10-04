@@ -38,6 +38,7 @@ def execution_checks(
     has_open_position: Optional[bool],
     min_rr: float,
     min_tp1_pct: float,
+    news: Optional[tuple] = None,
 ) -> Dict[str, Any]:
     side = str(direction or "").upper()
     lo, hi, s, t, px = _f(zone_lo), _f(zone_hi), _f(sl), _f(tp1), _f(price)
@@ -79,7 +80,10 @@ def execution_checks(
         checks.append(_chk("duplicate", "Не дублює позицію", "FAIL" if has_open_position else "OK",
                            "вже є підтверджена /position у цьому напрямку" if has_open_position else "відкритої /position немає"))
     checks.append(_chk("spread", "Спред і ліквідність", "UNAVAILABLE", "стакан/спред не підключені"))
-    checks.append(_chk("news", "Немає новини перед входом", "UNAVAILABLE", "перевіреного календаря подій немає"))
+    if news is None:
+        checks.append(_chk("news", "Немає новини перед входом", "UNAVAILABLE", "перевіреного календаря подій немає"))
+    else:   # стан із календаря (той самий, що показує статус джерела), а не вічне «невідомо»
+        checks.append(_chk("news", "Немає новини перед входом", str(news[0]), str(news[1])))
     fails = [c for c in checks if c["state"] == "FAIL"]
     unknown = [c for c in checks if c["state"] == "UNAVAILABLE"]
     if fails:

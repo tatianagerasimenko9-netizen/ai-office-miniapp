@@ -31,7 +31,7 @@ EVENT_UA = {
     "SIGNAL_ENTRY": "Лев склав план", "THESIS_VERSION": "Лев оновив план", "ZONE_REACHED": "Ціна досягла зони",
     "HIT_ENTRY": "Ціна досягла зони", "CONFIRMED": "Підтвердження отримано", "SCENARIO_CONFIRMED": "Підтвердження отримано",
     "CANCELLED": "План скасовано", "INVALIDATED": "План скасовано", "SCENARIO_EXPIRED": "Час очікування минув",
-    "EXPIRED": "Час очікування минув",
+    "EXPIRED": "Час очікування минув", "SIGNAL_PLAN": "План готовий і надіслано в Telegram",
 }
 
 
@@ -128,7 +128,8 @@ def history(events: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, str]
 
 
 def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[str, Any], targets: Optional[Dict[str, Any]] = None,
-          events: Optional[List[Dict[str, Any]]] = None, plan_check=None, now: Optional[datetime] = None) -> Dict[str, Any]:
+          events: Optional[List[Dict[str, Any]]] = None, plan_check=None, now: Optional[datetime] = None,
+          plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Людський вигляд сценарію. price: {price, fresh, as_of}. plan_check(symbol, side, plan, lo, hi) → None|причина."""
     sym = str(row.get("symbol") or "").upper()
     side = str(row.get("direction") or "").upper()
@@ -139,6 +140,12 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
     tp1, sl = _f(row.get("tp1")), _f(row.get("sl"))
     cancel = _cancel_level(row, thesis)
     ctf = _confirm_tf(thesis, row)
+    # Канонічний знімок: готовий план, ДОСТАВЛЕНИЙ у Telegram (SIGNAL_PLAN). Він і є запис підтвердження; ціни/цілі/строк беремо з нього.
+    frozen = plan if (plan and status == "CONFIRMED") else None
+    if frozen:
+        ctf = ctf or "M15"
+        tp1 = _f(frozen.get("tp1")) if _f(frozen.get("tp1")) is not None else tp1
+        sl = _f(frozen.get("sl")) if _f(frozen.get("sl")) is not None else sl
     up = "вгору" if side != "SHORT" else "вниз"
     cross = "нижче" if side != "SHORT" else "вище"
     dont = "не купувати" if side != "SHORT" else "не продавати"
@@ -172,8 +179,8 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
         confirmed = status == "CONFIRMED"
         inside = lo is not None and hi is not None and lo <= p <= hi
         if confirmed:
-            entry = _confirmed_px(row)
-            _tp2 = _f(row.get("tp2"))   # лише ЗАПИСАНИЙ у БД TP2 — відновлений структурний у шлюз RR не йде
+            entry = _f(frozen.get("entry")) if frozen and _f(frozen.get("entry")) is not None else _confirmed_px(row)
+            _tp2 = _f(frozen.get("tp2")) if frozen else _f(row.get("tp2"))   # лише ЗАПИСАНИЙ TP2 (той самий, що в гейті й Telegram)
             plan = {"entry": entry, "sl": sl, "tp1": tp1, "tp2": _tp2}
             if entry is None:
                 missing.append("не збережено ціну входу в момент підтвердження")
@@ -194,9 +201,12 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
             state = "READY" if not missing else "NOT_READY"
             if state == "READY":
                 tg = targets or {}
+                if frozen:   # TP2/TP3 — рівно ті, що в Telegram; без перерахунку зі структури
+                    tg = {"tp2": {"price": _f(frozen.get("tp2")), "why": ""} if _f(frozen.get("tp2")) is not None else None,
+                          "tp3": {"price": _f(frozen.get("tp3")), "why": ""} if _f(frozen.get("tp3")) is not None else None}
                 v["plan"] = {"entry": px(entry, sym), "stop": px(sl, sym), "tp1": px(tp1, sym),
-                             "tp2": px(tg["tp2"]["price"], sym) + f" ({tg['tp2']['why']})" if tg.get("tp2") else "немає обґрунтованої",
-                             "tp3": (px(tg["tp3"]["price"], sym) + f" ({tg['tp3']['why']})") if tg.get("tp3") else "немає обґрунтованої"}
+                             "tp2": (px(tg["tp2"]["price"], sym) + (f" ({tg['tp2']['why']})" if tg["tp2"].get("why") else "")) if tg.get("tp2") else "немає обґрунтованої",
+                             "tp3": (px(tg["tp3"]["price"], sym) + (f" ({tg['tp3']['why']})" if tg["tp3"].get("why") else "")) if tg.get("tp3") else "немає обґрунтованої"}
                 from office_alert_gate import fee_round_trip_pct
 
                 fee = fee_round_trip_pct()
@@ -218,9 +228,14 @@ def build(row: Dict[str, Any], *, thesis: Optional[Dict[str, Any]], price: Dict[
                 try:
                     from office_scenario_lifecycle import kyiv_hhmm, valid_until_ts, _ts as _lts
 
-                    t_conf = _lts(row.get("ts_updated"))
-                    if t_conf:
-                        v["plan"]["valid_until"] = kyiv_hhmm(valid_until_ts(t_conf, _tf_from_row(row)))
+                    if frozen and _f(frozen.get("valid_until_ts")):
+                        from office_ready_core import kyiv_stamp
+
+                        v["plan"]["valid_until"] = kyiv_stamp(float(frozen["valid_until_ts"]))
+                    else:
+                        t_conf = _lts(row.get("ts_updated"))
+                        if t_conf:
+                            v["plan"]["valid_until"] = kyiv_hhmm(valid_until_ts(t_conf, _tf_from_row(row)))
                 except Exception:  # noqa: BLE001
                     pass
                 v["plan"]["potential"] = f"до цілі 1 ≈ {to_tp1:.2f}% (≈ {max(to_tp1 - fee, 0):.2f}% після комісій), до стопа ≈ {to_sl:.2f}%".replace(".", ",")

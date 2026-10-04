@@ -6866,7 +6866,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         continue
                     tf_wait = "5m" if str(st.get("timeframe") or "M15").upper() in ("M15", "M5", "M1") else "15m"
                     try:
-                        ltf = fetch_candles(sym_f, tf_wait, 40)
+                        ltf = await asyncio.to_thread(fetch_candles, sym_f, tf_wait, 40)
                     except Exception:
                         ltf = []
                     px_f = None
@@ -6876,10 +6876,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                     except Exception:
                         px_f = None
                     try:
-                        h1_f = fetch_candles(sym_f, "1h", 60)
+                        h1_f = await asyncio.to_thread(fetch_candles, sym_f, "1h", 60)
                     except Exception:
                         h1_f = None
-                    fu = follow_setup(setup=st, price=px_f, candles_ltf=ltf, candles_h1=h1_f if isinstance(h1_f, list) else None)
+                    fu = await asyncio.to_thread(follow_setup, setup=st, price=px_f, candles_ltf=ltf, candles_h1=h1_f if isinstance(h1_f, list) else None)
                     act = str(fu.get("action") or "")
                     if act == "confirm":
                         okey = str(st.get("scenario_id") or key)
@@ -6894,10 +6894,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                             continue
                         plan_px = fu.get("price") or px_f
                         try:
+                            _m15, _d1, _w1 = await asyncio.gather(asyncio.to_thread(fetch_candles, sym_f, "15m", 96), asyncio.to_thread(fetch_candles, sym_f, "1d", 20),
+                                                                  asyncio.to_thread(fetch_candles, sym_f, "1w", 4))
                             tgt = _targets.structural_targets(
                                 direction=str(st.get("direction") or ""), entry=plan_px, tp1=st.get("tp1"),
-                                lv=_targets.levels(m15=fetch_candles(sym_f, "15m", 96), daily=fetch_candles(sym_f, "1d", 20),
-                                                   weekly=fetch_candles(sym_f, "1w", 4)))
+                                lv=_targets.levels(m15=_m15, daily=_d1, weekly=_w1))
                         except Exception as exc_t:
                             print(f"[confluence] targets {sym_f}: {type(exc_t).__name__}: {exc_t}")
                             tgt = {}
@@ -6969,7 +6970,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                                              max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_valid_c,
                                              rejected=False, confirm_msg_id=confirm_msg_id,
                                              gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
-                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f)))
+                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu)))
                         except Exception as exc_tr:
                             print(f"[track] record plan failed: {exc_tr}")
                         try:
