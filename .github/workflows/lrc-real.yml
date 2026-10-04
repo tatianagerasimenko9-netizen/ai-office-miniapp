@@ -1,0 +1,16 @@
+name: LRC real-data parity (research, read-only)
+on:
+  push:
+    branches: [claude/lrc-audit]
+    paths: [".github/workflows/lrc-real.yml", "scripts/lrc_parity.py"]
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy matplotlib
+      - name: Pine reference vs Office on real Binance Futures 15m closes
+        run: python scripts/lrc_parity.py --real
