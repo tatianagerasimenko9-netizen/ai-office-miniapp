@@ -27,3 +27,13 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Звідки TP3 в ALGO
         run: python scripts/probe_algo_tp3.py
+  coins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install -r requirements.txt
+      - name: VVV і SYRUP до READY і до стопа
+        run: python scripts/brain_coin_probe.py
