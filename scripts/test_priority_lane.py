@@ -67,3 +67,22 @@ with M.priority():
         pass
 M.reset_market_cache()
 print("OK priority lane: м'яка пауза ваги не затримує життя READY; жорстка пауза й 429 зупиняють усіх")
+
+# облік REST: за ТФ і оцінка ваги нашого процесу
+M.reset_market_cache()
+M._HEALTH.pop("rest_by", None)
+M._HEALTH["weight_est"] = 0
+M._FAPI_GAP = 0.0
+M._RAMP_GAP = 0.0
+class Resp2(Resp):
+    headers = {"X-MBX-USED-WEIGHT-1M": "100"}
+
+
+M.urlopen = lambda *a, **k: Resp2()
+M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": "X", "interval": "1m", "limit": 30})
+M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": "X", "interval": "1m", "limit": 360})
+M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": "X", "interval": "15m", "limit": 1000})
+M._http_get_json("https://fapi.binance.com/fapi/v1/premiumIndex", {"symbol": "X"})
+assert M._HEALTH["rest_by"] == {"klines_1m": 2, "klines_15m": 1, "premiumIndex": 1}, M._HEALTH["rest_by"]
+assert M._HEALTH["weight_est"] == 1 + 2 + 10 + 1, M._HEALTH["weight_est"]
+print("OK rest accounting: по ТФ і оцінка ваги процесу")
