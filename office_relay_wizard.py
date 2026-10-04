@@ -6955,6 +6955,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
                         _gate_snap = _rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
                                                        max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu),
+                                                       zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"),
                                                        tp3_why=(((tgt or {}).get("tp3") or {}).get("why") or "") if _tp3_m is not None else "")
                         _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
@@ -6981,7 +6982,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             print(f"[card] фаза недоступна {sym_f}: {exc_ph}")
                         _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
-                        _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
+                        _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, zone=_gate_snap.get("zone"),
                                              risk_usd=_risk, valid_until=_rc.kyiv_stamp(_valid_c), why=_why, sigma30=_sig30)
                         _img: Dict[str, Any] = {}
                         try:
@@ -6989,7 +6990,7 @@ EV позитивне: {prob.get('ev_positive', '')}
 
                             _lvl = next((t for t in (_cf.get("tags") or []) if t in _card.LEVEL_TAGS), None)
                             _img = await asyncio.to_thread(
-                                _card.render, symbol=sym_f, direction=_dir_c, candles=(_m15 if isinstance(_m15, list) else []), entry=plan_px, max_entry=_max_e,
+                                _card.render, symbol=sym_f, direction=_dir_c, candles=(_m15 if isinstance(_m15, list) else []), entry=plan_px, zone=_gate_snap.get("zone"),
                                 sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, key_level=(plan_px if _lvl else None),
                                 path=os.path.join(tempfile.gettempdir(), f"ready_{sym_f}_{int(_now_c)}.png"))
                         except Exception as exc_img:

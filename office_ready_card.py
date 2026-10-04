@@ -33,13 +33,11 @@ def _num(v: Any, symbol: str) -> str:
     return "—" if x is None else format_px(x, symbol).replace(".", ",")
 
 
-def _zone(entry: Any, max_entry: Any, direction: str):
-    e, m = _f(entry), _f(max_entry)
-    if e is None:
-        return None, None
-    if m is None:
-        return e, e
-    return (min(e, m), max(e, m))
+def _zone(entry: Any, zone: Any):
+    """Зона входу = зона сетапу зі знімка (gate.zone). Межа «далі не входити» (max_entry) — інше поняття і сюди не потрапляє."""
+    from office_ready_core import entry_zone
+
+    return entry_zone(entry, zone)
 
 
 def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: str, entry: Any, zone_lo: Any = None, zone_hi: Any = None) -> str:
@@ -105,7 +103,7 @@ def phase_sigma(closes_5m: Any, direction: str) -> Optional[float]:
         return None
 
 
-def caption(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, max_entry: Any = None,
+def caption(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None, zone: Any = None,
             risk_usd: Any = None, valid_until: str = "", why: str = "", sigma30: Optional[float] = None) -> str:
     from office_user_messages import _dir_head, _pct_txt, ticker
 
@@ -114,7 +112,7 @@ def caption(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, tp2: 
     if why:
         L.append(f"Чому: {why}")
     L.append("")
-    lo, hi = _zone(entry, max_entry, direction)
+    lo, hi = _zone(entry, zone)
     z = _num(lo, symbol) if lo == hi else f"{_num(lo, symbol)}–{_num(hi, symbol)}"
     L.append(f"Вхід: {z}")
     L.append(f"Стоп: {_num(sl, symbol)}" + _pct_txt(sl, entry, "−"))
@@ -136,7 +134,7 @@ BG, FG, GRID = "#0f1420", "#e8ecf3", "#1f2735"
 UP, DOWN, YEL, TPC, SLC = "#2ebd85", "#e5534b", "#f2c230", "#2ebd85", "#e5534b"
 
 
-def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, max_entry: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
+def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
            ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
@@ -154,7 +152,7 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         return {"ok": False, "reason": "мало свічок"}
     short = str(direction or "").upper() == "SHORT"
     e, sl_, t1, t2, t3 = _f(entry), _f(sl), _price(tp1), _price(tp2), _price(tp3)
-    zlo, zhi = _zone(entry, max_entry, direction)
+    zlo, zhi = _zone(entry, zone)
     if e is None or sl_ is None:
         return {"ok": False, "reason": "немає входу/стопа"}
     hi_c, lo_c = max(float(c["high"]) for c in cs), min(float(c["low"]) for c in cs)
