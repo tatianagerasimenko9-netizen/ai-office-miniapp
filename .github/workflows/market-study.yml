@@ -37,3 +37,13 @@ jobs:
       - run: pip install -r requirements.txt
       - name: VVV і SYRUP до READY і до стопа
         run: python scripts/brain_coin_probe.py
+  momentum:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install numpy
+      - name: Власний рух монети проти угоди перед READY
+        run: python -u scripts/ready_momentum_study.py study/plans_ready.json
