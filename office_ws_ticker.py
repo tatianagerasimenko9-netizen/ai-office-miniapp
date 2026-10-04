@@ -17,6 +17,8 @@ _LOCK = threading.Lock()
 _TICK: Dict[str, Dict[str, float]] = {}
 _STATE: Dict[str, Any] = {"thread": None, "connected": False, "msgs": 0, "hits": 0, "misses": 0, "errors": 0, "last_msg": 0.0, "connects": 0, "last_error": None}
 MAX_AGE_SEC = 30.0
+_MISS: Dict[str, Any] = {"symbol_missing": 0, "stale": 0, "no_open": 0, "ages": [], "stale_syms": {}}   # вимір причин промахів (лише облік, поведінку не змінює)
+_MISS_AGES_CAP = 4000
 
 
 def enabled() -> bool:
@@ -69,6 +71,16 @@ def get(symbol: str, max_age: float = MAX_AGE_SEC) -> Optional[Dict[str, float]]
         r = _TICK.get(sym)
         if not r or time.time() - r["at"] > max_age or not r["o"]:
             _STATE["misses"] += 1
+            if not r:
+                _MISS["symbol_missing"] += 1
+            elif not r["o"]:
+                _MISS["no_open"] += 1
+            else:
+                _MISS["stale"] += 1
+                if len(_MISS["ages"]) < _MISS_AGES_CAP:
+                    _MISS["ages"].append(time.time() - r["at"])
+                if len(_MISS["stale_syms"]) < 50 or sym in _MISS["stale_syms"]:
+                    _MISS["stale_syms"][sym] = _MISS["stale_syms"].get(sym, 0) + 1
             return None
         _STATE["hits"] += 1
         return {"lastPrice": r["c"], "highPrice": r["h"], "lowPrice": r["l"], "quoteVolume": r["q"], "openPrice": r["o"],
@@ -136,13 +148,26 @@ def _ensure_thread() -> None:
     t.start()
 
 
+def _pct(a: list, q: float) -> Optional[float]:
+    if not a:
+        return None
+    b = sorted(a)
+    return round(b[min(len(b) - 1, int(q * len(b)))], 1)
+
+
 def stats() -> Dict[str, Any]:
     with _LOCK:
+        ages = list(_MISS["ages"])
+        top = sorted(_MISS["stale_syms"].items(), key=lambda kv: -kv[1])[:5]
         return {"enabled": enabled(), "symbols": len(_TICK), **{k: _STATE[k] for k in ("connected", "connects", "msgs", "hits", "misses", "errors", "last_error")},
-                "silent_sec": round(time.time() - _STATE["last_msg"], 1) if _STATE["last_msg"] else None}
+                "silent_sec": round(time.time() - _STATE["last_msg"], 1) if _STATE["last_msg"] else None,
+                "miss_why": {"symbol_missing": _MISS["symbol_missing"], "stale": _MISS["stale"], "no_open": _MISS["no_open"],
+                             "stale_age_s": {"p50": _pct(ages, 0.5), "p90": _pct(ages, 0.9), "p95": _pct(ages, 0.95), "max": round(max(ages), 1) if ages else None},
+                             "stale_top": top}}
 
 
 def reset_for_tests() -> None:
     with _LOCK:
         _TICK.clear()
         _STATE.update(msgs=0, hits=0, misses=0, errors=0, last_msg=0.0, connects=0, connected=False, last_error=None)
+        _MISS.update(symbol_missing=0, stale=0, no_open=0, ages=[], stale_syms={})
