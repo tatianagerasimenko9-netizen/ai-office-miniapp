@@ -169,18 +169,30 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
 CHART_BARS = 96
 
 
-def freeze_chart(candles: Any, decided_ts: float, tf: str = "15m") -> Dict[str, Any]:
-    """Свічки, на яких прийнято рішення READY: точні OHLCV із часом і джерелом. Картка малює ТІЛЬКИ їх; доказ рахується з них же."""
-    import hashlib
-    import json
-
+def freeze_chart(candles: Any, decided_ts: float, tf: str = "15m", symbol: str = "") -> Dict[str, Any]:
+    """Свічки, на яких прийнято рішення READY: точні OHLCV із часом і джерелом + походження (provenance), щоб знімок можна було незалежно звірити з архівом біржі.
+    Картка малює ТІЛЬКИ ці свічки; доказ рахується з них же."""
     from office_patterns import _ts
 
     rows = [r for r in (candles or []) if isinstance(r, dict) and _ts(r.get("ts")) is not None and all(_f(r.get(k)) is not None for k in ("open", "high", "low", "close"))][-CHART_BARS:]
     data = [[_ts(r["ts"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]), _f(r.get("volume"))] for r in rows]
-    srcs = sorted({str(r.get("src")) for r in rows if r.get("src")})
-    return {"tf": tf, "source": ",".join(srcs) or "unknown", "decided_ts": float(decided_ts), "n": len(data), "range": [data[0][0], data[-1][0]] if data else None,
-            "candles": data, "sha256": ohlc_sha(data)}
+    srcs: Dict[str, int] = {}
+    for r in rows:
+        k = str(r.get("src") or "unknown")
+        srcs[k] = srcs.get(k, 0) + 1
+    step = (data[-1][0] - data[-2][0]) if len(data) >= 2 else None
+    futures = set(srcs) == {"binance_futures"}
+    exch = "Binance USDT-M Futures" if futures else ("змішане/запасне джерело: " + ",".join(sorted(srcs)))
+    return {"tf": tf, "source": ",".join(sorted(srcs)) or "unknown", "decided_ts": float(decided_ts), "n": len(data), "range": [data[0][0], data[-1][0]] if data else None,
+            "candles": data, "sha256": ohlc_sha(data),
+            "provenance": {"exchange": exch, "symbol": str(symbol or "").upper(), "interval": tf, "step_sec": step, "source_counts": srcs,
+                           "open_time_first": data[0][0] if data else None, "open_time_last": data[-1][0] if data else None,
+                           "close_time_last": (data[-1][0] + step) if (data and step) else None,
+                           "last_candle_forming": bool(data and step and data[-1][0] + step > float(decided_ts)),
+                           "received_ts": float(decided_ts), "hash_algo": "sha256 над [open_time,o,h,l,c,volume] (див. ohlc_sha)",
+                           "endpoint": "GET /fapi/v1/klines (REST) або kline-потік; які саме свічки прийшли REST, а які з WS, у знімку не позначено" if futures else None,
+                           "archive_check": "data.binance.vision/data/futures/um/daily/klines/{SYMBOL}/{interval}/ (після закінчення доби) — scripts/verify_snapshot_vs_archive.py",
+                           "known_gaps": ["не збережено, REST чи WS дав кожну свічку", "час фактичного HTTP-запиту/повідомлення не збережено: received_ts — момент заморожування знімка"]}}
 
 
 def ohlc_sha(data: Any) -> str:

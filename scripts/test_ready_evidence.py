@@ -174,6 +174,22 @@ fl_gate = {"chart": ev.freeze_chart(rows1[-96:], T0.timestamp() + 10 ** 7, "15m"
 fl_gate["evidence"] = ev.build(ev.candles_from_chart(fl_gate["chart"]), "SHORT", 101.5, 102.5, ["flag"], now_ts=T0.timestamp() + 10 ** 7)["items"]
 afl = ev.audit(fl_gate)
 check(afl and afl[0]["proof_complete"] is False and afl[0]["proof_note"], f"прапор: неповний доказ позначений (детектор не віддає свінги): {afl}")
+# 2d) походження знімка + звірка з «архівом» (синтетичний архів) і виявлення розбіжності
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import verify_snapshot_vs_archive as va  # noqa: E402
+
+ch2 = ev.freeze_chart(sw_rows, decided, "15m", symbol="TESTUSDT")
+pv = ch2["provenance"]
+check(pv["exchange"] == "Binance USDT-M Futures" and pv["symbol"] == "TESTUSDT" and pv["interval"] == "15m" and pv["step_sec"] == 900 and pv["received_ts"] == decided
+      and pv["close_time_last"] == ch2["range"][1] + 900 and pv["last_candle_forming"] is False and pv["known_gaps"], f"provenance: {pv}")
+arch = {round(c[0]): tuple(c[1:6]) for c in ch2["candles"]}
+check(all(r["status"] == "OK" for r in va.compare(ch2["candles"], arch, 5)), "звірка з архівом: збігається")
+arch_bad = dict(arch)
+k0 = round(ch2["candles"][0][0])
+arch_bad[k0] = (arch[k0][0], arch[k0][1] + 0.5) + arch[k0][2:]
+check(any(r["status"] == "DIFF" for r in va.compare(ch2["candles"], arch_bad, 5)), "розбіжність OHLC з архівом виявляється")
+check(any(r["status"] == "NO_ARCHIVE_ROW" for r in va.compare(ch2["candles"], {}, 3)), "немає рядка архіву — чесно NO_ARCHIVE_ROW")
+check(ev.freeze_chart(sw_rows[:-1] + [dict(sw_rows[-1], src="bybit_linear")], decided, "15m", symbol="X")["provenance"]["exchange"].startswith("змішане"), "запасне джерело не видається за Binance Futures")
 # 3) channel_edge — канал із реального детектора
 rows3 = []
 for i in range(120):
