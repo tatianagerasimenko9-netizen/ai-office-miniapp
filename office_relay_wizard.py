@@ -6989,10 +6989,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                             _gate_snap["evidence"] = _ev.get("items") or []
                             if _ev.get("missing"):
                                 _gate_snap["evidence_missing"] = _ev["missing"]
+                            if _ev.get("unsupported"):
+                                _gate_snap["evidence_unsupported"] = _ev["unsupported"]   # теги без модуля геометрії: чесно записано, що їх на картці немає
                         except Exception as exc_ev:
                             print(f"[card] докази недоступні {sym_f}: {type(exc_ev).__name__}: {exc_ev}")
                         _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
-                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
+                                               zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"),
+                                               prefer=[x.get("kind") for x in (_gate_snap.get("evidence") or [])])
                         _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, zone=_gate_snap.get("zone"),
                                              risk_usd=_risk, valid_until=_rc.kyiv_stamp(_valid_c), why=_why, sigma30=_sig30)
                         _img: Dict[str, Any] = {}

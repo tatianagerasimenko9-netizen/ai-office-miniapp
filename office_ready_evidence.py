@@ -10,11 +10,13 @@ from typing import Any, Dict, List, Optional
 MAX_ITEMS = 3
 PATTERNS = ("head_shoulders", "inverse_head_shoulders", "ascending_triangle", "descending_triangle", "symmetrical_triangle", "rectangle", "rising_wedge",
             "falling_wedge", "flag", "pennant")
-LABELS = {"head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "трикутник", "descending_triangle": "трикутник",
+MULTI = ("double_top", "double_bottom", "triple_top", "triple_bottom")
+LABELS = {"double_top": "подвійна вершина", "double_bottom": "подвійне дно", "triple_top": "потрійна вершина", "triple_bottom": "потрійне дно",
+          "head_shoulders": "голова і плечі", "inverse_head_shoulders": "перевернута голова і плечі", "ascending_triangle": "трикутник", "descending_triangle": "трикутник",
           "symmetrical_triangle": "трикутник", "rectangle": "коридор", "rising_wedge": "клин", "falling_wedge": "клин", "flag": "прапор", "pennant": "вимпел",
           "level_retest": "рівень", "level_hold": "рівень", "level_false_break": "рівень", "fvg_retest": "FVG", "ob_retest": "OB", "breaker_retest": "breaker",
           "sweep_pool": "зняли стопи", "bos": "BOS", "choch": "CHoCH", "channel_edge": "канал", "ote": "OTE", "displacement": "сильна свічка"}
-PRIORITY = list(PATTERNS) + ["level_retest", "level_hold", "level_false_break", "channel_edge", "fvg_retest", "ob_retest", "breaker_retest", "sweep_pool", "choch", "bos", "ote", "displacement"]
+PRIORITY = list(PATTERNS) + list(MULTI) + ["level_retest", "level_hold", "level_false_break", "channel_edge", "fvg_retest", "ob_retest", "breaker_retest", "sweep_pool", "choch", "bos", "ote", "displacement"]
 
 
 def _f(v: Any) -> Optional[float]:
@@ -32,13 +34,14 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
     rows = closed_only([r for r in (candles or []) if isinstance(r, dict)], now_ts)
     ts = [str(t) for t in (tags or [])]
     want = [t for t in PRIORITY if t in ts]
+    unsupported = [t for t in ts if t not in PRIORITY]   # теги підтвердження без модуля геометрії (upthrust, spring, sfp, engulf, pin_bar…): на картці їх немає, і це записується
     zl, zh = _f(zone_lo), _f(zone_hi)
     if zl is not None and zh is not None and zl > zh:
         zl, zh = zh, zl
     items: List[Dict[str, Any]] = []
     missing: List[str] = []
     if len(rows) < 12:
-        return {"items": [], "missing": want, "reason": "мало свічок"}
+        return {"items": [], "missing": want, "unsupported": unsupported, "reason": "мало свічок"}
 
     def t_at(i: int) -> Optional[float]:
         return _ts(rows[max(0, min(len(rows) - 1, int(i)))].get("ts"))
@@ -61,6 +64,17 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
                               "anchors": [{"t": ln[k], "price": ln["p" + k[1]], "role": "кінець лінії межі"} for ln in p["lines"] for k in ("t0", "t1")],
                               "proof_complete": False, "proof_note": "детектор віддає лише кінці ліній; свінги/дотики, через які їх проведено, не збережені (Pattern Engine 2.0)"}
                         break
+            elif kind in MULTI:
+                from office_patterns import find_multi
+
+                res = find_multi(candles, direction=side, n=3 if kind.startswith("triple") else 2, zone_lo=zl, zone_hi=zh, now_ts=now_ts)
+                if res and res["kind"] == kind and res.get("confirmed") and res.get("confirm"):
+                    pts = [{"t": _ts(x["ts"]), "price": float(x["price"])} for x in res["extremes"]]
+                    it = {"kind": kind, "draw": "multi", "points": pts, "neckline": float(res["neckline"]), "t_confirm": _ts(res["confirm"]["ts"]),
+                          "close": float(res["confirm"]["close"]), "detector": "office_patterns.find_multi",
+                          "rule": "екстремуми на одному рівні в допуску, розрив ≥3 свічок; підтвердження — закриття за лінією шиї",
+                          "anchors": [{"t": x["t"], "price": x["price"], "role": f"екстремум {i + 1}"} for i, x in enumerate(pts)]
+                                     + [{"t": _ts(res["confirm"]["ts"]), "price": float(res["confirm"]["close"]), "role": "закриття за шиєю"}], "proof_complete": True}
             elif kind in ("level_retest", "level_hold", "level_false_break"):
                 import office_levels as lv
 
@@ -162,7 +176,7 @@ def build(candles: Any, side: str, zone_lo: Any, zone_hi: Any, tags: List[str], 
             items.append(it)
         else:
             missing.append(kind)
-    return {"items": items, "missing": missing}
+    return {"items": items, "missing": missing, "unsupported": unsupported}
 
 
 # ------------------------------------------------------------------ знімок графіка та аудит
