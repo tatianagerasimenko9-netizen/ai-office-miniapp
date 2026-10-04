@@ -5,28 +5,12 @@ on:
 permissions:
   contents: read
 jobs:
-  study:
+  probe:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
-      - run: pip install -r requirements.txt
-      - name: Ринок на момент READY
-        run: python scripts/market_study_ready.py study/plans.json > study/out.txt 2> study/err.txt || true; tail -15 study/err.txt
-      - name: Коротко
-        run: |
-          python - <<'PY'
-          import json,re
-          t=open('study/out.txt').read()
-          js=t.split('\n==== CARD')[0]
-          d=json.loads(js)
-          for p in d['plans']:
-              m=p['market']; a=p['alignment']
-              print(p['symbol'],p['direction'],'src',p['coin_src'],'| ринок',m['bias'],m['long'],'/',m['short'],'з',m['checked'],'|',[f['text'] for f in m['facts']],'| проти BTC',a['state'],a['coin_1h'],a['btc_1h'],a['rel_pp'],'corr',a['corr_btc'])
-          print('---')
-          print('\n==== CARD'+ '\n==== CARD'.join(t.split('\n==== CARD')[1:]))
-          PY
-      - uses: actions/upload-artifact@v4
-        with: {name: market-study, path: study}
+      - name: Які історичні дані є безкоштовно
+        run: python scripts/probe_vision.py
