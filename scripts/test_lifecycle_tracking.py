@@ -106,4 +106,17 @@ tfs3 = []
 run({}, BASE + 3600 + 30, tfs3)
 assert ("NEWUSDT", "5m", 1000) not in tfs3, "старі плани не частіше за інтервал"
 T.FRESH_SEC = old_fresh
+# 10) джерело: TP/SL лише за свічками ф'ючерсів Binance; резервний ринок (спот/Bybit) подій не дає; touched_ts і src записуються
+plan("SCN|B|SHORT|H1|1", "BYBUSDT", "SHORT", 50.0, 51.0, [48.0], ts=BASE + 7)
+cb = c1(BASE + 7, [(50.0, 50.2, 49.9, 50.0), (50.0, 51.5, 49.9, 51.2)])
+fb = [dict(c, src="bybit_linear") for c in cb]
+assert levels(run({"BYBUSDT": fb}, BASE + 7 + 3 * 60), "BYBUSDT") == [], "резервне джерело TP/SL не фіксує"
+ft = [dict(c, src="binance_futures") for c in cb]
+mb = run({"BYBUSDT": ft}, BASE + 7 + 3 * 60)
+assert levels(mb, "BYBUSDT") == ["ENTRY", "SL"], mb
+sl_ev = [m for m in mb if m["level"] == "SL"][0]
+assert sl_ev["touched_ts"] == BASE + 7 + 60 and sl_ev["src"] == "binance_futures" and sl_ev["tf"] == "1m", sl_ev
+T.record_milestone(db, sl_ev, 5)
+rec = [e for e in T._events(db, T.EV_MILESTONE) if e["p"].get("symbol") == "BYBUSDT" and e["p"].get("level") == "SL"][0]["p"]
+assert rec["touched_ts"] == sl_ev["touched_ts"] and rec["src"] == "binance_futures"
 print("test_lifecycle_tracking: OK")

@@ -60,7 +60,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
     e, sl = _f(plan.get("entry")), _f(plan.get("sl"))
     tps = [(n, _f(plan.get(k))) for n, k in (("TP1", "tp1"), ("TP2", "tp2"), ("TP3", "tp3")) if _f(plan.get(k)) is not None]
     t_conf, t_valid = float(plan["confirmed_ts"]), float(plan["valid_until_ts"])
-    out: Dict[str, Any] = {"status": "PENDING", "filled_at": None, "result_at": None, "mfe_pct": None, "mae_pct": None, "reached": [], "stopped": False}
+    out: Dict[str, Any] = {"status": "PENDING", "filled_at": None, "result_at": None, "mfe_pct": None, "mae_pct": None, "reached": [], "stopped": False, "at": {}}
     if not e or sl is None or not tps:
         return {**out, "status": "INVALID"}
     filled = False
@@ -76,21 +76,25 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
             if lo <= e <= hi:
                 filled = True
                 out["filled_at"] = t0
+                out["at"]["ENTRY"] = t0
                 stop_hit = (lo <= sl) if long_ else (hi >= sl)
                 mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
                 mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
                 if stop_hit:
+                    out["at"]["SL"] = t0
                     return {**out, "status": "STOP", "stopped": True, "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
             continue
         mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
         mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
         stop_hit = (lo <= sl) if long_ else (hi >= sl)
         if stop_hit:
+            out["at"]["SL"] = t0
             res = out["reached"][-1] if out["reached"] else "STOP"
             return {**out, "status": res, "stopped": True, "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
         for name, lvl in tps:
             if name not in out["reached"] and ((hi >= lvl) if long_ else (lo <= lvl)):
                 out["reached"].append(name)
+                out["at"][name] = t0
         if tps and tps[-1][0] in out["reached"]:
             return {**out, "status": tps[-1][0], "result_at": t0 + tf_sec, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
         if now - float(out["filled_at"]) > MAX_TRACK_SEC:
@@ -231,6 +235,9 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             continue
         if not isinstance(candles, list) or not candles:
             continue
+        src = str((candles[-1] or {}).get("src") or "binance_futures") if isinstance(candles[-1], dict) else "binance_futures"
+        if src != "binance_futures":   # резервний ринок (спот/Bybit) має базис: TP/SL за ним не фіксуємо, чекаємо свічки ф'ючерсів Binance
+            continue
         res = simulate(p, candles, now, tf_sec=tfs)
         levels = _levels_of(res)
         terminal = res["status"] not in ("PENDING", "INVALID")
@@ -242,7 +249,8 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
                 continue
             price = p.get({"ENTRY": "entry", "TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl", "EXPIRED": "entry"}[lv])
             out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv,
-                        "price": price, "confirm_msg_id": p.get("confirm_msg_id"), "silent": lv in SILENT_LEVELS})
+                        "price": price, "confirm_msg_id": p.get("confirm_msg_id"), "silent": lv in SILENT_LEVELS,
+                        "touched_ts": (res.get("at") or {}).get(lv), "src": src, "tf": tf})
     return out
 
 
@@ -250,7 +258,8 @@ def record_milestone(db: str, m: Dict[str, Any], msg_id: Any = None) -> None:
     from office_bridge import log_event
 
     log_event(db, EV_MILESTONE, {"scenario_id": m.get("scenario_id"), "confirmed_ts": m.get("confirmed_ts"), "level": m.get("level"),
-                                 "symbol": m.get("symbol"), "price": m.get("price"), "msg_id": msg_id, "sent_ts": time.time()}, str(m.get("scenario_id") or ""))
+                                 "symbol": m.get("symbol"), "price": m.get("price"), "msg_id": msg_id, "sent_ts": time.time(),
+                                 "touched_ts": m.get("touched_ts"), "src": m.get("src"), "tf": m.get("tf")}, str(m.get("scenario_id") or ""))
 
 
 def report(db: str, min_sample: int = 20) -> Dict[str, Any]:
