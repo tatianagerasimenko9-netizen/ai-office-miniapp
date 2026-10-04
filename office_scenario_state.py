@@ -335,6 +335,9 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
 
     g = plan.get("gate") or {}
     conf = g.get("confirm") or {}
+    fz = g.get("zone")   # зона сетапу, збережена зі знімком READY: Telegram, картка й Mini App беруть одну й ту саму
+    if isinstance(fz, (list, tuple)) and len(fz) == 2 and _f(fz[0]) is not None and _f(fz[1]) is not None:
+        lo, hi = float(fz[0]), float(fz[1])
     ts = _f(plan.get("confirmed_ts"))
     try:
         from zoneinfo import ZoneInfo
@@ -343,6 +346,7 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
     except Exception:  # noqa: BLE001
         hhmm = ""
     ready = {"at": ts, "at_hhmm": hhmm, "at_stamp": kyiv_stamp(ts) if ts else "", "entry": px(plan.get("entry"), sym), "max_entry": px(plan.get("max_entry"), sym) if plan.get("max_entry") else None,
+             "zone": (f"{px(lo, sym).replace(' $', '')}–{px(hi, sym)}" if lo is not None and hi is not None and lo != hi else None),
              "rr_net": g.get("rr_net"), "rr_weighted": g.get("rr_weighted"), "rr_rule": g.get("rr_rule"), "risk_pct": g.get("risk_pct"),
              "confirm_tags": conf.get("tags") or [], "confirm_ua": _plain_confirms(conf.get("tags") or []), "confirm_mode": conf.get("mode"), "confirm_detail": conf.get("detail"),
              "valid_until": kyiv_stamp(float(plan["valid_until_ts"])) if _f(plan.get("valid_until_ts")) else None}

@@ -57,17 +57,32 @@ def message_targets(*, direction: str, entry: Any, tp1: Any, tp2: Any, tp3_struc
 
 
 def gate_snapshot(*, direction: str, entry: Any, sl: Any, tp1: Any, tp2: Any, tp3: Any = None, max_entry: Any = None,
-                  min_tp1_pct: Any = None, plan_bad: str = "", confirm: Optional[Dict[str, Any]] = None, tp3_why: str = "") -> Dict[str, Any]:
+                  min_tp1_pct: Any = None, plan_bad: str = "", confirm: Optional[Dict[str, Any]] = None, tp3_why: str = "",
+                  zone_lo: Any = None, zone_hi: Any = None) -> Dict[str, Any]:
     """Усі входи й виходи гейта на момент READY: за ними рішення відтворюється без жодних зовнішніх даних."""
     import office_alert_gate as g
 
     e, s_, t1, t2 = _f(entry), _f(sl), _f(tp1), _f(tp2)
     rr = g.net_rr(e, s_, t1, t2) or {}
     risk = abs(e - s_) / e * 100.0 if e and s_ is not None else None
-    return {"direction": str(direction or "").upper(), "entry": e, "sl": s_, "tp1": t1, "tp2": t2, "tp3": _f(tp3), "max_entry": _f(max_entry),
+    zl, zh = _f(zone_lo), _f(zone_hi)
+    zone = [min(zl, zh), max(zl, zh)] if zl is not None and zh is not None else None   # зона сетапу (де шукали вхід); max_entry — інше: межа «далі не входити»
+    return {"zone": zone, "direction": str(direction or "").upper(), "entry": e, "sl": s_, "tp1": t1, "tp2": t2, "tp3": _f(tp3), "max_entry": _f(max_entry),
             "risk_pct": round(risk, 4) if risk is not None else None, "rr_net": rr.get("rr_net"), "rr_weighted": rr.get("rr_weighted"),
             "rr_rule": g.rr_rule(), "fee_round_trip_pct": g.fee_round_trip_pct(), "min_tp1_pct": _f(min_tp1_pct), "gate_reject": plan_bad or "",
             "shown_tps": [x for x in (t1, t2, _f(tp3)) if x is not None], "confirm": confirm or None, "tp3_why": tp3_why or ""}
+
+
+def entry_zone(entry: Any, zone: Any) -> tuple:
+    """Зона входу для показу: зона сетапу зі знімка, якщо вона містить ціну входу (з допуском 0,15%); інакше лише ціна входу. max_entry сюди НЕ входить."""
+    e = _f(entry)
+    try:
+        lo, hi = float(zone[0]), float(zone[1])
+    except (TypeError, ValueError, IndexError):
+        return e, e
+    if e is not None and lo - e * 0.0015 <= e <= hi + e * 0.0015:
+        return lo, hi
+    return e, e
 
 
 def confirm_basis(fu: Dict[str, Any]) -> Dict[str, Any]:

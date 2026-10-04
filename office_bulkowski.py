@@ -46,6 +46,11 @@ def _at(line: Tuple[float, float], x: float) -> float:
     return line[0] * x + line[1]
 
 
+def _ln(line: Tuple[float, float], i0: float, i1: float, off: float = 0.0) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """Відрізок лінії фігури в координатах індексів свічок: ((i0, ціна), (i1, ціна)); `off` — індекс, від якого лінія рахувалась (прапор)."""
+    return (i0, _at(line, i0 - off)), (i1, _at(line, i1 - off))
+
+
 def _first_close_beyond(rows: List[Dict[str, Any]], start: int, up: bool, level_at) -> Optional[int]:
     for i in range(start, len(rows)):
         lv = level_at(i)
@@ -86,6 +91,7 @@ def head_shoulders(rows: List[Dict[str, Any]], a: float) -> List[Dict[str, Any]]
         tgt = _at(neck, idx) - head_h if (idx is not None and top) else (_at(neck, idx) + head_h if idx is not None else None)
         out.append(_res("head_shoulders" if top else "inverse_head_shoulders", "SHORT" if top else "LONG", idx is not None, lvl, tgt,
                         f"голова {H[1]:.6g}, плечі {L[1]:.6g}/{R[1]:.6g}, шия {lvl:.6g}", idx))
+        out[-1]["lines_idx"] = [_ln(neck, t1, len(rows) - 1)]
     return out
 
 
@@ -139,6 +145,8 @@ def triangles_rectangle(rows: List[Dict[str, Any]], a: float) -> List[Dict[str, 
     elif fh[0] < -slope_tol and fl[0] < -slope_tol and fh[0] < fl[0] and conv:
         i = brk(True, fh)
         out.append(_res("falling_wedge", "LONG", i is not None, _at(fh, now_x), (_at(fh, i) + start_w) if i is not None else None, "обидві лінії вниз і сходяться", i))
+    for r_ in out:   # межі фігури (для показу на графіку): верхня й нижня лінії від першого свінгу до поточної свічки
+        r_["lines_idx"] = [_ln(fh, x0, now_x), _ln(fl, x0, now_x)]
     return out
 
 
@@ -189,6 +197,7 @@ def flags(rows: List[Dict[str, Any]], a: float) -> List[Dict[str, Any]]:
                     tgt = base + mv if up else base - mv
                 found = _res("pennant" if converge else "flag", "LONG" if up else "SHORT", idx is not None, lvl, tgt,
                              f"імпульс {mv:.6g} ≥3×ATR, відкат {retr / mv * 100:.0f}%", idx)
+                found["lines_idx"] = [_ln(hi, e + 1, n - 1, off=e + 1), _ln(lo, e + 1, n - 1, off=e + 1)]
                 break
             if found:
                 break
@@ -205,6 +214,16 @@ def detect_all(candles: Any, *, now_ts: Optional[float] = None, lookback: int = 
     if not a:
         return []
     out = head_shoulders(rows, a) + triangles_rectangle(rows, a) + flags(rows, a)
+    from office_patterns import _ts
+
+    for r_ in out:   # індекси свічок → час (JSON-сумісно); сама перевірка фігури не змінюється
+        idx_lines = r_.pop("lines_idx", None) or []
+        lines = []
+        for (i0, p0), (i1, p1) in idx_lines:
+            t0, t1 = _ts(rows[max(0, min(len(rows) - 1, int(i0)))].get("ts")), _ts(rows[max(0, min(len(rows) - 1, int(i1)))].get("ts"))
+            if t0 is not None and t1 is not None:
+                lines.append({"t0": t0, "p0": round(p0, 8), "t1": t1, "p1": round(p1, 8)})
+        r_["lines"] = lines
     return out
 
 

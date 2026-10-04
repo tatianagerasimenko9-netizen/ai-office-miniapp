@@ -6955,6 +6955,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
                         _gate_snap = _rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
                                                        max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu),
+                                                       zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"),
                                                        tp3_why=(((tgt or {}).get("tp3") or {}).get("why") or "") if _tp3_m is not None else "")
                         _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
@@ -6979,9 +6980,20 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 _gate_snap["phase30_sigma"] = _sig30
                         except Exception as exc_ph:
                             print(f"[card] фаза недоступна {sym_f}: {exc_ph}")
+                        try:   # докази цього READY: свічки знімка заморожуються, докази рахуються з НИХ, картка малює ТІЛЬКИ їх
+                            import office_ready_evidence as _evd
+
+                            _chart = _evd.freeze_chart(_m15 if isinstance(_m15, list) else [], _now_c, "15m")
+                            _gate_snap["chart"] = _chart
+                            _ev = _evd.build(_evd.candles_from_chart(_chart), _dir_c, st.get("zone_lo"), st.get("zone_hi"), list(_cf.get("tags") or []), now_ts=_now_c)
+                            _gate_snap["evidence"] = _ev.get("items") or []
+                            if _ev.get("missing"):
+                                _gate_snap["evidence_missing"] = _ev["missing"]
+                        except Exception as exc_ev:
+                            print(f"[card] докази недоступні {sym_f}: {type(exc_ev).__name__}: {exc_ev}")
                         _why = _card.short_why(tags=_cf.get("tags") or [], mode=_cf.get("mode"), direction=_dir_c, symbol=sym_f, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"))
-                        _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
+                        _cap = _card.caption(symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, zone=_gate_snap.get("zone"),
                                              risk_usd=_risk, valid_until=_rc.kyiv_stamp(_valid_c), why=_why, sigma30=_sig30)
                         _img: Dict[str, Any] = {}
                         try:
@@ -6989,8 +7001,9 @@ EV позитивне: {prob.get('ev_positive', '')}
 
                             _lvl = next((t for t in (_cf.get("tags") or []) if t in _card.LEVEL_TAGS), None)
                             _img = await asyncio.to_thread(
-                                _card.render, symbol=sym_f, direction=_dir_c, candles=(_m15 if isinstance(_m15, list) else []), entry=plan_px, max_entry=_max_e,
-                                sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, key_level=(plan_px if _lvl else None),
+                                _card.render, symbol=sym_f, direction=_dir_c, candles=(_evd.candles_from_chart(_gate_snap["chart"]) if _gate_snap.get("chart") else (_m15 if isinstance(_m15, list) else [])), entry=plan_px, zone=_gate_snap.get("zone"),
+                                sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m, ready_price=plan_px, evidence=_gate_snap.get("evidence") or None,
+                                key_level=(plan_px if (_lvl and not _gate_snap.get("evidence")) else None),
                                 path=os.path.join(tempfile.gettempdir(), f"ready_{sym_f}_{int(_now_c)}.png"))
                         except Exception as exc_img:
                             _img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
@@ -7016,7 +7029,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 "snapshot_ts": _now_c, "snapshot_sha": hashlib.sha256(json.dumps(_gate_snap, sort_keys=True, default=str).encode()).hexdigest()[:16],
                                 "message_type": "photo" if _img.get("ok") else "text", "telegram_msg_id": confirm_msg_id, "delivered": bool(confirm_msg_id),
                                 "media_ok": bool(_img.get("ok")) and bool(confirm_msg_id), "image_error": None if _img.get("ok") else _img.get("reason"),
-                                "text": _cap, "image_sha256": _img.get("sha256"), "image_size": _img.get("size"), "image_drawn": _img.get("drawn"), "image_png_b64": _blob,
+                                "text": _cap, "chart_sha256": (_gate_snap.get("chart") or {}).get("sha256"), "drawn_ohlc_sha256": (_img.get("drawn") or {}).get("ohlc_sha"),
+                                "chart_source": (_gate_snap.get("chart") or {}).get("source"), "chart_range": (_gate_snap.get("chart") or {}).get("range"),
+                                "evidence_audit": _evd.audit(_gate_snap), "evidence_verify": _evd.verify(_gate_snap, _dir_c, _gate_snap.get("zone"), list(_cf.get("tags") or [])),
+                                "image_sha256": _img.get("sha256"), "image_size": _img.get("size"), "image_drawn": _img.get("drawn"), "image_png_b64": _blob,
                             }, signal_id=okey)
                         except Exception as exc_au:
                             print(f"[card] audit failed: {type(exc_au).__name__}: {exc_au}")

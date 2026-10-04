@@ -177,12 +177,20 @@ def main() -> int:
     env = {**os.environ, "OFFICE_DB_PATH": db2, "OFFICE_MINI_FIXTURE": "1", "OFFICE_EXINFO_SEED": "1", "OFFICE_MINI_PORT": str(pnum), "OFFICE_MINI_HOST": "127.0.0.1", "DATABASE_URL": ""}
     proc = subprocess.Popen([sys.executable, "-u", str(ROOT / "office_mini_app.py")], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        for _ in range(50):
+        up = False
+        for _ in range(150):   # до 30 с: на повільному CI сервер стартує довше за 10 с (раніше цикл мовчки йшов далі й браузер бачив ERR_CONNECTION_REFUSED)
+            if proc.poll() is not None:
+                print(f"FAIL: сервер Mini App завершився зі кодом {proc.returncode} до старту")
+                return 1
             try:
                 socket.create_connection(("127.0.0.1", pnum), 0.2).close()
+                up = True
                 break
             except OSError:
                 time.sleep(0.2)
+        if not up:
+            print("FAIL: сервер Mini App не відкрив порт за 30 с")
+            return 1
         shots = Path(a.shots) if a.shots else None
         if shots:
             shots.mkdir(parents=True, exist_ok=True)

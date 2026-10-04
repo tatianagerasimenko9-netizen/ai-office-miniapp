@@ -31,7 +31,7 @@ def candles(p0, vol=0.004, n=96):
 
 
 # --- текст
-t = rc.caption(symbol="ONEUSDT", direction="SHORT", entry=0.0245, sl=0.0258, tp1=0.0238, tp2=0.0231, tp3=0.0219, max_entry=0.0248, risk_usd=10,
+t = rc.caption(symbol="ONEUSDT", direction="SHORT", entry=0.0245, sl=0.0258, tp1=0.0238, tp2=0.0231, tp3=0.0219, zone=[0.0245, 0.0248], risk_usd=10,
                valid_until="05.10 12:30", why=rc.short_why(tags=["level_retest", "engulf"], mode=None, direction="SHORT", symbol="ONEUSDT", entry=0.0245), sigma30=3.2)
 L = t.split("\n")
 check(L[0] == "🔴 SHORT · ONE", "заголовок")
@@ -62,7 +62,7 @@ cases = [("ONEUSDT", "SHORT", 0.0245, 0.0248, 0.0258, 0.0238, 0.0231, 0.0219), (
          ("BTCUSDT", "SHORT", 64000, 64900, 65500, 63500, 62000, 40000)]
 for i, (s, d, e, me, sl, a, b, c) in enumerate(cases):
     path = os.path.join(tempfile.gettempdir(), f"test_ready_card_{i}.png")
-    r = rc.render(symbol=s, direction=d, candles=candles(e), entry=e, max_entry=me, sl=sl, tp1=a, tp2=b, tp3=c, ready_price=e, key_level=e, path=path)
+    r = rc.render(symbol=s, direction=d, candles=candles(e), entry=e, zone=[min(e, me), max(e, me)], sl=sl, tp1=a, tp2=b, tp3=c, ready_price=e, key_level=e, path=path)
     check(r.get("ok") and r["size"] > 5000, f"картинка {s} {d}: {r}")
     if r.get("ok"):
         try:
@@ -77,6 +77,19 @@ for i, (s, d, e, me, sl, a, b, c) in enumerate(cases):
         except ImportError:
             pass
 check(rc.render(symbol="X", direction="LONG", candles=[], entry=1, sl=0.9, tp1=1.1, path="/tmp/x.png").get("ok") is False, "без свічок — ok=False")
+
+# --- регресія LTC (живий READY): зона сетапу 71,249–71,54, вхід 71,26, межа «далі не входити» 70,43 — це НЕ зона входу
+import office_ready_core as core  # noqa: E402
+
+g = core.gate_snapshot(direction="SHORT", entry=71.26, sl=71.97, tp1=68.7, tp2=67.43, max_entry=70.42798, zone_lo=71.25, zone_hi=71.54)
+check(g["zone"] == [71.25, 71.54] and abs(g["max_entry"] - 70.42798) < 1e-6, "знімок зберігає зону й межу окремо")
+lt = rc.caption(symbol="LTCUSDT", direction="SHORT", entry=71.26, sl=71.97, tp1=68.7, tp2=67.43, zone=g["zone"], risk_usd=10, valid_until="x", why="w")
+check("Вхід: 71,25–71,54" in lt and "70,43" not in lt, f"LTC вхід = зона сетапу: {lt}")
+r = rc.render(symbol="LTCUSDT", direction="SHORT", candles=candles(71.3), entry=71.26, zone=g["zone"], sl=71.97, tp1=68.7, tp2=67.43, ready_price=71.26,
+              key_level=71.26, path=os.path.join(tempfile.gettempdir(), "test_ltc.png"))
+check(r.get("ok") and r["drawn"]["entry"] == [71.25, 71.54], f"жовта зона на картинці = зона сетапу: {r.get('drawn')}")
+# зона, що не містить ціну входу, не показується (лише ціна входу)
+check(core.entry_zone(71.26, [72.5, 73.0]) == (71.26, 71.26) and core.entry_zone(71.26, None) == (71.26, 71.26), "зона без входу → лише вхід")
 
 # --- події життя
 c = um.scenario_event(symbol="ONEUSDT", direction="SHORT", level="TP1", price=0.0238)
