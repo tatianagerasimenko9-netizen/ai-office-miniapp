@@ -5,45 +5,15 @@ on:
 permissions:
   contents: read
 jobs:
-  brain:
+  phase:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install numpy
-      - name: Дослідження Market Brain на історії (без look-ahead)
-        run: python -u scripts/brain_study.py 2>&1 | tee study_out.txt
+      - name: Фаза руху на ~60 монетах × 6 міс.
+        run: python -u scripts/phase_study.py 2>&1 | tee phase_out.txt
       - uses: actions/upload-artifact@v4
-        with: {name: brain-study, path: study_out.txt}
-  tp3:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install -r requirements.txt
-      - name: Звідки TP3 в ALGO
-        run: python scripts/probe_algo_tp3.py
-  coins:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install -r requirements.txt
-      - name: VVV і SYRUP до READY і до стопа
-        run: python scripts/brain_coin_probe.py
-  momentum:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install numpy
-      - name: Власний рух монети проти угоди перед READY
-        run: python -u scripts/ready_momentum_study.py study/plans_ready.json
+        with: {name: phase-study, path: phase_out.txt}
