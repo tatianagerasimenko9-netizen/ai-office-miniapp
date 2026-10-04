@@ -12,6 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
+      - run: pip install -r requirements.txt
       - name: Ринок на момент READY
         run: python scripts/market_study_ready.py study/plans.json > study/out.txt 2> study/err.txt || true; tail -15 study/err.txt
       - name: Коротко
