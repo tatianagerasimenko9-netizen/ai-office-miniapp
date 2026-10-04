@@ -126,16 +126,21 @@ def signal_lines(market: Dict[str, Any], al: Dict[str, Any]) -> List[str]:
     """Рядки для READY-картки; лише те, що реально пораховано."""
     if not market or market.get("bias") in (None, "UNKNOWN"):
         return []
-    out = [f"Ринок: перевага {BIAS_UA.get(market['bias'], market['bias'])}" + (f" ({market['long']} за LONG, {market['short']} за SHORT із {market['checked']})" if market.get("checked") else "")]
+    flat_n = (market.get("checked") or 0) - market.get("long", 0) - market.get("short", 0)
+    out = [f"Ринок: перевага {BIAS_UA.get(market['bias'], market['bias'])}"
+           + (f" ({market['long']} за LONG, {market['short']} за SHORT, {flat_n} без руху — із {market['checked']})" if market.get("checked") else "")]
     if al.get("btc_1h") is not None:
         out.append(f"BTC 1 год: {_txt(al['btc_1h'])}")
     if al.get("coin_1h") is not None:
         out.append(f"{al['coin']} 1 год: {_txt(al['coin_1h'])}")
     if al.get("rel_pp") is not None:
-        word = "сильніший" if al["rel_pp"] >= 0 else "слабший"
-        out.append(f"{al['coin']} {word} за BTC на {abs(al['rel_pp']):.1f}".replace(".", ",") + " п.п.")
+        if abs(al["rel_pp"]) < 0.15:
+            out.append(f"{al['coin']} рухається так само, як BTC (різниця {abs(al['rel_pp']):.1f}".replace(".", ",") + " п.п.)")
+        else:
+            word = "сильніший" if al["rel_pp"] >= 0 else "слабший"
+            out.append(f"{al['coin']} {word} за BTC на {abs(al['rel_pp']):.1f}".replace(".", ",") + " п.п.")
     out.append({"WITH": "Напрямок: разом із ринком ✅", "COUNTER": "Напрямок: проти ринку ⚠️", "MIXED": "Напрямок: ринок змішаний, переваги немає",
-                "INDEPENDENT": f"Напрямок: монета рухається незалежно від BTC (кореляція {str(al.get('corr_btc')).replace('.', ',')})"}[al["state"]])
+                "INDEPENDENT": f"Напрямок: монета рухається незалежно від BTC (кореляція {str(al.get('corr_btc')).replace('.', ',').replace('-', '−')})"}[al["state"]])
     return out
 
 

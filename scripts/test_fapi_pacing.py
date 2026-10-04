@@ -33,6 +33,7 @@ M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {})
 assert M.backoff_left() > 0 and M.source_health()["weight_pauses"] == 1, M.source_health()
 # резервні джерела темпом і вагою не керуються
 M._BACKOFF_UNTIL = 0.0
+M._SOFT_UNTIL = 0.0
 t1 = time.time()
 for _ in range(5):
     M._http_get_json("https://data-api.binance.vision/api/v3/klines", {})
@@ -42,6 +43,7 @@ print("OK fapi pacing: 60ms spacing, weight-aware pause before 429, fallbacks un
 # стартовий розгін: перші 3 хв процесу — ≥250 мс між запитами
 M._STARTED_AT = time.time()
 M._BACKOFF_UNTIL = 0.0
+M._SOFT_UNTIL = 0.0
 W["v"] = 100
 t2 = time.time()
 for _ in range(4):
