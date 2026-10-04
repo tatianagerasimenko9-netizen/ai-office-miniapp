@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -59,7 +60,7 @@ _CACHE_LOCK = threading.Lock()
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
     return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
-            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off"}
+            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report()}
 
 
 def backoff_left() -> float:
@@ -136,6 +137,45 @@ def _note_weight(headers: Any) -> None:
         else:
             _SOFT_UNTIL = max(_SOFT_UNTIL, time.time() + pause)
         _HEALTH["weight_pauses"] = _HEALTH.get("weight_pauses", 0) + 1
+
+
+_CALLERS: Dict[str, Dict[str, Any]] = {}
+_CALLERS_CAP = 400
+
+
+def _caller_label() -> str:
+    """Хто просить свічки: перший кадр стеку поза цим файлом (файл:функція). Лише облік навантаження — на дані не впливає."""
+    try:
+        f = sys._getframe(2)
+        me = os.path.basename(__file__)
+        while f is not None and os.path.basename(f.f_code.co_filename) == me:
+            f = f.f_back
+        if f is None:
+            return "?"
+        return f"{os.path.basename(f.f_code.co_filename)}:{f.f_code.co_name}"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _note_call(tf: str, sym: str, outcome: str) -> None:
+    """outcome: ws | cache | rest. Рахуємо за (ТФ, хто просить): скільки з WS, з кешу, з REST і скільки різних монет."""
+    try:
+        key = f"{tf}|{_caller_label()}"
+        d = _CALLERS.get(key)
+        if d is None:
+            if len(_CALLERS) >= _CALLERS_CAP:
+                return
+            d = _CALLERS[key] = {"ws": 0, "cache": 0, "rest": 0, "syms": set()}
+        d[outcome] += 1
+        if len(d["syms"]) < 500:
+            d["syms"].add(sym)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def callers_report(top: int = 12) -> Dict[str, Any]:
+    rows = sorted(_CALLERS.items(), key=lambda kv: -(kv[1]["rest"]))[:top]
+    return {k: {"rest": v["rest"], "ws": v["ws"], "cache": v["cache"], "syms": len(v["syms"])} for k, v in rows}
 
 
 def _count_rest(url: str, params: Dict[str, Any]) -> None:
@@ -334,6 +374,7 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 bs0 = _HEALTH.setdefault("by_src", {})
                 bs0[FUTURES_SRC] = bs0.get(FUTURES_SRC, 0) + 1
                 _FALLBACK_AT.pop(sym, None)
+                _note_call(str(tf), sym, "ws")
                 return ws_rows
         if use_cache:
             with _CACHE_LOCK:
@@ -343,13 +384,16 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 if ws_on and _ws.needs_seed(sym, str(tf)) and _ws.seed(sym, str(tf), hit[2], hit[0]):
                     ws_rows = _ws.get(sym, str(tf), lim)   # історія вже завантажена — засіваємо потік без другого REST-запиту
                     if ws_rows:
+                        _note_call(str(tf), sym, "cache")
                         return ws_rows
                 _note_src(sym, hit[2])
+                _note_call(str(tf), sym, "cache")
                 return hit[2][-lim:]
         want = max(lim, hit[1] if hit else 0, _ws.wanted_limit(sym, str(tf)) if ws_on else 0)
         try:
             try:
                 t_req = time.time()
+                _note_call(str(tf), sym, "rest")
                 data = _http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": sym, "interval": tf, "limit": want})
                 rows = _tag(_parse_klines(data), FUTURES_SRC)
                 if not rows:
