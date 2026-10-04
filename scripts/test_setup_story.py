@@ -11,7 +11,7 @@ from office_confluence import FORMAL_TAGS  # noqa: E402
 
 # живі приклади після #112
 spx = SU.build(["flag", "fvg_retest"], "inside_zone", "SHORT", rr_net=2.09, rr_weighted=2.65)
-assert spx["name"] == "SHORT · повернення в розрив між свічками після паузи в русі (прапор)" and "fvg" in spx["objects"] and len(spx["why"]) <= 4, spx
+assert spx["name"] == "SHORT · повернення в розрив між свічками після паузи в русі (схоже на прапор)" and "fvg" in spx["objects"] and len(spx["why"]) <= 4, spx
 eigen = SU.build(["flag", "level_retest", "channel_edge", "engulf"], "inside_zone", "SHORT")
 assert eigen["name"].startswith("SHORT · ретест рівня біля краю лінії тренду") and "розворотна свічка" in eigen["name"] and set(eigen["objects"]) == {"level", "channel"}, eigen
 syrup = SU.build(["level_hold", "channel_edge"], "inside_zone", "SHORT", rr_net=7.57, rr_weighted=10.44)

@@ -69,7 +69,7 @@ def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: s
     elif has("breaker_retest"):
         first = f"Ціна відбилась {way} від зони {zt}, яку раніше пробили."
     elif has("double_top", "double_bottom", "triple_top", "triple_bottom", "head_shoulders", "inverse_head_shoulders"):
-        first = f"Фігура розвороту біля {et}: закриття за лінією шиї, рух {way}."
+        first = f"Схоже на фігуру розвороту біля {et}: закриття за лінією шиї, рух {way}."
     elif has("choch", "bos"):
         first = f"Рух на малих свічках змінив напрямок {way}, зона {zt} утримується."
     elif has("ote"):
@@ -77,7 +77,7 @@ def short_why(*, tags: List[str], mode: Optional[str], direction: str, symbol: s
     elif has("displacement"):
         first = f"Був різкий рух {way}, ціна тримається біля {et}."
     elif next((t for t in ts if t in ("flag", "pennant", "ascending_triangle", "descending_triangle", "symmetrical_triangle", "rectangle", "rising_wedge", "falling_wedge")), None):
-        first = f"Ціна вийшла з фігури {way} і тримається біля {et}."
+        first = f"Схоже на фігуру продовження: ціна вийшла {way} і тримається біля {et}."
     elif has("channel_edge"):
         first = f"Ціна біля краю лінії тренду {et} і відбилась {way}."
     elif mode == "retest":
