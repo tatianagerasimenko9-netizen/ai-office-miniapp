@@ -207,6 +207,7 @@ async function office(){
   setHealth(okFeeds===marks.length&&marks.length?'ok':(okFeeds?'warn':'bad'), okFeeds===marks.length&&marks.length?'дані актуальні':(okFeeds?'дані частково':'дані недоступні'));
   const ch=b.change_24h; const chTxt=(ch==null)?'—':((ch>0?'+':'')+Number(ch).toFixed(2)+'%');
   app.innerHTML=`
+    <div class="card" id="mktbox"><div class="mut">📊 РИНОК ЗАРАЗ</div><div class="mut" style="margin-top:6px">Збираю цифри ринку…</div></div>
     <div class="card">
       <div class="mut">Що зараз важливо</div>
       <p style="margin:6px 0 0;font-size:15px;line-height:1.5">${live.length?`${live.length} ${live.length===1?'сценарій потребує':'сценарії потребують'} уваги.`:'Підтверджених планів немає — «сьогодні без входу» теж рішення.'}
@@ -241,6 +242,15 @@ async function office(){
       ${(ov.unavailable||[]).length?`<div class="kv"><span>Не підключено</span><b>${esc((ov.unavailable||[]).join(', '))}</b></div>`:''}
     </div>`;
   bindCards();
+  (async()=>{ /* ринок зараз: цифри збираються у фоні на сервері — питаємо до 6 разів */
+    for(let i=0;i<6;i++){ const box=$('mktbox'); if(!box||T0!==RT) return;
+      let m=null; try{ m=await j('/api/v2/market'); }catch(e){ if(e.stale) return; m=null; }
+      if(m&&m.ok&&!m.pending){ const ls=m.lines||[];
+        box.innerHTML=ls.length>1?`<div class="mut">${esc(ls[0])}</div><div style="margin-top:6px;line-height:1.5"><b>${esc(ls[1])}</b>${ls.slice(2,-1).map(x=>`<div>${esc(x)}</div>`).join('')}</div><div style="margin-top:6px"><b>${esc(ls[ls.length-1])}</b></div><div class="mut" style="margin-top:6px">Не підключено: ${esc((m.not_connected||[]).join(', '))}. Це інформація, на сигнали не впливає.</div>`:`<div class="mut">📊 РИНОК ЗАРАЗ</div><div style="margin-top:6px">Даних для висновку замало.</div>`;
+        return; }
+      await new Promise(r=>setTimeout(r,3000)); }
+    const b2=$('mktbox'); if(b2) b2.innerHTML='<div class="mut">📊 РИНОК ЗАРАЗ</div><div style="margin-top:6px">Цифри ринку тимчасово недоступні.</div>';
+  })();
   (async()=>{ const box=$('watchbox'); if(!box) return;
     try{ const r=await j('/api/v2/watches');
       if(!r.ok){ box.innerHTML='<div class="mut">Дані про відстеження недоступні.</div>'; return; }
