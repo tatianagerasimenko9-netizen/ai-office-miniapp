@@ -175,6 +175,53 @@ def simulate(row: Dict[str, Any], c5: List[Candle], data_end: float) -> Dict[str
     return res
 
 
+FEE_RT = 0.10   # % кругла комісія (як office_alert_gate.fee_round_trip_pct)
+
+
+def rr_gate_ok(entry: float, sl: float, tp1: float, tp2: Optional[float]) -> Tuple[bool, float]:
+    """Те саме правило, що й гейт READY: зважений RR (40% TP1 + 60% TP2) після комісій ≥ 1,5 і до TP1 ≥ 1,0; без TP2 — до TP1 ≥ 1,5. Повертає (ok, rr_net до TP1)."""
+    risk = abs(entry - sl) / entry * 100.0
+    r1 = abs(tp1 - entry) / entry * 100.0
+    if risk <= 0:
+        return False, 0.0
+    net1 = max(r1 - FEE_RT, 0.0) / (risk + FEE_RT)
+    if tp2 is None:
+        return net1 >= 1.5, net1
+    r2 = abs(tp2 - entry) / entry * 100.0
+    w = max(0.4 * r1 + 0.6 * r2 - FEE_RT, 0.0) / (risk + FEE_RT)
+    return (w >= 1.5 and net1 >= 1.0), net1
+
+
+def counterfactual(rows: List[Dict[str, Any]], ks=(0.0, 0.75, 1.0, 1.25, 1.5)) -> None:
+    """Що було б, якби стоп мав мінімум k×ATR(H1) від ТОГО Ж входу (цілі ті самі): скільки сигналів ще проходять правило RR і яка частка TP1/стоп за 24 год. Лише аналіз."""
+    print("\n=== КОНТРФАКТ: мінімальний стоп у ATR(H1) (вхід і цілі ті самі; RR-гейт ті самий) ===")
+    for k in ks:
+        n_pass = 0
+        res = {"STOP": 0, "TP1": 0, "НІЧОГО": 0}
+        rsum = 0.0
+        n_h = 0
+        for r in rows:
+            if not r.get("atr") or not r["entry"] or r["sl"] is None:
+                continue
+            risk = abs(r["entry"] - r["sl"])
+            need = k * r["atr"]
+            sl = r["sl"] if risk >= need else (r["entry"] - need if r["dir"] != "SHORT" else r["entry"] + need)
+            ok, net1 = rr_gate_ok(r["entry"], sl, r["tp1"], r["tp2"])
+            if not ok:
+                continue
+            n_pass += 1
+            sim = simulate(dict(r, sl=sl), r["c5"], r["data_end"])
+            h = sim.get("h24")
+            if not h:
+                continue
+            n_h += 1
+            res[h] += 1
+            rsum += net1 if h == "TP1" else (-1.0 if h == "STOP" else 0.0)
+        tot = sum(res.values()) or 1
+        print(json.dumps({"k_ATR": k, "проходить RR-гейт": n_pass, "з повним 24г": n_h, "STOP %": round(100 * res["STOP"] / tot, 1), "TP1 %": round(100 * res["TP1"] / tot, 1),
+                          "нічого %": round(100 * res["НІЧОГО"] / tot, 1), "середній R (TP1=+RR, стоп=−1)": round(rsum / tot, 3)}, ensure_ascii=False))
+
+
 def bucket(x: Optional[float]) -> str:
     if x is None:
         return "немає ATR"
@@ -201,7 +248,7 @@ def run(rows: List[Dict[str, Any]], fetch_day: Callable[[str, str], List[Candle]
             a = atr_h1([c for c in c5 if c[0] < r["t"]], r["t"])
             risk = abs(r["entry"] - r["sl"]) if r["entry"] and r["sl"] is not None else None
             sim = simulate(r, [c for c in c5 if c[0] >= r["t"] - 1], data_end)
-            out_rows.append({**r, **sim, "stop_atr": (risk / a) if (risk is not None and a) else None, "bin": bucket((risk / a) if (risk is not None and a) else None)})
+            out_rows.append({**r, **sim, "atr": a, "c5": [c for c in c5 if c[0] >= r["t"] - 1], "data_end": data_end, "stop_atr": (risk / a) if (risk is not None and a) else None, "bin": bucket((risk / a) if (risk is not None and a) else None)})
     return {"rows": out_rows, "missing": missing}
 
 
@@ -242,6 +289,7 @@ def main() -> int:
     for r in rr:   # групи за ризиком і RR
         r["risk_bin"] = "<1%" if (r["risk_pct"] or 0) < 1 else ("1–1.5%" if r["risk_pct"] < 1.5 else ("1.5–2.5%" if r["risk_pct"] < 2.5 else ">2.5%"))
         r["rr_bin"] = "<2" if (r["rr_net"] or 0) < 2 else ("2–3" if r["rr_net"] < 3 else ("3–5" if r["rr_net"] < 5 else "≥5"))
+    counterfactual([r for r in rr if r["unique"]])
     print(f"READY у таблиці {len(rows)}; з даними свічок {len(rr)}; монет без даних {len(data['missing'])}: {','.join(data['missing'][:30])}")
     for title, subset in (("УСІ", rr), ("УНІКАЛЬНІ (без D/R)", [r for r in rr if r["unique"]])):
         print(f"\n=== {title}: n={len(subset)} ===")

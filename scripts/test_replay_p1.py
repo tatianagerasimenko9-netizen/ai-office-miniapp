@@ -67,3 +67,10 @@ day = lambda sym, d: hist + mk(T, [(100, 100.5, 99.5, 100)] * 2 + [(100, 105, 10
 out = R.run(rows, day)
 assert len(out["rows"]) == 2 and not out["missing"] and R.summarize(out["rows"], "bin")
 print("test_replay_p1: OK")
+
+# RR-гейт і контрфакт: правило те саме, що й у production
+ok, n1 = R.rr_gate_ok(100.0, 98.0, 106.0, 110.0)
+assert ok and n1 > 1.5
+assert not R.rr_gate_ok(100.0, 94.0, 106.0, 110.0)[0]      # стоп розширено → RR падає нижче правила
+assert R.rr_gate_ok(100.0, 98.0, 103.0, None)[0] is False and R.rr_gate_ok(100.0, 98.0, 104.0, None)[0] is True
+print("test_replay_p1 counterfactual: OK")
