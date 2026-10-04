@@ -135,6 +135,13 @@ UP, DOWN, YEL, TPC, SLC = "#2ebd85", "#e5534b", "#f2c230", "#2ebd85", "#e5534b"
 EVC = "#7aa2ff"   # докази сетапу (фігура, рівень, FVG тощо): синій, щоб не плутати із зоною входу (жовта), SL (червоний) і TP (зелений)
 
 
+def _ohlc_sha(cs: List[Dict[str, Any]], tsf: Any) -> str:
+    """sha тих свічок, що реально намальовані (та сама формула, що й у знімку): доказ, що картка не змінила жодної свічки."""
+    from office_ready_evidence import ohlc_sha
+
+    return ohlc_sha([[tsf(c.get("ts")), float(c["open"]), float(c["high"]), float(c["low"]), float(c["close"]), _f(c.get("volume"))] for c in cs])
+
+
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
            ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
@@ -393,4 +400,4 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     plt.close(fig)
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
-            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "size_px": [width_px, height_px]}}
+            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}

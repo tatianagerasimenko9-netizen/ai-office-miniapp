@@ -147,6 +147,33 @@ check(it_sw.get("draw") == "sweep" and it_sw.get("price") == 105.0 and it_sw.get
 r_sw = rc.render(symbol="TESTUSDT", direction="SHORT", candles=sw_rows, entry=103.0, zone=[102.5, 103.5], sl=106.5, tp1=100.0, ready_price=103.0, evidence=e_sw["items"],
                  path=os.path.join(tempfile.gettempdir(), "ctl_sweep_real.png"))
 check_card("sweep(real)", r_sw, ["sweep_pool"])
+# 2c) знімок графіка: свічки заморожені, докази = вихід детекторів на них, картка малює ті самі свічки 1:1, аудит зв'язує елементи зі свічками
+for r_ in sw_rows:
+    r_["src"] = "binance_futures"
+decided = T0.timestamp() + 40 * 900 + 5
+chart = ev.freeze_chart(sw_rows, decided, "15m")
+check(chart["n"] == 40 and chart["source"] == "binance_futures" and chart["range"] == [T0.timestamp(), T0.timestamp() + 39 * 900], f"знімок: діапазон, джерело, кількість: {chart['range']} {chart['source']}")
+gate = {"chart": chart}
+e_fr = ev.build(ev.candles_from_chart(chart), "SHORT", 103, 106, ["sweep_pool"], now_ts=decided)
+gate["evidence"] = e_fr["items"]
+check(bool(e_fr["items"]), "докази на frozen-свічках знайдені")
+vr = ev.verify(gate, "SHORT", [103, 106], ["sweep_pool"])
+check(vr["ok"], f"докази відтворюються з frozen-свічок: {vr}")
+bad = dict(gate, evidence=[dict(gate["evidence"][0], price=999.0)])
+check(not ev.verify(bad, "SHORT", [103, 106], ["sweep_pool"])["ok"], "підміна координати доказу виявляється")
+tam = dict(gate, chart=dict(chart, candles=[chart["candles"][0][:2] + [999.0] + chart["candles"][0][3:]] + chart["candles"][1:]))
+check(not ev.verify(tam, "SHORT", [103, 106], ["sweep_pool"])["ok"], "підміна свічки у знімку виявляється (sha)")
+rr = rc.render(symbol="TESTUSDT", direction="SHORT", candles=ev.candles_from_chart(chart), entry=103.0, zone=[102.5, 103.5], sl=106.5, tp1=100.0, ready_price=103.0, evidence=gate["evidence"],
+               path=os.path.join(tempfile.gettempdir(), "ctl_snapshot.png"))
+check(rr.get("ok") and rr["drawn"]["ohlc_sha"] == chart["sha256"], f"OHLC на картці = OHLC знімка (sha): {rr.get('drawn', {}).get('ohlc_sha')} vs {chart['sha256']}")
+au = ev.audit(gate)
+check(au and au[0]["detector"] == "office_smc.sweeps" and au[0]["rule"] and au[0]["anchors_on_real_candles"] is True and au[0]["proof_complete"], f"аудит: елемент → детектор → правило → свічки: {au}")
+check(all(a["candle_exists"] and a["price_within_candle"] for a in au[0]["anchors"]), "опорні точки лежать на реальних свічках у межах їхнього high/low")
+# неповний доказ чесно позначений
+fl_gate = {"chart": ev.freeze_chart(rows1[-96:], T0.timestamp() + 10 ** 7, "15m")}
+fl_gate["evidence"] = ev.build(ev.candles_from_chart(fl_gate["chart"]), "SHORT", 101.5, 102.5, ["flag"], now_ts=T0.timestamp() + 10 ** 7)["items"]
+afl = ev.audit(fl_gate)
+check(afl and afl[0]["proof_complete"] is False and afl[0]["proof_note"], f"прапор: неповний доказ позначений (детектор не віддає свінги): {afl}")
 # 3) channel_edge — канал із реального детектора
 rows3 = []
 for i in range(120):
