@@ -750,6 +750,7 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
                 )
             if bars:
                 bars[-1]["forming"] = True
+                source = str((raw[-1] or {}).get("src") or "binance_futures")   # реальне джерело (резервний ринок більше не маскується під ф'ючерси)
             status = "DATA_OK"
             quote_mode = "polling"
         else:
