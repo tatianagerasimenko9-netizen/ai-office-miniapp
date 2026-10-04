@@ -632,6 +632,12 @@ def _trim_lines(text: str, max_lines: int = 6) -> str:
     return "\n".join(lines).strip()
 
 
+def _desk_card_min_tp1(symbol: str) -> float:
+    from office_desk_card import min_tp1_pct
+
+    return min_tp1_pct(symbol)
+
+
 async def send_via_bot_api(
     session: aiohttp.ClientSession,
     token: str,
@@ -640,6 +646,8 @@ async def send_via_bot_api(
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
     reply_markup: Optional[Dict[str, Any]] = None,
+    retries: int = 0,
+    timeout_sec: Optional[float] = None,
 ) -> tuple[bool, str, Optional[int]]:
     """
     Send via Bot API without parse_mode.
@@ -659,22 +667,29 @@ async def send_via_bot_api(
         payload["message_thread_id"] = int(message_thread_id)
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
-    try:
-        async with session.post(url, json=payload) as resp:
-            body = await resp.json()
-            if resp.status != 200:
-                return False, f"http {resp.status}: {body}", None
-            if not bool(body.get("ok")):
-                desc = str((body or {}).get("description") or body)
-                return False, f"telegram: {desc}", None
-            msg_id = None
-            try:
-                msg_id = int(((body or {}).get("result") or {}).get("message_id"))
-            except Exception:
+    kw: Dict[str, Any] = {"timeout": aiohttp.ClientTimeout(total=float(timeout_sec))} if timeout_sec else {}
+    last = "exception: unknown"
+    for attempt in range(max(0, int(retries)) + 1):
+        try:
+            async with session.post(url, json=payload, **kw) as resp:
+                body = await resp.json()
+                if resp.status != 200:
+                    return False, f"http {resp.status}: {body}", None
+                if not bool(body.get("ok")):
+                    desc = str((body or {}).get("description") or body)
+                    return False, f"telegram: {desc}", None
                 msg_id = None
-            return True, "ok", msg_id
-    except Exception as exc:
-        return False, f"exception: {exc}", None
+                try:
+                    msg_id = int(((body or {}).get("result") or {}).get("message_id"))
+                except Exception:
+                    msg_id = None
+                return True, "ok", msg_id
+        except Exception as exc:
+            # Збій з'єднання/таймаут: для повідомлення з кнопкою повторюємо Bot API (Telethon-запасний шлях кнопки не має — це й губило «Сценарій»).
+            last = f"exception: {type(exc).__name__}: {exc}"
+            if attempt < max(0, int(retries)):
+                await asyncio.sleep(1.5 * (attempt + 1))
+    return False, last, None
 
 
 async def send_via_bot_photo(
@@ -2760,6 +2775,7 @@ async def run() -> None:
                     base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
                 )
             token = agent_bot_tokens.get(agent_key or "")
+            _rel: Dict[str, Any] = {"retries": 2, "timeout_sec": 30.0} if btn_markup else {}
             # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
             # для desk лише sendMessage + thread_id «Загальний».
             if token:
@@ -2783,6 +2799,7 @@ async def run() -> None:
                             reply_to_message_id=reply_to,
                             message_thread_id=thread_id,
                             reply_markup=btn_markup,
+                            **_rel,
                         )
                 except Exception:
                     ok, reason, msg_id = await send_via_bot_api(
@@ -2793,6 +2810,7 @@ async def run() -> None:
                         reply_to_message_id=reply_to,
                         message_thread_id=thread_id,
                         reply_markup=btn_markup,
+                            **_rel,
                     )
                 if ok:
                     return msg_id
@@ -2805,6 +2823,7 @@ async def run() -> None:
                         reply_to_message_id=None,
                         message_thread_id=thread_id,
                         reply_markup=btn_markup,
+                            **_rel,
                     )
                     if ok2:
                         print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
@@ -2820,6 +2839,7 @@ async def run() -> None:
                     reply_to_message_id=reply_to,
                     message_thread_id=thread_id,
                     reply_markup=btn_markup,
+                            **_rel,
                 )
                 if ok:
                     return msg_id
@@ -6881,9 +6901,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                         except Exception as exc_t:
                             print(f"[confluence] targets {sym_f}: {type(exc_t).__name__}: {exc_t}")
                             tgt = {}
+                        import office_ready_core as _rc
+
+                        _tp2_m, _tp3_m = _rc.message_targets(direction=str(st.get("direction") or ""), entry=plan_px, tp1=st.get("tp1"), tp2=st.get("tp2"),
+                                                             tp3_structural=((tgt or {}).get("tp3") or {}).get("price"))
                         try:
                             plan_bad = _lev_watch.check_plan(sym_f, str(st.get("direction") or ""),
-                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": st.get("tp2")},   # лише ЗАПИСАНИЙ TP2 сценарію (не структурний)
+                                                             {"entry": plan_px, "sl": st.get("sl"), "tp1": st.get("tp1"), "tp2": _tp2_m},   # гейт і повідомлення — одні й ті самі цілі
                                                              st.get("zone_lo"), st.get("zone_hi"))
                         except Exception as exc_p:
                             plan_bad = f"Перевірку плану виконати не вдалося ({type(exc_p).__name__})."
@@ -6900,25 +6924,34 @@ EV позитивне: {prob.get('ev_positive', '')}
                                 print(f"[confluence] confirm без готового плану {key}: {plan_bad} — мовчу, стан лише в Mini App")
                                 try:
                                     _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
-                                                     tp1=st.get("tp1"), tp2=(tgt or {}).get("tp2", {}) and (tgt or {}).get("tp2", {}).get("price"),
+                                                     tp1=st.get("tp1"), tp2=_tp2_m,
                                                      tp3=None, max_entry=None, confirmed_ts=_now_c,
-                                                     valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2), rejected=True, reason=str(plan_bad)[:200])
+                                                     valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2), rejected=True, reason=str(plan_bad)[:200],
+                                                     gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m,
+                                                                            plan_bad=str(plan_bad)[:200]))
                                 except Exception as exc_rj:
                                     print(f"[track] record rejected failed: {exc_rj}")
                             continue
-                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), st.get("tp2"))
+                        _max_e = max_entry_price(_dir_c, st.get("sl"), st.get("tp1"), _tp2_m)
                         if _max_e is not None and px_f is not None and ((_dir_c.upper() != "SHORT" and px_f > _max_e) or (_dir_c.upper() == "SHORT" and px_f < _max_e)):
                             print(f"[confluence] confirm {key}: ціна {px_f} вже за межею входу {_max_e} — сигнал неактуальний, мовчу")
                             continue
+                        _dup = await asyncio.to_thread(_rc.find_duplicate, db_path, symbol=sym_f, direction=_dir_c, entry=plan_px, scenario_id=okey)
+                        if _dup:   # та сама незавершена ідея вже показана: другий READY не шлемо (інший scenario_id/basis ідею не змінює)
+                            print(f"[confluence] confirm {key}: дубль незавершеної ідеї {_dup.get('scenario_id')} (вхід {_dup.get('entry')}) — мовчу")
+                            apply_setup_event(okey, "CANCELLED")
+                            live_drop(key)
+                            continue
+                        _valid_c = _lc.valid_until_ts(_now_c, _tf_c2)
                         _sz = plan_position_size(entry=plan_px, sl=st.get("sl"), score=12, min_score=10, direction=_dir_c)
                         confirm_msg_id = await send_proactive(
                             EVENT_TRADE_UPDATE,
                             _msgs.ready_signal(
                                 symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"),
-                                tp2=(tgt or {}).get("tp2"), tp3=(tgt or {}).get("tp3"), max_entry=_max_e,
+                                tp2=_tp2_m, tp3=_tp3_m, max_entry=_max_e,
                                 size_usdt=_sz.get("size_usdt") if _sz.get("ok") else None,
                                 risk_usd=(float(_sz.get("depo") or 0) * float(_sz.get("risk_pct") or 0)) if _sz.get("ok") else None,
-                                valid_until=_lc.kyiv_hhmm(_lc.valid_until_ts(_now_c, _tf_c2))),
+                                valid_until=_rc.kyiv_stamp(_valid_c)),
                             symbol=sym_f,
                             kind="CONFIRM",
                             intent="CONFIRM",
@@ -6932,9 +6965,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                         apply_setup_event(okey, "CONFIRMED", ltf_ok=True)
                         try:  # мовчазне відстеження кожного «Плану готовий» для статистики (не залежить від кнопки «Я відкрила угоду»)
                             _trk.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=_dir_c, tf=_tf_c2, entry=plan_px, sl=st.get("sl"),
-                                             tp1=st.get("tp1"), tp2=((tgt or {}).get("tp2") or {}).get("price"), tp3=((tgt or {}).get("tp3") or {}).get("price"),
-                                             max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_lc.valid_until_ts(_now_c, _tf_c2),
-                                             rejected=False, confirm_msg_id=confirm_msg_id)
+                                             tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
+                                             max_entry=_max_e, confirmed_ts=_now_c, valid_until_ts=_valid_c,
+                                             rejected=False, confirm_msg_id=confirm_msg_id,
+                                             gate=_rc.gate_snapshot(direction=_dir_c, entry=plan_px, sl=st.get("sl"), tp1=st.get("tp1"), tp2=_tp2_m, tp3=_tp3_m,
+                                                                    max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f)))
                         except Exception as exc_tr:
                             print(f"[track] record plan failed: {exc_tr}")
                         try:
@@ -7411,6 +7446,33 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(600)
 
     asyncio.create_task(monitor_signal_tracks())
+
+    async def monitor_scenario_milestones() -> None:
+        """Подія рівня для КОЖНОГО доставленого «Плану готовий»: ціна досягла TP1/TP2/TP3 або стоп-рівня сценарію.
+        Не залежить від кнопки «Я відкрила угоду» (та лише додає ведення твоєї позиції). Один раз на рівень, відповіддю на повідомлення плану."""
+        import office_signal_track as trk
+
+        await asyncio.sleep(150)
+        while True:
+            try:
+                for m in await asyncio.to_thread(trk.pending_milestones, db_path):
+                    mid = await send_proactive(
+                        EVENT_TRADE_UPDATE,
+                        _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price")),
+                        reply_to_message_id=m.get("confirm_msg_id"), symbol=str(m["symbol"]), direction=str(m["direction"]),
+                        kind="SCENARIO_EVENT", intent="SCENARIO_EVENT", canonical_id=f"{m['scenario_id']}|{m['confirmed_ts']}|{m['level']}",
+                        scenario_event=str(m["level"]),
+                    )
+                    if mid:
+                        await asyncio.to_thread(trk.record_milestone, db_path, m, mid)
+                        print(f"[milestone] sent {m['symbol']} {m['level']} id={mid}")
+                    else:
+                        print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")
+            except Exception as exc_ms:
+                print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
+            await asyncio.sleep(120)
+
+    asyncio.create_task(monitor_scenario_milestones())
 
     async def monitor_manual_trades() -> None:
         """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.

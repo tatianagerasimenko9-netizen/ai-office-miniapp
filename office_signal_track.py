@@ -15,6 +15,8 @@ EV_PLAN = "SIGNAL_PLAN"
 EV_RESULT = "SIGNAL_RESULT"
 EV_EXPIRY = "SCENARIO_TIME_EXPIRY"
 EV_FALSE = "FALSE_EXPIRY_CHECK"
+EV_MILESTONE = "SCENARIO_MILESTONE"   # досягнення рівня сценарію (TP1/TP2/TP3/SL) вже ПОКАЗАНОЇ в Telegram ідеї; не залежить від «Я відкрила угоду»
+EV_MILESTONE_ON = "SCENARIO_MILESTONE_ENABLED"
 FALSE_EXPIRY_WINDOW_SEC = 48 * 3600
 MAX_TRACK_SEC = 72 * 3600
 TF_SEC = 900
@@ -41,13 +43,13 @@ def _ts(v: Any) -> Optional[float]:
 
 def record_plan(db: str, *, scenario_id: str, symbol: str, direction: str, tf: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
                 max_entry: Any = None, confirmed_ts: float, valid_until_ts: float, rejected: bool = False, reason: str = "",
-                confirm_msg_id: Any = None) -> None:
+                confirm_msg_id: Any = None, gate: Optional[Dict[str, Any]] = None) -> None:
     from office_bridge import log_event
 
     log_event(db, EV_PLAN, {"scenario_id": scenario_id, "symbol": str(symbol).upper(), "direction": str(direction).upper(), "tf": tf,
                             "entry": _f(entry), "sl": _f(sl), "tp1": _f(tp1), "tp2": _f(tp2), "tp3": _f(tp3), "max_entry": _f(max_entry),
                             "confirmed_ts": float(confirmed_ts), "valid_until_ts": float(valid_until_ts), "rejected": bool(rejected),
-                            "reason": reason, "confirm_msg_id": confirm_msg_id}, scenario_id)
+                            "reason": reason, "confirm_msg_id": confirm_msg_id, "gate": gate or None}, scenario_id)
 
 
 def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None) -> Dict[str, Any]:
@@ -58,7 +60,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None)
     e, sl = _f(plan.get("entry")), _f(plan.get("sl"))
     tps = [(n, _f(plan.get(k))) for n, k in (("TP1", "tp1"), ("TP2", "tp2"), ("TP3", "tp3")) if _f(plan.get(k)) is not None]
     t_conf, t_valid = float(plan["confirmed_ts"]), float(plan["valid_until_ts"])
-    out: Dict[str, Any] = {"status": "PENDING", "filled_at": None, "result_at": None, "mfe_pct": None, "mae_pct": None, "reached": []}
+    out: Dict[str, Any] = {"status": "PENDING", "filled_at": None, "result_at": None, "mfe_pct": None, "mae_pct": None, "reached": [], "stopped": False}
     if not e or sl is None or not tps:
         return {**out, "status": "INVALID"}
     filled = False
@@ -78,14 +80,14 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None)
                 mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
                 mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
                 if stop_hit:
-                    return {**out, "status": "STOP", "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+                    return {**out, "status": "STOP", "stopped": True, "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
             continue
         mfe = max(mfe, ((hi - e) if long_ else (e - lo)) / e * 100.0)
         mae = max(mae, ((e - lo) if long_ else (hi - e)) / e * 100.0)
         stop_hit = (lo <= sl) if long_ else (hi >= sl)
         if stop_hit:
             res = out["reached"][-1] if out["reached"] else "STOP"
-            return {**out, "status": res, "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+            return {**out, "status": res, "stopped": True, "result_at": t0 + TF_SEC, "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
         for name, lvl in tps:
             if name not in out["reached"] and ((hi >= lvl) if long_ else (lo <= lvl)):
                 out["reached"].append(name)
@@ -144,6 +146,67 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
         log_event(db, EV_RESULT, payload, p.get("scenario_id"))
         written.append(payload)
     return written
+
+
+def milestone_since(db: str) -> float:
+    """Момент першого запуску відстеження подій сценарію: старіші READY історичні — по них повідомлень не шлемо (без лавини після деплою)."""
+    from office_bridge import log_event
+
+    ev = _events(db, EV_MILESTONE_ON)
+    if ev:
+        return float(ev[0]["p"].get("since") or 0.0)
+    now = time.time()
+    log_event(db, EV_MILESTONE_ON, {"since": now}, "")
+    return now
+
+
+_MS_DONE: set = set()   # плани, що завершені й повністю відпрацьовані в цьому процесі (не тягнемо свічки знову)
+
+
+def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Нові події рівнів для доставлених READY (від появи функції): TP1/TP2/TP3 і SL, кожна — один раз. Це подія СЦЕНАРІЮ за ринком, а не закриття угоди."""
+    if fetch is None:
+        from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
+    now = time.time() if now_ts is None else now_ts
+    since = milestone_since(db)
+    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE)}
+    out: List[Dict[str, Any]] = []
+    for ev in _events(db, EV_PLAN):
+        p = ev["p"]
+        if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since:
+            continue
+        sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
+        if (sid, ct) in _MS_DONE:
+            continue
+        if all((sid, ct, lv) in seen for lv in ("TP1", "TP2", "TP3", "SL")):
+            continue
+        if now > float(p.get("valid_until_ts") or 0) + MAX_TRACK_SEC + 3600:
+            continue
+        try:
+            candles = fetch(p["symbol"], "15m", 300)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(candles, list) or not candles:
+            continue
+        res = simulate(p, candles, now)
+        levels = list(res.get("reached") or []) + (["SL"] if res.get("stopped") else [])
+        if res["status"] not in ("PENDING", "INVALID") and all((sid, ct, lv) in seen for lv in levels):
+            _MS_DONE.add((sid, ct))
+            continue
+        for lv in levels:
+            if (sid, ct, lv) in seen:
+                continue
+            price = p.get({"TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl"}[lv])
+            out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv,
+                        "price": price, "confirm_msg_id": p.get("confirm_msg_id")})
+    return out
+
+
+def record_milestone(db: str, m: Dict[str, Any], msg_id: Any = None) -> None:
+    from office_bridge import log_event
+
+    log_event(db, EV_MILESTONE, {"scenario_id": m.get("scenario_id"), "confirmed_ts": m.get("confirmed_ts"), "level": m.get("level"),
+                                 "symbol": m.get("symbol"), "price": m.get("price"), "msg_id": msg_id, "sent_ts": time.time()}, str(m.get("scenario_id") or ""))
 
 
 def report(db: str, min_sample: int = 20) -> Dict[str, Any]:

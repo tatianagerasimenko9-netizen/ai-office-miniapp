@@ -62,15 +62,24 @@ def parse_cancel_level(note: Any) -> Optional[float]:
     return _f(raw)
 
 
+MAJOR_BASES = frozenset({"BTC", "ETH", "XAU", "PAXG"})
+_QUOTES = ("USDT", "USDC", "BUSD", "USD", "PERP")
+
+
+def major_base(symbol: str) -> str:
+    """База монети без котирування: 'ETHUSDT' → 'ETH', 'ETHFIUSDT' → 'ETHFI', 'BTC/USDT' → 'BTC'. Лише точні збіги, без префіксів."""
+    import re
+
+    s = re.sub(r"[^A-Z0-9]", "", str(symbol or "").upper())
+    for q in _QUOTES:
+        if s.endswith(q) and len(s) > len(q):
+            return s[: -len(q)]
+    return s
+
+
 def is_major_symbol(symbol: str) -> bool:
-    s = str(symbol or "").upper()
-    if s in MAJORS:
-        return True
-    if s.startswith("BTC") or s.startswith("ETH"):
-        return True
-    if "XAU" in s or s.startswith("PAXG"):
-        return True
-    return False
+    """Мажор — лише ТОЧНИЙ збіг бази зі списком (ETHFI, BTCDOM, XAUT... — не мажори)."""
+    return major_base(symbol) in MAJOR_BASES
 
 
 def min_tp1_pct(symbol: str) -> float:
