@@ -1,0 +1,19 @@
+name: replay-p1
+on:
+  push:
+    branches: [claude/replay-p1]
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: offline test
+        run: python scripts/test_replay_p1.py
+      - name: replay READY на свічках 5m (read-only, data.binance.vision)
+        run: python scripts/replay_p1.py docs/audit/office2_ready_table_2026-10-04.psv --cache /tmp/klines5m
