@@ -803,6 +803,7 @@ async def fetch_mark_price(session: aiohttp.ClientSession, symbol: str) -> float
     url = "https://fapi.binance.com/fapi/v1/premiumIndex"
     params = {"symbol": symbol.upper()}
     async with session.get(url, params=params) as resp:
+        __import__("office_market_data").note_direct("mark_price", url, resp.headers, params)
         if resp.status != 200:
             raise RuntimeError(f"price status {resp.status}")
         data = await resp.json()
@@ -820,6 +821,7 @@ async def fetch_binance_premium_index(session: aiohttp.ClientSession, symbol: st
     url = "https://fapi.binance.com/fapi/v1/premiumIndex"
     params = {"symbol": symbol.upper()}
     async with session.get(url, params=params) as resp:
+        __import__("office_market_data").note_direct("premium_index", url, resp.headers, params)
         if resp.status in (418, 429):
             note_rate_limited(resp.headers.get("Retry-After"))
         if resp.status != 200:
@@ -859,6 +861,7 @@ async def fetch_binance_futures_ticker(session: aiohttp.ClientSession, symbol: s
         url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
         params = {"symbol": symbol.upper()}
         async with session.get(url, params=params) as resp:
+            __import__("office_market_data").note_direct("ticker_symbol_rest", url, resp.headers, params)
             if resp.status in (418, 429):
                 note_rate_limited(resp.headers.get("Retry-After"))
             if resp.status != 200:
@@ -3985,6 +3988,7 @@ async def run() -> None:
             async with aiohttp.ClientSession(timeout=to) as _s:
                 async with _s.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as _r:
                     _tickers = await _r.json()
+                    __import__("office_market_data").note_direct("marichka_dynamic_symbols", "https://fapi.binance.com/fapi/v1/ticker/24hr", _r.headers)
             if not isinstance(_tickers, list):
                 raise ValueError("ticker 24hr not a list")
             _candidates: List[Dict[str, Any]] = []
@@ -4641,6 +4645,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                 async with aiohttp.ClientSession(timeout=timeout_scan) as s_scan:
                     async with s_scan.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as r_scan:
                         rows_24 = await r_scan.json()
+                        __import__("office_market_data").note_direct("scanner_cycle", "https://fapi.binance.com/fapi/v1/ticker/24hr", r_scan.headers)
                 if isinstance(rows_24, list):
                     for it in rows_24:
                         if not isinstance(it, dict):
@@ -6501,6 +6506,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     async with aiohttp.ClientSession(timeout=timeout_sc) as s_sc:
                         async with s_sc.get("https://fapi.binance.com/fapi/v1/ticker/24hr") as r_sc:
                             tickers_24 = await r_sc.json()
+                            __import__("office_market_data").note_direct("radar_scout", "https://fapi.binance.com/fapi/v1/ticker/24hr", r_sc.headers)
                 except Exception as exc_sc:
                     print(f"[scout] ticker 24hr unavailable: {type(exc_sc).__name__}: {exc_sc}")
                     tickers_24 = None
