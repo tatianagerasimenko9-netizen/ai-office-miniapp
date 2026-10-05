@@ -84,6 +84,21 @@ check(abs(vs["фрактал15m+0.25ATR"] - 104.25) < 1e-9, f"SHORT: стоп н
 # з) блоковий бутстреп
 m, lo, hi = sr.block_ci([(1, 1.0), (1, 1.0), (2, -1.0), (3, 0.0)])
 check(lo <= m <= hi, "бутстреп: середнє в інтервалі")
+
+# к) рівні ліквідності: H1-фрактал і PDH/PDL; без lookahead
+base_t = T0 - 2 * 86400
+lv_rows = []
+for k in range(4 * 1440):
+    t_ = base_t + 60 * k
+    hh = (t_ - base_t) / 3600.0
+    hi_ = 100.5 + (6.0 if 30 <= hh < 31 else 0.0) + (9.0 if 80 <= hh < 81 else 0.0)   # пік у годині 30 (до ct) і в годині 80 (після ct)
+    lv_rows.append([t_, 100.0, hi_, 99.5, 100.0, 1.0])
+lv_times = [x[0] for x in lv_rows]
+ct_lv = base_t + 60 * 3600   # година 60
+levels = sr.h1_levels(lv_rows, lv_times, ct_lv)
+check(any(n == "H1-high" and abs(p - 106.5) < 1e-9 for n, p in levels), f"H1-фрактал піку до ct знайдено: {levels[:4]}")
+check(not any(abs(p - 109.5) < 1e-9 for _n, p in levels), "пік ПІСЛЯ ct не потрапляє в рівні (без lookahead)")
+check(any(n == "PDH" for n, _p in levels) and any(n == "PDL" for n, _p in levels), "є PDH/PDL")
 # і) наскрізний офлайн-прогін на синтетичних архівах
 tmp = Path(tempfile.mkdtemp())
 cache = tmp / "cache"

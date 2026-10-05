@@ -69,6 +69,36 @@ def fractals(bars: List[Tuple[float, float, float, float, float]]) -> List[Tuple
     return out
 
 
+def h1_levels(rows: List[List[float]], times: List[float], ct: float, lookback: float = 72 * 3600.0) -> List[Tuple[str, float]]:
+    """Рівні ліквідності ДО ct: фрактали H1 (K=2) за lookback + максимум/мінімум попередньої UTC-доби (PDH/PDL). Без lookahead: лише закриті години."""
+    last_open = (int(ct) // 3600) * 3600 - 3600   # остання повністю закрита година
+    nb = int(lookback // 3600)
+    bars: List[Tuple[float, float, float]] = []
+    for k in range(nb):
+        b0 = last_open - 3600 * k
+        i0 = bisect.bisect_left(times, b0)
+        i1 = bisect.bisect_left(times, b0 + 3600)
+        if i1 - i0 < 40:
+            continue
+        seg = rows[i0:i1]
+        bars.append((b0, max(x[2] for x in seg), min(x[3] for x in seg)))
+    bars.reverse()
+    out: List[Tuple[str, float]] = []
+    for i in range(K_FRACTAL, len(bars) - K_FRACTAL):
+        if all(bars[i][1] > bars[j][1] for j in range(i - K_FRACTAL, i + K_FRACTAL + 1) if j != i):
+            out.append(("H1-high", bars[i][1]))
+        if all(bars[i][2] < bars[j][2] for j in range(i - K_FRACTAL, i + K_FRACTAL + 1) if j != i):
+            out.append(("H1-low", bars[i][2]))
+    d0 = (int(ct) // 86400) * 86400
+    i0 = bisect.bisect_left(times, d0 - 86400)
+    i1 = bisect.bisect_left(times, d0)
+    if i1 - i0 > 600:
+        seg = rows[i0:i1]
+        out.append(("PDH", max(x[2] for x in seg)))
+        out.append(("PDL", min(x[3] for x in seg)))
+    return out
+
+
 def walk(rows: List[List[float]], times: List[float], ct: float, vt: float, entry: float, sl: float, tp1: float, long_: bool, horizon: float = H) -> Dict[str, Any]:
     """Як у lifecycle (simulate на 1m): вхід — перша хвилина з t0 ≥ ct, що торкається ціни входу; у хвилині входу цілі не зараховуються, а стоп так;
     далі стоп перевіряється раніше за ціль (одна хвилина зі стопом і ціллю = стоп). Горизонт ≥ horizon; нема даних до горизонту = NO_DATA."""
@@ -185,7 +215,7 @@ def main() -> int:
     syms = sorted(by_sym)[: a.max_symbols or None]
     for si, sym in enumerate(syms, 1):
         ps = by_sym[sym]
-        rows, _missing = rr.load_symbol(sym, rr._day(min(float(p["ct"]) for p in ps) - 86400), rr._day(min(now, max(float(p["ct"]) for p in ps) + H + POST + 3600)), cache, a.offline)
+        rows, _missing = rr.load_symbol(sym, rr._day(min(float(p["ct"]) for p in ps) - 4 * 86400), rr._day(min(now, max(float(p["ct"]) for p in ps) + H + POST + 3600)), cache, a.offline)
         if not rows:
             continue
         times = [r[0] for r in rows]
@@ -202,6 +232,14 @@ def main() -> int:
             rec: Dict[str, Any] = {"mid": p["mid"], "ct": ct, "dir": "LONG" if long_ else "SHORT", "sym": sym, "regime": p.get("regime"), "risk_pct": abs(entry - sl) / entry * 100, "tp1_pct": abs(tp1 - entry) / entry * 100,
                                    "atr_pct": (atr / entry * 100) if atr else None, "btc4h": rr.ret_pct(btc_rows, btc_times, ct, 4 * 3600), "hr": datetime.fromtimestamp(ct, tz=timezone.utc).hour,
                                    "var": {}, "base": base}
+            lv = h1_levels(rows, times, ct)
+            adv = [x for _n, x in lv if (x < entry if long_ else x > entry)]
+            if adv:
+                nl = max(adv) if long_ else min(adv)
+                dl = abs(entry - nl)
+                rec["lvl_q"] = abs(entry - sl) / dl if dl > 0 else None   # <1: стоп ПЕРЕД найближчим рівнем; >1: за ним
+                rec["lvl_dist_atr"] = (dl / atr) if atr else None
+                rec["lvl_pct"] = dl / entry * 100
             for name, slv in stop_variants(entry, sl, long_, atr, fr).items():
                 res = base if name == "поточний" else walk(rows, times, ct, vt, entry, slv, tp1, long_)
                 if res["status"] in ("NO_DATA", "NOT_FILLED"):
@@ -336,6 +374,35 @@ def main() -> int:
         cut("BTC 4 год", lambda r: "н/д" if r["btc4h"] is None else ("за напрямом" if r["btc4h"] * (1 if r["dir"] == "LONG" else -1) > 0.3 else "проти напряму" if r["btc4h"] * (1 if r["dir"] == "LONG" else -1) < -0.3 else "нейтрально"))
         cut("сесія", lambda r: "Азія" if r["hr"] < 8 else "Лондон" if r["hr"] < 13 else "NY" if r["hr"] < 21 else "пізній")
         cut("режим (thesis)", lambda r: str(r.get("regime")))
+    # ---- 5) стоп відносно найближчого рівня ліквідності
+    P("\n## 5. Де поточний стоп відносно найближчого рівня (H1-фрактал за 72 год або PDH/PDL) — без параметрів\n")
+    P("q = відстань до стопу / відстань до найближчого рівня за входом у бік стопу. q<1: стоп стоїть ПЕРЕД рівнем (рівень далі за стоп); q>1: стоп ЗА рівнем (рівень «захищає» стоп). Групи розбиті за q, порогів не підбираю.\n")
+    gq: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in recs:
+        q = r.get("lvl_q")
+        if q is None:
+            gq["рівня немає"].append(r)
+        elif q < 0.5:
+            gq["a) q<0,5 (рівень далеко за стопом)"].append(r)
+        elif q < 1.0:
+            gq["b) 0,5–1,0 (стоп перед рівнем)"].append(r)
+        elif q < 1.5:
+            gq["c) 1,0–1,5 (стоп трохи за рівнем)"].append(r)
+        else:
+            gq["d) ≥1,5 (стоп далеко за рівнем)"].append(r)
+    P("| Група | N | TP1 | SL | нічого | середнє R (поточний) | R (3×ATR15) | R (4×ATR15) |\n|---|---|---|---|---|---|---|---|")
+    for k in sorted(gq):
+        xs = gq[k]
+        st = [r["var"]["поточний"]["res"] for r in xs if "поточний" in r["var"]]
+        if not st:
+            continue
+        def mr(nm: str, xs=xs) -> str:
+            v = [r["var"][nm]["R"] for r in xs if nm in r["var"] and r["var"][nm]["R"] is not None]
+            return f"{sum(v) / len(v):+.3f}" if v else "—"
+        P(f"| {k} | {len(xs)} | {st.count('TP1') / len(st) * 100:.0f}% | {st.count('SL') / len(st) * 100:.0f}% | {st.count('NONE') / len(st) * 100:.0f}% | {mr('поточний')} | {mr('3×ATR15')} | {mr('4×ATR15')} |")
+    dd = sorted(r["lvl_dist_atr"] for r in recs if r.get("lvl_dist_atr") is not None)
+    if dd:
+        P(f"\nВідстань від входу до найближчого рівня за стопом: p25 / p50 / p75 = {dd[len(dd) // 4]:.1f} / {dd[len(dd) // 2]:.1f} / {dd[3 * len(dd) // 4]:.1f} ATR15.")
     out = "\n".join(L)
     print(out)
     if a.md:
