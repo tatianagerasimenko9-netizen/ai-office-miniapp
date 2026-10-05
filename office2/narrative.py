@@ -335,3 +335,139 @@ def event_controls(symbol: str, ctx: Dict[str, Any], n: int, p: NParams = NParam
         rec.update({"symbol": symbol, "dir": direction, "t_entry": t_dec, "day": int(t_dec // 86400), "kind": "control", "risk_pct": rec["risk"] / entry * 100.0, "feat": {}, "rr15": False})
         out.append(rec)
     return out
+
+
+# ---- matched-impulse control (exploratory, правило matching ЗАФІКСОВАНО до test; HYPOTHESES.md, поправка 5) ----
+SESSIONS = ((0, 8), (8, 13), (13, 21), (21, 24))
+CALIPER_IMP = (0.7, 1.3)    # імпульс контролю / імпульс події
+CALIPER_ATR = (0.7, 1.0 / 0.7)  # ATR_H1/ціна контролю / події
+
+
+def _session(t: float) -> int:
+    hh = int(t // 3600) % 24
+    return next(i for i, (a, b) in enumerate(SESSIONS) if a <= hh < b)
+
+
+def _btc_bucket(btc4: Optional[float], sg: float) -> int:
+    v = (btc4 or 0.0) * sg
+    return 1 if v > 0.3 else (-1 if v < -0.3 else 0)
+
+
+def _impulses(bars: F.Arr, atr: np.ndarray, p: NParams) -> List[dict]:
+    l = bars["l"]
+    sh, _ = F.swings(bars, 2)
+    out = []
+    for ih, kih, ph in sh:
+        a0 = atr[ih]
+        if ih < 30 or np.isnan(a0) or a0 <= 0:
+            continue
+        lo0 = max(0, ih - p.imp_window)
+        io = lo0 + int(np.argmin(l[lo0:ih]))
+        if ih - io < 3:
+            continue
+        imp = ph - l[io]
+        if imp >= p.imp_atr * a0:
+            out.append({"ih": ih, "kih": kih, "ph": float(ph), "imp_atr": float(imp / a0)})
+    return out
+
+
+def matched_pairs(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]], p: NParams = NParams(), stats: Optional[Dict[str, int]] = None) -> List[dict]:
+    """Для кожної події пробою (symbol, напрям) — найближчий момент того самого symbol і напряму у стані «після імпульсу, корекція 8–60 барів, ретрейс 25–90%, хай імпульсу не перевищено»,
+    але БЕЗ завершеного пробою похилої (±3 бари від будь-якої події пробою виключені). Правила (зафіксовані):
+    жорстко: та сама сесія UTC (0–8/8–13/13–21/21–24), той самий H4 і D1 режим відносно напряму; caliper: імпульс контролю/події в [0,7; 1,3], ATR_H1/ціна в [0,7; 1,43];
+    відстань = |imp_c/imp_e − 1| + |ln(atrp_c/atrp_e)| + (0 якщо BTC-кошик (±0,3%) збігається, інакше 1); один контроль на подію, без повторів. Результат: пари з однаковими outcome-мітками."""
+    st = stats if stats is not None else {}
+    m1 = ctx["m1"]
+    h1 = ctx.get("h1")
+    if h1 is None:
+        h1 = ctx["h1"] = F.resample(m1, 3600)
+        ctx["atr1h"] = F.atr(h1, 14)
+    atr1h = ctx["atr1h"]
+    out: List[dict] = []
+    tmp: Dict[str, int] = {}
+    for direction, bars in (("LONG", h1), ("SHORT", _mirror(h1))):
+        sg = 1.0 if direction == "LONG" else -1.0
+        h, l, c = bars["h"], bars["l"], bars["c"]
+        n = len(h)
+        events = find_setups_long(bars, atr1h, p, tmp)
+        if not events:
+            continue
+        ev_b = np.array([e["b"] for e in events])
+        imps = _impulses(bars, atr1h, p)
+        pool: List[dict] = []
+        for j in range(40, n - 1):
+            aj = atr1h[j]
+            if np.isnan(aj) or aj <= 0 or (np.abs(ev_b - j) <= 3).any():
+                continue
+            best = None
+            for im in imps:
+                if im["ih"] + p.min_corr <= j <= im["ih"] + p.max_corr and im["kih"] <= j - 1:
+                    if best is None or im["ih"] > best["ih"]:
+                        best = im
+            if best is None:
+                continue
+            ih, ph = best["ih"], best["ph"]
+            if h[ih + 1:j + 1].max() > ph:
+                continue
+            minlow = float(l[ih + 1:j].min())
+            io_low = float(l[max(0, ih - p.imp_window):ih].min())
+            imp = ph - io_low
+            retr = (ph - minlow) / max(imp, 1e-12)
+            if not (p.retr_min <= retr <= p.retr_max):
+                continue
+            t_dec = float(h1["t"][j] + 3600)
+            k4, kd = F.last_closed(ctx["h4"], 4 * 3600, t_dec), F.last_closed(ctx["d1"], F.DAY, t_dec)
+            pool.append({"j": j, "t_dec": t_dec, "ph": ph, "minlow": minlow, "imp_atr": best["imp_atr"], "atrp": float(aj / abs(c[j])), "atr_b": float(aj),
+                         "sess": _session(t_dec), "r4": int(ctx["reg4"][k4]) * int(sg) if k4 >= 0 else 0, "rd": int(ctx["regd"][kd]) * int(sg) if kd >= 0 else 0,
+                         "btcb": _btc_bucket(_btc_ret4h(btc, float(h1["t"][j] + 2700)) if (btc and symbol != "BTCUSDT") else None, sg)})
+        used = set()
+        for ev in events:
+            t_dec_e = float(h1["t"][ev["b"]] + 3600)
+            k4, kd = F.last_closed(ctx["h4"], 4 * 3600, t_dec_e), F.last_closed(ctx["d1"], F.DAY, t_dec_e)
+            e_r4, e_rd = (int(ctx["reg4"][k4]) * int(sg) if k4 >= 0 else 0), (int(ctx["regd"][kd]) * int(sg) if kd >= 0 else 0)
+            e_btc = _btc_bucket(_btc_ret4h(btc, float(h1["t"][ev["b"]] + 2700)) if (btc and symbol != "BTCUSDT") else None, sg)
+            e_sess = _session(t_dec_e)
+            e_atrp = float(ev["atr_b"] / abs(c[ev["b"]]))
+            bestc, bd = None, 1e9
+            for cd in pool:
+                if cd["j"] in used or cd["sess"] != e_sess or cd["r4"] != e_r4 or cd["rd"] != e_rd:
+                    continue
+                ri, ra = cd["imp_atr"] / ev["imp_atr"], cd["atrp"] / e_atrp
+                if not (CALIPER_IMP[0] <= ri <= CALIPER_IMP[1] and CALIPER_ATR[0] <= ra <= CALIPER_ATR[1]):
+                    continue
+                d = abs(ri - 1.0) + abs(float(np.log(ra))) + (0.0 if cd["btcb"] == e_btc else 1.0)
+                if d < bd:
+                    bd, bestc = d, cd
+            if bestc is None:
+                st["pair_unmatched"] = st.get("pair_unmatched", 0) + 1
+                continue
+            used.add(bestc["j"])
+            recs = []
+            for kind, t_dec, minlow, ph, atr_b, line, jb in (("event", t_dec_e, ev["minlow"], ev["ph"], ev["atr_b"], ev["line_b"], ev["b"]),
+                                                              ("matched", bestc["t_dec"], bestc["minlow"], bestc["ph"], bestc["atr_b"], None, bestc["j"])):
+                ie = _entry_index(m1, t_dec)
+                if ie is None:
+                    break
+                entry = float(m1["o"][ie])
+                sl_t = minlow - p.sl_buf * atr_b
+                rec = _outcome_record(m1, ie, direction, entry, sg * sl_t, sg * ph, None if line is None else sg * line, float(atr_b))
+                if rec is None:
+                    break
+                rec.update({"symbol": symbol, "dir": direction, "t_entry": t_dec, "kind": kind, "risk_pct": rec["risk"] / abs(entry) * 100.0})
+                rec["rr15"] = bool(rec["rr_to_high"] is not None and rec["rr_to_high"] >= p.min_rr)
+                rec["cand"] = {"symbol": symbol, "dir": direction, "t_entry": t_dec, "i1": ie, "entry": entry, "sl": sg * sl_t, "tp": sg * ph, "risk_pct": rec["risk_pct"], "rr": rec["rr_to_high"],
+                               "trigger": "pair_" + kind, "etype": "NARR", "lvl_kind": "NARR", "lvl_strength": 0, "lvl_p": entry, "reg4": 0, "regd": 0, "btc4": None, "flow_ok": True,
+                               "atr_pct": atr_b / abs(entry) * 100.0, "htf_ok": True, "btc_ok": True, "tp_known": t_dec, "lvl_known": t_dec, "depth_atr": 0.0, "tp_kind": "IMPULSE_HIGH", "feat": {}}
+                recs.append(rec)
+            if len(recs) == 2:
+                pid = f"{symbol}:{direction}:{ev['b']}"
+                for rec in recs:
+                    rec["pair"] = pid
+                    rec["cand"]["pair"] = pid
+                    rec["day"] = int(t_dec_e // 86400)     # день ПАРИ = день події (для train/test і кластерів)
+                recs[0]["match_d"] = recs[1]["match_d"] = float(bd)
+                out.extend(recs)
+                st["pair_n"] = st.get("pair_n", 0) + 1
+            else:
+                used.discard(bestc["j"])
+    return out

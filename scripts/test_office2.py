@@ -272,6 +272,26 @@ def test_outcome_record():
     assert N._outcome_record(m1, 0, "LONG", 100.0, 100.0, None, None, 1.0) is None
 
 
+def test_matched_pairs():
+    from office2 import narrative as N
+    ctx = P.build_context(synth(220, seed=41, sigma=0.0035))
+    btc = P.build_context(synth(220, seed=42, sigma=0.0035))
+    st = {}
+    pr = N.matched_pairs("XUSDT", ctx, btc, N.NParams(), st)
+    assert st.get("pair_n", 0) >= 3, st
+    byp = {}
+    for r in pr:
+        byp.setdefault(r["pair"], {})[r["kind"]] = r
+    assert all(set(v) == {"event", "matched"} for v in byp.values())
+    for v in byp.values():
+        e, c = v["event"], v["matched"]
+        assert e["dir"] == c["dir"] and e["symbol"] == c["symbol"] and e["day"] == c["day"]
+        assert N._session(e["t_entry"]) == N._session(c["t_entry"])            # та сама сесія
+        assert abs(e["t_entry"] - c["t_entry"]) > 3 * 3600                     # контроль ≥ 3 бари від події
+        assert c["rr_to_high"] is not None and c["back_below_min"] is None
+    assert len({(r["dir"], round(r["t_entry"])) for r in pr if r["kind"] == "matched"}) == sum(1 for r in pr if r["kind"] == "matched")   # без повторів
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"

@@ -69,6 +69,8 @@ def main() -> int:
     nctrl: List[dict] = []
     nstats: Dict[str, int] = {}
     nev: List[dict] = []
+    npairs: List[dict] = []
+    npstruct: List[dict] = []
     nevc: List[dict] = []
     p48 = P.Params(horizon_sec=48 * 3600)
     for i, sym in enumerate(syms):
@@ -84,6 +86,12 @@ def main() -> int:
         nctrl.extend(E.evaluate(NR.generic_controls(sym, ctx, 25), {sym: ctx}, p48))
         nev.extend(NR.event_outcomes(sym, ctx, btc_ctx, NR.NParams(), nstats))
         nevc.extend(NR.event_controls(sym, ctx, 40))
+        _pr = NR.matched_pairs(sym, ctx, btc_ctx, NR.NParams(), nstats)
+        npairs.extend(_pr)
+        _pday = {r["pair"]: r["day"] for r in _pr}
+        for _x in E.evaluate([r["cand"] for r in _pr if r["rr15"]], {sym: ctx}, p48):
+            _x["day"] = _pday[_x["pair"]]
+            npstruct.append(_x)
         scr = SC.scenario_candidates(sym, ctx, btc_ctx, p, sc_stats)
         sc_rows.extend(E.evaluate(scr["cands"], {sym: ctx}, p))
         behav.extend(scr["behav"])
@@ -328,26 +336,59 @@ def main() -> int:
     L.append("\nУ дужках кластерний 95% ІВ (symbol+день). Ніяких порогів не підбирається; потрібно лише порівняти «події» з «контролем» і з випадковим блуканням.\n")
     L.append(f"\nВоронка діагностики: подій {nstats.get('ev_n', 0)}; без 1m-входу {nstats.get('ev_no_entry', 0)}; без outcome (ризик ≤0 або <1 год даних) {nstats.get('ev_no_outcome', 0)}. Ризик% подій (медіана): "
              f"{(_np2.median([r['risk_pct'] for r in ev_t]) if ev_t else float('nan')):.2f}%; контроль: {(_np2.median([r['risk_pct'] for r in _sel(nevc)]) if _sel(nevc) else float('nan')):.2f}%.\n")
+    def boot_diff(x: List[tuple], y: List[tuple]) -> tuple:
+        cx: Dict[tuple, List[float]] = {}
+        cy: Dict[tuple, List[float]] = {}
+        for k, v in x:
+            cx.setdefault(k, []).append(v)
+        for k, v in y:
+            cy.setdefault(k, []).append(v)
+        kx, ky = list(cx), list(cy)
+        if len(kx) < 8 or len(ky) < 8:
+            return float("nan"), float("nan"), float("nan")
+        m = lambda c, ks, rr: (lambda smp: sum(smp) / len(smp))([v for k in (rr.choice(ks) for _ in ks) for v in c[k]])
+        rr = _rnd.Random(17)
+        ds = sorted(m(cx, kx, rr) - m(cy, ky, rr) for _ in range(500))
+        mean_x = sum(v for vs in cx.values() for v in vs) / sum(len(vs) for vs in cx.values())
+        mean_y = sum(v for vs in cy.values() for v in vs) / sum(len(vs) for vs in cy.values())
+        return mean_x - mean_y, ds[12], ds[487]
+
+
+    # ===== EXPLORATORY: MATCHED-IMPULSE CONTROL (правило matching зафіксовано до test; HYPOTHESES.md, поправка 5) =====
+    L.append("\n### EXPLORATORY: matched-impulse control — чи додає COMPRESSION→BREAKOUT інформацію понад уже наявний імпульс?\n")
+    L.append("Контроль для кожної події: той самий символ і напрям, стан «після імпульсу» (корекція 8–60 барів, ретрейс 25–90%, хай імпульсу не перевищено), але БЕЗ завершеного пробою (±3 бари від подій виключені). "
+             "Жорстко: та сама сесія UTC і той самий H4/D1 режим відносно напряму; caliper: імпульс 0,7–1,3×, ATR_H1/ціна 0,7–1,43×; відстань = |Δімпульсу| + |ln Δволатильності| + (BTC-кошик ±0,3% не збігся → 1). Один контроль на подію, без повторів. Показано ПАРИ.\n")
+    cutp = E.cut_day([r for r in npairs]) if npairs else None
+    pr_t = [r for r in npairs if (r["day"] < cutp)] if (tr_only and cutp is not None) else npairs
+    pe = {r["pair"]: r for r in pr_t if r["kind"] == "event"}
+    pc = {r["pair"]: r for r in pr_t if r["kind"] == "matched"}
+    ids = sorted(set(pe) & set(pc))
+    L.append(f"Пар: {len(ids)}; подій без пари (немає контролю в caliper): {nstats.get('pair_unmatched', 0)} (за всю вибірку, включно з test-частиною лічильника).\n")
+    if ids:
+        L.append("| Метрика | подія | matched-контроль | різниця по парах (кластерний 95% ІВ) |\n|---|---|---|---|")
+        for name, fn in (("+0,5R раніше −1R", lambda r: 1.0 if r["order_0.5"] == "up" else 0.0), ("+1R раніше −1R", lambda r: 1.0 if r["order_1.0"] == "up" else 0.0),
+                         ("+1,5R раніше −1R", lambda r: 1.0 if r["order_1.5"] == "up" else 0.0), ("+2R раніше −1R", lambda r: 1.0 if r["order_2.0"] == "up" else 0.0),
+                         ("MFE48, R (середнє)", lambda r: r["mfe_r_48"]), ("MAE48, R (середнє)", lambda r: r["mae_r_48"]), ("MFE48−MAE48, R", lambda r: r["mfe_r_48"] - r["mae_r_48"])):
+            dd = [((pe[i]["symbol"], pe[i]["day"]), fn(pe[i]) - fn(pc[i])) for i in ids]
+            lo, hi = boot_mean(dd)
+            mx = sum(fn(pe[i]) for i in ids) / len(ids)
+            my = sum(fn(pc[i]) for i in ids) / len(ids)
+            pct = name.startswith("+")
+            f = (lambda v: f"{v * 100:.0f}%") if pct else (lambda v: f"{v:+.2f}")
+            fd = (lambda v: f"{v * 100:+.0f} п.п.") if pct else (lambda v: f"{v:+.2f}")
+            L.append(f"| {name} | {f(mx)} | {f(my)} | {fd(mx - my)} ({fd(lo)}…{fd(hi)}) |")
+        md = sorted(pe[i]["match_d"] for i in ids)
+        L.append(f"\nЯкість matching: медіана відстані {md[len(md) // 2]:.2f}; медіана ризику% події {sorted(pe[i]['risk_pct'] for i in ids)[len(ids) // 2]:.2f}% / контролю {sorted(pc[i]['risk_pct'] for i in ids)[len(ids) // 2]:.2f}%.\n")
+        idset = set(ids)
+        sx = [(( r["symbol"], r["day"]), r["r_net"]) for r in npstruct if r["pair"] in idset and r["trigger"] == "pair_event" and (cutp is None or not tr_only or r["day"] < cutp)]
+        sy = [((r["symbol"], r["day"]), r["r_net"]) for r in npstruct if r["pair"] in idset and r["trigger"] == "pair_matched" and (cutp is None or not tr_only or r["day"] < cutp)]
+        if sx and sy:
+            d, lo, hi = boot_diff(sx, sy)
+            L.append(f"\nСтруктурна угода (SL під корекцією, TP хай імпульсу, RR ≥1,5; фільтр застосовується до кожної сторони окремо): подія N={len(sx)} R {sum(v for _, v in sx) / len(sx):+.3f}; matched N={len(sy)} R {sum(v for _, v in sy) / len(sy):+.3f}; різниця {d:+.3f} ({lo:+.3f}…{hi:+.3f}).\n")
+    L.append("")
     # ===== ЗАФІКСОВАНІ ГІПОТЕЗИ HN-A / HN-A2 / HN-B (HYPOTHESES.md, раунд 3, поправки 2–3): лише з --open-test =====
     if a.open_test:
         L.append("\n## Зафіксовані гіпотези класу IMPULSE→COMPRESSION→BREAKOUT (HN-A, HN-A2, HN-B): train і test поруч — test відкрито один раз\n")
-
-        def boot_diff(x: List[tuple], y: List[tuple]) -> tuple:
-            cx: Dict[tuple, List[float]] = {}
-            cy: Dict[tuple, List[float]] = {}
-            for k, v in x:
-                cx.setdefault(k, []).append(v)
-            for k, v in y:
-                cy.setdefault(k, []).append(v)
-            kx, ky = list(cx), list(cy)
-            if len(kx) < 8 or len(ky) < 8:
-                return float("nan"), float("nan"), float("nan")
-            m = lambda c, ks, rr: (lambda smp: sum(smp) / len(smp))([v for k in (rr.choice(ks) for _ in ks) for v in c[k]])
-            rr = _rnd.Random(17)
-            ds = sorted(m(cx, kx, rr) - m(cy, ky, rr) for _ in range(500))
-            mean_x = sum(v for vs in cx.values() for v in vs) / sum(len(vs) for vs in cx.values())
-            mean_y = sum(v for vs in cy.values() for v in vs) / sum(len(vs) for vs in cy.values())
-            return mean_x - mean_y, ds[12], ds[487]
 
         cl = lambda r: (r["symbol"], r["day"])
         cutx = E.cut_day(nev + nevc)
