@@ -187,8 +187,9 @@ def features(fl: Dict[str, np.ndarray], t_dec: float, sg: float, r4_rel: float) 
         if k >= 0 and t_dec - ft[k] < 12 * 3600.0:
             out["funding_rel"] = float(sg * fr[k] * 1e4)
             hist = fr[max(k - 90, 0):k + 1]
-            if len(hist) >= 20 and hist.std() > 1e-9:
-                out["funding_z"] = float(np.clip(sg * (fr[k] - hist.mean()) / hist.std(), -6, 6))
+            if len(hist) >= 20:
+                # funding часто «прилипає» до базової ставки (std=0): відсутність варіації = нейтральний z=0, а не відсутнє значення
+                out["funding_z"] = float(np.clip(sg * (fr[k] - hist.mean()) / hist.std(), -6, 6)) if hist.std() > 1e-9 else 0.0
     return out
 
 

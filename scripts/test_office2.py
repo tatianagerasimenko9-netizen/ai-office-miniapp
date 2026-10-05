@@ -403,6 +403,8 @@ def test_flowdata():
     for k, v in a.items():
         assert (v != v and a2[k] != a2[k]) or abs(v - a2[k]) < 1e-9, (k, v, a2[k])
     assert all(v == v for v in a.values()), a
+    flat = FD.prep(mm, np.column_stack([mm[0, 0] - 86400 + 8 * 3600.0 * np.arange(200), np.full(200, 0.0001)]))
+    assert FD.features(flat, t_dec, 1.0, 1.0)["funding_z"] == 0.0      # константний funding → z=0, рядок не губиться
 
 
 def test_disp_population():
