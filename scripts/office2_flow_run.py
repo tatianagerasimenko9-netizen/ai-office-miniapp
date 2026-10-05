@@ -195,7 +195,7 @@ def main() -> int:
             tt = fl["t"]
             dts = np.diff(tt)
             hl = lambda k: float(np.mean(~np.isnan(fl[k])) * 100)
-            health.append(f"{sym}: знімків {len(tt)}, крок медіана {np.median(dts):.0f} с / p99 {np.percentile(dts, 99):.0f} с / макс {dts.max():.0f} с; oi_chg_1h валідних {hl('oi_chg_1h'):.0f}%, oi_std_1h валідних {hl('oi_std_1h'):.0f}%, oi_chg_4h {hl('oi_chg_4h'):.0f}%; "
+            health.append(f"{sym}: знімків {len(tt)}, крок медіана {np.median(dts):.0f} с / p99 {np.percentile(dts, 99):.0f} с / макс {dts.max():.0f} с; oi_chg_1h валідних {hl('oi_chg_1'):.0f}%, oi_std_1h валідних {hl('oi_std_1'):.0f}%, oi_chg_4h {hl('oi_chg_4'):.0f}%; "
                           f"перший знімок {datetime.fromtimestamp(tt[0], timezone.utc):%Y-%m-%d %H:%M}, останній {datetime.fromtimestamp(tt[-1], timezone.utc):%Y-%m-%d %H:%M}; funding прінтів {len(fl['fund_t'])}")
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         zr = [r for r in Z.build_records(sym, ctx, btc_ctx, Z.ZParams(), st, with_controls=False)["events"] if r["etype"] == "EXIT"]
