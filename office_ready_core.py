@@ -181,3 +181,54 @@ def story_for(*, symbol: str, direction: str, confirm: Optional[Dict[str, Any]],
     g = gate or {}
     return su.build(conf.get("tags") or [], conf.get("mode"), direction, rr_net=g.get("rr_net"), rr_weighted=g.get("rr_weighted"),
                     tf="M5" if str(tf or "").upper() in ("M15", "M5") else "M15", entry_txt=et, zone_txt=zt)
+
+
+def repeat_context(db: str, *, symbol: str, direction: str, entry: Any, sl: Any, tags: Any = None, zone: Any = None, now: Optional[float] = None) -> Dict[str, Any]:
+    """ІНСТРУМЕНТАЦІЯ для shadow-визначення structural reset (05.10). НЕ впливає на gate/READY: лише зберігає у знімку, що змінилось
+    порівняно з попередньою READY тієї ж пари symbol+direction. Заповнюється з журналу подій; збій → порожній результат.
+    Структурні події після SL (новий sweep/BOS/CHoCH, зміна HTF-контексту) тут ще не обчислюються — окреме поле в наступному кроці."""
+    import office_signal_track as trk
+
+    now = time.time() if now is None else now
+    sym, d = str(symbol or "").upper(), str(direction or "").upper()
+    prevs = [e["p"] for e in trk._events(db, trk.EV_PLAN)
+             if not e["p"].get("rejected") and str(e["p"].get("symbol") or "").upper() == sym and str(e["p"].get("direction") or "").upper() == d
+             and (_f(e["p"].get("confirmed_ts")) or 0.0) < now]
+    prevs.sort(key=lambda p: _f(p.get("confirmed_ts")) or 0.0)
+    out: Dict[str, Any] = {"v": 1, "has_prev": bool(prevs), "n_prev_24h": sum(1 for p in prevs if now - (_f(p.get("confirmed_ts")) or 0.0) <= 86400), "n_prev_total": len(prevs)}
+    if not prevs:
+        return out
+    prev = prevs[-1]
+    ct = _f(prev.get("confirmed_ts")) or 0.0
+    k = (prev.get("scenario_id"), prev.get("confirmed_ts"))
+    res = next((e["p"] for e in trk._events(db, trk.EV_RESULT) if (e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) == k), None)
+    lv: Dict[str, Optional[float]] = {}
+    for e in trk._events(db, trk.EV_MILESTONE):
+        if (e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) == k:
+            lv[str(e["p"].get("level") or "")] = _f(e["p"].get("touched_ts"))
+    sl_ts = lv.get("SL") if lv.get("SL") else (ct + (_f(res.get("time_to_result_sec")) or 0.0) if res and res.get("outcome") == "STOP" else None)
+    if "SL" in lv or (res and res.get("outcome") == "STOP"):
+        state = "sl"
+    elif lv.keys() & {"TP1", "TP2", "TP3"} or (res and str(res.get("outcome") or "").startswith("TP")):
+        state = "tp"
+    elif "ENTRY" in lv:
+        state = "open"
+    else:
+        state = "unresolved"
+    e0, s0 = _f(entry), _f(sl)
+    pe, ps = _f(prev.get("entry")), _f(prev.get("sl"))
+    pz = ((prev.get("gate") or {}).get("zone")) or None
+    overlap = None
+    try:
+        if pz and zone:
+            overlap = max(float(pz[0]), float(zone[0])) <= min(float(pz[1]), float(zone[1]))
+    except (TypeError, ValueError, IndexError):
+        overlap = None
+    ptags = ((prev.get("gate") or {}).get("confirm") or {}).get("tags")
+    out.update({"prev_scenario_id": prev.get("scenario_id"), "prev_confirmed_ts": ct, "prev_age_min": round((now - ct) / 60.0, 1), "prev_state": state,
+                "since_prev_sl_min": round((now - sl_ts) / 60.0, 1) if sl_ts and state == "sl" else None,
+                "sl_diff_pct": round(abs(s0 - ps) / s0 * 100.0, 4) if s0 and ps is not None else None,
+                "entry_diff_pct": round(abs(e0 - pe) / e0 * 100.0, 4) if e0 and pe is not None else None,
+                "zone_overlap": overlap, "prev_tags": ptags, "tags": [str(x) for x in (tags or [])] or None,
+                "same_tags": (sorted(ptags) == sorted(str(x) for x in tags)) if ptags and tags else None})
+    return out

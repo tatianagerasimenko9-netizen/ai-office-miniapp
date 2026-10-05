@@ -7016,6 +7016,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                                                        max_entry=_max_e, min_tp1_pct=_desk_card_min_tp1(sym_f), confirm=_rc.confirm_basis(fu),
                                                        zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"),
                                                        tp3_why=(((tgt or {}).get("tp3") or {}).get("why") or "") if _tp3_m is not None else "")
+                        try:   # інструментація для shadow (structural reset): що змінилось порівняно з попередньою READY пари; на READY/gate не впливає
+                            _gate_snap["repeat_ctx"] = await asyncio.to_thread(_rc.repeat_context, db_path, symbol=sym_f, direction=_dir_c, entry=plan_px, sl=st.get("sl"),
+                                                                                tags=(_gate_snap.get("confirm") or {}).get("tags"), zone=_gate_snap.get("zone"), now=_now_c)
+                        except Exception as exc_rp:
+                            print(f"[repeat_ctx] skipped {sym_f}: {type(exc_rp).__name__}: {exc_rp}")
                         _story = _rc.story_for(symbol=sym_f, direction=_dir_c, confirm=_gate_snap.get("confirm"), gate=_gate_snap, entry=plan_px,
                                                zone_lo=st.get("zone_lo"), zone_hi=st.get("zone_hi"), tf=_tf_c2)
                         _mctx: Dict[str, Any] = {}
