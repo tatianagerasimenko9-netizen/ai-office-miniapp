@@ -108,6 +108,31 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
     return out
 
 
+_BAR_MEMO: Dict[tuple, int] = {}   # (вид, ключ) -> номер 15m-бару, на якому план уже оцінено без підсумку
+
+
+def _bar_idx(now: float, tf_sec: float = TF_SEC) -> int:
+    return int(now // tf_sec)
+
+
+def _skip_same_bar(kind: str, key: Any, now: float, tf_sec: float = TF_SEC) -> bool:
+    """simulate() бере лише ЗАКРИТІ свічки, тож доки не закрилась нова, повторна оцінка дає ту саму відповідь — запит свічок зайвий (результат не змінюється)."""
+    return _BAR_MEMO.get((kind, key)) == _bar_idx(now, tf_sec)
+
+
+def _remember_bar(kind: str, key: Any, candles: Any, now: float, tf_sec: float = TF_SEC) -> None:
+    """Запамʼятовуємо бар лише якщо вибірка вже містила останню закриту свічку; інакше наступний прохід спробує знову (затримка даних не повинна відкладати результат)."""
+    try:
+        last = candles[-1]
+        t0 = _ts((last or {}).get("ts"))
+        if t0 is not None and t0 >= (_bar_idx(now, tf_sec) - 1) * tf_sec:
+            _BAR_MEMO[(kind, key)] = _bar_idx(now, tf_sec)
+            if len(_BAR_MEMO) > 5000:
+                _BAR_MEMO.clear()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _events(db: str, etype: str) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
@@ -136,6 +161,8 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
         key = (p.get("scenario_id"), p.get("confirmed_ts"))
         if key in done:
             continue
+        if _skip_same_bar("tick", key, now):
+            continue   # нова 15m-свічка ще не закрилась: результат не може змінитись
         try:
             candles = fetch(p["symbol"], "15m", 300)
         except Exception:  # noqa: BLE001
@@ -144,6 +171,7 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
             continue
         res = simulate(p, candles, now)
         if res["status"] in ("PENDING", "INVALID"):
+            _remember_bar("tick", key, candles, now)
             continue
         payload = {"scenario_id": p.get("scenario_id"), "confirmed_ts": p.get("confirmed_ts"), "symbol": p.get("symbol"), "direction": p.get("direction"),
                    "rejected": bool(p.get("rejected")), "outcome": res["status"], "reached": res["reached"], "mfe_pct": res["mfe_pct"], "mae_pct": res["mae_pct"],
@@ -364,6 +392,8 @@ def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         p = ev["p"]
         if p.get("scenario_id") in done or now < float(p["expired_ts"]) + 3600:
             continue
+        if _skip_same_bar("false", p.get("scenario_id"), now):
+            continue   # нова 15m-свічка ще не закрилась: відповідь не зміниться
         lo, hi = _f(p.get("zone_lo")), _f(p.get("zone_hi"))
         if lo is None or hi is None or _f(p.get("sl")) is None or _f(p.get("tp1")) is None:
             continue
@@ -377,6 +407,7 @@ def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
                 "valid_until_ts": float(p["expired_ts"]) + FALSE_EXPIRY_WINDOW_SEC}
         res = simulate(plan, candles, now)
         if res["status"] == "PENDING" and now < float(p["expired_ts"]) + FALSE_EXPIRY_WINDOW_SEC:
+            _remember_bar("false", p.get("scenario_id"), candles, now)
             continue
         payload = {"scenario_id": p["scenario_id"], "symbol": p["symbol"], "direction": p["direction"], "false_expiry": res["status"] in ("TP1", "TP2", "TP3"),
                    "after_expiry_outcome": res["status"]}
