@@ -131,10 +131,18 @@ def unfinished_ready(db: str, *, now: Optional[float] = None) -> List[Dict[str, 
 
     now = time.time() if now is None else now
     done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in trk._events(db, trk.EV_RESULT)}
+    # Lifecycle 1m (SCENARIO_MILESTONE) — друге джерело правди: 15m-симулятор SIGNAL_RESULT може оголосити результат РАНІШЕ, ніж 1m бачить вхід
+    # (KAITO 05.10: «результат» 04.10 22:38, а ENTRY 00:16, SL 04:33). Якщо ENTRY є, а SL/TP/EXPIRED ще немає — ідея ще в позиції, не завершена.
+    lc: Dict[Tuple[Any, Any], set] = {}
+    for e in trk._events(db, trk.EV_MILESTONE):
+        lc.setdefault((e["p"].get("scenario_id"), e["p"].get("confirmed_ts")), set()).add(str(e["p"].get("level") or ""))
     out = []
     for ev in trk._events(db, trk.EV_PLAN):
         p = ev["p"]
-        if p.get("rejected") or (p.get("scenario_id"), p.get("confirmed_ts")) in done:
+        k = (p.get("scenario_id"), p.get("confirmed_ts"))
+        lv = lc.get(k, set())
+        lifecycle_open = "ENTRY" in lv and not (lv & {"SL", "TP1", "TP2", "TP3", "EXPIRED"})
+        if p.get("rejected") or (k in done and not lifecycle_open):
             continue
         v = _f(p.get("valid_until_ts")) or 0.0
         if now > v + MAX_OPEN_SEC:
