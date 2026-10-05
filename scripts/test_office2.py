@@ -259,6 +259,16 @@ def test_outcome_record():
     assert r["back_below_min"] == 1500 and abs(r["mfe_to_inval_r"] - 3.025) < 1e-6 and r["mfe_r_1"] < r["mfe_r_4"] <= r["mfe_r_48"]
     s2 = N._outcome_record(m1, 0, "SHORT", 100.0, 102.0, 95.0, 101.0, 1.0)      # дзеркально: ціна росте проти шорта → інвалідація, ХАЮ не досягнуто
     assert s2["inval_min"] is not None and s2["inval_min"] < 100 and not s2["high_before_inval"] and s2["mfe_to_inval_r"] < 0.5
+    assert r["order_0.5"] == "up" and r["order_1.0"] == "up" and r["order_2.0"] == "up"        # +4R (до 106) досягнуто до падіння під SL
+    assert s2["order_0.5"] == "down" and s2["order_2.0"] == "down"
+    # спочатку −1R, потім +3R: MFE велика, але порядок «down»
+    c2 = np.full(n, 100.0); c2[5:20] = 97.0; c2[20:] = 106.0
+    m2 = {"t": t, "o": c2.copy(), "h": c2 + .05, "l": c2 - .05, "c": c2, "v": np.ones(n), "tbv": np.ones(n) * .5}
+    r2 = N._outcome_record(m2, 0, "LONG", 100.0, 98.0, None, None, 1.0)
+    assert r2["mfe_r_48"] > 2.5 and r2["order_1.0"] == "down" and r2["order_0.5"] == "down"
+    # без жодного з двох
+    c3 = np.full(n, 100.0); m3 = {"t": t, "o": c3.copy(), "h": c3 + .05, "l": c3 - .05, "c": c3, "v": np.ones(n), "tbv": np.ones(n) * .5}
+    assert N._outcome_record(m3, 0, "LONG", 100.0, 98.0, None, None, 1.0)["order_1.0"] == "none"
     assert N._outcome_record(m1, 0, "LONG", 100.0, 100.0, None, None, 1.0) is None
 
 

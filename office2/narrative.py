@@ -221,6 +221,7 @@ def generic_controls(symbol: str, ctx: Dict[str, Any], n: int, p: NParams = NPar
 
 
 HORIZONS_H = (1, 4, 12, 24, 48)
+ORDER_K = (0.5, 1.0, 1.5, 2.0)
 
 
 def _outcome_record(m1: F.Arr, i0: int, direction: str, entry: float, sl: float, ph: Optional[float], line: Optional[float], atr: float) -> Optional[dict]:
@@ -248,6 +249,11 @@ def _outcome_record(m1: F.Arr, i0: int, direction: str, entry: float, sl: float,
     rec["inval_min"] = k_inv if k_inv >= 0 else None
     # хвилина інвалідації не зараховується як сприятлива (стоп-first, як у first_touch)
     rec["mfe_to_inval_r"] = float(cf[-1] / risk) if k_inv < 0 else (0.0 if k_inv == 0 else float(cf[k_inv - 1] / risk))
+    # ПОРЯДОК руху (exploratory): +k·R раніше за −1R (= структурний SL)? Та сама хвилина — стоп раніше. «none» = жодного з двох за 48 год
+    for kr in ORDER_K:
+        hit_up = fav >= kr * risk
+        ku = int(np.argmax(hit_up)) if hit_up.any() else -1
+        rec[f"order_{kr}"] = "none" if (ku < 0 and k_inv < 0) else ("up" if (ku >= 0 and (k_inv < 0 or ku < k_inv)) else "down")
     rec["t_mfe_min"], rec["t_mae_min"] = int(np.argmax(fav)), int(np.argmax(adv))
     if line is not None:
         under = (l <= line) if sg > 0 else (h >= line)

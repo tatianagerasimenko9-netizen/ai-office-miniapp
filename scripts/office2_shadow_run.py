@@ -309,6 +309,23 @@ def main() -> int:
                      ("  усі LONG", [r for r in ev_t if r["dir"] == "LONG"]), ("  усі SHORT", [r for r in ev_t if r["dir"] == "SHORT"]),
                      ("КОНТРОЛЬ: випадкові години, випадковий напрям", _sel(nevc))):
         L.append(_row(name, rs))
+    L.append("\n### EXPLORATORY (не преддекларована): що першим після входу — +k·R чи −1R (структурний SL)? Це outcome, не feature. Порядок руху, а не лише MFE/MAE. Стоп у ту саму хвилину — раніше.\n")
+    L.append("| Група | N | +0,5R раніше −1R (випадкове блукання: 67%) | +1R раніше −1R (50%) | +1,5R раніше −1R (40%) | +2R раніше −1R (33%) | жодного за 48 год (при +1R) |")
+    L.append("|---|---|---|---|---|---|---|")
+    for name, rs in (("УСІ події пробою", ev_t), ("  RR до хая < 1,5", [r for r in ev_t if not r["rr15"]]), ("  RR до хая ≥ 1,5", [r for r in ev_t if r["rr15"]]),
+                     ("  LONG", [r for r in ev_t if r["dir"] == "LONG"]), ("  SHORT", [r for r in ev_t if r["dir"] == "SHORT"]), ("КОНТРОЛЬ", _sel(nevc))):
+        n = len(rs)
+        if n == 0:
+            L.append(f"| {name} | 0 |  |  |  |  |  |")
+            continue
+        cells = []
+        for kr in NR.ORDER_K:
+            gk = [((r["symbol"], r["day"]), 1.0 if r[f"order_{kr}"] == "up" else 0.0) for r in rs]
+            lo, hi = boot_mean(gk)
+            cells.append(f"{sum(v for _, v in gk) / n * 100:.0f}% ({lo * 100:.0f}…{hi * 100:.0f})")
+        none1 = sum(1 for r in rs if r["order_1.0"] == "none") / n * 100
+        L.append(f"| {name} | {n} | " + " | ".join(cells) + f" | {none1:.0f}% |")
+    L.append("\nУ дужках кластерний 95% ІВ (symbol+день). Ніяких порогів не підбирається; потрібно лише порівняти «події» з «контролем» і з випадковим блуканням.\n")
     L.append(f"\nВоронка діагностики: подій {nstats.get('ev_n', 0)}; без 1m-входу {nstats.get('ev_no_entry', 0)}; без outcome (ризик ≤0 або <1 год даних) {nstats.get('ev_no_outcome', 0)}. Ризик% подій (медіана): "
              f"{(_np2.median([r['risk_pct'] for r in ev_t]) if ev_t else float('nan')):.2f}%; контроль: {(_np2.median([r['risk_pct'] for r in _sel(nevc)]) if _sel(nevc) else float('nan')):.2f}%.\n")
     L += PR.report(obs_all, cut, a.open_test)
