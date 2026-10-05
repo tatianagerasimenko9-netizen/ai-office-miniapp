@@ -94,10 +94,13 @@ def evaluate_pop(pop: str, rows: List[dict], cut: int, phase: str, L: List[str])
     L.append("Частка відсутніх значень за ознаками (>0,5%): " + (", ".join(f"{k} {v * 100:.0f}%" for v, k in bad) or "немає") + "\n")
     bymon: Dict[str, List[int]] = {}
     for r in rows:
+        if "t_dec" not in r:
+            continue
         mo = datetime.fromtimestamp(r["t_dec"], timezone.utc).strftime("%Y-%m")
         x = r["X"].get("oi_chg_1h_z", float("nan"))
         bymon.setdefault(mo, []).append(1 if x != x else 0)
-    L.append("Відсутність oi_chg_1h_z за місяцями: " + ", ".join(f"{k} {sum(v) / len(v) * 100:.0f}%" for k, v in sorted(bymon.items())) + "\n")
+    if bymon:
+        L.append("Відсутність oi_chg_1h_z за місяцями: " + ", ".join(f"{k} {sum(v) / len(v) * 100:.0f}%" for k, v in sorted(bymon.items())) + "\n")
     bysym: Dict[str, List[int]] = {}
     for r in rows:
         ok = all(r["X"].get(k, float("nan")) == r["X"].get(k, float("nan")) for k in allf)
