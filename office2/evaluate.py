@@ -83,6 +83,11 @@ def is_holdout(symbol: str) -> bool:
     return int(hashlib.md5((HOLDOUT_SALT + symbol).encode()).hexdigest(), 16) % 3 == 0
 
 
+def cut_day(rows: List[dict], train_frac: float = 0.6) -> Optional[int]:
+    days = sorted({r["day"] for r in rows})
+    return days[int(len(days) * train_frac)] if len(days) > 1 else None
+
+
 def split(rows: List[dict], train_frac: float = 0.6) -> Dict[str, List[dict]]:
     days = sorted({r["day"] for r in rows})
     if not days:
@@ -162,12 +167,16 @@ def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
     return f"{v:+.1f}" if signed else f"{v:.1f}"
 
 
-def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool = True) -> List[str]:
-    L = [f"\n### {title}\n", "| Варіант | N (кластерів) | TP/SL | факт | база | надлишок п.п. (95% ІВ) | R чистий (95% ІВ) | train надл. (N) | test надл. (N) |", "|---|---|---|---|---|---|---|---|---|"]
+def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool = True, train_only: bool = False, cut_day: Optional[int] = None) -> List[str]:
+    """train_only: у таблиці лише train-рядки (test ВІДКРИТИЙ НЕ показується) — для гіпотез, що ще не зафіксовані."""
+    hdr = "| Варіант | N (кластерів) | TP/SL | таймаут | факт | база | надлишок п.п. (95% ІВ) | R чистий після комісій (95% ІВ) |" + (" train надл. (N) | test надл. (N) |" if not train_only else "")
+    L = [f"\n### {title}\n", hdr, "|---|---|---|---|---|---|---|---|" + ("---|---|" if not train_only else "")]
     for name, rows in groups:
+        if train_only and cut_day is not None:
+            rows = [r for r in rows if r["day"] < cut_day]
         s = summarize(rows)
         if not rows:
-            L.append(f"| {name} | 0 | — | — | — | — | — | — | — |")
+            L.append(f"| {name} | 0 | — | — | — | — | — | — |" + ("" if train_only else " — | — |"))
             continue
         sp = split(rows)
         cells = []
@@ -178,5 +187,5 @@ def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool
         rci = "—" if s["r_lo"] != s["r_lo"] else f"{s['r_lo']:+.2f}…{s['r_hi']:+.2f}"
         nres = s["n_res"]
         tp = sum(1 for r in rows if r["outcome"] == "TP")
-        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) | {cells[0]} | {cells[1]} |")
+        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {s['n'] - nres} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) |" + ("" if train_only else f" {cells[0]} | {cells[1]} |"))
     return L

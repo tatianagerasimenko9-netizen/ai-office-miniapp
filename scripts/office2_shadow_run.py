@@ -19,6 +19,7 @@ from office2 import data as D  # noqa: E402
 from office2 import evaluate as E  # noqa: E402
 from office2 import pipeline as P  # noqa: E402
 from office2 import risk as R  # noqa: E402
+from office2 import scenarios as SC  # noqa: E402
 
 DEFAULT_SYMBOLS = ("BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT DOTUSDT LTCUSDT BCHUSDT TRXUSDT ATOMUSDT NEARUSDT APTUSDT ARBUSDT OPUSDT SUIUSDT INJUSDT "
                    "AAVEUSDT UNIUSDT ETCUSDT FILUSDT HBARUSDT ICPUSDT TIAUSDT SEIUSDT 1000PEPEUSDT 1000SHIBUSDT FETUSDT RUNEUSDT ALGOUSDT MKRUSDT LDOUSDT WLDUSDT ONDOUSDT JUPUSDT ENAUSDT TAOUSDT").split()
@@ -38,6 +39,7 @@ def main() -> int:
     ap.add_argument("--symbols", default="")
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--k-buf", type=float, default=0.5)
+    ap.add_argument("--open-test", action="store_true", help="сценарні таблиці з колонкою test (лише ПІСЛЯ фіксації гіпотез у HYPOTHESES.md)")
     ap.add_argument("--mode", choices=("explore", "final"), default="explore",
                     help="explore: hold-out символи НЕ завантажуються; final: ЛИШЕ hold-out символи, одна перевірка зафіксованої версії")
     a = ap.parse_args()
@@ -57,6 +59,9 @@ def main() -> int:
     skipped: Dict[str, int] = {}
     stats: Dict[str, int] = {}
     mir: List[dict] = []
+    sc_rows: List[dict] = []
+    behav: List[dict] = []
+    sc_stats: Dict[str, int] = {}
     for i, sym in enumerate(syms):
         m1, missing = (btc_m1, miss) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
         if m1 is None or len(m1["t"]) < 3 * 1440:
@@ -65,6 +70,9 @@ def main() -> int:
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         c = P.candidates(sym, ctx, btc_ctx, p, stats)
         rows.extend(E.evaluate(c, {sym: ctx}, p))
+        scr = SC.scenario_candidates(sym, ctx, btc_ctx, p, sc_stats)
+        sc_rows.extend(E.evaluate(scr["cands"], {sym: ctx}, p))
+        behav.extend(scr["behav"])
         mir.extend(E.evaluate([E.mirror(x) for x in c if x["trigger"] == "reclaim" and x["reg4"] * (1 if x["dir"] == "LONG" else -1) < 0], {sym: ctx}, p))
         ctrl.extend(E.evaluate(E.random_control({sym: ctx}, 40, p), {sym: ctx}, p))
         print(f"[{i + 1}/{len(syms)}] {sym}: бар 1m {len(m1['t'])}, кандидатів {len(c)}, пропущених днів {len(missing)}, {time.time() - t0:.0f} с", flush=True)
@@ -133,6 +141,81 @@ def main() -> int:
     dg("ризик, %", lambda r: "<0,5" if r["risk_pct"] < 0.5 else "0,5–1" if r["risk_pct"] < 1 else "1–2" if r["risk_pct"] < 2 else "≥2")
     dg("RR до цілі", lambda r: "1,5–2,5" if r["rr"] < 2.5 else "2,5–4" if r["rr"] < 4 else "≥4")
     dg("година UTC", lambda r: "Азія 0–8" if int(r["t_entry"] % 86400 // 3600) < 8 else "Лондон 8–13" if int(r["t_entry"] % 86400 // 3600) < 13 else "NY 13–21" if int(r["t_entry"] % 86400 // 3600) < 21 else "пізня 21–24")
+    # ===== СЦЕНАРНИЙ ШАР: що зробила ціна після зняття ліквідності (TRAIN; test лише з --open-test) =====
+    cut = E.cut_day(rows + sc_rows)
+    tr_only = not a.open_test
+    L.append("\n## Сценарний шар: Office спершу визначає, що сталося з ціною, а вже потім вибирає вхід\n")
+    L.append(f"> {'TRAIN-ONLY: test не відкривається, гіпотези ще не заморожені.' if tr_only else 'Test відкритий для зафіксованих гіпотез (HYPOTHESES.md).'} Метрика, яку показуємо завжди: **середній R після комісій** (математичне сподівання угоди), а не лише TP1-first.\n")
+    L.append(f"Проколів рівнів: {sc_stats.get('pierces', 0)}; прийняттів (2 закриття за рівнем): {sc_stats.get('accept_events', 0)}; кандидатів CONT: {sc_stats.get('accept_candidate', 0)}, RETEST: {sc_stats.get('retest_candidate', 0)}.\n")
+    # 1) поведінка після проколу: дрейф у бік пробою
+    bt = [b for b in behav if b["day"] < cut] if tr_only and cut is not None else behav
+    L.append("### Поведінка ціни після проколу рівня (TRAIN): куди пішла ціна після рішення, у ATR15 у БІК пробою (>0 = продовження, <0 = розворот)\n")
+    L.append("| Поведінка | H4 відносно пробою | N | частка | середній рух +1 год | +4 год (95% ІВ) | частка >0 за 4 год |\n|---|---|---|---|---|---|---|")
+    import random as _rnd
+
+    def boot_mean(vals: List[tuple]) -> tuple:
+        cl: Dict[tuple, List[float]] = {}
+        for k, v in vals:
+            cl.setdefault(k, []).append(v)
+        keys = list(cl)
+        if len(keys) < 8:
+            return float("nan"), float("nan")
+        rr = _rnd.Random(3)
+        ms = []
+        for _ in range(300):
+            samp = [x for k in (rr.choice(keys) for _ in keys) for x in cl[k]]
+            ms.append(sum(samp) / len(samp))
+        ms.sort()
+        return ms[7], ms[292]
+
+    tot = len(bt)
+    for beh in ("A", "B1", "ACCEPT", "TRAP"):
+        for rel in ("за трендом пробою", "проти тренду пробою", "діапазон"):
+            g = [b for b in bt if b["behavior"] == beh and b["rel"] == rel]
+            if len(g) < 40:
+                continue
+            f1 = [b["fwd1h_atr"] for b in g if b["fwd1h_atr"] is not None]
+            f4 = [((b["symbol"], b["day"]), b["fwd4h_atr"]) for b in g if b["fwd4h_atr"] is not None]
+            lo, hi = boot_mean(f4)
+            m4 = sum(v for _, v in f4) / len(f4)
+            L.append(f"| {beh} | {rel} | {len(g)} | {len(g) / max(1, tot) * 100:.0f}% | {sum(f1) / len(f1):+.2f} | {m4:+.2f} ({lo:+.2f}…{hi:+.2f}) | {sum(1 for _, v in f4 if v > 0) / len(f4) * 100:.0f}% |")
+    L.append("\nA = wick-reclaim; B1 = reclaim після 1 закриття за рівнем; ACCEPT = 2 закриття за рівнем; TRAP = прийняття з поверненням на 3-му барі (знаємо лише постфактум, у рішенні не використовується).\n")
+    # 2) сценарії
+    sg = lambda r: 1 if r["dir"] == "LONG" else -1
+    allc = rows + sc_rows
+    scen_groups = [
+        ("REVERSAL: reclaim + CHoCH (підтверджена зміна структури)", [r for r in rows if r["trigger"] == "choch"]),
+        ("RANGE: reclaim на краю діапазону H4 (reg4 = 0)", [r for r in rows if r["trigger"] == "reclaim" and r["reg4"] == 0]),
+        ("REVERSAL без підтвердження, ПО тренду H4 (інформаційно)", [r for r in rows if r["trigger"] == "reclaim" and r["reg4"] * sg(r) > 0]),
+        ("REVERSAL без підтвердження, ПРОТИ тренду H4 (інформаційно)", [r for r in rows if r["trigger"] == "reclaim" and r["reg4"] * sg(r) < 0]),
+        ("CONTINUATION: прийняття за рівнем у бік тренду H4", [r for r in sc_rows if r["trigger"] == "accept" and r["reg4"] * sg(r) > 0]),
+        ("ПРИЙНЯТТЯ без підтримки HTF (проти тренду / діапазон) — інформаційно", [r for r in sc_rows if r["trigger"] == "accept" and r["reg4"] * sg(r) <= 0]),
+        ("BREAKOUT+RETEST: прийняття → ретест рівня → вхід у бік пробою", [r for r in sc_rows if r["trigger"] == "retest"]),
+        ("  …з них у бік тренду H4", [r for r in sc_rows if r["trigger"] == "retest" and r["reg4"] * sg(r) > 0]),
+    ]
+    L += E.table("Сценарії (Office спершу визначає ситуацію): N → TP1-first → SL-first → таймаут → база → надлишок → середній R після комісій", scen_groups, train_only=tr_only, cut_day=cut)
+    L.append("\nNO TRADE: події, що не склалися в жоден сценарій (немає цілі RR ≥1,5, ризик поза межами, або поведінка не з переліку); у воронці — окремі лічильники.\n")
+    # 3) розрізи по сценаріях
+    def rel_h4(r: dict) -> str:
+        v = r["reg4"] * sg(r)
+        return "за трендом H4" if v > 0 else "проти тренду H4" if v < 0 else "діапазон H4"
+
+    def rel_btc(r: dict) -> str:
+        if r["btc4"] is None:
+            return "н/д"
+        v = r["btc4"] * sg(r)
+        return "BTC за" if v > 0.3 else "BTC проти" if v < -0.3 else "BTC нейтрально"
+
+    for name, g in scen_groups[:2] + scen_groups[4:5] + scen_groups[6:7]:
+        if not g:
+            continue
+        for lab, key in (("напрям", lambda r: r["dir"]), ("H4", rel_h4), ("BTC 4 год", rel_btc), ("тип рівня", lambda r: r["lvl_kind"])):
+            sub: Dict[str, List[dict]] = {}
+            for r in g:
+                sub.setdefault(key(r), []).append(r)
+            groups = [(f"{lab}: {k}", v) for k, v in sorted(sub.items()) if len(v) >= 40]
+            if groups:
+                L += E.table(f"{name} — розріз «{lab}»", groups, train_only=tr_only, cut_day=cut)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
     for name, sel in (("БАЗА", [r for r in rows if r["trigger"] == "reclaim"]),

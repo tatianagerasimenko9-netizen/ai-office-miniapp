@@ -129,6 +129,28 @@ def test_pipeline_runs_and_ablation_nonempty():
     assert "надлишок" in txt
 
 
+def test_scenarios_no_lookahead_and_behavior():
+    from office2 import scenarios as SC
+    full = synth(45, seed=7)
+    btc = synth(45, seed=8)
+    cf, bf = P.build_context(full), P.build_context(btc)
+    r = SC.scenario_candidates("XUSDT", cf, bf)
+    assert r["behav"] and {b["behavior"] for b in r["behav"]} <= {"A", "B1", "ACCEPT", "TRAP"}
+    assert any(c["trigger"] == "accept" for c in r["cands"])
+    T = full["t"][0] + 30 * 86400
+    cut = lambda a: {k: v[: int((T - a["t"][0]) // 60)] for k, v in a.items()}
+    rc = SC.scenario_candidates("XUSDT", P.build_context(cut(full)), P.build_context(cut(btc)))
+    k = lambda c: (c["trigger"], c["dir"], round(c["t_entry"]), round(c["entry"], 8), round(c["sl"], 8), round(c["tp"], 8), c["lvl_kind"], c["reg4"], c["etype"], round(c["depth_atr"], 8))
+    kf = {k(c) for c in r["cands"] if c["t_entry"] <= T - 120}
+    kc = {k(c) for c in rc["cands"] if c["t_entry"] <= T - 120}
+    assert kc and kc == kf, (len(kc), len(kf), sorted(kc ^ kf)[:3])
+    for c in r["cands"]:
+        assert c["tp_known"] <= c["t_entry"] + 1e-6 and c["lvl_known"] <= c["t_entry"] and c["etype"] == "ACCEPT"
+        # продовження торгує У БІК пробою, SL — за рівнем
+        assert (c["dir"] == "LONG") == (c["brk"] > 0)
+        assert (c["sl"] < c["lvl_p"]) if c["dir"] == "LONG" else (c["sl"] > c["lvl_p"])
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"
