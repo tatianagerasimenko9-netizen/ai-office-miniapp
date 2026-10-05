@@ -328,6 +328,50 @@ def main() -> int:
     L.append("\nУ дужках кластерний 95% ІВ (symbol+день). Ніяких порогів не підбирається; потрібно лише порівняти «події» з «контролем» і з випадковим блуканням.\n")
     L.append(f"\nВоронка діагностики: подій {nstats.get('ev_n', 0)}; без 1m-входу {nstats.get('ev_no_entry', 0)}; без outcome (ризик ≤0 або <1 год даних) {nstats.get('ev_no_outcome', 0)}. Ризик% подій (медіана): "
              f"{(_np2.median([r['risk_pct'] for r in ev_t]) if ev_t else float('nan')):.2f}%; контроль: {(_np2.median([r['risk_pct'] for r in _sel(nevc)]) if _sel(nevc) else float('nan')):.2f}%.\n")
+    # ===== ЗАФІКСОВАНІ ГІПОТЕЗИ HN-A / HN-A2 / HN-B (HYPOTHESES.md, раунд 3, поправки 2–3): лише з --open-test =====
+    if a.open_test:
+        L.append("\n## Зафіксовані гіпотези класу IMPULSE→COMPRESSION→BREAKOUT (HN-A, HN-A2, HN-B): train і test поруч — test відкрито один раз\n")
+
+        def boot_diff(x: List[tuple], y: List[tuple]) -> tuple:
+            cx: Dict[tuple, List[float]] = {}
+            cy: Dict[tuple, List[float]] = {}
+            for k, v in x:
+                cx.setdefault(k, []).append(v)
+            for k, v in y:
+                cy.setdefault(k, []).append(v)
+            kx, ky = list(cx), list(cy)
+            if len(kx) < 8 or len(ky) < 8:
+                return float("nan"), float("nan"), float("nan")
+            m = lambda c, ks, rr: (lambda smp: sum(smp) / len(smp))([v for k in (rr.choice(ks) for _ in ks) for v in c[k]])
+            rr = _rnd.Random(17)
+            ds = sorted(m(cx, kx, rr) - m(cy, ky, rr) for _ in range(500))
+            mean_x = sum(v for vs in cx.values() for v in vs) / sum(len(vs) for vs in cx.values())
+            mean_y = sum(v for vs in cy.values() for v in vs) / sum(len(vs) for vs in cy.values())
+            return mean_x - mean_y, ds[12], ds[487]
+
+        cl = lambda r: (r["symbol"], r["day"])
+        cutx = E.cut_day(nev + nevc)
+        L.append("| ID | набір | події: N | контроль: N | подія | контроль | різниця (кластерний 95% ІВ) |\n|---|---|---|---|---|---|---|")
+        for lab, f in (("train", lambda r: r["day"] < cutx), ("test", lambda r: r["day"] >= cutx)):
+            ev_s = [r for r in nev if f(r)]
+            ct_s = [r for r in nevc if f(r)]
+            for hid, fn, name in (("HN-A", lambda r: r["mfe_r_48"] - r["mae_r_48"], "середнє MFE48−MAE48, R"),
+                                  ("HN-A2", lambda r: 1.0 if r["order_1.0"] == "up" else 0.0, "частка «+1R раніше −1R»")):
+                x = [(cl(r), fn(r)) for r in ev_s]
+                y = [(cl(r), fn(r)) for r in ct_s]
+                d, lo, hi = boot_diff(x, y)
+                mx = sum(v for _, v in x) / max(len(x), 1)
+                my = sum(v for _, v in y) / max(len(y), 1)
+                L.append(f"| {hid}: {name} | {lab} | {len(x)} | {len(y)} | {mx:+.3f} | {my:+.3f} | {d:+.3f} ({lo:+.3f}…{hi:+.3f}) |")
+        L.append("\n### HN-B: структурна угода (SL під корекцією, TP хай імпульсу, RR≥1,5), середній R після комісій; для контексту — «загальний структурний вхід»\n")
+        L.append("| набір | вхід на пробої: N | R (кластерний 95% ІВ) | контроль: N | R | різниця «пробій − контроль» (ІВ) |\n|---|---|---|---|---|---|")
+        for lab, f in (("train", lambda r: r["day"] < cutn), ("test", lambda r: r["day"] >= cutn)):
+            x = [(cl(r), r["r_net"]) for r in brk if f(r) and r["outcome"] is not None]
+            y = [(cl(r), r["r_net"]) for r in nctrl if f(r) and r["outcome"] is not None]
+            lo1, hi1 = boot_mean(x)
+            d, lo, hi = boot_diff(x, y)
+            L.append(f"| {lab} | {len(x)} | {sum(v for _, v in x) / max(len(x), 1):+.3f} ({lo1:+.3f}…{hi1:+.3f}) | {len(y)} | {sum(v for _, v in y) / max(len(y), 1):+.3f} | {d:+.3f} ({lo:+.3f}…{hi:+.3f}) |")
+        L.append("\nHN-B формально: R>0 з ІВ, що виключає 0. Різниця з контролем показана, бо на train «загальний структурний вхід» сам дав R>0 (дрейф періоду) — без контролю HN-B не відрізняє сетап від дрейфу.\n")
     L += PR.report(obs_all, cut, a.open_test)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
