@@ -100,7 +100,8 @@ def main() -> int:
                      "hr": hr, "sess": "Азія 00–08" if hr < 8 else "Лондон 08–13" if hr < 13 else "NY 13–21" if hr < 21 else "пізній 21–24",
                      "btc30": f(r.get("btc_30m")), "btc4h": f(r.get("btc_4h")), "c30": f(r.get("coin_30m")), "c4h": f(r.get("coin_4h")), "slatr": f(r.get("sl_atr15")),
                      "atrp": f(r.get("atr15_pct")), "sgn": sgn, "tradfi": p["symbol"].replace("USDT", "") in TRADFI, "tie": bool(r.get("tie")),
-                     "ctx_align": p.get("ctx_align"), "ctx_bias": p.get("ctx_bias"), "tags": p.get("confirm_tags"), "mfe": f(r.get("mfe")), "mae": f(r.get("mae")),
+                     "ctx_align": p.get("ctx_align"), "ctx_bias": p.get("ctx_bias"), "tags": p.get("confirm_tags"), "expgap": f(p.get("th_exp_gap_min")), "th_state": p.get("th_state"), "regime": p.get("regime"),
+                     "nzsrc": len([x for x in str(p.get("zone_src") or "").split(",") if x.strip()]), "th_nver": f(p.get("th_nver")), "mfe": f(r.get("mfe")), "mae": f(r.get("mae")),
                      "ttr": (f(r.get("result_at")) - ct) if r.get("result_at") else None, "tp2": p.get("tp2") is not None,
                      "t_sl": f((r.get("at") or {}).get("SL")), "t_tp1": f((r.get("at") or {}).get("TP1")), "t_entry": f((r.get("at") or {}).get("ENTRY")), "data_end": f(r.get("data_end")), "status": st})
     P("## Класи (строгий пересчет)\n")
@@ -160,6 +161,11 @@ def main() -> int:
     table("BTC за 30 хв до READY відносно напряму (за/проти)", lambda r: "н/д" if r["btc30"] is None else ("за напрямом" if r["btc30"] * r["sgn"] > 0.05 else "проти напряму" if r["btc30"] * r["sgn"] < -0.05 else "нейтрально ±0,05%"))
     table("BTC за 4 год до READY відносно напряму", lambda r: "н/д" if r["btc4h"] is None else ("за напрямом" if r["btc4h"] * r["sgn"] > 0.3 else "проти напряму" if r["btc4h"] * r["sgn"] < -0.3 else "нейтрально ±0,3%"))
 
+    def thesis_fresh(r: Dict[str, Any]) -> str:
+        if r["expgap"] is None:
+            return "н/д"
+        return "прострочена (READY після expires_at)" if r["expgap"] > 0 else "свіжа"
+
     def chase(r: Dict[str, Any]) -> str:
         if r["c30"] is None or not r["atrp"]:
             return "н/д"
@@ -176,6 +182,10 @@ def main() -> int:
         last[key] = r["ct"]
     table("Повтор: той самий символ і напрям вже були видані за останні 24 год", lambda r: "повтор" if rep.get(r["mid"]) else "перший")
     table("Є TP2", lambda r: "є" if r["tp2"] else "немає")
+    table("Теза на момент READY: свіжа / прострочена", thesis_fresh)
+    table("Стан тези", lambda r: str(r["th_state"] or "н/д"))
+    table("Режим (thesis)", lambda r: str(r["regime"] or "н/д"))
+    table("Скільки джерел зони (zone_src)", lambda r: "н/д" if r["nzsrc"] == 0 else "1" if r["nzsrc"] == 1 else "2" if r["nzsrc"] == 2 else "3+")
     # час до результату
     for k in ("TP1_first", "SL_first"):
         v = sorted(r["ttr"] for r in dec if (r["k"] == k or (k == "SL_first" and r["k"] == "SL_first_tie")) and r["ttr"])
@@ -242,6 +252,9 @@ def main() -> int:
                 hz_table("TP1 / стоп", lambda r: bq(r["rr1"]))
             hz_table("BTC за 4 год до READY відносно напряму", lambda r: "н/д" if r["btc4h"] is None else ("за напрямом" if r["btc4h"] * r["sgn"] > 0.3 else "проти напряму" if r["btc4h"] * r["sgn"] < -0.3 else "нейтрально ±0,3%"))
             hz_table("Сесія UTC", lambda r: r["sess"])
+            hz_table("Теза: свіжа / прострочена", thesis_fresh)
+            hz_table("Режим (thesis)", lambda r: str(r["regime"] or "н/д"))
+            hz_table("Скільки джерел зони", lambda r: "н/д" if r["nzsrc"] == 0 else "1" if r["nzsrc"] == 1 else "2" if r["nzsrc"] == 2 else "3+")
             hz_table("Тип інструмента", lambda r: "акції/ETF/сировина" if r["tradfi"] else "крипто")
 
     # gate-ознаки лише там, де вони збережені
