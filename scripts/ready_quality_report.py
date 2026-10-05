@@ -377,6 +377,30 @@ def main() -> int:
         rw = sum(abs(float(r["entry_f"]) - float(r["sl_f"])) / (abs(float(r["entry_f"]) - float(r["sl_f"])) + abs(float(r["tp1_f"]) - float(r["entry_f"]))) for r, _ in both) / len(both) if all("entry_f" in r for r, _ in both) else None
         P(f"\nСтрогий 1m: TP1 {k1}, SL {s1} → {k1 / max(1, k1 + s1) * 100:.1f}% TP1-first. Офіційний 15m (ті самі плани): TP {k2}, SL {s2} → {k2 / max(1, k2 + s2) * 100:.1f}% TP-first."
           + (f" Геометрична база: {rw * 100:.1f}%." if rw is not None else ""))
+        # ЦЕНЗУРУВАННЯ офіційних результатів: SIGNAL_RESULT пишеться лише коли план завершено (після TP1 сценарій живе до TP2/TP3/SL/строку) —
+        # плани без запису = ще «в роботі», серед них переважно ті, що вже взяли TP1. Що кажуть про них 1m?
+        nores = [(r, hz_class(r, H24)) for r in rows if not r["sim"]]
+        nores = [(r, c) for r, c in nores if c]
+        if nores:
+            cc = Counter(c for _r, c in nores)
+            P(f"\nПлани БЕЗ офіційного результату (SIGNAL_RESULT ще не записано): {len(nores)}; за 1m на 24 год: TP1 першим {cc['TP1 першим']}, SL першим {cc['SL першим']}, нічого {cc['нічого за горизонт']}. "
+              f"Тобто серед «нерозв'язаних» офіційною системою частка TP1-first {cc['TP1 першим'] / max(1, cc['TP1 першим'] + cc['SL першим']) * 100:.0f}% — офіційний підрахунок цензурований проти виграшів.")
+        # 1m «нічого за 24 год», а офіційний SL: коли 1m бачить SL (пізніше 24 год чи ніколи)?
+        later = never = 0
+        gaps = []
+        for r, c in both:
+            if c == "нічого за горизонт" and off(r) == "SL":
+                if r["t_sl"] is not None:
+                    later += 1
+                    if r["sim_t"] is not None:
+                        gaps.append((r["t_sl"] - r["sim_t"]) / 3600.0)
+                else:
+                    never += 1
+        P(f"\n1m «нічого за 24 год», але офіційний SL: 1m бачить SL пізніше 24 год у {later}, не бачить зовсім у {never}."
+          + (f" Різниця (SL за 1m − час за офіційним), год: p25 {sorted(gaps)[len(gaps) // 4]:.1f}, p50 {sorted(gaps)[len(gaps) // 2]:.1f}, p75 {sorted(gaps)[3 * len(gaps) // 4]:.1f}." if gaps else ""))
+        agree_gap = sorted((r["sim_t"] - r["t_sl"]) / 60.0 for r, c in both if c == "SL першим" and off(r) == "SL" and r["t_sl"] is not None and r["sim_t"] is not None)
+        if agree_gap:
+            P(f"Де обидва кажуть SL: час офіційного − час 1m, хв: p10 {agree_gap[len(agree_gap) // 10]:.0f}, p50 {agree_gap[len(agree_gap) // 2]:.0f}, p90 {agree_gap[9 * len(agree_gap) // 10]:.0f}.")
         # де розходяться: 1m каже TP1 першим, офіційний — SL: той самий 15m-бар?
         same_bar = other = 0
         for r, c in both:
