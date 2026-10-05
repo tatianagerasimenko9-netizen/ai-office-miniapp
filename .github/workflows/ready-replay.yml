@@ -9,6 +9,8 @@ on:
       - '.github/workflows/ready-replay.yml'
       - 'scripts/ready_replay_strict.py'
       - 'scripts/ready_quality_report.py'
+      - 'scripts/ready_stop_research.py'
+      - 'scripts/test_ready_stop_research.py'
       - 'data/research/**'
 
 permissions:
@@ -29,11 +31,15 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
       - name: Self-test (synthetic candles, no network)
-        run: python scripts/test_ready_replay_strict.py
+        run: |
+          python scripts/test_ready_replay_strict.py
+          python scripts/test_ready_stop_research.py
       - name: Strict replay on 1m archive (public data.binance.vision, read-only)
         run: python scripts/ready_replay_strict.py --plans data/research/ready_plans_2026-10-01_04.json --out /tmp/ready_strict.json --cache /tmp/ready_cache
       - name: Quality report
         run: python scripts/ready_quality_report.py --plans data/research/ready_plans_2026-10-01_04.json --results /tmp/ready_strict.json --md /tmp/ready_quality.md | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Stop Engine research (after-SL, geometry vs random walk, alternative stops at constant $ risk)
+        run: python scripts/ready_stop_research.py --plans data/research/ready_plans_2026-10-01_04.json --cache /tmp/ready_cache --md /tmp/ready_stop_research.md | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -41,5 +47,6 @@ jobs:
           path: |
             /tmp/ready_strict.json
             /tmp/ready_quality.md
+            /tmp/ready_stop_research.md
           if-no-files-found: ignore
           retention-days: 30
