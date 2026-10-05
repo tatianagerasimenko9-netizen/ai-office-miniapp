@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install numpy pandas
-      - name: Self-test (синтетика, без мережі: lookahead, first-touch, калібрування, Risk Manager)
+      - name: 'Self-test (синтетика, без мережі; lookahead, first-touch, калібрування, Risk Manager)'
         run: python scripts/test_office2.py
       - uses: actions/cache@v4
         with:
