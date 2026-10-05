@@ -40,5 +40,22 @@ md._HEALTH.pop("rest_by", None)
 md._HEALTH["weight_est"] = 0
 md._count_rest("https://fapi.binance.com/fapi/v1/ticker/24hr", {})
 check(md._HEALTH["weight_est"] == 40, f"_count_rest: повний 24hr = 40: {md._HEALTH['weight_est']}")
+
+# пікові хвилини: оцінка за хвилину + caller + макс. заголовок
+md._WMIN.clear()
+import time as _t
+
+
+def _caller_a():
+    md._count_rest("https://fapi.binance.com/fapi/v1/klines", {"symbol": "X", "interval": "15m", "limit": 300})
+    md._count_rest("https://fapi.binance.com/fapi/v1/klines", {"symbol": "Y", "interval": "15m", "limit": 300})
+
+
+_caller_a()
+md._note_weight(H({"X-MBX-USED-WEIGHT-1M": "1500"}))
+pk = md.peak_minutes()
+check(len(pk) == 1 and pk[0]["est"] == 4 and pk[0]["hdr"] == 1500, f"пікова хвилина: оцінка 2×2=4, заголовок 1500: {pk}")
+check(pk[0]["top"][0][0].endswith(":_caller_a") and pk[0]["top"][0][1] == 4, f"caller пікової хвилини = test:_caller_a: {pk}")
+check("peak_minutes" in md.source_health(), "peak_minutes іде в [data] binance")
 print("OK" if not FAIL else f"{len(FAIL)} FAIL")
 sys.exit(1 if FAIL else 0)

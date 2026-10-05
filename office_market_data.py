@@ -60,7 +60,7 @@ _CACHE_LOCK = threading.Lock()
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
     return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
-            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report(), "direct_fapi": dict(_DIRECT)}
+            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report(), "direct_fapi": dict(_DIRECT), "peak_minutes": peak_minutes()}
 
 
 def backoff_left() -> float:
@@ -130,6 +130,11 @@ def _note_weight(headers: Any) -> None:
     if used is None:
         return
     _WEIGHT_LAST.update(used=used, at=time.time())
+    try:
+        slot = _wmin_slot(time.time())
+        slot["hdr"] = max(slot["hdr"], used)
+    except Exception:  # noqa: BLE001
+        pass
     if used >= _WEIGHT_SOFT:
         pause = 60.0 - (time.time() % 60.0)
         if used >= _WEIGHT_HARD:
@@ -195,6 +200,30 @@ def _endpoint_weight(key: str, params: Optional[Dict[str, Any]]) -> int:
     return 1
 
 
+_WMIN: Dict[int, Dict[str, Any]] = {}   # хвилина -> {"est": оцінка ваги, "hdr": макс. вага IP з заголовка, "by": {caller: вага}}
+_WMIN_KEEP = 90
+
+
+def _wmin_slot(now: float) -> Dict[str, Any]:
+    k = int(now // 60)
+    d = _WMIN.get(k)
+    if d is None:
+        d = _WMIN[k] = {"est": 0, "hdr": 0, "by": {}}
+        for old in [x for x in _WMIN if x < k - _WMIN_KEEP]:
+            _WMIN.pop(old, None)
+    return d
+
+
+def peak_minutes(top: int = 5) -> List[Dict[str, Any]]:
+    """Найважчі хвилини за останні ~90 хв: оцінка нашої ваги, максимум ваги IP з заголовка Binance і основні caller-и. Лише облік."""
+    rows = sorted(_WMIN.items(), key=lambda kv: -max(kv[1]["est"], kv[1]["hdr"]))[:top]
+    out = []
+    for k, v in rows:
+        by = sorted(v["by"].items(), key=lambda kv: -kv[1])[:3]
+        out.append({"utc": datetime.fromtimestamp(k * 60, tz=timezone.utc).strftime("%H:%M"), "est": v["est"], "hdr": v["hdr"], "top": by})
+    return out
+
+
 _DIRECT: Dict[str, Dict[str, Any]] = {}
 
 
@@ -227,6 +256,10 @@ def _count_rest(url: str, params: Dict[str, Any]) -> None:
         rb = _HEALTH.setdefault("rest_by", {})
         rb[key] = rb.get(key, 0) + 1
         _HEALTH["weight_est"] = _HEALTH.get("weight_est", 0) + w
+        slot = _wmin_slot(time.time())
+        slot["est"] += w
+        lab = _caller_label()
+        slot["by"][lab] = slot["by"].get(lab, 0) + w
     except Exception:  # noqa: BLE001
         pass
 
