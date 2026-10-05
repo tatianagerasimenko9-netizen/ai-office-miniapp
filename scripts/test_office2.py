@@ -403,6 +403,12 @@ def test_flowdata():
     for k, v in a.items():
         assert (v != v and a2[k] != a2[k]) or abs(v - a2[k]) < 1e-9, (k, v, a2[k])
     assert all(v == v for v in a.values()), a
+    # збій даних: знімок OI=0 не руйнує z-оцінки на місяці вперед (раніше std ≈1e16 → решта ознак NaN)
+    bad = mm.copy()
+    bad[8000, 1] = 0.0
+    fl_b = FD.prep(bad, fund)
+    late = FD.features(fl_b, bad[0, 0] + 30 * 86400.0 + 3600, 1.0, 1.0)
+    assert late["oi_chg_1h_z"] == late["oi_chg_1h_z"] and abs(late["oi_chg_1h_z"]) < 6.01 and late["oi_chg_4h_z"] == late["oi_chg_4h_z"]
     flat = FD.prep(mm, np.column_stack([mm[0, 0] - 86400 + 8 * 3600.0 * np.arange(200), np.full(200, 0.0001)]))
     assert FD.features(flat, t_dec, 1.0, 1.0)["funding_z"] == 0.0      # константний funding → z=0, рядок не губиться
 

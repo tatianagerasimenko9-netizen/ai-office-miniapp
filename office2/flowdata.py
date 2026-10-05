@@ -118,11 +118,14 @@ def prep(m: np.ndarray, fund: np.ndarray) -> Dict[str, np.ndarray]:
     order = np.argsort(m[:, 0], kind="stable")
     m = m[order]
     t = m[:, 0]
-    d: Dict[str, np.ndarray] = {"t": t, "oi": m[:, 1], "top_acct": m[:, 3], "top_pos": m[:, 4], "glob": m[:, 5], "taker": m[:, 6]}
+    oi = np.where(m[:, 1] > 0, m[:, 1], np.nan)      # OI ≤ 0 — збій архіву (знімок без даних), не значення
+    d: Dict[str, np.ndarray] = {"t": t, "oi": oi, "top_acct": m[:, 3], "top_pos": m[:, 4], "glob": m[:, 5], "taker": m[:, 6]}
     for hh in (1, 4):
         j = np.searchsorted(t, t - hh * 3600.0, side="left")
         ok = (np.abs(t[np.clip(j, 0, len(t) - 1)] - (t - hh * 3600.0)) <= 600.0) & (j < np.arange(len(t)))
-        chg = np.where(ok, m[:, 1] / np.maximum(m[np.clip(j, 0, len(t) - 1), 1], 1e-12) - 1.0, np.nan)
+        chg = np.where(ok, oi / oi[np.clip(j, 0, len(t) - 1)] - 1.0, np.nan)
+        # зміна OI понад ±50% за 1–4 год на перпетуалі — збій даних (виявлено: знімок ≈0 у 2024-07 давав std ≈1e16 і «вбивав» кумулятивні суми)
+        chg = np.where(np.abs(chg) <= 0.5, chg, np.nan)
         d[f"oi_chg_{hh}"] = chg
         d[f"oi_std_{hh}"] = _rolling_std(chg, 2016)
         d[f"back_{hh}"] = j
@@ -166,7 +169,9 @@ def features(fl: Dict[str, np.ndarray], t_dec: float, sg: float, r4_rel: float) 
             out[f"oi_chg_{hh}h_z"] = float(np.clip(c / s, -6, 6))
     j24 = int(np.searchsorted(t, t[i] - 86400.0, side="left"))
     if abs(t[j24] - (t[i] - 86400.0)) <= 900.0 and j24 < i:
-        out["oi_chg_24h"] = float(fl["oi"][i] / max(fl["oi"][j24], 1e-12) - 1.0)
+        c24 = fl["oi"][i] / fl["oi"][j24] - 1.0
+        if c24 == c24 and abs(c24) <= 1.0:
+            out["oi_chg_24h"] = float(c24)
     z4 = out["oi_chg_4h_z"]
     if z4 == z4:
         out["oi_with_trend"] = float(np.sign(r4_rel) * z4)
