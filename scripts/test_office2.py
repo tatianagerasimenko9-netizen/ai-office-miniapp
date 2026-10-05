@@ -159,6 +159,35 @@ def test_diff_ci():
     assert E.diff_ci([], rows_b)[0] != E.diff_ci([], rows_b)[0]   # NaN без даних
 
 
+def test_probe_basics_and_no_lookahead():
+    from office2 import probe as PR
+    assert abs(PR.auc(np.array([1.0, 2, 3, 4]), np.array([0.0, 0, 1, 1])) - 1.0) < 1e-12
+    assert abs(PR.auc(np.array([4.0, 3, 2, 1]), np.array([0.0, 0, 1, 1])) - 0.0) < 1e-12
+    assert abs(PR.auc(np.array([1.0, 1, 1, 1]), np.array([0.0, 1, 0, 1])) - 0.5) < 1e-12      # зв'язки → 0,5
+    # ridge відновлює лінійну залежність; без залежності AUC ≈ 0,5
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(2000, 4))
+    y = (X[:, 0] + 0.3 * rng.normal(size=2000) > 0).astype(float)
+    m = PR.ridge_fit(X, y)
+    assert PR.auc(PR.ridge_score(X, m), y) > 0.9
+    y0 = rng.integers(0, 2, 2000).astype(float)
+    assert abs(PR.auc(PR.ridge_score(X, PR.ridge_fit(X, y0)), y0) - 0.5) < 0.06
+    # спостереження: features не залежать від майбутнього (усічення), TRAP лише мітка, контроль присутній
+    full, btc = synth(45, seed=11), synth(45, seed=12)
+    of = PR.build_observations("XUSDT", P.build_context(full), P.build_context(btc))
+    assert of and any(o["behavior"] == "CTRL" for o in of) and any(o["behavior"] != "CTRL" for o in of)
+    assert all(o["behavior"] in ("A", "B1", "ACCEPT", "CTRL") for o in of)      # TRAP не потрапляє в decision-time поведінку
+    T = full["t"][0] + 30 * 86400
+    cut = lambda a: {k: v[: int((T - a["t"][0]) // 60)] for k, v in a.items()}
+    oc = PR.build_observations("XUSDT", P.build_context(cut(full)), P.build_context(cut(btc)))
+    kf = {(round(o["t"]), o["behavior"], tuple(round(o["f"][k], 8) for k in PR.FEATURES)) for o in of if o["t"] <= T - 3600}
+    kc = {(round(o["t"]), o["behavior"], tuple(round(o["f"][k], 8) for k in PR.FEATURES)) for o in oc if o["t"] <= T - 3600}
+    assert kc and kc <= kf, (len(kc), len(kf), sorted(kc - kf)[:2])
+    # labels: стоп раніше цілі, обидва напрямки, MFE/MAE ≥ 0
+    for o in of[:50]:
+        assert o["cont_tp"] + o["cont_sl"] <= 1 and o["rev_tp"] + o["rev_sl"] <= 1 and o["cont_mfe"] >= 0 and o["cont_mae"] >= 0
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"

@@ -40,3 +40,16 @@ def first_touch(m1: F.Arr, i0: int, direction: str, entry: float, sl: float, tp:
 def net_r(r_gross: float, risk_pct: float, fee_rt_pct: float = FEE_RT_DEFAULT) -> float:
     """R після комісій: при фіксованому $-ризику витрати кола = fee_rt / risk_pct (у R)."""
     return r_gross - fee_rt_pct / max(risk_pct, 1e-9)
+
+
+def excursions(m1: F.Arr, i0: int, direction: str, entry: float, atr: float, horizon_sec: int = 24 * 3600) -> Dict[str, float]:
+    """MFE/MAE за горизонт у ATR (не обрізані моментом TP/SL) і час до них (хв). Лише label."""
+    t = m1["t"]
+    i1 = int(np.searchsorted(t, t[i0] + horizon_sec, side="right"))
+    h, l = m1["h"][i0:i1], m1["l"][i0:i1]
+    if direction == "LONG":
+        fav, adv = (h - entry) / atr, (entry - l) / atr
+    else:
+        fav, adv = (entry - l) / atr, (h - entry) / atr
+    kf, ka = int(np.argmax(fav)), int(np.argmax(adv))
+    return {"mfe_atr": float(fav[kf]), "mae_atr": float(adv[ka]), "t_mfe_min": float(kf), "t_mae_min": float(ka), "complete": bool(i1 - i0 >= horizon_sec / 60 * 0.98)}

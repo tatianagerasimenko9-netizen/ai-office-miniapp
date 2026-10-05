@@ -20,6 +20,7 @@ from office2 import evaluate as E  # noqa: E402
 from office2 import pipeline as P  # noqa: E402
 from office2 import risk as R  # noqa: E402
 from office2 import scenarios as SC  # noqa: E402
+from office2 import probe as PR  # noqa: E402
 
 DEFAULT_SYMBOLS = ("BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT DOTUSDT LTCUSDT BCHUSDT TRXUSDT ATOMUSDT NEARUSDT APTUSDT ARBUSDT OPUSDT SUIUSDT INJUSDT "
                    "AAVEUSDT UNIUSDT ETCUSDT FILUSDT HBARUSDT ICPUSDT TIAUSDT SEIUSDT 1000PEPEUSDT 1000SHIBUSDT FETUSDT RUNEUSDT ALGOUSDT MKRUSDT LDOUSDT WLDUSDT ONDOUSDT JUPUSDT ENAUSDT TAOUSDT").split()
@@ -62,6 +63,7 @@ def main() -> int:
     sc_rows: List[dict] = []
     behav: List[dict] = []
     sc_stats: Dict[str, int] = {}
+    obs_all: List[dict] = []
     for i, sym in enumerate(syms):
         m1, missing = (btc_m1, miss) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
         if m1 is None or len(m1["t"]) < 3 * 1440:
@@ -70,6 +72,7 @@ def main() -> int:
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         c = P.candidates(sym, ctx, btc_ctx, p, stats)
         rows.extend(E.evaluate(c, {sym: ctx}, p))
+        obs_all.extend(PR.build_observations(sym, ctx, btc_ctx, p))
         scr = SC.scenario_candidates(sym, ctx, btc_ctx, p, sc_stats)
         sc_rows.extend(E.evaluate(scr["cands"], {sym: ctx}, p))
         behav.extend(scr["behav"])
@@ -241,6 +244,7 @@ def main() -> int:
             if g:
                 lo, hi = boot_mean(g)
                 L.append(f"| {lab} | {len(g)} | {sum(v for _, v in g) / len(g):+.2f} ({lo:+.2f}…{hi:+.2f}) | {sum(1 for _, v in g if v > 0) / len(g) * 100:.0f}% |")
+    L += PR.report(obs_all, cut, a.open_test)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
     for name, sel in (("БАЗА", [r for r in rows if r["trigger"] == "reclaim"]),

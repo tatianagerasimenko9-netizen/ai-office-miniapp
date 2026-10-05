@@ -9,3 +9,4 @@
 | 05.10 09:18 | 37289079885 | explore, test відкрито ОДИН раз для H1–H3 | вердикти в HYPOTHESES.md | H1/H1b/H2 не підтверджено; H3 частково (R≈0) |
 | 05.10 09:5x | (наступний) | explore, сценарний шар TRAIN-only | `office2/scenarios.py`: поведінка після проколу (A/B1/ACCEPT/TRAP), CONT/RETEST кандидати, таблиці з середнім R після комісій; test сценаріїв НЕ відкривається (`--open-test` лише після фіксації гіпотез) | пошук ознак розрізнення reversal/continuation — лише на train |
 | 05.10 09:24 | 37289851227 | explore, test відкрито ОДИН раз для HS1–HS3 | вердикти в HYPOTHESES.md (раунд 2) | HS1a/b/c, HS2 не підтверджено; HS3 частково |
+| 05.10 09:4x | (автозапуск) | explore, раунд 3 probe TRAIN-only | `office2/probe.py` (спостереження: проколи + КОНТРОЛЬ біля рівнів; labels: TP-before-SL G1, net R, MFE/MAE, інвалідація; TRAIN: ознаки × наслідки; test probe закритий) | преддекларація 6cd739c до запуску |
