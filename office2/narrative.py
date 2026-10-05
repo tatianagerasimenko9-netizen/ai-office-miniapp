@@ -218,3 +218,114 @@ def generic_controls(symbol: str, ctx: Dict[str, Any], n: int, p: NParams = NPar
                     "etype": "CTRL", "lvl_kind": "-", "lvl_strength": 0, "lvl_p": entry, "reg4": 0, "regd": 0, "btc4": None, "flow_ok": True, "atr_pct": a / entry * 100.0, "htf_ok": True,
                     "btc_ok": True, "tp_known": t_dec, "lvl_known": t_dec, "depth_atr": 0.0, "tp_kind": "-", "feat": {}})
     return out
+
+
+HORIZONS_H = (1, 4, 12, 24, 48)
+
+
+def _outcome_record(m1: F.Arr, i0: int, direction: str, entry: float, sl: float, ph: Optional[float], line: Optional[float], atr: float) -> Optional[dict]:
+    """Діагностичні outcome-мітки (лише майбутнє, лише label): MFE/MAE в ATR і R на 1/4/12/24/48 год, рух до структурної інвалідації,
+    повернення під рівень пробою, досягнення хая імпульсу. Не залежить від RR до хая і не обрізається TP/SL."""
+    sg = 1.0 if direction == "LONG" else -1.0
+    risk = sg * (entry - sl)
+    if risk <= 0 or atr <= 0:
+        return None
+    t = m1["t"]
+    i1 = int(np.searchsorted(t, t[i0] + 48 * 3600, side="right"))
+    if i1 - i0 < 60:
+        return None
+    h, l = m1["h"][i0:i1], m1["l"][i0:i1]
+    fav = (h - entry) if sg > 0 else (entry - l)       # хвилинні сприятливі/несприятливі відхилення
+    adv = (entry - l) if sg > 0 else (h - entry)
+    cf, ca = np.maximum.accumulate(fav), np.maximum.accumulate(adv)
+    rec: Dict[str, Any] = {"risk": float(risk), "rr_to_high": (None if ph is None else float(sg * (ph - entry) / risk))}
+    for hh in HORIZONS_H:
+        k = min(hh * 60, len(h)) - 1
+        rec[f"mfe_atr_{hh}"], rec[f"mae_atr_{hh}"] = float(cf[k] / atr), float(ca[k] / atr)
+        rec[f"mfe_r_{hh}"], rec[f"mae_r_{hh}"] = float(cf[k] / risk), float(ca[k] / risk)
+    hit_sl = adv >= risk
+    k_inv = int(np.argmax(hit_sl)) if hit_sl.any() else -1
+    rec["inval_min"] = k_inv if k_inv >= 0 else None
+    # хвилина інвалідації не зараховується як сприятлива (стоп-first, як у first_touch)
+    rec["mfe_to_inval_r"] = float(cf[-1] / risk) if k_inv < 0 else (0.0 if k_inv == 0 else float(cf[k_inv - 1] / risk))
+    rec["t_mfe_min"], rec["t_mae_min"] = int(np.argmax(fav)), int(np.argmax(adv))
+    if line is not None:
+        under = (l <= line) if sg > 0 else (h >= line)
+        rec["back_below_min"] = int(np.argmax(under)) if under.any() else None
+    else:
+        rec["back_below_min"] = None
+    if ph is not None:
+        up = (h >= ph) if sg > 0 else (l <= ph)
+        k_ph = int(np.argmax(up)) if up.any() else -1
+        rec["high_min"] = k_ph if k_ph >= 0 else None
+        rec["high_before_inval"] = bool(k_ph >= 0 and (k_inv < 0 or k_ph < k_inv))
+    else:
+        rec["high_min"], rec["high_before_inval"] = None, False
+    return rec
+
+
+def event_outcomes(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]], p: NParams = NParams(), stats: Optional[Dict[str, int]] = None) -> List[dict]:
+    """ПО ВСІХ дедуплікованих подіях пробою (без фільтра RR/ризику): питання A — чи має послідовність прогнозну цінність саме по собі.
+    Вхід = відкриття 1m після закриття пробійного бару H1; структурний SL = мінімум корекції − sl_buf·ATR_H1."""
+    st = stats if stats is not None else {}
+    m1 = ctx["m1"]
+    h1 = ctx.get("h1")
+    if h1 is None:
+        h1 = ctx["h1"] = F.resample(m1, 3600)
+        ctx["atr1h"] = F.atr(h1, 14)
+    atr1h = ctx["atr1h"]
+    out: List[dict] = []
+    tmp: Dict[str, int] = {}
+    for direction, bars in (("LONG", h1), ("SHORT", _mirror(h1))):
+        sg = 1.0 if direction == "LONG" else -1.0
+        for ev in find_setups_long(bars, atr1h, p, tmp):
+            t_dec = float(h1["t"][ev["b"]] + 3600)
+            ie = _entry_index(m1, t_dec)
+            if ie is None:
+                st["ev_no_entry"] = st.get("ev_no_entry", 0) + 1
+                continue
+            entry = float(m1["o"][ie])
+            sl = sg * (ev["minlow"] - p.sl_buf * ev["atr_b"])
+            rec = _outcome_record(m1, ie, direction, entry, sl, sg * ev["ph"], sg * ev["line_b"], float(ev["atr_b"]))
+            if rec is None:
+                st["ev_no_outcome"] = st.get("ev_no_outcome", 0) + 1
+                continue
+            rec.update({"symbol": symbol, "dir": direction, "t_entry": t_dec, "day": int(t_dec // 86400), "kind": "event", "risk_pct": rec["risk"] / abs(entry) * 100.0,
+                        "feat": {k: ev[k] for k in ("imp_atr", "retr", "corr_bars", "compress", "touches", "brk_body", "brk_volr", "brk_delta", "room_imp")}})
+            rec["rr15"] = bool(rec["rr_to_high"] is not None and rec["rr_to_high"] >= p.min_rr)
+            out.append(rec)
+            st["ev_n"] = st.get("ev_n", 0) + 1
+    return out
+
+
+def event_controls(symbol: str, ctx: Dict[str, Any], n: int, p: NParams = NParams(), seed: int = 11) -> List[dict]:
+    """Контроль для event_outcomes: випадкові години, випадковий напрям, той самий структурний SL (мін./макс. 12 барів ∓ 0,5 ATR_H1), без вимог до RR."""
+    m1 = ctx["m1"]
+    h1 = ctx.get("h1")
+    if h1 is None:
+        h1 = ctx["h1"] = F.resample(m1, 3600)
+        ctx["atr1h"] = F.atr(h1, 14)
+    atr1h = ctx["atr1h"]
+    rnd = random.Random(seed)
+    nb = len(h1["t"])
+    out: List[dict] = []
+    tries = 0
+    while len(out) < n and tries < n * 30 and nb > 120:
+        tries += 1
+        j = rnd.randrange(60, nb - 60)
+        a = atr1h[j]
+        if np.isnan(a) or a <= 0:
+            continue
+        direction = rnd.choice(["LONG", "SHORT"])
+        t_dec = float(h1["t"][j] + 3600)
+        ie = _entry_index(m1, t_dec)
+        if ie is None:
+            continue
+        entry = float(m1["o"][ie])
+        sl = float(h1["l"][j - 11:j + 1].min()) - p.sl_buf * a if direction == "LONG" else float(h1["h"][j - 11:j + 1].max()) + p.sl_buf * a
+        rec = _outcome_record(m1, ie, direction, entry, sl, None, None, float(a))
+        if rec is None:
+            continue
+        rec.update({"symbol": symbol, "dir": direction, "t_entry": t_dec, "day": int(t_dec // 86400), "kind": "control", "risk_pct": rec["risk"] / entry * 100.0, "feat": {}, "rr15": False})
+        out.append(rec)
+    return out

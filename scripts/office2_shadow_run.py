@@ -68,6 +68,8 @@ def main() -> int:
     nrows: List[dict] = []
     nctrl: List[dict] = []
     nstats: Dict[str, int] = {}
+    nev: List[dict] = []
+    nevc: List[dict] = []
     p48 = P.Params(horizon_sec=48 * 3600)
     for i, sym in enumerate(syms):
         m1, missing = (btc_m1, miss) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
@@ -80,6 +82,8 @@ def main() -> int:
         obs_all.extend(PR.build_observations(sym, ctx, btc_ctx, p))
         nrows.extend(E.evaluate(NR.candidates(sym, ctx, btc_ctx, NR.NParams(), nstats), {sym: ctx}, p48))
         nctrl.extend(E.evaluate(NR.generic_controls(sym, ctx, 25), {sym: ctx}, p48))
+        nev.extend(NR.event_outcomes(sym, ctx, btc_ctx, NR.NParams(), nstats))
+        nevc.extend(NR.event_controls(sym, ctx, 40))
         scr = SC.scenario_candidates(sym, ctx, btc_ctx, p, sc_stats)
         sc_rows.extend(E.evaluate(scr["cands"], {sym: ctx}, p))
         behav.extend(scr["behav"])
@@ -279,6 +283,34 @@ def main() -> int:
             y = _np.array([1.0 if r["outcome"] == "TP" else 0.0 for r in trb])
             L.append(f"| {k} | {PR.auc(x, y):.3f} | {PR._fmt(PR.spearman(x, _np.array([r['mfe_full_r'] for r in trb])), 2)} | {PR._fmt(PR.spearman(x, _np.array([r['mae_full_r'] for r in trb])), 2)} | {PR._fmt(PR.spearman(x, _np.array([r['r_net'] for r in trb])), 2)} |")
         L.append(f"\nN={len(trb)} (TP/SL); ознак ≈20 — випадково «значущі» значення очікувані; рішення лише за замороженою гіпотезою на test.\n")
+    # ===== ПИТАННЯ A (послідовність має цінність?) vs B (чи добра конструкція SL/TP/RR?): усі події пробою, без фільтра RR =====
+    L.append("\n### A/B: усі дедупліковані події пробою — рух після входу НЕЗАЛЕЖНО від RR до старого хая (діагностика outcome; параметри детектора не змінювались)\n")
+    L.append("A: чи має сама послідовність IMPULSE→COMPRESSION→BREAKOUT прогнозну цінність (порівняння з контролем: випадкові години, той самий тип структурного SL). B: чи хороша поточна конструкція SL/TP/RR (група RR≥1,5 проти RR<1,5). "
+             "Вхід = відкриття 1m після закриття пробійного H1; R = відстань до структурного SL (мін. корекції −0,5 ATR_H1); MFE/MAE не обрізані TP/SL; медіани.\n")
+    cute = E.cut_day(nev + nevc)
+    def _sel(rs):
+        return [r for r in rs if r["day"] < cute] if (tr_only and cute is not None) else rs
+    import numpy as _np2
+    def _row(name, rs):
+        n = len(rs)
+        if n == 0:
+            return f"| {name} | 0 | — |"
+        md = lambda k: float(_np2.median([r[k] for r in rs]))
+        cl = len({(r["symbol"], r["day"]) for r in rs})
+        mfe = " / ".join(f"{md(f'mfe_r_{h}'):.2f}·{md(f'mae_r_{h}'):.2f}" for h in NR.HORIZONS_H)
+        sh = lambda f: f"{sum(1 for r in rs if f(r)) / n * 100:.0f}%"
+        return (f"| {name} | {n} ({cl}) | {mfe} | {sh(lambda r: r['mfe_r_48'] >= 1)} / {sh(lambda r: r['mfe_r_48'] >= 2)} | {md('mfe_to_inval_r'):.2f} | "
+                f"{sh(lambda r: r['inval_min'] is not None)} | {sh(lambda r: r['back_below_min'] is not None and r['back_below_min'] <= 240)} | "
+                f"{sh(lambda r: r['high_min'] is not None)} / {sh(lambda r: r['high_before_inval'])} | {md('t_mfe_min'):.0f} / {md('t_mae_min'):.0f} |")
+    L.append("| Група | N (кластерів) | MFE·MAE у R, медіана: 1 год / 4 / 12 / 24 / 48 | MFE48 ≥1R / ≥2R | медіана макс. руху до інвалідації, R | інвалідація ≤48 год | повернення під рівень пробою ≤4 год | досяг хая імпульсу / до інвалідації | час до MFE / MAE, хв (мед.) |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
+    ev_t = _sel(nev)
+    for name, rs in (("УСІ події пробою", ev_t), ("  RR до хая < 1,5 (відсіялись би)", [r for r in ev_t if not r["rr15"]]), ("  RR до хая ≥ 1,5 (стали б угодами)", [r for r in ev_t if r["rr15"]]),
+                     ("  усі LONG", [r for r in ev_t if r["dir"] == "LONG"]), ("  усі SHORT", [r for r in ev_t if r["dir"] == "SHORT"]),
+                     ("КОНТРОЛЬ: випадкові години, випадковий напрям", _sel(nevc))):
+        L.append(_row(name, rs))
+    L.append(f"\nВоронка діагностики: подій {nstats.get('ev_n', 0)}; без 1m-входу {nstats.get('ev_no_entry', 0)}; без outcome (ризик ≤0 або <1 год даних) {nstats.get('ev_no_outcome', 0)}. Ризик% подій (медіана): "
+             f"{(_np2.median([r['risk_pct'] for r in ev_t]) if ev_t else float('nan')):.2f}%; контроль: {(_np2.median([r['risk_pct'] for r in _sel(nevc)]) if _sel(nevc) else float('nan')):.2f}%.\n")
     L += PR.report(obs_all, cut, a.open_test)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")

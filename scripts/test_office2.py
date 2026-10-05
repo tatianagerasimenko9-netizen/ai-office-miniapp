@@ -246,6 +246,22 @@ def test_narrative_detector():
     assert np.allclose(N._mirror(mb)["h"], bars["h"])
 
 
+def test_outcome_record():
+    from office2 import narrative as N
+    n = 3000
+    t = np.arange(n, dtype=float) * 60
+    c = np.full(n, 100.0)
+    c[10:] = np.minimum(100 + (np.arange(n - 10)) * 0.1, 106)     # росте до 106, тримається
+    c[1500:] = 97.0                                              # потім падає під SL (98)
+    m1 = {"t": t, "o": c.copy(), "h": c + 0.05, "l": c - 0.05, "c": c, "v": np.ones(n), "tbv": np.ones(n) * .5}
+    r = N._outcome_record(m1, 0, "LONG", 100.0, 98.0, 105.0, 99.0, 1.0)
+    assert abs(r["mfe_r_48"] - 3.025) < 1e-6 and r["inval_min"] == 1500 and r["high_min"] is not None and r["high_before_inval"]
+    assert r["back_below_min"] == 1500 and abs(r["mfe_to_inval_r"] - 3.025) < 1e-6 and r["mfe_r_1"] < r["mfe_r_4"] <= r["mfe_r_48"]
+    s2 = N._outcome_record(m1, 0, "SHORT", 100.0, 102.0, 95.0, 101.0, 1.0)      # дзеркально: ціна росте проти шорта → інвалідація, ХАЮ не досягнуто
+    assert s2["inval_min"] is not None and s2["inval_min"] < 100 and not s2["high_before_inval"] and s2["mfe_to_inval_r"] < 0.5
+    assert N._outcome_record(m1, 0, "LONG", 100.0, 100.0, None, None, 1.0) is None
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"
