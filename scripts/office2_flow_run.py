@@ -199,6 +199,10 @@ def main() -> int:
             dts = np.diff(tt)
             hl = lambda k: float(np.mean(~np.isnan(fl[k])) * 100)
             health.append(f"{sym}: знімків {len(tt)}, крок медіана {np.median(dts):.0f} с / p99 {np.percentile(dts, 99):.0f} с / макс {dts.max():.0f} с; oi_chg_1h валідних {hl('oi_chg_1'):.0f}%, oi_std_1h валідних {hl('oi_std_1'):.0f}%, oi_chg_4h {hl('oi_chg_4'):.0f}%; "
+                          f"[по місяцях: частка нульових oi_chg_1h / std oi_chg_1h / std_1h у кінці місяця] " + "; ".join(
+                              f"{mo}: {np.mean(fl['oi_chg_1'][mm] == 0) * 100:.0f}% / {np.nanstd(fl['oi_chg_1'][mm]):.2e} / {np.nanmean(fl['oi_std_1'][mm][-50:]):.2e}"
+                              for mo, mm in ((m_, np.array([datetime.fromtimestamp(x, timezone.utc).strftime('%Y-%m') == m_ for x in tt[::1]])) for m_ in sorted({datetime.fromtimestamp(x, timezone.utc).strftime('%Y-%m') for x in tt[::2000]}))
+                              if mm.sum() > 100) + " | "
                           f"перший знімок {datetime.fromtimestamp(tt[0], timezone.utc):%Y-%m-%d %H:%M}, останній {datetime.fromtimestamp(tt[-1], timezone.utc):%Y-%m-%d %H:%M}; funding прінтів {len(fl['fund_t'])}")
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         zr = [r for r in Z.build_records(sym, ctx, btc_ctx, Z.ZParams(), st, with_controls=False)["events"] if r["etype"] == "EXIT"]
