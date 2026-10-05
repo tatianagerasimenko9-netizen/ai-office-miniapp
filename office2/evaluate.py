@@ -75,15 +75,23 @@ def summarize(rows: List[dict]) -> Dict[str, Any]:
     return out
 
 
+HOLDOUT_SALT = "office2-holdout-v2"   # v1 «підглянуто» у run №4 (друкувалась колонка hold-out) — сіль змінено до будь-яких висновків
+
+
+def is_holdout(symbol: str) -> bool:
+    """≈1/3 символів — hold-out: у режимі explore НЕ ЗАВАНТАЖУЮТЬСЯ взагалі; відкриваються лише режимом final для зафіксованої версії."""
+    return int(hashlib.md5((HOLDOUT_SALT + symbol).encode()).hexdigest(), 16) % 3 == 0
+
+
 def split(rows: List[dict], train_frac: float = 0.6) -> Dict[str, List[dict]]:
     days = sorted({r["day"] for r in rows})
     if not days:
-        return {"all": [], "train": [], "test": [], "test_holdout": []}
+        return {"all": [], "train": [], "test": []}
     cut = days[int(len(days) * train_frac)] if len(days) > 1 else days[0]
-    hold = lambda s: int(hashlib.md5(s.encode()).hexdigest(), 16) % 3 == 0   # ≈1/3 символів — hold-out
+    hold = is_holdout
     train = [r for r in rows if r["day"] < cut]
     test = [r for r in rows if r["day"] >= cut]
-    return {"all": rows, "train": train, "test": test, "test_holdout": [r for r in test if hold(r["symbol"])]}
+    return {"all": rows, "train": train, "test": test}
 
 
 STAGES: Dict[str, Callable[[dict], bool]] = {
@@ -127,6 +135,8 @@ def random_control(ctxs: Dict[str, Dict[str, Any]], n_per_symbol: int, p: P.Para
                 continue
             entry = float(m1["o"][ie])
             a = float(atr15[j])
+            if a <= 0 or 2 * a / float(m1["o"][ie]) * 100 < 0.05:
+                continue   # виродженний ATR (плоска ціна): без даних, не рахуємо
             d = rnd.choice(["LONG", "SHORT"])
             sg = 1.0 if d == "LONG" else -1.0
             sl, tp = entry - sg * 2 * a, entry + sg * 3 * a
@@ -143,20 +153,20 @@ def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
 
 
 def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool = True) -> List[str]:
-    L = [f"\n### {title}\n", "| Варіант | N (кластерів) | TP/SL | факт | база | надлишок п.п. (95% ІВ) | R чистий (95% ІВ) | train надл. (N) | test надл. (N) | test×hold-out надл. (N) |", "|---|---|---|---|---|---|---|---|---|---|"]
+    L = [f"\n### {title}\n", "| Варіант | N (кластерів) | TP/SL | факт | база | надлишок п.п. (95% ІВ) | R чистий (95% ІВ) | train надл. (N) | test надл. (N) |", "|---|---|---|---|---|---|---|---|---|"]
     for name, rows in groups:
         s = summarize(rows)
         if not rows:
-            L.append(f"| {name} | 0 | — | — | — | — | — | — | — | — |")
+            L.append(f"| {name} | 0 | — | — | — | — | — | — | — |")
             continue
         sp = split(rows)
         cells = []
-        for k in ("train", "test", "test_holdout"):
+        for k in ("train", "test"):
             ss = summarize(sp[k]) if len(sp[k]) >= 15 else None
             cells.append(f"{fmt(ss['excess'], signed=True)} ({ss['n_res']})" if ss and ss["n_res"] else "—")
         ci = "—" if s["lo"] != s["lo"] else f"{fmt(s['lo'], signed=True)}…{fmt(s['hi'], signed=True)}"
         rci = "—" if s["r_lo"] != s["r_lo"] else f"{s['r_lo']:+.2f}…{s['r_hi']:+.2f}"
         nres = s["n_res"]
         tp = sum(1 for r in rows if r["outcome"] == "TP")
-        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) | {cells[0]} | {cells[1]} | {cells[2]} |")
+        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) | {cells[0]} | {cells[1]} |")
     return L

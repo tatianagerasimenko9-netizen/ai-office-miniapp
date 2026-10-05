@@ -114,15 +114,22 @@ def _btc_ret4h(btc: Optional[Dict[str, Any]], open_r: float) -> Optional[float]:
     return float((m["c"][j] / m["c"][j - 16] - 1.0) * 100.0)
 
 
-def candidates(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]] = None, p: Params = Params()) -> List[dict]:
+def candidates(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]] = None, p: Params = Params(), stats: Optional[Dict[str, int]] = None) -> List[dict]:
     m15, m1 = ctx["m15"], ctx["m1"]
     atr15 = ctx["atr15"]
     levels = ctx["levels"]
     out: List[dict] = []
     nb = len(m15["t"])
+    st = stats if stats is not None else {}
+
+    def bump(k: str) -> None:
+        st[k] = st.get(k, 0) + 1
+
     for ev in _events(ctx, p):
+        bump("events")
         s, r = ev["s"], ev["r"]
         if r < 20 or np.isnan(atr15[r]):
+            bump("no_atr")
             continue
         direction = ev["dir"]
         sgn = 1.0 if direction == "LONG" else -1.0
@@ -145,18 +152,24 @@ def candidates(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]] =
             if (direction == "SHORT" and m15["c"][m] < lo_ref) or (direction == "LONG" and m15["c"][m] > hi_ref):
                 triggers.append(("choch", m))
                 break
+        if len(triggers) == 1:
+            bump("choch_absent")
         for trig, jb in triggers:
+            bump(f"{trig}_trigger")
             t_trig = float(m15["t"][jb] + 900)
             ie = _entry_index(m1, t_trig)
             if ie is None:
+                bump(f"{trig}_no_entry_bar")
                 continue
             entry = float(m1["o"][ie])
             sl = ev["ext"] + (p.k_buf * float(atr15[jb]) if direction == "SHORT" else -p.k_buf * float(atr15[jb]))
             risk = (sl - entry) if direction == "SHORT" else (entry - sl)
             if risk <= 0:
+                bump(f"{trig}_bad_risk")
                 continue
             risk_pct = risk / entry * 100.0
             if risk_pct < p.min_risk_pct or risk_pct > p.max_risk_pct:
+                bump(f"{trig}_risk_out_of_range")
                 continue
             # TP: найближчий протилежний рівень, відомий на t_trig, з RR ≥ min_rr
             best: Optional[dict] = None
@@ -170,11 +183,14 @@ def candidates(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]] =
                     if best is None or lv["p"] < best["p"]:
                         best = lv
             if best is None:
+                bump(f"{trig}_no_target")
                 continue
             tp = best["p"]
             tdist = abs(tp - entry)
             if tdist > p.max_tp_r * risk:
+                bump(f"{trig}_target_too_far")
                 continue
+            bump(f"{trig}_candidate")
             out.append({"symbol": symbol, "dir": direction, "t_entry": t_trig, "i1": ie, "entry": entry, "sl": float(sl), "tp": float(tp), "risk_pct": risk_pct,
                         "rr": tdist / risk, "trigger": trig, "etype": ev["type"], "lvl_kind": ev["lv"]["kind"], "lvl_strength": ev["lv"]["strength"], "lvl_p": ev["lv"]["p"],
                         "depth_atr": abs(ev["ext"] - ev["lv"]["p"]) / float(atr15[r]), "tp_kind": best["kind"], "tp_known": best["known"], "lvl_known": ev["lv"]["known"], "reg4": reg4, "regd": regd,

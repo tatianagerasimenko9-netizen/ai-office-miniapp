@@ -39,4 +39,4 @@ def first_touch(m1: F.Arr, i0: int, direction: str, entry: float, sl: float, tp:
 
 def net_r(r_gross: float, risk_pct: float, fee_rt_pct: float = FEE_RT_DEFAULT) -> float:
     """R після комісій: при фіксованому $-ризику витрати кола = fee_rt / risk_pct (у R)."""
-    return r_gross - fee_rt_pct / risk_pct
+    return r_gross - fee_rt_pct / max(risk_pct, 1e-9)
