@@ -145,6 +145,16 @@ def random_control(ctxs: Dict[str, Dict[str, Any]], n_per_symbol: int, p: P.Para
     return cands
 
 
+def mirror(c: dict) -> dict:
+    """H3: дзеркальна угода — той самий вхід, протилежний напрямок, SL/TP дзеркально відносно входу (ті самі відстані r і t; база r/(r+t) та сама)."""
+    m = dict(c)
+    m["dir"] = "SHORT" if c["dir"] == "LONG" else "LONG"
+    m["sl"] = 2 * c["entry"] - c["sl"]
+    m["tp"] = 2 * c["entry"] - c["tp"]
+    m["trigger"] = "mirror"
+    return m
+
+
 def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
     if x != x:
         return "—"

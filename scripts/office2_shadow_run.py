@@ -56,6 +56,7 @@ def main() -> int:
     ctrl: List[dict] = []
     skipped: Dict[str, int] = {}
     stats: Dict[str, int] = {}
+    mir: List[dict] = []
     for i, sym in enumerate(syms):
         m1, missing = (btc_m1, miss) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
         if m1 is None or len(m1["t"]) < 3 * 1440:
@@ -64,6 +65,7 @@ def main() -> int:
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         c = P.candidates(sym, ctx, btc_ctx, p, stats)
         rows.extend(E.evaluate(c, {sym: ctx}, p))
+        mir.extend(E.evaluate([E.mirror(x) for x in c if x["trigger"] == "reclaim" and x["reg4"] * (1 if x["dir"] == "LONG" else -1) < 0], {sym: ctx}, p))
         ctrl.extend(E.evaluate(E.random_control({sym: ctx}, 40, p), {sym: ctx}, p))
         print(f"[{i + 1}/{len(syms)}] {sym}: бар 1m {len(m1['t'])}, кандидатів {len(c)}, пропущених днів {len(missing)}, {time.time() - t0:.0f} с", flush=True)
     L: List[str] = [f"# Baseline Office 2.0 v0 — shadow-replay ({a.mode}): {a.d0} … {a.d1} UTC", "",
@@ -102,6 +104,13 @@ def main() -> int:
     L.append("")
     L += E.table("Сіднійний контроль (випадковий вхід, SL 2·ATR15, TP 3·ATR15): очікуваний надлишок ≈ 0", [("випадкові входи", ctrl)])
     L += E.table("Абляція етапів Office 2.0 (кожен етап має довести надлишок, не лише існувати)", E.ablation(rows))
+    # преддекларовані гіпотези (docs/office2/HYPOTHESES.md, зафіксовані до перегляду test): одна оцінка, train і test поруч
+    sg = lambda r: 1 if r["dir"] == "LONG" else -1
+    L += E.table("Преддекларовані гіпотези H1–H3 (HYPOTHESES.md; вердикт незалежно від знаку)", [
+        ("H1: фейд sweep лише ПО тренду H4", [r for r in base_rows if r["reg4"] * sg(r) > 0]),
+        ("H1b: H1 + BTC не проти", [r for r in base_rows if r["reg4"] * sg(r) > 0 and r["btc_ok"]]),
+        ("H2 (data-mined): глибина sweep 0,3–1 ATR15", [r for r in base_rows if 0.3 <= r["depth_atr"] < 1.0]),
+        ("H3: дзеркальна угода (в напрямку пробою) проти тренду H4", mir)])
     # діагностика ЛИШЕ на train (щоб зрозуміти механіку; не для вибору параметрів/порогів; test не використовується)
     trn = E.split(base_rows)["train"]
     L.append("\n### Діагностика на TRAIN (базові кандидати; механіка, не вибір правил)\n")

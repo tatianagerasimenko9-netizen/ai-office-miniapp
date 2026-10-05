@@ -129,6 +129,13 @@ def test_pipeline_runs_and_ablation_nonempty():
     assert "надлишок" in txt
 
 
+def test_mirror():
+    m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
+    assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"
+    m = E.mirror({"dir": "LONG", "entry": 100.0, "sl": 99.0, "tp": 103.0})
+    assert m["dir"] == "SHORT" and m["sl"] == 101.0 and m["tp"] == 97.0
+
+
 def test_risk_manager():
     s = R.position_size(10.0, 100.0, 99.0, 0.10)
     # збиток на SL разом із комісіями = 10$
