@@ -47,25 +47,24 @@ def _day(t: float) -> int:
 
 def simulate_portfolio(trades: List[Dict[str, Any]], cfg: RiskConfig = RiskConfig()) -> Dict[str, Any]:
     """trades: словники з t_entry, t_exit, symbol, dir, r_net (результат у R), lvl_key (опційно). Обробка в порядку t_entry.
-    Повертає accepted, rejected{reason: n}, equity_r, max_dd_r, worst_day_r."""
+    Просадка рахується від піку ПІСЛЯ останнього скидання: коли спрацював dd_halt, торгівля зупиняється до наступної доби UTC і база просадки
+    скидається (нова доба = новий відлік), інакше після першої великої просадки система ніколи б не поверталась.
+    Повертає accepted, rejected{reason: n}, equity, total_r, max_dd_r, worst_day_r."""
     accepted: List[Dict[str, Any]] = []
     rejected: Dict[str, int] = {}
     last_sl: Dict[Tuple[str, str], float] = {}
-    day_pnl: Dict[int, float] = {}
-    eq = 0.0
-    peak = 0.0
     halt_day: Optional[int] = None
-    max_dd = 0.0
+    base_t = -1e18          # закриті угоди ДО цього моменту не враховуються у просадці (скидання після halt)
     for tr in sorted(trades, key=lambda x: x["t_entry"]):
         t0 = tr["t_entry"]
         d = _day(t0)
-        # реалізований PnL до моменту t0 (за закритими угодами)
-        closed = [a for a in accepted if a["t_exit"] <= t0]
+        if halt_day is not None and d > halt_day and base_t < d * 86400:
+            base_t = d * 86400.0   # нова доба після зупинки: база просадки скинута
+        closed = [a for a in accepted if a["t_exit"] <= t0 and a["t_exit"] > base_t]
         eq = sum(a["r_net"] for a in closed)
         peak = max([0.0] + list(_run_peak(closed)))
         dd = peak - eq
-        max_dd = max(max_dd, dd)
-        day_loss = sum(a["r_net"] for a in closed if _day(a["t_exit"]) == d)
+        day_loss = sum(a["r_net"] for a in accepted if a["t_exit"] <= t0 and _day(a["t_exit"]) == d)
         reason = None
         open_ = [a for a in accepted if a["t_exit"] > t0]
         cl = cluster_of(tr["symbol"])
@@ -94,10 +93,10 @@ def simulate_portfolio(trades: List[Dict[str, Any]], cfg: RiskConfig = RiskConfi
         accepted.append(tr)
         if tr["r_net"] < 0:
             last_sl[(tr["symbol"], tr["dir"])] = tr["t_exit"]
-    eq_curve = []
     run = 0.0
     pk = 0.0
     worst_dd = 0.0
+    eq_curve = []
     for a in sorted(accepted, key=lambda x: x["t_exit"]):
         run += a["r_net"]
         pk = max(pk, run)

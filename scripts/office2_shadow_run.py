@@ -102,6 +102,28 @@ def main() -> int:
     L.append("")
     L += E.table("Сіднійний контроль (випадковий вхід, SL 2·ATR15, TP 3·ATR15): очікуваний надлишок ≈ 0", [("випадкові входи", ctrl)])
     L += E.table("Абляція етапів Office 2.0 (кожен етап має довести надлишок, не лише існувати)", E.ablation(rows))
+    # діагностика ЛИШЕ на train (щоб зрозуміти механіку; не для вибору параметрів/порогів; test не використовується)
+    trn = E.split(base_rows)["train"]
+    L.append("\n### Діагностика на TRAIN (базові кандидати; механіка, не вибір правил)\n")
+    L.append("| Зріз | Група | N | факт | база | надлишок п.п. (кластерний 95% ІВ) |\n|---|---|---|---|---|---|")
+    def dg(title: str, key) -> None:
+        g: Dict[str, List[dict]] = {}
+        for r in trn:
+            g.setdefault(str(key(r)), []).append(r)
+        for name in sorted(g):
+            rr = g[name]
+            if len(rr) < 40:
+                continue
+            sm = E.summarize(rr)
+            ci = "—" if sm["lo"] != sm["lo"] else f"{E.fmt(sm['lo'], signed=True)}…{E.fmt(sm['hi'], signed=True)}"
+            L.append(f"| {title} | {name} | {sm['n_res']} | {E.fmt(sm['hit'])}% | {E.fmt(sm['base'])}% | {E.fmt(sm['excess'], signed=True)} ({ci}) |")
+    dg("напрям", lambda r: r["dir"])
+    dg("тип рівня", lambda r: r["lvl_kind"])
+    dg("H4 режим відносно угоди", lambda r: "за трендом" if r["reg4"] * (1 if r["dir"] == "LONG" else -1) > 0 else "проти тренду" if r["reg4"] * (1 if r["dir"] == "LONG" else -1) < 0 else "діапазон")
+    dg("глибина sweep, ATR15", lambda r: "<0,3" if r["depth_atr"] < 0.3 else "0,3–1" if r["depth_atr"] < 1 else "≥1")
+    dg("ризик, %", lambda r: "<0,5" if r["risk_pct"] < 0.5 else "0,5–1" if r["risk_pct"] < 1 else "1–2" if r["risk_pct"] < 2 else "≥2")
+    dg("RR до цілі", lambda r: "1,5–2,5" if r["rr"] < 2.5 else "2,5–4" if r["rr"] < 4 else "≥4")
+    dg("година UTC", lambda r: "Азія 0–8" if int(r["t_entry"] % 86400 // 3600) < 8 else "Лондон 8–13" if int(r["t_entry"] % 86400 // 3600) < 13 else "NY 13–21" if int(r["t_entry"] % 86400 // 3600) < 21 else "пізня 21–24")
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
     for name, sel in (("БАЗА", [r for r in rows if r["trigger"] == "reclaim"]),

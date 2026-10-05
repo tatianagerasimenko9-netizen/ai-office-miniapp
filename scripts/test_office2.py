@@ -152,6 +152,12 @@ def test_risk_manager():
     # пов'язані сценарії (той самий рівень) і повтор після SL
     pf = R.simulate_portfolio([tr(t0, "AUSDT", "LONG", -1, 100, "k"), tr(t0 + 10, "BUSDT", "LONG", 1, 100, "k")], cfg)
     assert pf["rejected"].get("related_scenarios") == 1
+    # після drawdown_halt система відновлюється наступної доби (база просадки скинута), а не блокується назавжди
+    cfgh = R.RiskConfig(max_open_risk_usd=1000, max_cluster_open_risk_usd=1000, max_same_direction_alts=100, daily_loss_r=100, dd_halt_r=3)
+    day0 = (t0 // 86400) * 86400
+    seq = [tr(day0 + 100 + i * 200, f"Y{i}USDT", "LONG", -1.0, dur=100) for i in range(5)] + [tr(day0 + 86400 + 100 + i * 200, f"Z{i}USDT", "LONG", -1.0, dur=100) for i in range(5)]
+    pf = R.simulate_portfolio(seq, cfgh)
+    assert pf["rejected"].get("drawdown_halt", 0) >= 1 and any(a["symbol"].startswith("Z") for a in pf["accepted"]), (pf["rejected"], [a["symbol"] for a in pf["accepted"]])
     cfg2 = R.RiskConfig(repeat_after_sl_sec=7200)
     pf = R.simulate_portfolio([tr(t0, "AUSDT", "LONG", -1, 100), tr(t0 + 1000, "AUSDT", "LONG", 1, 100)], cfg2)
     assert pf["rejected"].get("repeat_after_sl") == 1
