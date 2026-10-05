@@ -216,6 +216,31 @@ def main() -> int:
             groups = [(f"{lab}: {k}", v) for k, v in sorted(sub.items()) if len(v) >= 40]
             if groups:
                 L += E.table(f"{name} — розріз «{lab}»", groups, train_only=tr_only, cut_day=cut)
+    # ===== ЗАФІКСОВАНІ ГІПОТЕЗИ HS1–HS3 (HYPOTHESES.md, раунд 2): друкуються ЛИШЕ з --open-test =====
+    if a.open_test:
+        L.append("\n## Зафіксовані гіпотези раунду 2 (HS1–HS3): train і test поруч — test відкрито один раз\n")
+        wt = lambda r: r["reg4"] * sg(r) > 0
+        hs1a = [r for r in rows if r["trigger"] == "choch" and wt(r)]
+        hs1b = [r for r in sc_rows if r["trigger"] == "retest" and wt(r)]
+        hs1c = hs1a + hs1b + [r for r in sc_rows if r["trigger"] == "accept" and wt(r)]
+        L += E.table("HS1: сценарії лише по тренду H4", [("HS1a: REVERSAL (CHoCH) по тренду H4", hs1a), ("HS1b: BREAKOUT+RETEST по тренду H4", hs1b), ("HS1c: об'єднання (HS1a ∪ HS1b ∪ CONTINUATION по тренду)", hs1c)])
+        allsc = [r for r in rows if r["trigger"] in ("choch", "reclaim")] + sc_rows
+        aligned = [r for r in allsc if wt(r)]
+        rest = [r for r in allsc if not wt(r)]
+        L.append("\n### HS2: різниця середнього R після комісій «по тренду H4» − «решта» (усі сценарні входи)\n")
+        L.append("| Набір | N по тренду | N решта | R по тренду | R решта | різниця (кластерний 95% ІВ) |\n|---|---|---|---|---|---|")
+        for lab, f in (("train", lambda r: r["day"] < cut), ("test", lambda r: r["day"] >= cut)):
+            x = [r for r in aligned if f(r)]
+            y = [r for r in rest if f(r)]
+            pt, lo, hi = E.diff_ci(x, y)
+            L.append(f"| {lab} | {len(x)} | {len(y)} | {E._mean_r(x):+.3f} | {E._mean_r(y):+.3f} | {pt:+.3f} ({lo:+.3f}…{hi:+.3f}) |")
+        L.append("\n### HS3: дрейф +4 год (ATR15) у бік пробою при проколі ПО тренду H4 (поведінка A або ACCEPT)\n")
+        L.append("| Набір | N | середній рух +4 год (кластерний 95% ІВ) | частка >0 |\n|---|---|---|---|")
+        for lab, f in (("train", lambda b: b["day"] < cut), ("test", lambda b: b["day"] >= cut)):
+            g = [((b["symbol"], b["day"]), b["fwd4h_atr"]) for b in behav if f(b) and b["rel"] == "за трендом пробою" and b["behavior"] in ("A", "ACCEPT") and b["fwd4h_atr"] is not None]
+            if g:
+                lo, hi = boot_mean(g)
+                L.append(f"| {lab} | {len(g)} | {sum(v for _, v in g) / len(g):+.2f} ({lo:+.2f}…{hi:+.2f}) | {sum(1 for _, v in g if v > 0) / len(g) * 100:.0f}% |")
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
     for name, sel in (("БАЗА", [r for r in rows if r["trigger"] == "reclaim"]),

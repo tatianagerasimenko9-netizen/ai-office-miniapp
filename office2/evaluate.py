@@ -160,6 +160,33 @@ def mirror(c: dict) -> dict:
     return m
 
 
+def diff_ci(a: List[dict], b: List[dict], B: int = 400, seed: int = 21) -> Tuple[float, float, float]:
+    """Різниця середніх R (a − b) і кластерний бутстреп за (symbol, день) на об'єднаній множині кластерів."""
+    if not a or not b:
+        return float("nan"), float("nan"), float("nan")
+    cl: Dict[Tuple[str, int], Tuple[List[dict], List[dict]]] = {}
+    for r in a:
+        cl.setdefault((r["symbol"], r["day"]), ([], []))[0].append(r)
+    for r in b:
+        cl.setdefault((r["symbol"], r["day"]), ([], []))[1].append(r)
+    keys = list(cl)
+    pt = _mean_r(a) - _mean_r(b)
+    if len(keys) < 8:
+        return pt, float("nan"), float("nan")
+    rnd = random.Random(seed)
+    vals = []
+    for _ in range(B):
+        sa: List[dict] = []
+        sb: List[dict] = []
+        for k in (rnd.choice(keys) for _ in keys):
+            sa += cl[k][0]
+            sb += cl[k][1]
+        if sa and sb:
+            vals.append(_mean_r(sa) - _mean_r(sb))
+    vals.sort()
+    return pt, vals[int(len(vals) * 0.025)], vals[int(len(vals) * 0.975)]
+
+
 def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
     if x != x:
         return "—"

@@ -15,6 +15,9 @@ on:
       k_buf:
         description: 'Буфер SL, ATR(M15)'
         default: '0.5'
+      open_test:
+        description: 'true = відкрити test для ЗАФІКСОВАНИХ гіпотез (одноразово)'
+        default: 'false'
       mode:
         description: 'explore (hold-out не завантажується) або final (лише hold-out; одноразово для зафіксованої версії)'
         default: 'explore'
@@ -49,7 +52,7 @@ jobs:
           path: /tmp/o2cache
           key: o2-${{ inputs.d0 || '2026-08-01' }}-${{ inputs.d1 || '2026-10-03' }}-v1
       - name: Shadow replay
-        run: python scripts/office2_shadow_run.py --d0 "${{ inputs.d0 || '2026-08-01' }}" --d1 "${{ inputs.d1 || '2026-10-03' }}" --symbols "${{ inputs.symbols || '' }}" --k-buf "${{ inputs.k_buf || '0.5' }}" --mode "${{ inputs.mode || 'explore' }}" --cache /tmp/o2cache --md /tmp/office2.md --json /tmp/office2_rows.json | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python scripts/office2_shadow_run.py --d0 "${{ inputs.d0 || '2026-08-01' }}" --d1 "${{ inputs.d1 || '2026-10-03' }}" --symbols "${{ inputs.symbols || '' }}" --k-buf "${{ inputs.k_buf || '0.5' }}" --mode "${{ inputs.mode || 'explore' }}" ${{ inputs.open_test == 'true' && '--open-test' || '' }} --cache /tmp/o2cache --md /tmp/office2.md --json /tmp/office2_rows.json | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: office2-shadow-results

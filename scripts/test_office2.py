@@ -151,6 +151,14 @@ def test_scenarios_no_lookahead_and_behavior():
         assert (c["sl"] < c["lvl_p"]) if c["dir"] == "LONG" else (c["sl"] > c["lvl_p"])
 
 
+def test_diff_ci():
+    rows_a = [{"symbol": f"S{i % 9}", "day": i % 5, "r_net": 1.0} for i in range(60)]
+    rows_b = [{"symbol": f"S{i % 9}", "day": i % 5, "r_net": -1.0} for i in range(60)]
+    pt, lo, hi = E.diff_ci(rows_a, rows_b)
+    assert abs(pt - 2.0) < 1e-9 and lo > 1.9 and hi <= 2.0 + 1e-9
+    assert E.diff_ci([], rows_b)[0] != E.diff_ci([], rows_b)[0]   # NaN без даних
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"
