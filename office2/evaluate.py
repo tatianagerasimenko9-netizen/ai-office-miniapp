@@ -23,6 +23,8 @@ def evaluate(cands: List[dict], ctxs: Dict[str, Dict[str, Any]], p: P.Params, fe
             continue   # немає повного горизонту — не рахуємо (нема даних = не перевірено)
         r = dict(c)
         r.update(res)
+        ex = S.excursions(m1, c["i1"], c["dir"], c["entry"], abs(c["entry"] - c["sl"]), p.horizon_sec)
+        r["mfe_full_r"], r["mae_full_r"] = ex["mfe_atr"], ex["mae_atr"]      # MFE/MAE за ВЕСЬ горизонт у R (не обрізані TP/SL); лише label
         r["r_net"] = S.net_r(res["r_gross"], c["risk_pct"], fee_rt_pct)
         r["t_exit"] = c["t_entry"] + res["ttr_sec"]
         r["day"] = int(c["t_entry"] // 86400)
@@ -187,6 +189,12 @@ def diff_ci(a: List[dict], b: List[dict], B: int = 400, seed: int = 21) -> Tuple
     return pt, vals[int(len(vals) * 0.025)], vals[int(len(vals) * 0.975)]
 
 
+def _mm(rows: List[dict]) -> str:
+    f = [r["mfe_full_r"] for r in rows if "mfe_full_r" in r]
+    a = [r["mae_full_r"] for r in rows if "mae_full_r" in r]
+    return f"{float(np.median(f)):.2f} / {float(np.median(a)):.2f}" if f and a else "—"
+
+
 def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
     if x != x:
         return "—"
@@ -196,14 +204,14 @@ def fmt(x: float, pct: bool = True, signed: bool = False) -> str:
 
 def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool = True, train_only: bool = False, cut_day: Optional[int] = None) -> List[str]:
     """train_only: у таблиці лише train-рядки (test ВІДКРИТИЙ НЕ показується) — для гіпотез, що ще не зафіксовані."""
-    hdr = "| Варіант | N (кластерів) | TP/SL | таймаут | факт | база | надлишок п.п. (95% ІВ) | R чистий після комісій (95% ІВ) |" + (" train надл. (N) | test надл. (N) |" if not train_only else "")
-    L = [f"\n### {title}\n", hdr, "|---|---|---|---|---|---|---|---|" + ("---|---|" if not train_only else "")]
+    hdr = "| Варіант | N (кластерів) | TP/SL | таймаут | факт | база | надлишок п.п. (95% ІВ) | R чистий після комісій (95% ІВ) | MFE/MAE R (медіана, весь горизонт) |" + (" train надл. (N) | test надл. (N) |" if not train_only else "")
+    L = [f"\n### {title}\n", hdr, "|---|---|---|---|---|---|---|---|---|" + ("---|---|" if not train_only else "")]
     for name, rows in groups:
         if train_only and cut_day is not None:
             rows = [r for r in rows if r["day"] < cut_day]
         s = summarize(rows)
         if not rows:
-            L.append(f"| {name} | 0 | — | — | — | — | — | — |" + ("" if train_only else " — | — |"))
+            L.append(f"| {name} | 0 | — | — | — | — | — | — | — |" + ("" if train_only else " — | — |"))
             continue
         sp = split(rows)
         cells = []
@@ -214,5 +222,5 @@ def table(title: str, groups: Sequence[Tuple[str, List[dict]]], split_cols: bool
         rci = "—" if s["r_lo"] != s["r_lo"] else f"{s['r_lo']:+.2f}…{s['r_hi']:+.2f}"
         nres = s["n_res"]
         tp = sum(1 for r in rows if r["outcome"] == "TP")
-        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {s['n'] - nres} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) |" + ("" if train_only else f" {cells[0]} | {cells[1]} |"))
+        L.append(f"| {name} | {s['n']} ({s['clusters']}) | {tp}/{nres - tp} | {s['n'] - nres} | {fmt(s['hit'])}% | {fmt(s['base'])}% | {fmt(s['excess'], signed=True)} ({ci}) | {s['mean_r']:+.3f} ({rci}) | {_mm(rows)} |" + ("" if train_only else f" {cells[0]} | {cells[1]} |"))
     return L

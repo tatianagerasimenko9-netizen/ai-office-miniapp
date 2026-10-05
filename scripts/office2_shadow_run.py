@@ -21,6 +21,7 @@ from office2 import pipeline as P  # noqa: E402
 from office2 import risk as R  # noqa: E402
 from office2 import scenarios as SC  # noqa: E402
 from office2 import probe as PR  # noqa: E402
+from office2 import narrative as NR  # noqa: E402
 
 DEFAULT_SYMBOLS = ("BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT DOTUSDT LTCUSDT BCHUSDT TRXUSDT ATOMUSDT NEARUSDT APTUSDT ARBUSDT OPUSDT SUIUSDT INJUSDT "
                    "AAVEUSDT UNIUSDT ETCUSDT FILUSDT HBARUSDT ICPUSDT TIAUSDT SEIUSDT 1000PEPEUSDT 1000SHIBUSDT FETUSDT RUNEUSDT ALGOUSDT MKRUSDT LDOUSDT WLDUSDT ONDOUSDT JUPUSDT ENAUSDT TAOUSDT").split()
@@ -64,6 +65,10 @@ def main() -> int:
     behav: List[dict] = []
     sc_stats: Dict[str, int] = {}
     obs_all: List[dict] = []
+    nrows: List[dict] = []
+    nctrl: List[dict] = []
+    nstats: Dict[str, int] = {}
+    p48 = P.Params(horizon_sec=48 * 3600)
     for i, sym in enumerate(syms):
         m1, missing = (btc_m1, miss) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
         if m1 is None or len(m1["t"]) < 3 * 1440:
@@ -73,6 +78,8 @@ def main() -> int:
         c = P.candidates(sym, ctx, btc_ctx, p, stats)
         rows.extend(E.evaluate(c, {sym: ctx}, p))
         obs_all.extend(PR.build_observations(sym, ctx, btc_ctx, p))
+        nrows.extend(E.evaluate(NR.candidates(sym, ctx, btc_ctx, NR.NParams(), nstats), {sym: ctx}, p48))
+        nctrl.extend(E.evaluate(NR.generic_controls(sym, ctx, 25), {sym: ctx}, p48))
         scr = SC.scenario_candidates(sym, ctx, btc_ctx, p, sc_stats)
         sc_rows.extend(E.evaluate(scr["cands"], {sym: ctx}, p))
         behav.extend(scr["behav"])
@@ -244,6 +251,34 @@ def main() -> int:
             if g:
                 lo, hi = boot_mean(g)
                 L.append(f"| {lab} | {len(g)} | {sum(v for _, v in g) / len(g):+.2f} ({lo:+.2f}…{hi:+.2f}) | {sum(1 for _, v in g if v > 0) / len(g) * 100:.0f}% |")
+    # ===== SETUP NARRATIVE: IMPULSE → COMPRESSION → BREAKOUT (H1; TRAIN; test лише з --open-test) =====
+    L.append("\n## Setup narrative: IMPULSE → COMPRESSION → BREAKOUT (H1, LONG і SHORT; дослідницьке визначення, не оптимізоване)\n")
+    L.append(f"> {'TRAIN-ONLY: test не відкривається.' if tr_only else 'Test відкритий для зафіксованих гіпотез.'} Outcome: структурна угода (SL = мінімум корекції − 0,5 ATR_H1; TP = хай імпульсу; RR ≥1,5; ризик 0,3–10%; горизонт 48 год).\n")
+    L.append(f"Воронка: імпульсів ≥3 ATR: {nstats.get('impulses', 0)}; з пробоєм похилої після стиснення: {nstats.get('breakouts', 0)}; після дедуплікації (1 пробій = 1 подія): {nstats.get('breakouts_dedup', 0)}; "
+             f"без пробою: {nstats.get('no_breakout', 0)}; кандидатів «пробій»: {nstats.get('break_candidate', 0)} (немає простору до хая: {nstats.get('break_no_room', 0)}, ризик поза межами: {nstats.get('break_risk_out', 0)}); "
+             f"«прийняття»: {nstats.get('accept_candidate', 0)} (немає прийняття: {nstats.get('accept_missing', 0)}).\n")
+    cutn = E.cut_day(nrows + nctrl)
+    brk = [r for r in nrows if r["trigger"] == "break"]
+    acc = [r for r in nrows if r["trigger"] == "accept"]
+    L += E.table("Клас IMPULSE→COMPRESSION→BREAKOUT: N → TP1-first → SL-first → таймаут → база → надлишок → середній R після комісій → MFE/MAE", [
+        ("вхід на пробої (закриття H1 над похилою)", brk), ("вхід на прийнятті (наступне закриття над лінією)", acc),
+        ("  пробій: LONG", [r for r in brk if r["dir"] == "LONG"]), ("  пробій: SHORT", [r for r in brk if r["dir"] == "SHORT"]),
+        ("  пробій: блок утримався (мін. корекції ≥ origin −0,3 ATR)", [r for r in brk if r["feat"]["block_held"] > 0.5]),
+        ("  пробій: блок НЕ утримався", [r for r in brk if r["feat"]["block_held"] <= 0.5]),
+        ("КОНТРОЛЬ: загальний структурний вхід у випадкові години (без імпульсу/стиснення/пробою)", nctrl)], train_only=tr_only, cut_day=cutn)
+    trb = [r for r in brk if cutn is None or r["day"] < cutn] if tr_only else brk
+    trb = [r for r in trb if r["outcome"] in ("TP", "SL")]
+    if len(trb) >= 60:
+        L.append("\n### TRAIN: чим ДО входу відрізняються хороші й погані екземпляри (AUC проти TP-before-SL; Spearman із MFE, MAE (R, 48 год) і net R) — діагностика, не правила\n")
+        L.append("| Ознака | AUC→TP | ρ MFE | ρ MAE | ρ net R |\n|---|---|---|---|---|")
+        import numpy as _np
+        for k in sorted(trb[0]["feat"].keys()):
+            x = _np.array([r["feat"][k] for r in trb], dtype=float)
+            if x.std() == 0:
+                continue
+            y = _np.array([1.0 if r["outcome"] == "TP" else 0.0 for r in trb])
+            L.append(f"| {k} | {PR.auc(x, y):.3f} | {PR._fmt(PR.spearman(x, _np.array([r['mfe_full_r'] for r in trb])), 2)} | {PR._fmt(PR.spearman(x, _np.array([r['mae_full_r'] for r in trb])), 2)} | {PR._fmt(PR.spearman(x, _np.array([r['r_net'] for r in trb])), 2)} |")
+        L.append(f"\nN={len(trb)} (TP/SL); ознак ≈20 — випадково «значущі» значення очікувані; рішення лише за замороженою гіпотезою на test.\n")
     L += PR.report(obs_all, cut, a.open_test)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")

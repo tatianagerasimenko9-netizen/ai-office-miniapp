@@ -188,6 +188,64 @@ def test_probe_basics_and_no_lookahead():
         assert o["cont_tp"] + o["cont_sl"] <= 1 and o["rev_tp"] + o["rev_sl"] <= 1 and o["cont_mfe"] >= 0 and o["cont_mae"] >= 0
 
 
+def _planted(n=260, seed=1, pierce=False, small_impulse=False):
+    rng = np.random.default_rng(seed)
+    c = 100 + np.cumsum(rng.normal(0, 0.15, n))
+    o = np.r_[c[0], c[:-1]]
+    h = np.maximum(o, c) + np.abs(rng.normal(0, 0.2, n))
+    l = np.minimum(o, c) - np.abs(rng.normal(0, 0.2, n))
+    step = 0.3 if small_impulse else 1.4
+    for i in range(100, 107):
+        c[i] = 100 + (i - 100) * step
+        o[i] = c[i] - 1.2 * (step / 1.4)
+        h[i] = c[i] + 0.3
+        l[i] = o[i] - 0.2
+    l[100] = 99.2
+    peak = h[106]
+    zig = [-1.2, -1.8, -2.2, -1.5, -2.2, -2.6, -2.1, -2.7, -3.0, -2.5, -3.1, -3.3, -2.9, -3.4, -3.6, -3.3, -3.7, -3.8]
+    for k, z in enumerate(zig):
+        i = 107 + k
+        c[i] = peak + z - 0.8
+        o[i] = c[i] + 0.2
+        h[i] = peak + z
+        l[i] = c[i] - 0.6
+    if pierce:
+        h[112] = peak + 0.5          # ціна вже пробила лінію під час стиснення → лінія не діє
+    i = 107 + len(zig)
+    c[i], o[i] = peak - 2.2, peak - 3.9
+    h[i], l[i] = c[i] + 0.2, o[i] - 0.1
+    for j in range(i + 1, i + 20):
+        c[j] = c[i] + 0.1 * (j - i)
+        o[j] = c[j] - 0.1
+        h[j] = c[j] + 0.3
+        l[j] = c[j] - 0.3
+    t = 3600.0 * np.arange(n) + 1_790_000_000 // 3600 * 3600
+    return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": np.full(n, 100.0), "tbv": np.full(n, 55.0), "n": np.full(n, 60.0)}
+
+
+def test_narrative_detector():
+    from office2 import narrative as N
+    bars = _planted()
+    st = {}
+    ev = N.find_setups_long(bars, F.atr(bars, 14), N.NParams(), st)
+    assert len(ev) == 1 and ev[0]["ih"] == 106 and ev[0]["b"] == 125 and ev[0]["imp_atr"] > 5 and 0.25 <= ev[0]["retr"] <= 0.9, (ev, st)
+    assert ev[0]["block_held"] == 1.0 and ev[0]["slope_atr"] < 0 and ev[0]["above_line"] > 0.1
+    # негативні варіанти
+    pb = _planted(pierce=True)
+    assert all(e["ih"] != 106 for e in N.find_setups_long(pb, F.atr(pb, 14), N.NParams(), {}))   # ціна вже вище хая імпульсу → старий імпульс не дає сетапу
+    sm = _planted(small_impulse=True)
+    assert not N.find_setups_long(sm, F.atr(sm, 14), N.NParams(), {})
+    # без lookahead: до пробійного бару події немає; після — ті самі ознаки
+    cut = lambda b, k: {kk: v[:k].copy() for kk, v in b.items()}
+    assert not N.find_setups_long(cut(bars, 125), F.atr(cut(bars, 125), 14), N.NParams(), {})
+    e2 = N.find_setups_long(cut(bars, 140), F.atr(cut(bars, 140), 14), N.NParams(), {})
+    assert len(e2) == 1 and all(abs(e2[0][k] - ev[0][k]) < 1e-9 for k in ("imp_atr", "retr", "line_b", "brk_body", "block_return", "touches", "room_imp"))
+    # дзеркало: SHORT-версія знаходиться в дзеркальних даних
+    mb = N._mirror(bars)
+    mb2 = {k: (-v if k in ("o", "h", "l", "c") else v) for k, v in mb.items()}      # дзеркало дзеркала = вихідні
+    assert np.allclose(N._mirror(mb)["h"], bars["h"])
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"
