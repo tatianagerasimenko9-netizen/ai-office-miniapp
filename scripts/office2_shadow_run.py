@@ -41,7 +41,8 @@ def main() -> int:
     ap.add_argument("--symbols", default="")
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--k-buf", type=float, default=0.5)
-    ap.add_argument("--open-test", action="store_true", help="сценарні таблиці з колонкою test (лише ПІСЛЯ фіксації гіпотез у HYPOTHESES.md)")
+    ap.add_argument("--legacy-test", action="store_true", help="старі розділи (сценарний шар, HS1–HS3, HD1/HD2): відкрити test. Раунд 2 уже відкрито; HD1 призупинено власницею — НЕ вмикати")
+    ap.add_argument("--open-test", action="store_true", help="test для класу IMPULSE→COMPRESSION→BREAKOUT (HN-A/HN-A2/HN-B, matched) — лише ПІСЛЯ фіксації гіпотез у HYPOTHESES.md")
     ap.add_argument("--mode", choices=("explore", "final"), default="explore",
                     help="explore: hold-out символи НЕ завантажуються; final: ЛИШЕ hold-out символи, одна перевірка зафіксованої версії")
     a = ap.parse_args()
@@ -166,11 +167,12 @@ def main() -> int:
     # ===== СЦЕНАРНИЙ ШАР: що зробила ціна після зняття ліквідності (TRAIN; test лише з --open-test) =====
     cut = E.cut_day(rows + sc_rows)
     tr_only = not a.open_test
+    tr_leg = not a.legacy_test      # старі розділи (сценарний шар, HS1–HS3, probe HD1) — test лишається закритим, якщо не --legacy-test
     L.append("\n## Сценарний шар: Office спершу визначає, що сталося з ціною, а вже потім вибирає вхід\n")
-    L.append(f"> {'TRAIN-ONLY: test не відкривається, гіпотези ще не заморожені.' if tr_only else 'Test відкритий для зафіксованих гіпотез (HYPOTHESES.md).'} Метрика, яку показуємо завжди: **середній R після комісій** (математичне сподівання угоди), а не лише TP1-first.\n")
+    L.append(f"> {'TRAIN-ONLY: test не відкривається, гіпотези ще не заморожені.' if tr_leg else 'Test відкритий для зафіксованих гіпотез (HYPOTHESES.md).'} Метрика, яку показуємо завжди: **середній R після комісій** (математичне сподівання угоди), а не лише TP1-first.\n")
     L.append(f"Проколів рівнів: {sc_stats.get('pierces', 0)}; прийняттів (2 закриття за рівнем): {sc_stats.get('accept_events', 0)}; кандидатів CONT: {sc_stats.get('accept_candidate', 0)}, RETEST: {sc_stats.get('retest_candidate', 0)}.\n")
     # 1) поведінка після проколу: дрейф у бік пробою
-    bt = [b for b in behav if b["day"] < cut] if tr_only and cut is not None else behav
+    bt = [b for b in behav if b["day"] < cut] if tr_leg and cut is not None else behav
     L.append("### Поведінка ціни після проколу рівня (TRAIN): куди пішла ціна після рішення, у ATR15 у БІК пробою (>0 = продовження, <0 = розворот)\n")
     L.append("| Поведінка | H4 відносно пробою | N | частка | середній рух +1 год | +4 год (95% ІВ) | частка >0 за 4 год |\n|---|---|---|---|---|---|---|")
     import random as _rnd
@@ -215,7 +217,7 @@ def main() -> int:
         ("BREAKOUT+RETEST: прийняття → ретест рівня → вхід у бік пробою", [r for r in sc_rows if r["trigger"] == "retest"]),
         ("  …з них у бік тренду H4", [r for r in sc_rows if r["trigger"] == "retest" and r["reg4"] * sg(r) > 0]),
     ]
-    L += E.table("Сценарії (Office спершу визначає ситуацію): N → TP1-first → SL-first → таймаут → база → надлишок → середній R після комісій", scen_groups, train_only=tr_only, cut_day=cut)
+    L += E.table("Сценарії (Office спершу визначає ситуацію): N → TP1-first → SL-first → таймаут → база → надлишок → середній R після комісій", scen_groups, train_only=tr_leg, cut_day=cut)
     L.append("\nNO TRADE: події, що не склалися в жоден сценарій (немає цілі RR ≥1,5, ризик поза межами, або поведінка не з переліку); у воронці — окремі лічильники.\n")
     # 3) розрізи по сценаріях
     def rel_h4(r: dict) -> str:
@@ -237,9 +239,9 @@ def main() -> int:
                 sub.setdefault(key(r), []).append(r)
             groups = [(f"{lab}: {k}", v) for k, v in sorted(sub.items()) if len(v) >= 40]
             if groups:
-                L += E.table(f"{name} — розріз «{lab}»", groups, train_only=tr_only, cut_day=cut)
+                L += E.table(f"{name} — розріз «{lab}»", groups, train_only=tr_leg, cut_day=cut)
     # ===== ЗАФІКСОВАНІ ГІПОТЕЗИ HS1–HS3 (HYPOTHESES.md, раунд 2): друкуються ЛИШЕ з --open-test =====
-    if a.open_test:
+    if a.legacy_test:
         L.append("\n## Зафіксовані гіпотези раунду 2 (HS1–HS3): train і test поруч — test відкрито один раз\n")
         wt = lambda r: r["reg4"] * sg(r) > 0
         hs1a = [r for r in rows if r["trigger"] == "choch" and wt(r)]
@@ -413,7 +415,7 @@ def main() -> int:
             d, lo, hi = boot_diff(x, y)
             L.append(f"| {lab} | {len(x)} | {sum(v for _, v in x) / max(len(x), 1):+.3f} ({lo1:+.3f}…{hi1:+.3f}) | {len(y)} | {sum(v for _, v in y) / max(len(y), 1):+.3f} | {d:+.3f} ({lo:+.3f}…{hi:+.3f}) |")
         L.append("\nHN-B формально: R>0 з ІВ, що виключає 0. Різниця з контролем показана, бо на train «загальний структурний вхід» сам дав R>0 (дрейф періоду) — без контролю HN-B не відрізняє сетап від дрейфу.\n")
-    L += PR.report(obs_all, cut, a.open_test)
+    L += PR.report(obs_all, cut, a.legacy_test)
     # портфель
     L.append("\n### Risk Manager (портфель): фіксований $-ризик, структурний SL, портфельні ліміти\n")
     for name, sel in (("БАЗА", [r for r in rows if r["trigger"] == "reclaim"]),
