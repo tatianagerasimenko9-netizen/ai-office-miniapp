@@ -373,6 +373,82 @@ def test_zone_calibration_random_walk():
     assert abs(m) < max(3 * se, 0.015), (m, se)
 
 
+def _synth_metrics(days=40, seed=3, start=1_790_000_000 // 86400 * 86400):
+    rng = np.random.default_rng(seed)
+    n = days * 288
+    t = start + 300.0 * np.arange(n)
+    oi = 1e6 * np.exp(np.cumsum(rng.normal(0, 0.0015, n)))
+    top_pos = np.exp(rng.normal(0.2, 0.1, n))
+    return np.column_stack([t, oi, oi * 100, np.exp(rng.normal(0.3, 0.1, n)), top_pos, np.exp(rng.normal(0.4, 0.1, n)), np.exp(rng.normal(0, 0.3, n))])
+
+
+def test_flowdata():
+    from office2 import flowdata as FD
+    m = FD.parse_metrics_csv("create_time,symbol,sum_open_interest,sum_open_interest_value,count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,count_long_short_ratio,sum_taker_long_short_vol_ratio\n"
+                             "2025-06-01 00:00:00,BTCUSDT,83624.19,8736988614.4,1.2345,1.5616,1.1906,0.5528\n2025-06-01 00:05:00,BTCUSDT,83584.79,8734318426.2,1.2314,1.5629,1.1867,1.1643\n")
+    assert m.shape == (2, 7) and abs(m[0, 0] - 1748736000.0) < 1 and abs(m[1, 1] - 83584.79) < 1e-6
+    f = FD.parse_funding_csv("calc_time,funding_interval_hours,last_funding_rate\n1748736000001,8,-0.00000582\n1748764800002,8,0.00002335\n")
+    assert f.shape == (2, 2) and abs(f[1, 1] - 0.00002335) < 1e-12
+    mm = _synth_metrics()
+    fund = np.column_stack([mm[0, 0] - 86400 + 8 * 3600.0 * np.arange(200), np.random.default_rng(1).normal(0.00005, 0.00005, 200)])
+    fl = FD.prep(mm, fund)
+    t_dec = mm[0, 0] + 20 * 86400.0 + 3600
+    a = FD.features(fl, t_dec, 1.0, 1.0)
+    b = FD.features(fl, t_dec, -1.0, -1.0)
+    assert a["top_pos_rel"] == -b["top_pos_rel"] and a["oi_chg_4h_z"] == b["oi_chg_4h_z"] and a["funding_rel"] == -b["funding_rel"]
+    # без lookahead: усічення даних після t_dec − 300 не змінює ознак
+    keep = mm[:, 0] <= t_dec - 300
+    fl2 = FD.prep(mm[keep], fund[fund[:, 0] <= t_dec - 300])
+    a2 = FD.features(fl2, t_dec, 1.0, 1.0)
+    for k, v in a.items():
+        assert (v != v and a2[k] != a2[k]) or abs(v - a2[k]) < 1e-9, (k, v, a2[k])
+    assert all(v == v for v in a.values()), a
+
+
+def test_disp_population():
+    from office2 import disp as D2
+    full = synth(160, seed=61, sigma=0.0030)
+    btc = synth(160, seed=62, sigma=0.0030)
+    ctx, bctx = P.build_context(full), P.build_context(btc)
+    rec = D2.build_records("XUSDT", ctx, bctx, D2.DParams(), {})
+    assert len(rec) >= 20, len(rec)
+    for r in rec:
+        assert r["risk_atr"] > 0 and r["feat"]["body_atr"] >= 1.5 - 1e-9 and r["feat"]["close_loc"] >= 0.7 - 1e-9
+    T = full["t"][0] + 130 * 86400
+    cut = lambda a: {k: v[: int((T - a["t"][0]) // 60)] for k, v in a.items()}
+    rc = D2.build_records("XUSDT", P.build_context(cut(full)), P.build_context(cut(btc)), D2.DParams(), {})
+    k1 = {(r["dir"], r["j"]): r["feat"] for r in rec if r["t_dec"] <= T - 6 * 3600}
+    k2 = {(r["dir"], r["j"]): r["feat"] for r in rc if r["t_dec"] <= T - 6 * 3600}
+    assert k1 and set(k1) == set(k2)
+    for k, a in k1.items():
+        for n_, v in a.items():
+            assert abs(v - k2[k][n_]) < 1e-6, (k, n_)
+
+
+def test_flow_model_planted_and_null():
+    """Модель оцінки джерел: знаходить ЗАСІЯНИЙ сигнал у блоці OI і не знаходить нічого на шумі (нульова калібровка)."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent))
+    import office2_flow_run as FR
+    from office2 import disp as D2
+    from office2 import flowdata as FD
+    names = list(D2.DISP_OHLCV) + list(FR.TBV) + [k for b in FD.FLOW_BLOCKS.values() for k in b]
+    def make(planted, seed):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for i in range(4000):
+            x = {k: float(rng.normal()) for k in names}
+            up = rng.random() < (0.5 + (0.22 * np.tanh(x["oi_with_trend"]) if planted else 0.0))
+            rows.append({"symbol": "S%d" % (i % 25), "day": 100 + (i // 25), "order_1.0": "up" if up else "down", "r_net_g2": (2.0 if up else -1.0) - 0.1 + float(rng.normal(0, 0.1)), "X": x})
+        return rows
+    L = []
+    v = FR.evaluate_pop("DISP", make(True, 1), 160, "test", L)
+    assert v["M+OI"] and not v["M+TAKER5"], (v, "\n".join(L))
+    vn = FR.evaluate_pop("DISP", make(False, 2), 160, "test", [])
+    assert not any(vn.values()), vn
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"

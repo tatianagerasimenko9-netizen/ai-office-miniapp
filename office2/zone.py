@@ -298,11 +298,11 @@ def _make_event(etype, symbol, ctx, btc, direction, sg, bars, atr1h, h1, m15, sh
             "range_slope": _slope(rng), "vol_slope": _slope(lv), **struct, "bos": float(bos_now), "disp_body": float((c[j] - o[j]) / aj), "disp_range": float((h[j] - l[j]) / aj),
             "m15_disp": m15_disp, "m15_loc": m15_loc, "room": float(room), "rel4": float(mk["r4"]), "reld": float(mk["rd"]), "btc_al": float(np.clip((mk["btc4"] or 0.0) * sg, -3, 3)),
             "risk_atr": float((c[j] - sl_t) / aj)}
-    return {"type": etype, "symbol": symbol, "dir": direction, "j": j, "ih": ih, "t_dec": t_dec, "t_open": t_open, "ph": ph, "sl_t": float(sl_t), "c_t": float(c[j]), "atr": aj, "atrp": float(aj / abs(c[j])),
+    return {"runs": [(r["start"], r["end"]) for r in runs], "type": etype, "symbol": symbol, "dir": direction, "j": j, "ih": ih, "t_dec": t_dec, "t_open": t_open, "ph": ph, "sl_t": float(sl_t), "c_t": float(c[j]), "atr": aj, "atrp": float(aj / abs(c[j])),
             "sess": _session(t_dec), "r4": mk["r4"], "rd": mk["rd"], "btcb": mk["btcb"], "feat": feat, "ctx": ctx, "risk_atr": feat["risk_atr"]}
 
 
-def build_records(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]], p: ZParams = ZParams(), stats: Optional[Dict[str, int]] = None, rnd_n: int = 40) -> Dict[str, List[dict]]:
+def build_records(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]], p: ZParams = ZParams(), stats: Optional[Dict[str, int]] = None, rnd_n: int = 40, with_controls: bool = True) -> Dict[str, List[dict]]:
     """Події + matched-пари + випадковий контроль, усе з outcome-мітками. Один контроль на подію, без повторів; coverage рахується."""
     st = stats if stats is not None else {}
     sc = scan(symbol, ctx, btc, p, st)
@@ -325,7 +325,7 @@ def build_records(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]
                     continue
                 st[f"cov_total_{etype}"] = st.get(f"cov_total_{etype}", 0) + 1
                 best, bd = None, 1e9
-                for q in buckets.get((ev["sess"], ev["r4"], ev["rd"]), []):
+                for q in (buckets.get((ev["sess"], ev["r4"], ev["rd"]), []) if with_controls else []):
                     if q["j"] in used or q["ih"] == ev["ih"]:
                         continue          # контроль НЕ з тієї самої корекції: бари до майбутньої атаки умовні на її настання (lookahead-зсув, виявлено калібруванням)
                     ri, ra, rr = q["imp_atr"] / ev["feat"]["imp_atr"], q["atrp"] / ev["atrp"], q["risk_atr"] / max(ev["risk_atr"], 1e-9)
@@ -334,7 +334,7 @@ def build_records(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]
                     d = abs(ri - 1.0) + abs(math.log(ra)) + abs(math.log(rr)) + (0.0 if q["btcb"] == ev["btcb"] else 1.0)
                     if d < bd:
                         bd, best = d, q
-                base = {"symbol": symbol, "dir": direction, "etype": etype, "day": int(ev["t_dec"] // 86400), "t_dec": ev["t_dec"], "feat": ev["feat"], "k": int(ev["feat"]["k"])}
+                base = {"runs": ev.get("runs"), "j": ev["j"], "symbol": symbol, "dir": direction, "etype": etype, "day": int(ev["t_dec"] // 86400), "t_dec": ev["t_dec"], "feat": ev["feat"], "k": int(ev["feat"]["k"])}
                 crec = None
                 if best is not None:
                     crec = _outcome(m1, best, sg, p)
@@ -345,7 +345,7 @@ def build_records(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]
                 if crec is not None:
                     out_ct.append({**base, **crec, "pair": pid, "kind": "matched", "match_d": float(bd)})
                     st[f"cov_matched_{etype}"] = st.get(f"cov_matched_{etype}", 0) + 1
-    out_rnd = random_controls(symbol, ctx, rnd_n, p)
+    out_rnd = random_controls(symbol, ctx, rnd_n, p) if with_controls else []
     return {"events": out_ev, "matched": out_ct, "random": out_rnd}
 
 
