@@ -60,7 +60,7 @@ _CACHE_LOCK = threading.Lock()
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
     return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
-            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report()}
+            "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report(), "direct_fapi": dict(_DIRECT)}
 
 
 def backoff_left() -> float:
@@ -178,6 +178,40 @@ def callers_report(top: int = 12) -> Dict[str, Any]:
     return {k: {"rest": v["rest"], "ws": v["ws"], "cache": v["cache"], "syms": len(v["syms"])} for k, v in rows}
 
 
+def _endpoint_weight(key: str, params: Optional[Dict[str, Any]]) -> int:
+    """Оцінка ваги запиту Binance Futures (лише облік; поведінку не змінює): повний список без symbol значно дорожчий за запит по одній монеті."""
+    has_sym = bool((params or {}).get("symbol"))
+    if key == "24hr":
+        return 1 if has_sym else 40
+    if key == "premiumIndex":
+        return 1 if has_sym else 10
+    if key == "depth":
+        lim = int((params or {}).get("limit") or 500)
+        return 2 if lim <= 50 else 5 if lim <= 100 else 10 if lim <= 500 else 20
+    if key == "forceOrders":
+        return 50
+    if key == "exchangeInfo":
+        return 10
+    return 1
+
+
+_DIRECT: Dict[str, Dict[str, Any]] = {}
+
+
+def note_direct(site: str, url: str, headers: Any = None, params: Optional[Dict[str, Any]] = None) -> None:
+    """Облік запитів до fapi, що йдуть НЕ через _http_get_json (aiohttp у relay): скільки викликів, оцінка ваги, найбільша вага IP з заголовка. Лише облік."""
+    try:
+        path = url.split("fapi.binance.com", 1)[1].split("?", 1)[0]
+        d = _DIRECT.setdefault(f"{site}|{path.rsplit('/', 1)[-1]}", {"calls": 0, "weight_est": 0, "max_used_weight_1m": 0})
+        d["calls"] += 1
+        d["weight_est"] += _endpoint_weight(path.rsplit("/", 1)[-1], params)
+        used = int(headers.get("X-MBX-USED-WEIGHT-1M")) if headers is not None and headers.get("X-MBX-USED-WEIGHT-1M") else None
+        if used is not None:
+            d["max_used_weight_1m"] = max(d["max_used_weight_1m"], used)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _count_rest(url: str, params: Dict[str, Any]) -> None:
     """Облік REST-навантаження ЦЬОГО процесу: запити за типом (klines по ТФ, інші — за назвою) і оцінка витраченої ваги (klines: limit<100 → 1,
     <500 → 2, <1000 → 5, інакше 10). Лічильник ваги в заголовку Binance — на весь IP (web + worker), цей — лише наш процес."""
@@ -188,8 +222,8 @@ def _count_rest(url: str, params: Dict[str, Any]) -> None:
             w = 1 if lim < 100 else 2 if lim < 500 else 5 if lim < 1000 else 10
             key = "klines_" + str((params or {}).get("interval") or "?")
         else:
-            w = 1
             key = path.rsplit("/", 1)[-1]
+            w = _endpoint_weight(key, params)
         rb = _HEALTH.setdefault("rest_by", {})
         rb[key] = rb.get(key, 0) + 1
         _HEALTH["weight_est"] = _HEALTH.get("weight_est", 0) + w
