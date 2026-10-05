@@ -92,6 +92,12 @@ def evaluate_pop(pop: str, rows: List[dict], cut: int, phase: str, L: List[str])
     miss = {k: sum(1 for r in rows if r["X"].get(k, float("nan")) != r["X"].get(k, float("nan"))) / max(len(rows), 1) for k in allf}
     bad = sorted(((v, k) for k, v in miss.items() if v > 0.005), reverse=True)
     L.append("Частка відсутніх значень за ознаками (>0,5%): " + (", ".join(f"{k} {v * 100:.0f}%" for v, k in bad) or "немає") + "\n")
+    bymon: Dict[str, List[int]] = {}
+    for r in rows:
+        mo = datetime.fromtimestamp(r["t_dec"], timezone.utc).strftime("%Y-%m")
+        x = r["X"].get("oi_chg_1h_z", float("nan"))
+        bymon.setdefault(mo, []).append(1 if x != x else 0)
+    L.append("Відсутність oi_chg_1h_z за місяцями: " + ", ".join(f"{k} {sum(v) / len(v) * 100:.0f}%" for k, v in sorted(bymon.items())) + "\n")
     bysym: Dict[str, List[int]] = {}
     for r in rows:
         ok = all(r["X"].get(k, float("nan")) == r["X"].get(k, float("nan")) for k in allf)
@@ -178,12 +184,19 @@ def main() -> int:
     disp_rows: List[dict] = []
     st: Dict[str, int] = {}
     skipped: List[str] = []
+    health: List[str] = []
     for i, sym in enumerate(syms):
         m1, _ = (btc_m1, []) if sym == "BTCUSDT" else D.load_symbol(sym, d0, d1, cache, a.offline)
         fl = FD.load_flow(sym, d0, d1, cache, a.offline)
         if m1 is None or len(m1["t"]) < 10 * 1440 or fl is None:
             skipped.append(sym)
             continue
+        if i < 2:
+            tt = fl["t"]
+            dts = np.diff(tt)
+            hl = lambda k: float(np.mean(~np.isnan(fl[k])) * 100)
+            health.append(f"{sym}: знімків {len(tt)}, крок медіана {np.median(dts):.0f} с / p99 {np.percentile(dts, 99):.0f} с / макс {dts.max():.0f} с; oi_chg_1h валідних {hl('oi_chg_1h'):.0f}%, oi_std_1h валідних {hl('oi_std_1h'):.0f}%, oi_chg_4h {hl('oi_chg_4h'):.0f}%; "
+                          f"перший знімок {datetime.fromtimestamp(tt[0], timezone.utc):%Y-%m-%d %H:%M}, останній {datetime.fromtimestamp(tt[-1], timezone.utc):%Y-%m-%d %H:%M}; funding прінтів {len(fl['fund_t'])}")
         ctx = btc_ctx if sym == "BTCUSDT" else P.build_context(m1)
         zr = [r for r in Z.build_records(sym, ctx, btc_ctx, Z.ZParams(), st, with_controls=False)["events"] if r["etype"] == "EXIT"]
         dr = DS.build_records(sym, ctx, btc_ctx, DS.DParams(), st)
@@ -200,6 +213,7 @@ def main() -> int:
     cut = E.cut_day(zone_rows + disp_rows)
     L = [f"# FLOW-1: інкрементальна цінність джерел потоку понад OHLCV — {a.d0} … {a.d1} UTC, фаза {a.phase.upper()}", "",
          f"Символи: {len(syms) - len(skipped)} (пропущено без даних потоку/свічок: {', '.join(skipped) or '—'}). Межа train/test: день {cut} ({datetime.fromtimestamp((cut or 0) * 86400, timezone.utc):%Y-%m-%d}). Hold-out символи не завантажувались."]
+    L.append("\nЗдоров'я даних потоку (перші символи): " + " | ".join(health) + "\n")
     res = {}
     for pop, rows in (("ZONE", zone_rows), ("DISP", disp_rows)):
         res[pop] = evaluate_pop(pop, rows, cut, a.phase, L)
