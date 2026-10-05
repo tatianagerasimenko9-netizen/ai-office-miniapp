@@ -138,7 +138,7 @@ def chains(ready: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
             row["prev_open_lc"] = bool(prev and prev.get("entry_evt_ts") and prev["entry_evt_ts"] <= r["ct"] and (prev["lc_ts"] is None or prev["lc_ts"] > r["ct"]))
             row["since_sl_min"] = (r["ct"] - prev["t_res"]) / 60 if prev and row["cls"] == "після SL" else None
             row["same_sl"] = bool(prev and abs(prev["sl"] - r["sl"]) / r["sl"] < 0.0005)
-            row["tags_changed"] = bool(prev and prev["tags"] != r["tags"])
+            row["tags_changed"] = (prev["tags"] != r["tags"]) if (prev and prev["tags"] and r["tags"]) else None   # None: теги збережені лише для планів із gate-знімком
             row["prev_sid"] = prev["sid"] if prev else None
             out.append(row)
     return sorted(out, key=lambda x: x["ct"])
@@ -158,10 +158,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--events", required=True)
     ap.add_argument("--md", default="")
+    ap.add_argument("--extra", default="", help="ready_plans_*.json з полями zone_src/th_ver/regime за sid (1–4 жовтня)")
     a = ap.parse_args()
     plans, events, results, atr = load(a.events)
     b = build(plans, events, results, atr)
     ready = b["ready"]
+    if a.extra:
+        ex = {x["sid"]: x for x in json.load(open(a.extra))}
+        for sid, r in ready.items():
+            x = ex.get(sid)
+            if x:
+                r["zone_src"], r["th_ver"], r["th_state"], r["regime"] = x.get("zone_src"), x.get("th_ver"), x.get("th_state"), x.get("regime")
     ch = chains(ready)
     now = max(float(p["ct"]) for p in plans)
     L: List[str] = []
@@ -201,12 +208,12 @@ def main() -> int:
         P(f"| {k} | {cnt[k]} | {rate(rows)} | {rate(rows, 12 * 3600.0, now)} |")
     aft = [r for r in ch if r["cls"] == "після SL"]
     if aft:
-        P(f"\nПісля SL: той самий рівень SL (±0,05%) у {sum(1 for r in aft if r['same_sl'])} із {len(aft)}; теги підтвердження змінились у {sum(1 for r in aft if r['tags_changed'])} із {len(aft)}.")
+        P(f"\nПісля SL: той самий рівень SL (±0,05%) у {sum(1 for r in aft if r['same_sl'])} із {len(aft)}; теги підтвердження змінились у {sum(1 for r in aft if r['tags_changed'])} із {sum(1 for r in aft if r['tags_changed'] is not None)} (теги відомі лише для планів із gate-знімком).")
         d = sorted(r["since_sl_min"] for r in aft)
         P(f"Час від SL до нового READY: p25 {d[len(d) // 4]:.0f} хв, p50 {d[len(d) // 2]:.0f} хв, p75 {d[3 * len(d) // 4]:.0f} хв (N={len(d)}).")
         P("\n| symbol | напрям | READY | через (хв) | той самий SL | теги змінились | результат нового (lifecycle / 15m) |\n|---|---|---|---|---|---|---|")
         for r in aft[:40]:
-            P(f"| {r['sym'].replace('USDT', '')} | {r['dir']} | {fts(r['ct'])} | {round(r['since_sl_min'])} | {'так' if r['same_sl'] else 'ні'} | {'так' if r['tags_changed'] else 'ні'} | {r['lc'] or '—'} / {r['res'] or '—'} |")
+            P(f"| {r['sym'].replace('USDT', '')} | {r['dir']} | {fts(r['ct'])} | {round(r['since_sl_min'])} | {'так' if r['same_sl'] else 'ні'} | {'—' if r['tags_changed'] is None else 'так' if r['tags_changed'] else 'ні'} | {r['lc'] or '—'} / {r['res'] or '—'} |")
     pairs = Counter((r["sym"], r["dir"]) for r in ch)
     multi = [k for k, v in pairs.items() if v > 1]
     P(f"\nПар symbol+direction з ≥2 READY: {len(multi)} із {len(pairs)}; READY у таких парах: {sum(pairs[k] for k in multi)} із {len(ch)}.")
@@ -267,6 +274,101 @@ def main() -> int:
         m = sorted(abs(r["entry"] - r["sl"]) / r["atr15"] for r in g)
         rw = sum(abs(r["entry"] - r["sl"]) / (abs(r["entry"] - r["sl"]) + abs(r["tp1"] - r["entry"])) for r in g) / len(g) if g else 0.0
         P(f"| {name} | {len(g)} | {rate(g)} | {m[len(m) // 2]:.2f} | {rw * 100:.1f}% |" if g else f"| {name} | 0 | — | — | — |")
+    # ---- 7. Час після SL, після TP, розворот, структурні ознаки
+    P("\n## 7. Повтор: залежність від часу після попередньої ідеї та від «нової інформації»\n")
+    by_pair: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+    for r in ch:
+        by_pair[(r["sym"], r["dir"])].append(r)
+    prev_of: Dict[str, Optional[Dict[str, Any]]] = {}
+    for lst in by_pair.values():
+        lst.sort(key=lambda x: x["ct"])
+        for i, r in enumerate(lst):
+            prev_of[r["sid"]] = lst[i - 1] if i else None
+    NOW = now
+
+    def tbl(title: str, groups: List[Tuple[str, List[Dict[str, Any]]]]) -> None:
+        P(f"\n### {title}\n")
+        P("| Група | N | результат 15m (усі вирішені) | фікс. 12 год | фікс. 24 год |\n|---|---|---|---|---|")
+        for name, rows in groups:
+            P(f"| {name} | {len(rows)} | {rate(rows)} | {rate(rows, 12 * 3600.0, NOW)} | {rate(rows, 24 * 3600.0, NOW)} |")
+
+    aft = [r for r in ch if r["cls"] == "після SL"]
+    bk = [("< 15 хв", lambda m: m < 15), ("15–60 хв", lambda m: 15 <= m < 60), ("1–4 год", lambda m: 60 <= m < 240), ("4–12 год", lambda m: 240 <= m < 720), ("> 12 год", lambda m: m >= 720)]
+    tbl("Нова READY після SL — за часом від SL (контроль: перша READY на пару)",
+        [("перша (контроль)", [r for r in ch if r["cls"] == "перша"])] + [(n, [r for r in aft if f(r["since_sl_min"])]) for n, f in bk])
+    tbl("Після SL: той самий рівень SL (±0,05%)", [("так", [r for r in aft if r["same_sl"]]), ("ні", [r for r in aft if not r["same_sl"]])])
+    tbl("Після SL: теги підтвердження (лише плани з gate-знімком)", [("ті самі", [r for r in aft if r["tags_changed"] is False]), ("змінились", [r for r in aft if r["tags_changed"] is True]), ("невідомо", [r for r in aft if r["tags_changed"] is None])])
+    if any(r.get("th_ver") for r in ready.values()):
+        def same(a_: Dict[str, Any], b_: Optional[Dict[str, Any]], k: str) -> Optional[bool]:
+            if not b_ or not a_.get(k) or not b_.get(k):
+                return None
+            return a_[k] == b_[k]
+        for lbl, k in (("та сама версія тези (th_ver)", "th_ver"), ("ті самі джерела зони (zone_src)", "zone_src")):
+            g_yes = [r for r in aft if same(r, prev_of.get(r["sid"]), k) is True]
+            g_no = [r for r in aft if same(r, prev_of.get(r["sid"]), k) is False]
+            tbl(f"Після SL: {lbl} (є лише для планів 1–4 жовтня)", [("так (нової інформації немає)", g_yes), ("ні (теза/зона змінились)", g_no)])
+    # після TP, розворот напрямку
+    aft_tp = [r for r in ch if r["cls"] == "після TP"]
+    tbl("Нова READY після TP попередньої", [("після TP", aft_tp), ("перша (контроль)", [r for r in ch if r["cls"] == "перша"])])
+    by_sym: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in ready.values():
+        by_sym[r["sym"]].append(r)
+    flip_sl, flip_other = [], []
+    for lst in by_sym.values():
+        lst.sort(key=lambda x: x["ct"])
+        for i, r in enumerate(lst):
+            opp = [x for x in lst[:i] if x["dir"] != r["dir"] and 0 < r["ct"] - x["ct"] <= 24 * 3600]
+            if not opp:
+                continue
+            pv = opp[-1]
+            (flip_sl if outcome_of(pv) == "SL" and pv["t_res"] is not None and pv["t_res"] <= r["ct"] else flip_other).append(r)
+    tbl("Зміна напрямку: протилежна READY по тому ж символу за ≤24 год", [("після SL протилежної", flip_sl), ("інші", flip_other)])
+
+    # ---- 8. Геометрія: стоп%, TP1%, RR, базова ймовірність і надлишок
+    P("\n## 8. Геометрія на всій вибірці: базова ймовірність «TP1 раніше SL» проти фактичної (24 год, офіційна 15m)\n")
+    P("База = середнє r/(r+t) по планах групи (r — відстань до стопу, t — до TP1; випадкове блукання без зносу). Факт — частка TP серед вирішених за 24 год. Надлишок = факт − база. Плани молодші за 24 год не входять.\n")
+    H24 = 24 * 3600.0
+    elig = [r for r in ready.values() if outcome_h(r, H24, now) in ("SL", "TP")]
+    def gline(name: str, rows: List[Dict[str, Any]]) -> None:
+        if not rows:
+            P(f"| {name} | 0 | — | — | — |")
+            return
+        k = sum(1 for r in rows if outcome_h(r, H24, now) == "TP")
+        n = len(rows)
+        rw = sum(abs(r["entry"] - r["sl"]) / (abs(r["entry"] - r["sl"]) + abs(r["tp1"] - r["entry"])) for r in rows) / n
+        lo, hi = wilson(k, n)
+        P(f"| {name} | {n} | {rw * 100:.1f}% | {k / n * 100:.1f}% ({lo * 100:.0f}–{hi * 100:.0f}%) | {(k / n - rw) * 100:+.1f} п.п. |")
+    def rr1(r: Dict[str, Any]) -> float:
+        return abs(r["tp1"] - r["entry"]) / abs(r["entry"] - r["sl"])
+    def tp1p(r: Dict[str, Any]) -> float:
+        return abs(r["tp1"] - r["entry"]) / r["entry"] * 100
+    P("| Група | N (TP/SL за 24 год) | база блукання | факт TP1-first | надлишок |\n|---|---|---|---|---|")
+    gline("усі", elig)
+    for name, lo_, hi_ in (("RR ≤ 1,5", 0, 1.5), ("RR 1,5–3", 1.5, 3), ("RR 3–5", 3, 5), ("RR 5–10", 5, 10), ("RR 10–15", 10, 15), ("RR > 15", 15, 1e9)):
+        gline(name, [r for r in elig if lo_ < rr1(r) <= hi_] if lo_ else [r for r in elig if rr1(r) <= hi_])
+    P("\nКумулятивно (RR вище порога):\n")
+    P("| Група | N | база | факт | надлишок |\n|---|---|---|---|---|")
+    for th in (3, 5, 10, 15):
+        gline(f"RR > {th}", [r for r in elig if rr1(r) > th])
+    P("\nЗа стопом у %:\n")
+    P("| Група | N | база | факт | надлишок |\n|---|---|---|---|---|")
+    for name, lo_, hi_ in (("стоп < 0,5%", 0, 0.5), ("0,5–1%", 0.5, 1.0), ("1–1,5%", 1.0, 1.5), ("1,5–2,5%", 1.5, 2.5), ("2,5–4%", 2.5, 4.0), ("≥ 4%", 4.0, 1e9)):
+        gline(name, [r for r in elig if lo_ <= r["risk"] < hi_])
+    P("\nЗа відстанню до TP1 у %:\n")
+    P("| Група | N | база | факт | надлишок |\n|---|---|---|---|---|")
+    for name, lo_, hi_ in (("TP1 < 3,5%", 0, 3.5), ("3,5–5%", 3.5, 5), ("5–8%", 5, 8), ("≥ 8%", 8, 1e9)):
+        gline(name, [r for r in elig if lo_ <= tp1p(r) < hi_])
+    # навчання/перевірка за часом
+    P("\nПерша половина часу / друга половина (надлишок over baseline, RR>5 проти RR≤5):\n")
+    mid = sorted(r["ct"] for r in elig)[len(elig) // 2] if elig else 0
+    P("| Половина | група | N | база | факт | надлишок |\n|---|---|---|---|---|---|")
+    for hn, hf in (("1-ша", lambda r: r["ct"] < mid), ("2-га", lambda r: r["ct"] >= mid)):
+        for gn, gf in (("RR>5", lambda r: rr1(r) > 5), ("RR≤5", lambda r: rr1(r) <= 5)):
+            rows = [r for r in elig if hf(r) and gf(r)]
+            if rows:
+                k = sum(1 for r in rows if outcome_h(r, H24, now) == "TP")
+                rw = sum(abs(r["entry"] - r["sl"]) / (abs(r["entry"] - r["sl"]) + abs(r["tp1"] - r["entry"])) for r in rows) / len(rows)
+                P(f"| {hn} | {gn} | {len(rows)} | {rw * 100:.1f}% | {k / len(rows) * 100:.1f}% | {(k / len(rows) - rw) * 100:+.1f} п.п. |")
     out = "\n".join(L)
     print(out)
     if a.md:
