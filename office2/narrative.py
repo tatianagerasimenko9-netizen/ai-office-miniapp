@@ -417,7 +417,7 @@ def matched_pairs(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]
                 continue
             t_dec = float(h1["t"][j] + 3600)
             k4, kd = F.last_closed(ctx["h4"], 4 * 3600, t_dec), F.last_closed(ctx["d1"], F.DAY, t_dec)
-            pool.append({"j": j, "t_dec": t_dec, "ph": ph, "minlow": minlow, "imp_atr": best["imp_atr"], "atrp": float(aj / abs(c[j])), "atr_b": float(aj),
+            pool.append({"ih_imp": best["ih"], "j": j, "t_dec": t_dec, "ph": ph, "minlow": minlow, "imp_atr": best["imp_atr"], "atrp": float(aj / abs(c[j])), "atr_b": float(aj),
                          "sess": _session(t_dec), "r4": int(ctx["reg4"][k4]) * int(sg) if k4 >= 0 else 0, "rd": int(ctx["regd"][kd]) * int(sg) if kd >= 0 else 0,
                          "btcb": _btc_bucket(_btc_ret4h(btc, float(h1["t"][j] + 2700)) if (btc and symbol != "BTCUSDT") else None, sg)})
         used = set()
@@ -430,8 +430,8 @@ def matched_pairs(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]
             e_atrp = float(ev["atr_b"] / abs(c[ev["b"]]))
             bestc, bd = None, 1e9
             for cd in pool:
-                if cd["j"] in used or cd["sess"] != e_sess or cd["r4"] != e_r4 or cd["rd"] != e_rd:
-                    continue
+                if cd["j"] in used or cd["ih_imp"] == ev["ih"] or cd["sess"] != e_sess or cd["r4"] != e_r4 or cd["rd"] != e_rd:
+                    continue          # контроль не з тієї ж корекції (бари до майбутнього пробою умовні на нього: зсув; виправлено 05.10 після калібрування N2)
                 ri, ra = cd["imp_atr"] / ev["imp_atr"], cd["atrp"] / e_atrp
                 if not (CALIPER_IMP[0] <= ri <= CALIPER_IMP[1] and CALIPER_ATR[0] <= ra <= CALIPER_ATR[1]):
                     continue

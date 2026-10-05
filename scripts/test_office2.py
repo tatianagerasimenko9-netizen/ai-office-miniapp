@@ -292,6 +292,87 @@ def test_matched_pairs():
     assert len({(r["dir"], round(r["t_entry"])) for r in pr if r["kind"] == "matched"}) == sum(1 for r in pr if r["kind"] == "matched")   # без повторів
 
 
+def test_zone_n2():
+    from office2 import zone as Z
+    from office2 import outcome as O
+    full = synth(260, seed=51, sigma=0.0035)
+    btc = synth(260, seed=52, sigma=0.0035)
+    ctx, bctx = P.build_context(full), P.build_context(btc)
+    st = {}
+    sc = Z.scan("XUSDT", ctx, bctx, Z.ZParams(), st)
+    ev = [e for e in sc["events"] if e["type"] == "EXIT"]
+    assert len(ev) >= 10 and sc["pool"], (st, len(sc["pool"]))
+    for e in ev:
+        f = e["feat"]
+        assert f["k"] >= 1 and f["depth_last"] >= 0 and 0 <= f["close_loc_last"] <= 1 and f["risk_atr"] > 0, f
+        assert sum(f[x] for x in ("shape_range", "shape_down", "shape_up", "shape_conv", "shape_exp", "shape_unk")) == 1.0
+    # без lookahead: усічення даних після моменту рішення не змінює подію
+    T = full["t"][0] + 200 * 86400
+    cut = lambda a: {k: v[: int((T - a["t"][0]) // 60)] for k, v in a.items()}
+    cx, cb = P.build_context(cut(full)), P.build_context(cut(btc))
+    sc2 = Z.scan("XUSDT", cx, cb, Z.ZParams(), {})
+    key = lambda e: (e["type"], e["dir"], e["j"])
+    f1 = {key(e): e["feat"] for e in sc["events"] if e["t_dec"] <= T - 6 * 3600}
+    f2 = {key(e): e["feat"] for e in sc2["events"] if e["t_dec"] <= T - 6 * 3600}
+    assert f1 and set(f1) == set(f2), (len(f1), len(f2), sorted(set(f1) ^ set(f2))[:3])
+    for k_, a in f1.items():
+        for name, val in a.items():
+            assert abs(val - f2[k_][name]) < 1e-6, (k_, name, val, f2[k_][name])
+    # змінність: сконструйована константа відсікається
+    rows = [{"feat": {"a": 1.0, "b": float(i % 7)}} for i in range(100)]
+    rep = {r["feature"]: r for r in Z.variance_report(rows, ("a", "b"))}
+    assert not rep["a"]["usable"] and rep["b"]["usable"]
+    # matched-пари: однакові сесія/режим, пара належить до дня події, контролі без повторів
+    out = Z.build_records("XUSDT", ctx, bctx, Z.ZParams(), {}, 20)
+    byp = {}
+    for r in out["events"] + out["matched"]:
+        if r["pair"]:
+            byp.setdefault(r["pair"], []).append(r)
+    mp = [v for v in byp.values() if len(v) == 2]
+    for v in mp:
+        assert v[0]["day"] == v[1]["day"] and v[0]["dir"] == v[1]["dir"]
+        assert abs(v[1]["risk_atr"] / v[0]["risk_atr"] - 1) < 0.34      # caliper відстані стопу в ATR
+    assert out["events"] and out["random"]
+
+
+def test_outcome_n2():
+    from office2 import outcome as O
+    n = 3000
+    t = np.arange(n, dtype=float) * 60
+    c = np.full(n, 100.0)
+    c[10:] = np.minimum(100 + np.arange(n - 10) * 0.1, 106)
+    m1 = {"t": t, "o": c.copy(), "h": c + .05, "l": c - .05, "c": c, "v": np.ones(n), "tbv": np.ones(n) * .5}
+    r = O.outcome_record(m1, 0, "LONG", 100.0, 98.0, 1.0)
+    assert r["order_2.0"] == "up" and r["g2_outcome"] == "TP" and abs(r["r_gross_g2"] - 2.0) < 1e-9
+    assert abs(r["r_net_g2"] - (2.0 - 0.15 / 2.0)) < 1e-9 and abs(r["risk_atr"] - 2.0) < 1e-9
+    s = O.outcome_record(m1, 0, "SHORT", 100.0, 102.0, 1.0)
+    assert s["order_0.5"] == "down" and s["g2_outcome"] == "SL" and s["r_gross_g2"] == -1.0
+    assert O.outcome_record(m1, 0, "LONG", 100.0, 100.0, 1.0) is None
+
+
+def test_zone_calibration_random_walk():
+    """На випадковому блуканні (без пам'яті) різниця подія − matched-контроль у P(+1R раніше −1R | вирішено) має бути ≈0.
+    Ловить lookahead-зсув контролю (колись контроль брався з тієї ж корекції до майбутньої атаки → зсув −3,7 п.п.)."""
+    from office2 import zone as Z
+    pu = lambda rs: (lambda dec: sum(r["order_1.0"] == "up" for r in dec) / max(len(dec), 1))([r for r in rs if r["order_1.0"] != "none"])
+    diffs = []
+    for seed in range(10):
+        btc = P.build_context(synth(120, seed=9000 + seed, sigma=0.0010, drift_wave=False))
+        ev, ct = [], []
+        for i in range(3):
+            ctx = P.build_context(synth(120, seed=seed * 10 + i, sigma=0.0010, drift_wave=False))
+            o = Z.build_records("X%dUSDT" % i, ctx, btc, Z.ZParams(), {}, 0)
+            ev += o["events"]
+            ct += o["matched"]
+        cb = {c["pair"]: c for c in ct}
+        pe = [e for e in ev if e["pair"] in cb]
+        if len(pe) >= 100:
+            diffs.append(pu(pe) - pu([cb[e["pair"]] for e in pe]))
+    assert len(diffs) >= 8, len(diffs)
+    m, se = float(np.mean(diffs)), float(np.std(diffs) / np.sqrt(len(diffs)))
+    assert abs(m) < max(3 * se, 0.015), (m, se)
+
+
 def test_mirror():
     m = E.mirror({"dir": "SHORT", "entry": 100.0, "sl": 101.0, "tp": 97.0, "trigger": "reclaim"})
     assert m["dir"] == "LONG" and m["sl"] == 99.0 and m["tp"] == 103.0 and m["trigger"] == "mirror"

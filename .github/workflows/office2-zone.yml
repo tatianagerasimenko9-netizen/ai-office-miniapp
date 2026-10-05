@@ -1,0 +1,52 @@
+name: Office 2.0 N2 zone behaviour (1m Binance archive, research only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      d0:
+        description: 'Початок (YYYY-MM-DD)'
+        default: '2025-01-01'
+      d1:
+        description: 'Кінець (YYYY-MM-DD)'
+        default: '2025-12-31'
+      symbols:
+        description: 'Символи через кому (порожньо = стандартний список)'
+        default: ''
+      open_test:
+        description: 'true = відкрити test для ЗАМОРОЖЕНОЇ версії (одноразово, docs/office2/N2_FROZEN.md)'
+        default: 'false'
+  push:
+    branches:
+      - claude/office2-shadow
+    paths:
+      - '.github/workflows/office2-zone.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  zone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install numpy pandas
+      - name: 'Self-test (синтетика; lookahead, калібрування на випадковому блуканні, outcome)'
+        run: python scripts/test_office2.py
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/o2cache
+          key: o2-${{ inputs.d0 || '2025-01-01' }}-${{ inputs.d1 || '2025-12-31' }}-v1
+      - name: N2 replay
+        run: python scripts/office2_zone_run.py --d0 "${{ inputs.d0 || '2025-01-01' }}" --d1 "${{ inputs.d1 || '2025-12-31' }}" --symbols "${{ inputs.symbols || '' }}" ${{ inputs.open_test == 'true' && '--open-test' || '' }} --cache /tmp/o2cache --md /tmp/office2_zone.md | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: office2-zone-results
+          path: /tmp/office2_zone.md
+          if-no-files-found: ignore
+          retention-days: 30
