@@ -89,6 +89,15 @@ def evaluate_pop(pop: str, rows: List[dict], cut: int, phase: str, L: List[str])
     allf = sorted({k for v in fs.values() for k in v})
     cc = [r for r in rows if all(r["X"].get(k, float("nan")) == r["X"].get(k, float("nan")) for k in allf)]
     L.append(f"\n### Популяція {pop}: подій {len(rows)}, повних (усі ознаки, включно з потоком) {len(cc)} ({len(cc) / max(len(rows), 1) * 100:.0f}%)\n")
+    miss = {k: sum(1 for r in rows if r["X"].get(k, float("nan")) != r["X"].get(k, float("nan"))) / max(len(rows), 1) for k in allf}
+    bad = sorted(((v, k) for k, v in miss.items() if v > 0.005), reverse=True)
+    L.append("Частка відсутніх значень за ознаками (>0,5%): " + (", ".join(f"{k} {v * 100:.0f}%" for v, k in bad) or "немає") + "\n")
+    bysym: Dict[str, List[int]] = {}
+    for r in rows:
+        ok = all(r["X"].get(k, float("nan")) == r["X"].get(k, float("nan")) for k in allf)
+        bysym.setdefault(r["symbol"], []).append(0 if ok else 1)
+    worst = sorted(((sum(v) / len(v), k) for k, v in bysym.items()), reverse=True)[:6]
+    L.append("Найгірше покриття за символами (частка неповних): " + ", ".join(f"{k} {v * 100:.0f}%" for v, k in worst) + "\n")
     if phase == "dev":
         days = sorted({r["day"] for r in cc if r["day"] < cut})
         cut2 = days[int(len(days) * 0.6)] if len(days) > 10 else cut
