@@ -100,10 +100,10 @@ def main() -> int:
                      "hr": hr, "sess": "Азія 00–08" if hr < 8 else "Лондон 08–13" if hr < 13 else "NY 13–21" if hr < 21 else "пізній 21–24",
                      "btc30": f(r.get("btc_30m")), "btc4h": f(r.get("btc_4h")), "c30": f(r.get("coin_30m")), "c4h": f(r.get("coin_4h")), "slatr": f(r.get("sl_atr15")),
                      "atrp": f(r.get("atr15_pct")), "sgn": sgn, "tradfi": p["symbol"].replace("USDT", "") in TRADFI, "tie": bool(r.get("tie")),
-                     "ctx_align": p.get("ctx_align"), "ctx_bias": p.get("ctx_bias"), "tags": p.get("confirm_tags"), "expgap": f(p.get("th_exp_gap_min")), "th_state": p.get("th_state"), "regime": p.get("regime"),
+                     "ctx_align": p.get("ctx_align"), "ctx_bias": p.get("ctx_bias"), "tags": p.get("confirm_tags"), "expgap": f(p.get("th_exp_gap_min")), "th_age": f(p.get("th_age_min")), "sim": p.get("sim_outcome"), "sim_t": (ct + float(p["sim_ttr"])) if p.get("sim_ttr") not in (None, "") else None, "th_state": p.get("th_state"), "regime": p.get("regime"),
                      "nzsrc": len([x for x in str(p.get("zone_src") or "").split(",") if x.strip()]), "th_nver": f(p.get("th_nver")), "mfe": f(r.get("mfe")), "mae": f(r.get("mae")),
                      "ttr": (f(r.get("result_at")) - ct) if r.get("result_at") else None, "tp2": p.get("tp2") is not None,
-                     "t_sl": f((r.get("at") or {}).get("SL")), "t_tp1": f((r.get("at") or {}).get("TP1")), "t_entry": f((r.get("at") or {}).get("ENTRY")), "data_end": f(r.get("data_end")), "status": st})
+                     "t_sl": f((r.get("at") or {}).get("SL")), "t_tp1": f((r.get("at") or {}).get("TP1")), "t_entry": f((r.get("at") or {}).get("ENTRY")), "data_end": f(r.get("data_end")), "status": st, "entry_f": e, "sl_f": sl, "tp1_f": tp1})
     P("## Класи (строгий пересчет)\n")
     P("| Клас | N |\n|---|---|")
     for k, v in sorted(cls.items(), key=lambda x: -x[1]):
@@ -256,6 +256,143 @@ def main() -> int:
             hz_table("Режим (thesis)", lambda r: str(r["regime"] or "н/д"))
             hz_table("Скільки джерел зони", lambda r: "н/д" if r["nzsrc"] == 0 else "1" if r["nzsrc"] == 1 else "2" if r["nzsrc"] == 2 else "3+")
             hz_table("Тип інструмента", lambda r: "акції/ETF/сировина" if r["tradfi"] else "крипто")
+
+    # ГОЛОВНА МЕТРИКА: надлишок над геометричною базою = факт TP1-first − середнє r/(r+t); ІВ — кластерний бутстреп за symbol+direction (READY не незалежні)
+    import random
+
+    H24e = 24 * 3600.0
+    res24 = []
+    for r in rows:
+        c = hz_class(r, H24e)
+        if c in ("TP1 першим", "SL першим"):
+            d_ = abs(r["entry_f"] - r["sl_f"])
+            t_ = abs(r["tp1_f"] - r["entry_f"])
+            res24.append((r, 1.0 if c == "TP1 першим" else 0.0, d_ / (d_ + t_) if (d_ + t_) else 0.0))
+
+    def excess(xs: List[Tuple[Dict[str, Any], float, float]]) -> Tuple[float, float, float]:
+        n_ = len(xs)
+        a_ = sum(x[1] for x in xs) / n_
+        b_ = sum(x[2] for x in xs) / n_
+        return a_, b_, a_ - b_
+
+    def cluster_ci(xs: List[Tuple[Dict[str, Any], float, float]], B: int = 300) -> Tuple[float, float]:
+        cl: Dict[str, List[Tuple[Dict[str, Any], float, float]]] = defaultdict(list)
+        for x in xs:
+            cl[x[0]["sym"] + x[0]["dir"]].append(x)
+        keys = list(cl)
+        if len(keys) < 5:
+            return float("nan"), float("nan")
+        rnd = random.Random(7)
+        vals = []
+        for _ in range(B):
+            samp = [x for k in (rnd.choice(keys) for _ in keys) for x in cl[k]]
+            vals.append(excess(samp)[2])
+        vals.sort()
+        return vals[int(B * 0.025)], vals[int(B * 0.975)]
+
+    P("\n## Надлишок над геометричною базою (строгий 1m, горизонт 24 год; кластерний бутстреп за symbol+direction)\n")
+    if len(res24) < 30:
+        P("Недостатньо вирішених планів — НЕ ПЕРЕВІРЕНО.\n")
+    else:
+        nclu = len({x[0]["sym"] + x[0]["dir"] for x in res24})
+        a_, b_, e_ = excess(res24)
+        lo_, hi_ = cluster_ci(res24)
+        P(f"Вирішених планів: {len(res24)}, кластерів symbol+direction: {nclu} (ефективна вибірка ближча до числа кластерів, ніж до числа планів). "
+          f"Факт TP1-first {a_ * 100:.1f}%, база {b_ * 100:.1f}%, надлишок {e_ * 100:+.1f} п.п. (кластерний 95% ІВ {lo_ * 100:+.1f}…{hi_ * 100:+.1f}).\n")
+        tmid = sorted(x[0]["ct"] for x in res24)[len(res24) // 2]
+
+        def ex_table(title: str, key: Callable[[Dict[str, Any]], str], by_dir: bool = False) -> None:
+            P(f"\n### {title}\n")
+            P("| Група | N | факт | база | надлишок (кластер. ІВ) | 1-ша пол. | 2-га пол. |" + (" LONG надл. (N) | SHORT надл. (N) |" if by_dir else "") + "\n|---|---|---|---|---|---|---|" + ("---|---|" if by_dir else ""))
+            g: Dict[str, List[Tuple[Dict[str, Any], float, float]]] = defaultdict(list)
+            for x in res24:
+                g[key(x[0])].append(x)
+            for name in sorted(g):
+                xs = g[name]
+                if len(xs) < 10:
+                    P(f"| {name} | {len(xs)} | замало (<10) | | | | |" + (" | |" if by_dir else ""))
+                    continue
+                a2, b2, e2 = excess(xs)
+                l2, h2 = cluster_ci(xs)
+                h1 = [x for x in xs if x[0]["ct"] < tmid]
+                h2s = [x for x in xs if x[0]["ct"] >= tmid]
+                f1 = f"{excess(h1)[2] * 100:+.1f} (N={len(h1)})" if len(h1) >= 10 else "—"
+                f2 = f"{excess(h2s)[2] * 100:+.1f} (N={len(h2s)})" if len(h2s) >= 10 else "—"
+                ci = "—" if l2 != l2 else f"{l2 * 100:+.1f}…{h2 * 100:+.1f}"
+                line = f"| {name} | {len(xs)} | {a2 * 100:.1f}% | {b2 * 100:.1f}% | {e2 * 100:+.1f} ({ci}) | {f1} | {f2} |"
+                if by_dir:
+                    for dn in ("LONG", "SHORT"):
+                        ds = [x for x in xs if x[0]["dir"] == dn]
+                        line += f" {excess(ds)[2] * 100:+.1f} (N={len(ds)}) |" if len(ds) >= 10 else " — |"
+                P(line)
+
+        ex_table("Напрям", lambda r: r["dir"])
+        ex_table("BTC за 4 год до READY відносно напряму", lambda r: "н/д" if r["btc4h"] is None else ("за напрямом" if r["btc4h"] * r["sgn"] > 0.3 else "проти напряму" if r["btc4h"] * r["sgn"] < -0.3 else "нейтрально"), by_dir=True)
+        ex_table("BTC за 30 хв до READY відносно напряму", lambda r: "н/д" if r["btc30"] is None else ("за напрямом" if r["btc30"] * r["sgn"] > 0.05 else "проти напряму" if r["btc30"] * r["sgn"] < -0.05 else "нейтрально"), by_dir=True)
+        ex_table("Сесія UTC", lambda r: r["sess"], by_dir=True)
+        ex_table("Джерел зони (zone_src)", lambda r: "н/д" if r["nzsrc"] == 0 else "1" if r["nzsrc"] == 1 else "2" if r["nzsrc"] == 2 else "3+", by_dir=True)
+        ex_table("Режим (thesis)", lambda r: str(r["regime"] or "н/д"), by_dir=True)
+        ex_table("Стан тези", lambda r: str(r["th_state"] or "н/д"))
+        ex_table("Теза: свіжа / прострочена", thesis_fresh, by_dir=True)
+        ex_table("Вік тези на момент READY (хв)", lambda r: "н/д" if r["th_age"] is None else "<60" if r["th_age"] < 60 else "60–240" if r["th_age"] < 240 else "240–720" if r["th_age"] < 720 else "≥720")
+        ex_table("Рух монети за 30 хв до READY (в ATR15, у бік угоди)", chase, by_dir=True)
+        ex_table("Стоп у ATR15", lambda r: "н/д" if r["slatr"] is None else "<1,5" if r["slatr"] < 1.5 else "1,5–2,5" if r["slatr"] < 2.5 else "2,5–4" if r["slatr"] < 4 else "≥4", by_dir=True)
+        ex_table("Стоп %", lambda r: "<0,7" if r["risk"] < 0.7 else "0,7–1,2" if r["risk"] < 1.2 else "1,2–2" if r["risk"] < 2 else "2–3" if r["risk"] < 3 else "≥3", by_dir=True)
+        ex_table("TP1% (відстань до цілі)", lambda r: "<3,5" if r["tp1d"] < 3.5 else "3,5–5" if r["tp1d"] < 5 else "5–8" if r["tp1d"] < 8 else "≥8")
+        ex_table("RR до TP1", lambda r: "н/д" if not r["rr1"] else "≤1,5" if r["rr1"] <= 1.5 else "1,5–3" if r["rr1"] <= 3 else "3–5" if r["rr1"] <= 5 else "5–10" if r["rr1"] <= 10 else ">10")
+        ex_table("Повтор тієї ж пари за 24 год", lambda r: "повтор" if rep.get(r["mid"]) else "перша")
+        ex_table("Розмір пачки (READY за ту ж хвилину)", lambda r: "1" if cnt[round(r["ct"] / 60)] == 1 else "2–3" if cnt[round(r["ct"] / 60)] <= 3 else "4+")
+        ex_table("Тип інструмента", lambda r: "акції/ETF/сировина" if r["tradfi"] else "крипто")
+        ex_table("ctx.alignment (лише плани з gate)", lambda r: str(r["ctx_align"] or "н/д"))
+
+    # КОНТРОЛЬ СИМУЛЯТОРА: ті самі плани за строгим 1m і за офіційним 15m (SIGNAL_RESULT) — чи не створює різниця механіка 15m
+    P("\n## Контроль симулятора: строгий 1m проти офіційного 15m на ТИХ САМИХ планах (горизонт 24 год)\n")
+    H24 = 24 * 3600.0
+    both = []
+    for r in rows:
+        c = hz_class(r, H24)
+        if c is None or not r["sim"]:
+            continue
+        both.append((r, c))
+    if not both:
+        P("Немає планів з обома результатами — НЕ ПЕРЕВІРЕНО.\n")
+    else:
+        def off(r: Dict[str, Any]) -> str:
+            if r["sim"] == "STOP":
+                return "SL"
+            if r["sim"] in ("TP1", "TP2", "TP3"):
+                return "TP"
+            return "інше"
+        m: Dict[Tuple[str, str], int] = Counter()
+        for r, c in both:
+            m[(c, off(r))] += 1
+        P(f"Планів з обома результатами: {len(both)}.\n")
+        P("| 1m: що першим | офіційно SL | офіційно TP | офіційно інше (таймаут/не виконано/без результату) |\n|---|---|---|---|")
+        for c in ("TP1 першим", "SL першим", "нічого за горизонт"):
+            P(f"| {c} | {m[(c, 'SL')]} | {m[(c, 'TP')]} | {m[(c, 'інше')]} |")
+        k1 = sum(1 for r, c in both if c == "TP1 першим")
+        s1 = sum(1 for r, c in both if c == "SL першим")
+        k2 = sum(1 for r, c in both if off(r) == "TP" and (r["sim_t"] or 1e18) <= r["ct"] + H24)
+        s2 = sum(1 for r, c in both if off(r) == "SL" and (r["sim_t"] or 1e18) <= r["ct"] + H24)
+        rw = sum(abs(float(r["entry_f"]) - float(r["sl_f"])) / (abs(float(r["entry_f"]) - float(r["sl_f"])) + abs(float(r["tp1_f"]) - float(r["entry_f"]))) for r, _ in both) / len(both) if all("entry_f" in r for r, _ in both) else None
+        P(f"\nСтрогий 1m: TP1 {k1}, SL {s1} → {k1 / max(1, k1 + s1) * 100:.1f}% TP1-first. Офіційний 15m (ті самі плани): TP {k2}, SL {s2} → {k2 / max(1, k2 + s2) * 100:.1f}% TP-first."
+          + (f" Геометрична база: {rw * 100:.1f}%." if rw is not None else ""))
+        # де розходяться: 1m каже TP1 першим, офіційний — SL: той самий 15m-бар?
+        same_bar = other = 0
+        for r, c in both:
+            if c == "TP1 першим" and off(r) == "SL" and r["t_tp1"] is not None and r["sim_t"] is not None:
+                if abs(r["sim_t"] - r["t_tp1"]) <= 900:
+                    same_bar += 1
+                else:
+                    other += 1
+        P(f"\nПлани, де 1m = TP1 першим, а офіційний = SL: у межах 15 хв від TP1 (імовірно один 15m-бар: стоп за правилом «стоп раніше цілі») {same_bar}, пізніше/інакше {other}.")
+        # вхід: різниця моменту входу
+        ent_diff = [(r["t_entry"] - r["ct"]) / 60 for r, c in both if r["t_entry"] is not None]
+        if ent_diff:
+            ent_diff.sort()
+            P(f"Момент входу за 1m після READY: p25 {ent_diff[len(ent_diff) // 4]:.0f} хв, p50 {ent_diff[len(ent_diff) // 2]:.0f} хв, p75 {ent_diff[3 * len(ent_diff) // 4]:.0f} хв (N={len(ent_diff)}).")
+        pre = sum(1 for r, c in both if r["t_entry"] is None)
+        P(f"Планів без входу за 1m: {pre} (не мають результату в строгому replay).\n")
 
     # gate-ознаки лише там, де вони збережені
     g = [r for r in dec if r["ctx_align"] or r["tags"]]
