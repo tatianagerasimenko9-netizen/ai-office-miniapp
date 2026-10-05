@@ -687,6 +687,10 @@ async def send_via_bot_api(
         except Exception as exc:
             # Збій з'єднання/таймаут: для повідомлення з кнопкою повторюємо Bot API (Telethon-запасний шлях кнопки не має — це й губило «Сценарій»).
             last = f"exception: {type(exc).__name__}: {exc}"
+            from office_delivery import is_ambiguous
+
+            if is_ambiguous(last):
+                break   # таймаут/обрив ПІСЛЯ відправки: Telegram міг прийняти — повтор дав би дубль (звірка в office_delivery)
             if attempt < max(0, int(retries)):
                 await asyncio.sleep(1.5 * (attempt + 1))
     return False, last, None
@@ -701,6 +705,7 @@ async def send_via_bot_photo(
     reply_to_message_id: Optional[int] = None,
     message_thread_id: Optional[int] = None,
     reply_markup: Optional[Dict[str, Any]] = None,
+    timeout_sec: float = 45.0,
 ) -> tuple[bool, str, Optional[int]]:
     """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -718,7 +723,7 @@ async def send_via_bot_photo(
     try:
         with open(photo_path, "rb") as fh:
             data.add_field("photo", fh, filename=os.path.basename(photo_path), content_type="image/png")
-            async with session.post(url, data=data) as resp:
+            async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=float(timeout_sec))) as resp:
                 body = await resp.json()
                 if resp.status != 200 or not bool(body.get("ok")):
                     desc = str((body or {}).get("description") or body)
@@ -730,7 +735,7 @@ async def send_via_bot_photo(
                     msg_id = None
                 return True, "ok", msg_id
     except Exception as exc:
-        return False, f"exception: {exc}", None
+        return False, f"exception: {type(exc).__name__}: {exc}", None
 
 
 async def send_via_bot_streaming(
@@ -2600,6 +2605,43 @@ async def run() -> None:
     except Exception:
         agent_bot_usernames = {}
     bot_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12))
+    from office_delivery import DeliveryLedger, ReconcileUnavailable, delivery_key
+
+    _ledger = DeliveryLedger(hold_sec=float(os.getenv("OFFICE_DELIVERY_HOLD_SEC", "120") or 120))
+    _last_out: Dict[str, int] = {"id": 0}   # найбільший відомий id повідомлення Office у чаті (база для звірки)
+
+    def _note_out(mid: Optional[int]) -> None:
+        try:
+            if mid and int(mid) > _last_out["id"]:
+                _last_out["id"] = int(mid)
+        except Exception:
+            pass
+
+    async def _reconcile_msg(text: str, t0: float, photo: bool = False) -> Optional[int]:
+        """Чи повідомлення вже в чаті (після таймауту)? Точний збіг тексту/caption, не раніше t0−10 с; id шукаємо за останнім відомим."""
+        last = _last_out["id"]
+        if not last:
+            raise ReconcileUnavailable("no baseline message id")
+        try:
+            msgs = await client.get_messages(office_entity, ids=list(range(last + 1, last + 61)))
+        except Exception as exc_rc:
+            raise ReconcileUnavailable(f"{type(exc_rc).__name__}: {exc_rc}")
+        want = str(text or "").strip()
+        for m in (msgs if isinstance(msgs, list) else [msgs]):
+            if not m:
+                continue
+            try:
+                if (getattr(m, "message", "") or "").strip() != want:
+                    continue
+                if photo and not getattr(m, "photo", None):
+                    continue
+                dt = getattr(m, "date", None)
+                if dt is not None and dt.timestamp() < t0 - 10:
+                    continue
+                return int(m.id)
+            except Exception:
+                continue
+        return None
     me = await client.get_me()
     owner_user_id: Optional[int] = None
     owner_env = os.getenv("OFFICE_OWNER_USER_ID", "").strip()
@@ -2783,6 +2825,23 @@ async def run() -> None:
                 )
             token = agent_bot_tokens.get(agent_key or "")
             _rel: Dict[str, Any] = {"retries": 2, "timeout_sec": 30.0} if btn_markup else {}
+            _dkey = delivery_key("TXT|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, text_part)
+            _amb = {"v": False}
+
+            async def _api(tok: str, rt: Optional[int]) -> Tuple[bool, str, Optional[int]]:
+                """Bot API через ідемпотентну доставку: неоднозначний таймаут не дає запасної копії (звірка/утримання)."""
+                async def _a() -> Tuple[bool, str, Optional[int]]:
+                    return await send_via_bot_api(bot_http, tok, office_chat_id, text_part, reply_to_message_id=rt, message_thread_id=thread_id, reply_markup=btn_markup, **_rel)
+
+                out = await _ledger.deliver(_dkey, _a, lambda t0: _reconcile_msg(text_part, t0))
+                if out.reconciled or out.suppressed or out.resent_unverified or out.ambiguous:
+                    print(f"[delivery] text {symbol or ''} key={_dkey[:48]} reconciled={out.reconciled} suppressed={out.suppressed} "
+                          f"resent_unverified={out.resent_unverified} ambiguous={out.ambiguous} msg={out.msg_id} stats={_ledger.stats}")
+                if out.ambiguous:
+                    _amb["v"] = True
+                if out.ok:
+                    _note_out(out.msg_id)
+                return out.ok, out.reason, out.msg_id
             # sendMessageDraft ігнорує/кидає форумну тему в корінь «General» —
             # для desk лише sendMessage + thread_id «Загальний».
             if token:
@@ -2798,61 +2857,30 @@ async def run() -> None:
                             reply_to=reply_to,
                         )
                     if not ok:
-                        ok, reason, msg_id = await send_via_bot_api(
-                            bot_http,
-                            token,
-                            office_chat_id,
-                            text_part,
-                            reply_to_message_id=reply_to,
-                            message_thread_id=thread_id,
-                            reply_markup=btn_markup,
-                            **_rel,
-                        )
+                        ok, reason, msg_id = await _api(token, reply_to)
                 except Exception:
-                    ok, reason, msg_id = await send_via_bot_api(
-                        bot_http,
-                        token,
-                        office_chat_id,
-                        text_part,
-                        reply_to_message_id=reply_to,
-                        message_thread_id=thread_id,
-                        reply_markup=btn_markup,
-                            **_rel,
-                    )
+                    ok, reason, msg_id = await _api(token, reply_to)
                 if ok:
                     return msg_id
+                if _amb["v"]:   # Telegram міг прийняти повідомлення: запасних шляхів немає, виклик повторить з тим самим ключем
+                    return None
                 if "message to be replied not found" in str(reason).lower() and reply_to is not None:
-                    ok2, reason2, msg_id2 = await send_via_bot_api(
-                        bot_http,
-                        token,
-                        office_chat_id,
-                        text_part,
-                        reply_to_message_id=None,
-                        message_thread_id=thread_id,
-                        reply_markup=btn_markup,
-                            **_rel,
-                    )
+                    ok2, reason2, msg_id2 = await _api(token, None)
                     if ok2:
                         print(f"[relay][WARN] bot-send reply fallback for {agent_key}: sent without reply_to")
                         return msg_id2
                     reason = f"{reason}; retry_without_reply failed: {reason2}"
                 print(f"[relay][WARN] bot-send failed for {agent_key}: {reason} (fallback user client)")
             if tg_bot_token:
-                ok, reason, msg_id = await send_via_bot_api(
-                    bot_http,
-                    tg_bot_token,
-                    office_chat_id,
-                    text_part,
-                    reply_to_message_id=reply_to,
-                    message_thread_id=thread_id,
-                    reply_markup=btn_markup,
-                            **_rel,
-                )
+                ok, reason, msg_id = await _api(tg_bot_token, reply_to)
                 if ok:
                     return msg_id
+                if _amb["v"]:
+                    return None
                 print(f"[relay][WARN] fallback bot-send failed: {reason} (trying Telethon client)")
             telethon_reply = reply_to if reply_to is not None else thread_id
             sent = await client.send_message(office_entity, text_part[:3900], reply_to=telethon_reply)
+            _note_out(getattr(sent, "id", None))
             try:
                 return int(getattr(sent, "id", 0) or 0) or None
             except Exception:
@@ -2913,17 +2941,29 @@ async def run() -> None:
             base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
         )
         if token:
-            ok, reason, msg_id = await send_via_bot_photo(
-                bot_http,
-                token,
-                office_chat_id,
-                photo_path,
-                caption=cap,
-                reply_to_message_id=reply_to_message_id,
-                message_thread_id=thread_id,
-                reply_markup=photo_btn,
-            )
+            _dk = delivery_key("PHOTO|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, "" if scenario_id else cap)
+
+            async def _photo_attempt():
+                return await send_via_bot_photo(
+                    bot_http,
+                    token,
+                    office_chat_id,
+                    photo_path,
+                    caption=cap,
+                    reply_to_message_id=reply_to_message_id,
+                    message_thread_id=thread_id,
+                    reply_markup=photo_btn,
+                )
+
+            _out = await _ledger.deliver(_dk, _photo_attempt, lambda t0: _reconcile_msg(cap, t0, photo=True))
+            ok, reason, msg_id = _out.ok, _out.reason, _out.msg_id
+            if _out.reconciled or _out.suppressed or _out.resent_unverified or _out.ambiguous:
+                print(f"[delivery] photo {symbol or ''} key={_dk[:48]} reconciled={_out.reconciled} suppressed={_out.suppressed} "
+                      f"resent_unverified={_out.resent_unverified} ambiguous={_out.ambiguous} msg={_out.msg_id} stats={_ledger.stats}")
+            if _out.ambiguous:   # Telegram міг прийняти: без запасної копії; виклик лишить доставку «непідтвердженою» і повторить із цим же ключем
+                return None
             if ok:
+                _note_out(msg_id)
                 return msg_id
             if reply_to_message_id and "message to be replied not found" in str(reason).lower():
                 ok, reason, msg_id = await send_via_bot_photo(
@@ -2936,6 +2976,7 @@ async def run() -> None:
                     reply_markup=photo_btn,
                 )
                 if ok:
+                    _note_out(msg_id)
                     print("[relay][WARN] photo reply root missing: sent without reply_to")
                     return msg_id
             print(f"[relay][WARN] photo send failed: {reason}")
@@ -2946,6 +2987,7 @@ async def run() -> None:
                 caption=cap,
                 reply_to=reply_to_message_id or thread_id,
             )
+            _note_out(getattr(sent, "id", None))
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
             print(f"[relay][WARN] photo telethon failed: {exc}")

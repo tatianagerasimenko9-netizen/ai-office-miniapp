@@ -78,6 +78,16 @@ from office_bridge import log_event  # noqa: E402
 ev = [e for e in T._events(db, T.EV_PLAN) if e["p"]["scenario_id"] == "SCN|ZZZ|LONG|H1|x"][0]["p"]
 log_event(db, T.EV_RESULT, {"scenario_id": ev["scenario_id"], "confirmed_ts": ev["confirmed_ts"], "outcome": "STOP"}, ev["scenario_id"])
 assert not RC.find_duplicate(db, symbol=sym, direction="LONG", entry=10.05)
+# KAITO 05.10: 15m-SIGNAL_RESULT оголосив результат, але lifecycle 1m показує ENTRY без SL/TP → ідея ще в позиції, дубль блокується
+sym = "KTUSDT"
+plan("SCN|KT|LONG|H1|k1", sym, "LONG", 10.0, 9.8, 10.4, 10.7)
+evk = [e for e in T._events(db, T.EV_PLAN) if e["p"]["scenario_id"] == "SCN|KT|LONG|H1|k1"][0]["p"]
+log_event(db, T.EV_RESULT, {"scenario_id": evk["scenario_id"], "confirmed_ts": evk["confirmed_ts"], "outcome": "STOP"}, evk["scenario_id"])
+assert not RC.find_duplicate(db, symbol=sym, direction="LONG", entry=10.05)                      # без lifecycle: завершена (як раніше)
+log_event(db, T.EV_MILESTONE, {"scenario_id": evk["scenario_id"], "confirmed_ts": evk["confirmed_ts"], "level": "ENTRY"}, evk["scenario_id"])
+assert RC.find_duplicate(db, symbol=sym, direction="LONG", entry=10.05)                          # ENTRY є, SL ще ні → відкрита
+log_event(db, T.EV_MILESTONE, {"scenario_id": evk["scenario_id"], "confirmed_ts": evk["confirmed_ts"], "level": "SL"}, evk["scenario_id"])
+assert not RC.find_duplicate(db, symbol=sym, direction="LONG", entry=10.05)                      # SL у lifecycle → завершена, нова ідея проходить (без cooldown)
 # відхилений план і недоставлений не рахуються
 plan("SCN|RJ|LONG|H1|r", "RJUSDT", "LONG", 5.0, 4.9, 5.2, 5.3, rejected=True)
 assert not RC.find_duplicate(db, symbol="RJUSDT", direction="LONG", entry=5.0)
