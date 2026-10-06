@@ -498,6 +498,116 @@ def test_risk_manager():
     assert pf["rejected"].get("repeat_after_sl") == 1
 
 
+def _fake_klines_getter(series):
+    """Імітація fapi klines з синтетичних 1m: повертає також бар, що ФОРМУЄТЬСЯ (як біржа), і майбутнє, якщо leak=True у series['leak']."""
+    W = {"1m": 60, "15m": 900, "4h": 4 * 3600, "1d": 86400, "1w": 7 * 86400}
+
+    memo = {}
+
+    def get(url, params):
+        sym, iv, lim = params["symbol"], params["interval"], int(params["limit"])
+        a = series[sym]
+        w = W[iv]
+        if (sym, iv) not in memo:
+            memo[(sym, iv)] = a if iv == "1m" else F.resample(a, w, offset=F.WEEK_OFFSET if iv == "1w" else 0)
+        bars = memo[(sym, iv)]
+        now = series["_now"]()
+        rows = []
+        tt = bars["t"]
+        lo = int(np.searchsorted(tt, params["startTime"] / 1000.0, side="left")) if "startTime" in params else max(0, int(np.searchsorted(tt, now, side="right")) - lim - 1)
+        hi = min(len(tt), int(np.searchsorted(tt, now, side="right")) + (10 if series.get("leak") else 0))   # біржа не знає майбутнього; бар, що формується (t0 ≤ now < t0+w), віддається
+        if "startTime" in params:
+            hi = min(hi, lo + lim)
+        for i in range(lo, hi):
+            t0 = float(tt[i])
+            rows.append([int(t0 * 1000), str(bars["o"][i]), str(bars["h"][i]), str(bars["l"][i]), str(bars["c"][i]), str(bars["v"][i]), int((t0 + w) * 1000 - 1), "0", 1, str(bars["tbv"][i])])
+        if "startTime" in params:
+            return rows[:lim]
+        return rows[-(lim + (10 if series.get("leak") else 0)):]   # у режимі leak вікно містить на 10 майбутніх барів більше, а історія та сама
+    return get
+
+
+def test_live_shadow():
+    import tempfile
+    from office2 import live as L
+    import office_bridge as OB
+    days = 90
+    base = synth(days, seed=71, sigma=0.0035)
+    series = {"BTCUSDT": synth(days, seed=72, sigma=0.0035), "ETHUSDT": synth(days, seed=73, sigma=0.0035), "XUSDT": base,
+              "AUSDT": synth(days, seed=74, sigma=0.0035), "BUSDT": synth(days, seed=75, sigma=0.0035), "CUSDT": synth(days, seed=76, sigma=0.0035),
+              "DUSDT": synth(days, seed=77, sigma=0.0035)}
+    t_end = float(base["t"][-1]) + 60
+    clock = {"now": t_end - 20 * 86400}
+    series["_now"] = lambda: clock["now"]
+    syms = [k for k in series if not k.startswith("_")]
+    with tempfile.TemporaryDirectory() as td:
+        db = str(Path(td) / "o2.db")
+        OB.init_office_db(db)
+        L.init_db(db)
+        feed = L.Feed(_fake_klines_getter(series), pause=0)
+        st = {"last_plan_id": L.last_event_id(db)}
+        n_ev = 0
+        now = clock["now"] // 900 * 900
+        for k in range(300):
+            now += 900
+            clock["now"] = now + 20
+            res = L.cycle(db, feed, now, st, syms)
+            n_ev += res["events"]
+            assert res["states"] == len(syms)
+        assert n_ev >= 1, "кандидатів не знайдено на 300 барах з sigma=0.35%"
+        rows = OB._fetchall(db, "SELECT kind, decision, direction, entry, sl, tp, snapshot_json, ts_epoch FROM office2_shadow_event WHERE kind = 'O2_CANDIDATE'")
+        assert rows and all(r[1] == L.OBS_ONLY for r in rows)           # без GATE рішення завжди OBSERVE, не READY2
+        import json as _json
+        for kind, dec, d, e, sl, tp, sj, ts in rows:
+            snap = _json.loads(sj)
+            assert snap["state"]["bar_close_ts"] <= ts + 1               # знімок не бачить барів після моменту рішення
+            assert (d == "LONG" and sl < e < tp) or (d == "SHORT" and tp < e < sl)
+            for key in ("market", "relative", "structural_invalidation", "targets", "risk", "old_lev", "version", "source"):
+                assert key in snap, key
+        # ЖОДНОГО lookahead: годуємо «з майбутнім» і порівнюємо збережений стан того ж моменту
+        db2 = str(Path(td) / "o2b.db")
+        OB.init_office_db(db2)
+        L.init_db(db2)
+        probe_now = now
+        clock["now"] = probe_now + 20
+        db1 = str(Path(td) / "o2a.db")
+        OB.init_office_db(db1)
+        L.init_db(db1)
+        L.cycle(db1, L.Feed(_fake_klines_getter(series), pause=0), probe_now, {"last_plan_id": 0}, syms)   # свіжий кеш без «майбутнього»
+        series["leak"] = True
+        feed2 = L.Feed(_fake_klines_getter(series), pause=0)
+        L.cycle(db2, feed2, probe_now, {"last_plan_id": 0}, syms)
+        a = OB._fetchall(db1, "SELECT symbol, payload_json FROM office2_shadow_state WHERE ts_epoch = ? ORDER BY symbol", (int(probe_now),))
+        b = OB._fetchall(db2, "SELECT symbol, payload_json FROM office2_shadow_state WHERE ts_epoch = ? ORDER BY symbol", (int(probe_now),))
+        if a != b and a and b:
+            ja, jb = _json.loads(a[0][1]), _json.loads(b[0][1])
+            print("DIFF", a[0][0], {k: (ja[k], jb.get(k)) for k in ja if ja[k] != jb.get(k)})
+        assert a and a == b, "стан залежить від майбутніх барів"
+        series["leak"] = False
+        # нове рішення старого Лева → подія OLD_LEV зі знімком Office2
+        OB.log_event(db, "SIGNAL_PLAN", {"scenario_id": "S1", "symbol": "XUSDT", "direction": "LONG", "tf": "H1", "entry": float(base["c"][-3000]), "sl": float(base["c"][-3000]) * 0.98,
+                                         "tp1": float(base["c"][-3000]) * 1.03, "confirmed_ts": now, "valid_until_ts": now + 3600, "rejected": False}, "S1")
+        res = L.cycle(db, feed, now + 900, st, syms)
+        assert res["old_lev"] == 1
+        r = OB._fetchone(db, "SELECT decision, snapshot_json FROM office2_shadow_event WHERE kind = 'OLD_LEV'")
+        assert r[0] == "OLD_LEV_READY" and _json.loads(r[1])["office2_decision"] == L.OBS_ONLY
+        # наслідки: після 48 год дорахунок за 1m; майбутнє лише в outcome
+        clock["now"] = t_end
+        before = OB._fetchone(db, "SELECT COUNT(*) FROM office2_shadow_outcome")[0]
+        done = L.resolve_outcomes(db, feed, t_end, limit=50)
+        after = OB._fetchone(db, "SELECT COUNT(*) FROM office2_shadow_outcome")[0]
+        assert done >= 1 and after == before + done
+        oj = OB._fetchone(db, "SELECT outcome_json, status FROM office2_shadow_outcome WHERE status = 'COMPLETE' LIMIT 1")
+        o = _json.loads(oj[0])
+        assert "r_net_g2" in o and "mfe_r_48" in o and "own_target" in o
+        # повторний цикл на тому ж барі не дублює (ідемпотентність)
+        n1 = OB._fetchone(db, "SELECT COUNT(*) FROM office2_shadow_event")[0]
+        L.cycle(db, feed, now, {"last_plan_id": 10**9}, syms)
+        assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_shadow_event")[0] == n1
+    assert L.enabled() is False                                            # за замовчуванням вимкнено
+    assert L.start_background("x") is False
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

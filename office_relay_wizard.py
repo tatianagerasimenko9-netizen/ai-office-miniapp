@@ -2511,6 +2511,15 @@ async def run() -> None:
         or "office_bridge.db"
     )
 
+    # Office 2.0 SHADOW: пасивний спостерігач (окремі таблиці, без Telegram, не впливає на рішення Лева). Лише за OFFICE2_SHADOW=1.
+    try:
+        from office2 import live as _office2_live
+
+        if _office2_live.start_background(db_path):
+            print("[relay] office2 shadow: потік запущено (спостереження, без сигналів)")
+    except Exception as exc_o2:  # noqa: BLE001
+        print(f"[relay] office2 shadow не запущено: {exc_o2!r}")
+
     client = TelegramClient(session_name, api_id, api_hash)
     while True:
         try:
