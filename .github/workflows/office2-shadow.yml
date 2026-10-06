@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install numpy pandas
+      - run: python -m pip install numpy pandas -r requirements.txt
       - name: 'Self-test (синтетика, без мережі; lookahead, first-touch, калібрування, Risk Manager)'
         run: python scripts/test_office2.py
       - uses: actions/cache@v4

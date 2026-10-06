@@ -35,7 +35,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install numpy pandas
+      - run: python -m pip install numpy pandas -r requirements.txt
       - name: 'Self-test (синтетика; lookahead, калібрування на випадковому блуканні, outcome)'
         run: python scripts/test_office2.py
       - uses: actions/cache@v4
