@@ -94,13 +94,17 @@ def save_scenario(db: str, sym: str, th: Dict[str, Any], state: str, now: float,
 
 # ------------------------------------------------------------------ портфельний ризик
 def open_signals(db: str, now: float) -> List[Dict[str, Any]]:
-    """Доставлені Office2-сигнали, що ще живі: строк не вийшов і немає SL/TP3 у lifecycle."""
+    """ЄМНІСТЬ СЦЕНАРІЇВ Office2 (скільки сценаріїв Office показує одночасно), а НЕ особистий ризик власниці: той починається лише після «Я відкрила угоду».
+    Рахуємо лише реально живі: ДОСТАВЛЕНІ (строк не вийшов, немає SL/TP3/EXPIRED у lifecycle) і свіжі PENDING, що ще чекають доставки (≤ STALE_PENDING_SEC).
+    SUPPRESSED, а також PENDING, які вчасно не доставлені (призраки), місця не займають."""
     from office_bridge import _fetchall
+    from office2.delivery import STALE_PENDING_SEC
 
-    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal WHERE status IN ('DELIVERED','PENDING') AND valid_until_ts > ?", (now,))
+    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal "
+                         "WHERE valid_until_ts > ? AND (status = 'DELIVERED' OR (status = 'PENDING' AND created_ts > ?))", (now, now - STALE_PENDING_SEC))
     done = set()
     try:
-        for (sid,) in _fetchall(db, "SELECT DISTINCT signal_id FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' AND (payload_json LIKE '%\"level\": \"SL\"%' OR payload_json LIKE '%\"level\": \"TP3\"%')"):
+        for (sid,) in _fetchall(db, "SELECT DISTINCT signal_id FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' AND (payload_json LIKE '%\"level\": \"SL\"%' OR payload_json LIKE '%\"level\": \"TP3\"%' OR payload_json LIKE '%\"level\": \"EXPIRED\"%')"):
             done.add(sid)
     except Exception:  # noqa: BLE001
         pass
@@ -133,11 +137,11 @@ def portfolio_gate(db: str, sym: str, direction: str, lvl_key: Optional[str], no
     op = open_signals(db, now)
     risk_open = len(op) * cfg.risk_usd
     if risk_open + cfg.risk_usd > cfg.max_open_risk_usd:
-        return f"сукупний відкритий ризик {risk_open + cfg.risk_usd:.0f}$ > {cfg.max_open_risk_usd:.0f}$"
+        return f"ємність сценаріїв Office2: {risk_open + cfg.risk_usd:.0f}$ > {cfg.max_open_risk_usd:.0f}$ (не твій особистий ризик)"
     cl = RK.cluster_of(sym)
     same_cluster = [o for o in op if RK.cluster_of(o["symbol"]) == cl]
     if (len(same_cluster) + 1) * cfg.risk_usd > cfg.max_cluster_open_risk_usd:
-        return f"ризик кластера {cl} {(len(same_cluster) + 1) * cfg.risk_usd:.0f}$ > {cfg.max_cluster_open_risk_usd:.0f}$"
+        return f"ємність сценаріїв кластера {cl}: {(len(same_cluster) + 1) * cfg.risk_usd:.0f}$ > {cfg.max_cluster_open_risk_usd:.0f}$ ({len(same_cluster)} активних сценаріїв Office2; не твій особистий ризик)"
     if cl == "ALT" and sum(1 for o in same_cluster if o["direction"] == direction) + 1 > cfg.max_same_direction_alts:
         return f"вже {cfg.max_same_direction_alts} альтів у напрямі {direction}"
     if any(o["symbol"] == sym for o in op):
@@ -234,7 +238,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
             lvl_key = f"{sym}|{th['dir']}|{round(float((th.get('level') or {}).get('p') or th.get('trigger_level') or 0), 6)}"
             deny = portfolio_gate(db, sym, th["dir"], lvl_key, now)
             if deny:
-                th = dict(th, state="NO_TRADE", reason="портфельний ризик: " + deny)
+                th = dict(th, state="NO_TRADE", reason="ємність сценаріїв: " + deny)
                 save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
                 res["no_trade"] += 1
                 continue
