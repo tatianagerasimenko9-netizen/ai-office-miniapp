@@ -13,10 +13,20 @@ def _rng(vals: List[float]) -> List[float]:
     return [min(vals), max(vals)]
 
 
-def level_view(entry: float, trigger: Optional[float], sl: float, targets: List[Dict[str, Any]]) -> Dict[str, Any]:
+def zone_of(th: Dict[str, Any]) -> List[float]:
+    """Зона входу тези: brain v2 — entry_zone (OTE ∪ OB/FVG); brain v1 — від READY-ціни до рівня тригера."""
+    entry = float(th["entry"])
+    ez = th.get("entry_zone")
+    if ez and len(ez) == 2:
+        return [min(float(ez[0]), float(ez[1]), entry), max(float(ez[0]), float(ez[1]), entry)]
+    trig = float(th["trigger_level"]) if th.get("trigger_level") is not None else entry
+    return [min(entry, trig), max(entry, trig)]
+
+
+def level_view(entry: float, trigger: Optional[float], sl: float, targets: List[Dict[str, Any]], zone: Optional[List[float]] = None) -> Dict[str, Any]:
     entry, sl = float(entry), float(sl)
     trig = float(trigger) if trigger is not None else entry
-    lo, hi = min(entry, trig), max(entry, trig)
+    lo, hi = (min(zone), max(zone)) if zone else (min(entry, trig), max(entry, trig))
     ends = [entry] if lo == hi else [lo, hi]
     ends = [e for e in ends if e > 0 and abs(e - sl) > 0]
     out_t = []
@@ -29,7 +39,7 @@ def level_view(entry: float, trigger: Optional[float], sl: float, targets: List[
 
 def view_from_thesis(th: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     try:
-        return level_view(th["entry"], th.get("trigger_level"), th["sl"], th.get("targets") or [])
+        return level_view(th["entry"], th.get("trigger_level"), th["sl"], th.get("targets") or [], zone_of(th) if th.get("entry_zone") else None)
     except (KeyError, TypeError, ValueError):
         return None
 

@@ -2,6 +2,9 @@
 """Office 2.0 LIVE BETA: мозок (теза A/B, структурний SL, цілі, no-chase), відсутність lookahead, стани WATCH→WAIT→READY, портфельний ризик, outbox,
 доставка (Telegram-картка + запис плану), lifecycle (TP/SL), ідемпотентність і рестарт. Без мережі."""
 import asyncio
+import os
+
+os.environ["OFFICE2_BRAIN"] = "1"   # цей файл тестує brain v1 (thesis A/B); brain v2 — у test_office2_brain2.py
 import json
 import sys
 import tempfile

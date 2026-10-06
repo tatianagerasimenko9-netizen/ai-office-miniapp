@@ -174,6 +174,23 @@ class Feed:
         return arr
 
 
+def _flow_hook(sym: str):
+    """OI / funding / L:S / ліквідації — RESEARCH-факти лише для кандидата READY (мережа; будь-яка помилка → «недоступно»)."""
+    def _go() -> Dict[str, Any]:
+        import office_market_data as MD
+
+        out: Dict[str, Any] = {}
+        for key, fn in (("funding", MD.fetch_funding_rate), ("long_short", MD.fetch_long_short_ratio), ("liquidations", MD.fetch_liquidations_proxy)):
+            try:
+                r = fn(sym)
+                if r and not (isinstance(r, dict) and r.get("error")):
+                    out[key] = r
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+    return _go
+
+
 def build_ctx(feed: Feed, sym: str, now: float) -> Optional[Dict[str, Any]]:
     m15 = feed.klines(sym, "15m", now)
     h4 = feed.klines(sym, "4h", now)
@@ -392,7 +409,8 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             try:
                 from office2 import engine as EN
 
-                lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, lambda: old_lev_state(db, sym, now))   # старий Лев читається ліниво: лише при READY (LIKE по office_events дорогий)
+                lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, lambda: old_lev_state(db, sym, now),
+                                    flow_fetch=_flow_hook(sym), m5_fetch=lambda sym=sym: feed.klines(sym, "5m", now, limit=60))   # старий Лев читається ліниво: лише при READY (LIKE по office_events дорогий)
                 res["live"] = {k: res.get("live", {}).get(k, 0) + v for k, v in lv.items()}
             except Exception as exc:  # noqa: BLE001
                 _bump("errors")
