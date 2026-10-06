@@ -339,6 +339,18 @@ def test_live_cycle_integration_engine_on():
         os.environ.pop("OFFICE2_LIVE", None)
 
 
+def test_relay_delivery_task_has_all_names():
+    """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
+    import ast
+
+    src = Path(__file__).resolve().parent.parent.joinpath("office_relay_wizard.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "monitor_office2_delivery")
+    body = ast.get_source_segment(src, fn)
+    assert "from office_market_data import fetch_candles as _o2_fetch" in body and "fetch_candles, _o2card" not in body
+    assert "deliver_pending(db_path, send_proactive, _o2_fetch," in body
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):
