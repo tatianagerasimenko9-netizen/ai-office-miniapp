@@ -691,6 +691,55 @@ def _btc_cached() -> dict:
     return dict(v) if isinstance(v, dict) else _null_btc()
 
 
+_SUMMARY_CACHE: dict = {}
+_SUMMARY_LOCK = __import__("threading").Lock()
+_SUMMARY_FRESH_SEC = 4.0      # свіжіше — віддаємо як є
+_SUMMARY_MAX_STALE_SEC = 120.0  # старіше — рахуємо синхронно (щоб не показувати застарілі дані довго)
+
+
+def _summary_compute(key: tuple) -> bytes:
+    sym, act, agt, chart, kind = key
+    t0 = time.time()
+    data = get_data(symbol_filter=sym, action_filter=act, agent_filter=agt, chart_symbol=chart)
+    if kind == "office_state":
+        data = {"now_utc": data.get("now_utc"), "desk_state": data.get("desk_state"), "db_identity": data.get("db_identity")}
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    dt = time.time() - t0
+    if dt > 2.0:
+        print(f"[summary] get_data {dt:.1f} с (key={kind}/{bool(sym or act or agt or chart)}) — повільно; HTTP відповідає з кешу", flush=True)
+    with _SUMMARY_LOCK:
+        _SUMMARY_CACHE[key] = {"ts": time.time(), "body": body, "busy": False}
+        if len(_SUMMARY_CACHE) > 48:   # довільні query-параметри не роздувають пам'ять
+            for k_ in sorted(_SUMMARY_CACHE, key=lambda x: _SUMMARY_CACHE[x]["ts"])[:16]:
+                _SUMMARY_CACHE.pop(k_, None)
+    return body
+
+
+def _summary_refresh(key: tuple) -> None:
+    try:
+        _summary_compute(key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[summary] фонове оновлення не вдалось: {type(exc).__name__}: {str(exc)[:120]}", flush=True)
+        with _SUMMARY_LOCK:
+            ent = _SUMMARY_CACHE.get(key)
+            if ent:
+                ent["busy"] = False
+
+
+def summary_body(key: tuple) -> bytes:
+    """/api/summary (він же health-check Render, ліміт 5 с): HTTP НІКОЛИ не чекає на БД, якщо є кеш. Кожен get_data відкриває кілька Postgres-з'єднань
+    (кожне 0,1–3 с), тож сума інколи > 5 с. Свіже (<4 с) — віддаємо; старіше — віддаємо кеш і оновлюємо в одному фоновому потоці (single-flight); без кешу/дуже старе — рахуємо синхронно."""
+    now = time.time()
+    with _SUMMARY_LOCK:
+        ent = _SUMMARY_CACHE.get(key)
+        if ent and now - ent["ts"] <= _SUMMARY_MAX_STALE_SEC:
+            if now - ent["ts"] > _SUMMARY_FRESH_SEC and not ent["busy"]:
+                ent["busy"] = True
+                __import__("threading").Thread(target=_summary_refresh, args=(key,), daemon=True, name="summary-refresh").start()
+            return ent["body"]
+    return _summary_compute(key)
+
+
 def build_live_state(
     *,
     summary_events: list | None = None,
@@ -1351,19 +1400,8 @@ class Handler(BaseHTTPRequestHandler):
                 v = qs.get(name)
                 return (v[0] if v else "").strip()
 
-            data = get_data(
-                symbol_filter=_first("symbol"),
-                action_filter=_first("action"),
-                agent_filter=_first("agent"),
-                chart_symbol=_first("chart"),
-            )
-            if u.path == "/api/office_state":
-                data = {
-                    "now_utc": data.get("now_utc"),
-                    "desk_state": data.get("desk_state"),
-                    "db_identity": data.get("db_identity"),
-                }
-            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            key = (_first("symbol"), _first("action"), _first("agent"), _first("chart"), "office_state" if u.path == "/api/office_state" else "summary")
+            body = summary_body(key)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1584,6 +1622,7 @@ def main() -> None:
     if (not _is_pg()) and (not os.path.exists(DB_PATH)):
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    __import__("threading").Thread(target=_summary_refresh, args=(("", "", "", "", "summary"),), daemon=True, name="summary-warm").start()   # перший health-check не чекає на БД
     print(f"mini-app: http://{HOST}:{PORT}")
     srv.serve_forever()
 
