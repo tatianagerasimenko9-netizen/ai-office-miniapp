@@ -615,15 +615,16 @@ def test_btc_case_noise_stop_and_room_to_first_real_target_are_no_trade():
     d = B.decide(tight, ctx, now)
     assert d["state"] == "NO_TRADE" and "всередині нормального шуму" in d["reason"] and d["quality"]["risk_atr15"] < 1.0, d
     risk = entry - float(base["sl"])
-    real_levels = [{"p": entry + 0.7 * risk, "side": "high", "kind": "NEW_YORK_H", "known": 0.0, "strength": 1}, {"p": entry + 3.0 * risk, "side": "high", "kind": "PDH", "known": 0.0, "strength": 2}]
+    real_levels = [{"p": entry + 0.7 * risk, "side": "high", "kind": "PDH", "known": 0.0, "strength": 1}, {"p": entry + 3.0 * risk, "side": "high", "kind": "PDH", "known": 0.0, "strength": 2}]
     orig = B.all_levels
     try:
         B.all_levels = lambda c, n: real_levels
         d2 = B.decide(dict(base), ctx, now)
-        assert d2["state"] == "NO_TRADE" and "до першої реальної цілі NEW_YORK_H" in d2["reason"] and abs(d2["quality"]["first_target_r"] - 0.7) < 1e-6, d2
-        B.all_levels = lambda c, n: [dict(real_levels[0], kind="M15SW"), real_levels[1]]   # дрібний M15-свінг — не перешкода
-        d3 = B.decide(dict(base), ctx, now)
-        assert d3["state"] == "READY" and d3["targets"][0]["kind"] == "PDH", d3
+        assert d2["state"] == "NO_TRADE" and "до першої реальної цілі PDH" in d2["reason"] and abs(d2["quality"]["first_target_r"] - 0.7) < 1e-6, d2
+        for minor in ("M15SW", "NEW_YORK_H", "H1SW"):      # дрібні/сесійні рівні перед TP1 — не блокують (лише у trace)
+            B.all_levels = lambda c, n, minor=minor: [dict(real_levels[0], kind=minor), dict(real_levels[1], p=entry + 3.0 * risk)]
+            d3 = B.decide(dict(base), ctx, now)
+            assert d3["state"] == "READY" and d3["targets"][0]["kind"] == "PDH" and d3["obstacles_before_tp1"], (minor, d3)
     finally:
         B.all_levels = orig
 
