@@ -213,7 +213,7 @@ def test_delivery_end_to_end_and_lifecycle():
         n = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: _candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
         assert n == 1 and len(sent.calls) == 1
         ev, text, kw = sent.calls[0]
-        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "READY:" in text and "Стоп:" in text and "TP1:" in text and "Ризик: 10 $" in text and "⏳ до" in text
+        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "READY:" in text and "SL:" in text and "TP1:" in text and "Ризик: 10 $" in text and "⏳ до" in text
         assert not AG.text_grants_entry(text) and not AG.text_instructs_position_change(text), text      # проходить той самий Telegram-шлюз, що й старий READY
         assert kw["intent"] == "CONFIRM" and kw["kind"] == "CONFIRM" and kw["canonical_id"].startswith("O2|")
         assert kw["photo_path"] and Path(kw["photo_path"]).exists()                                        # реальний chart
@@ -451,7 +451,7 @@ def test_entry_zone_semantics_telegram_and_miniapp_agree():
     snap = _sol_snap()
     cap = DL.build_caption(snap)
     assert "READY: 120,99" in cap and "Зона входу: 120,99–121,53" in cap, cap
-    assert "Вхід:" not in cap and "Стоп: 122,02 (−0,40…−0,85%)" in cap, cap
+    assert "Вхід:" not in cap and "SL: 122,02 · ризик 0,40–0,85%" in cap, cap
     v = LVL.view_from_thesis(snap["thesis"])
     assert v["ready_price"] == 120.99 and v["zone"] == [120.99, 121.53]
     assert abs(v["sl_pct"][1] - (122.02 - 120.99) / 120.99 * 100) < 1e-9 and abs(v["sl_pct"][0] - (122.02 - 121.53) / 121.53 * 100) < 1e-9
@@ -461,7 +461,7 @@ def test_entry_zone_semantics_telegram_and_miniapp_agree():
     # без зони (тригер = READY-ціна): одне число, без діапазонів
     th2 = dict(snap["thesis"], trigger_level=120.99)
     cap2 = DL.build_caption(dict(snap, thesis=th2))
-    assert "Зона входу" not in cap2 and "Стоп: 122,02 (−0,85%)" in cap2 and "…" not in cap2, cap2
+    assert "Зона входу" not in cap2 and "SL: 122,02 · ризик 0,85%" in cap2 and "…" not in cap2, cap2
     # Mini App отримує ті самі числа з того самого модуля
     from office2 import webview as WV
     import office_bridge as OB
@@ -525,6 +525,54 @@ def test_runtime_guard_and_delivery_timing():
     for k in ("pickup_s", "late_check_s", "fetch_s", "render_s", "send_s", "emit_to_sent_s"):
         assert k in dsrc, k
     assert "emitted_wall_ts" in root.joinpath("office2", "engine.py").read_text(encoding="utf-8")
+
+
+def test_stats_outcomes_and_against_buckets():
+    """Накопичення LIVE BETA: стан/R з frozen-знімка і lifecycle, розріз за кількістю ПРОТИ (0/1/2+); SL до TP = −1R; результат сценарію ≠ особиста угода."""
+    from office2 import stats as ST
+    from office2 import webview as WV
+    import office_bridge as OB
+
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+
+        def put(sid, sym, against, miles, status="DELIVERED"):
+            snap = _sol_snap(sid)
+            snap["symbol"] = sym
+            snap["alignment_summary"] = {"for": 1, "against": against, "neutral": 0}
+            OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                        (sid, sym, "SHORT", 1791300000.0, 1791321600.0, status, json.dumps(snap), "t"))
+            for lvl, ts in miles:
+                OB.log_event(db, "SCENARIO_MILESTONE", {"scenario_id": sid, "level": lvl, "touched_ts": ts, "sent_ts": ts + 30, "price": 1.0}, sid)
+
+        put("O2|a|1", "AAAUSDT", 0, [("ENTRY", 1791300060.0), ("TP1", 1791300600.0)])                     # TP1 → +1,9 R
+        put("O2|b|1", "BBBUSDT", 2, [("ENTRY", 1791300060.0), ("SL", 1791300900.0)])                      # SL → −1 R
+        put("O2|c|1", "CCCUSDT", 1, [("ENTRY", 1791300060.0), ("TP1", 1791300600.0), ("SL", 1791301200.0)])  # TP1, потім SL
+        put("O2|d|1", "DDDUSDT", 1, [])                                                                    # чекає входу
+        put("O2|e|1", "EEEUSDT", 0, [("EXPIRED", 1791320000.0)])                                           # входу не було
+        put("O2|f|1", "FFFUSDT", 3, [], status="SUPPRESSED")
+        st = ST.collect(db)
+        t = st["total"]
+        assert t["ready"] == 6 and t["delivered"] == 5 and t["not_sent"] == 1 and t["tp"] == 2 and t["sl"] == 1 and t["waiting_entry"] == 1 and t["expired"] == 1, t
+        b = st["by_against"]
+        assert b["0"]["n"] == 2 and b["0"]["closed"] == 1 and abs(b["0"]["sum_r"] - 1.9) < 1e-9
+        assert b["1"]["n"] == 2 and b["2+"]["n"] == 1 and abs(b["2+"]["sum_r"] + 1.0) < 1e-9
+        by = {i["id"]: i for i in st["items"]}
+        assert by["O2|a|1"]["state"] == "TP1" and by["O2|c|1"]["state"] == "TP1→SL" and by["O2|a|1"]["time_to_entry_s"] == 60.0 and by["O2|a|1"]["order"] == ["ENTRY", "TP1"]
+        pl = WV.payload(db, now=1791301500.0)
+        assert pl["stats"]["total"]["delivered"] == 5
+    assert "накопичено" in WV.html() and "Не підключено" in WV.html()
+
+
+def test_brain_modules_audit_is_honest():
+    from office2 import brain as B
+
+    m = B.MODULES
+    assert set(m) >= {"active", "context_only", "research", "unavailable_today"}
+    blob = " ".join(m["unavailable_today"]).lower()
+    for must in ("m5/m1", "order book", "gex", "ob / breaker"):
+        assert must in blob, must
+    assert not any("OI/funding" in x for x in m["active"])        # FLOW не в рішенні
 
 
 def test_relay_delivery_task_has_all_names():

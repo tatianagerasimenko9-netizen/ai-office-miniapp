@@ -25,12 +25,18 @@ IMPULSE_ATR = 3.0          # N2-визначення «сильного імпу
 SESSIONS = (("ASIA", 0, 7), ("LONDON", 7, 13), ("NEW_YORK", 13, 21))
 
 MODULES = {
-    "active": ["HTF структура (W1/D1/H4/H1/M15)", "ключові рівні (PDH/PDL/PWH/PWL/H4-D1 swing/PMH/PML/сесійні)", "ліквідність BSL/SSL/EQH/EQL", "імпульс-відкат-стиснення (теза A)",
-               "sweep+reclaim (теза B)", "локальна структура BOS/CHoCH (за наявності тренду)", "displacement", "структурний SL (доказовий буфер)", "цілі від реальних рівнів",
-               "fixed-$ розмір", "портфельний ризик", "BTC/ETH/breadth/волатильність/relative strength", "сесії"],
-    "context_only": ["FVG/OB (як опис)", "RSI-дивергенція (як опис)", "taker-дельта останнього бару", "режим волатильності"],
-    "unavailable_today": ["M5/M1 тригери (цикл на M15)", "4D", "OI/funding/L:S/ліквідації (FLOW-1 FAIL; у живому циклі не підключено)", "GEX/options", "DOM/стакан",
-                          "Bulkowski/Wyckoff/regression channel/Fibonacci-OTE у трасі Office2 (є у production-знімку старого Лева, не підключено)", "макро-календар у трасі"],
+    # Аудит фактичного production-коду (office2/brain.py, live.py, engine.py), а не документації. ACTIVE = бере участь у рішенні READY/SL/TP/ризику.
+    "active": ["MN: PMH/PML (рівні попереднього місяця)", "W1/D1/H4/H1/M15 структура й тренд (htf_context)", "підтримка/опір: swing-рівні H1/M15/H4/D1", "PDH/PDL/PWH/PWL",
+               "сесійні рівні (Asia/London/NY high/low)", "ліквідність BSL/SSL/EQH/EQL", "sweep + reclaim + утримання (acceptance за ≥1 бар)", "BOS/CHoCH (лише за наявності тренду)",
+               "displacement (тіло ≥1.2 ATR, закриття в 35%)", "послідовність імпульс→відкат→зона→атаки→стиснення→злам (теза A, дзеркально SHORT)", "структурний SL + доказовий буфер",
+               "цілі від реальних рівнів + перешкоди до TP1", "fixed-$ розмір позиції", "Risk Manager сценаріїв (ємність: ≤40$, ALT ≤30$, ≤3 альти в напрямі, 1 символ, 1 ідея/рівень, 3 SL/добу, ≤8 READY/добу)",
+               "BTC/ETH контекст, breadth альтів, relative strength", "узгодженість ЗА/ПРОТИ/НЕЙТРАЛЬНО (align.py)"],
+    "context_only": ["FVG (описова, у трасі)", "RSI (описовий; дивергенція не рахується)", "taker-дельта останнього бару (одна свічка, не CVD)", "режим волатильності 7д"],
+    "research": ["OI/funding/L:S (office2/flowdata.py; FLOW-1 FAIL, у живому циклі не підключено)", "narrative/zone/disp-дослідження (research-пайплайн, не в живому рішенні)",
+                 "Bulkowski / Wyckoff / regression channel (є у старому Леві: office_bulkowski/office_wyckoff/office_regression_channel — у трасі Office2 не використовуються)"],
+    "unavailable_today": ["M5/M1 тригери (цикл на M15)", "3D/4D таймфрейми", "mirror levels (flip опір↔підтримка як окрема сутність)", "MSS як окрема подія (є лише BOS/CHoCH)", "OB / breaker / BPR (код відсутній)",
+                          "OTE / premium-discount", "CVD / повна дельта", "ліквідації/heatmap (є office_liq_map/office_btc_liquidations у старому контурі; у Office2 не підключено)",
+                          "DOM/order book", "BTC dominance/ринковий контекст за межами BTC/ETH/breadth", "GEX/options", "макро-календар (office_calendar є; у трасі Office2 не підключено)"],
 }
 
 

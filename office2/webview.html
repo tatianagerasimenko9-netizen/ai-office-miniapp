@@ -59,15 +59,16 @@ function signal(s){
  return o;
 }
 function recent(){var a=(D.signals||[]);return a.length?'<div class="card"><h2>Останні сигнали</h2>'+a.map(function(x){return '<div class="row"><a href="?id='+encodeURIComponent(x.id)+'">'+(x.direction==='LONG'?'🟢':'🔴')+' '+esc(x.symbol.replace('USDT',''))+'</a> <span class="mu">'+esc(x.status_ua)+' · '+dt(x.created_ts)+'</span></div>'}).join('')+'</div>':''}
+function stat(){var t=D.stats;if(!t)return '';var T=t.total,B=t.by_against;return '<div class="card"><h2>LIVE BETA · накопичено</h2><div>Сценаріїв READY: '+T.ready+' · надіслано '+T.delivered+' · не надіслано '+T.not_sent+'</div><div class="sub">очікують входу '+T.waiting_entry+' · у русі '+T.active+' · TP '+T.tp+' · SL '+T.sl+' · строк вийшов '+T.expired+'</div><div class="sub">За кількістю факторів ПРОТИ: 0 → '+B['0'].n+' (R '+f(B['0'].sum_r,1)+'), 1 → '+B['1'].n+' (R '+f(B['1'].sum_r,1)+'), 2+ → '+B['2+'].n+' (R '+f(B['2+'].sum_r,1)+')</div><div class="sub">'+esc(t.note)+'</div></div>'}
 function radar(){
- var sc=D.scenarios||[];return '<div class="card"><h2>Усі сценарії</h2><table>'+sc.map(function(x){return '<tr><td>'+esc(x.symbol.replace('USDT',''))+'<div class="sub">'+(x.direction==='LONG'?'LONG':'SHORT')+'</div></td><td>'+esc(x.state_ua)+'<div class="sub">'+esc(x.reason||'')+'</div></td><td class="mu">'+tm(x.updated_ts)+'</td></tr>'}).join('')+'</table></div>'+
+ var sc=D.scenarios||[];return stat()+'<div class="card"><h2>Усі сценарії</h2><table>'+sc.map(function(x){return '<tr><td>'+esc(x.symbol.replace('USDT',''))+'<div class="sub">'+(x.direction==='LONG'?'LONG':'SHORT')+'</div></td><td>'+esc(x.state_ua)+'<div class="sub">'+esc(x.reason||'')+'</div></td><td class="mu">'+tm(x.updated_ts)+'</td></tr>'}).join('')+'</table></div>'+
  '<div class="card"><h2>Інші сигнали</h2>'+D.signals.map(function(x){return '<div class="row"><a href="?id='+encodeURIComponent(x.id)+'">'+(x.direction==='LONG'?'🟢':'🔴')+' '+esc(x.symbol.replace('USDT',''))+'</a> <span class="mu">'+esc(x.status_ua)+' · '+dt(x.created_ts)+'</span></div>'}).join('')+'</div>';
 }
 function tech(){
  var s=D.signals[0],fr=(s&&s.frozen)||{},fl=D.flags;
  return '<div class="card"><h2>Статус</h2><div>LIVE BETA · статистика накопичується (докази ще не зібрані: це підтримка рішення, а не доведена стратегія).</div><div class="sub">Шар '+(fl.OFFICE2_LIVE==='1'?'ON':'OFF')+' · Telegram '+(fl.OFFICE2_LIVE_DELIVERY==='1'?'ON':'OFF')+' · старий READY '+(fl.OFFICE_OLD_READY_DELIVERY==='0'?'OFF':'ON')+'<br>Останній цикл '+dt(D.last_cycle_ts)+' Київ · монет за годину '+D.symbols_last_hour+'</div></div>'+
  (s?'<div class="card"><h2>Технічні деталі · '+esc(s.symbol)+'</h2><details><summary>Decision trace (заморожено)</summary>'+J(fr.trace)+'</details><details><summary>Теза та структурна інвалідація</summary>'+J(fr.thesis)+'</details><details><summary>Контекст на момент сигналу</summary>'+J(fr.context)+'</details><details><summary>Старий Лев на цю монету</summary>'+J(fr.old_lev)+'</details></div>':'')+
- '<div class="card"><h2>Модулі</h2><div class="row g">Активні: '+esc(D.modules.active.join('; '))+'</div><div class="row y">Лише контекст: '+esc(D.modules.context_only.join('; '))+'</div><div class="row r">Недоступні сьогодні: '+esc(D.modules.unavailable_today.join('; '))+'</div></div>';
+ '<div class="card"><h2>Модулі</h2><div class="row g">Активні: '+esc(D.modules.active.join('; '))+'</div><div class="row y">Лише контекст: '+esc(D.modules.context_only.join('; '))+'</div><div class="row mu">Дослідження (не в рішенні): '+esc((D.modules.research||[]).join('; '))+'</div><div class="row r">Не підключено: '+esc(D.modules.unavailable_today.join('; '))+'</div></div>';
 }
 function render(){
  var b=document.getElementById('box');
