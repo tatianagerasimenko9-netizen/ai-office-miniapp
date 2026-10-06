@@ -2518,6 +2518,7 @@ async def run() -> None:
 
         asyncio.get_running_loop().set_default_executor(_cf.ThreadPoolExecutor(max_workers=_rg.default_executor_workers(), thread_name_prefix="relay-io"))
         _rg.start_memory_guard()
+        _rg.start_loop_lag_watchdog(asyncio.get_running_loop())
         print(f"[relay] runtime guard: пул потоків {_rg.default_executor_workers()}, rss {(_rg.rss_mb() or 0):.0f} МБ")
     except Exception as exc_rg:  # noqa: BLE001
         print(f"[relay] runtime guard не запущено: {exc_rg!r}")
@@ -4738,8 +4739,8 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                 reverse=True,
             )
             top_volume_syms = [s for s, _ in by_volume[:30]]
-            gainers = fetch_top_movers("gainers", 5)
-            losers = fetch_top_movers("losers", 5)
+            gainers = (await asyncio.to_thread(fetch_top_movers, "gainers", 5))
+            losers = (await asyncio.to_thread(fetch_top_movers, "losers", 5))
             candidates: List[str] = []
             for sym in top_volume_syms:
                 if sym and sym not in candidates:
@@ -4756,7 +4757,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                 if symbol in EXCLUDED_FROM_SCANNER:
                     continue
                 try:
-                    candles_d = fetch_candles(symbol, "1d", 7)
+                    candles_d = (await asyncio.to_thread(fetch_candles, symbol, "1d", 7))
                     if not isinstance(candles_d, list) or len(candles_d) < 3:
                         continue
                     highs = [float((c or {}).get("high") or 0.0) for c in candles_d]
@@ -4768,7 +4769,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                     if weekly_low <= 0:
                         continue
                     weekly_range = (weekly_high - weekly_low) / weekly_low * 100.0
-                    oi = fetch_open_interest(symbol)
+                    oi = (await asyncio.to_thread(fetch_open_interest, symbol))
                     hist = (oi or {}).get("history") if isinstance(oi, dict) else []
                     oi_rising = False
                     if isinstance(hist, list) and len(hist) >= 2:
@@ -4808,18 +4809,18 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                         continue
                     if symbol == "BTCUSDT" and any("BTC" in str(s.get("symbol") or "") for s in setups_found):
                         continue
-                    atr = fetch_atr_context(symbol)
+                    atr = (await asyncio.to_thread(fetch_atr_context, symbol))
                     atr_used = float((atr or {}).get("day_used_pct", 100) or 100)
                     atr_cls = classify_atr_day_used(atr_used)
                     skip_enter = bool(atr_cls.get("gerchik_entry_blocked") or atr_cls.get("t0_entry_blocked"))
                     try:
-                        btc_reg = str((fetch_market_regime("BTCUSDT") or {}).get("regime") or "").upper()
+                        btc_reg = str(((await asyncio.to_thread(fetch_market_regime, "BTCUSDT")) or {}).get("regime") or "").upper()
                     except Exception:
                         btc_reg = ""
                     if symbol != "BTCUSDT" and btc_reg in ("NEWS_CHAOS", "PANIC", "LOW_LIQUIDITY"):
                         continue
 
-                    gops = compute_gerchik_ops(symbol)
+                    gops = (await asyncio.to_thread(compute_gerchik_ops, symbol))
                     gscore = gops.get("gerchik_ops_score") if isinstance(gops, dict) else None
                     if gscore is not None and int(gscore) <= 4:
                         continue
@@ -4953,10 +4954,10 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
             if skip_pro:
                 print(f"[scanner] proactive skip {symbol}: {skip_reason}")
                 return
-            liq_now = fetch_liquidations_proxy(symbol)
-            oi_now = fetch_open_interest(symbol)
-            candles_h1 = fetch_candles(symbol, "1h", 6)
-            candles_h4 = fetch_candles(symbol, "4h", 6)
+            liq_now = (await asyncio.to_thread(fetch_liquidations_proxy, symbol))
+            oi_now = (await asyncio.to_thread(fetch_open_interest, symbol))
+            candles_h1 = (await asyncio.to_thread(fetch_candles, symbol, "1h", 6))
+            candles_h4 = (await asyncio.to_thread(fetch_candles, symbol, "4h", 6))
             current_price = liq_now.get("current_price") if isinstance(liq_now, dict) else None
             news_risk = "SAFE"
             news_mins = 999
@@ -5098,7 +5099,7 @@ L/S: {ls_d.get("current_ratio", "")} ({long_pct_v}% лонгів)
                 )
             try:
                 prob = fetch_probability_score(symbol, db_path)
-                regime = fetch_market_regime(symbol)
+                regime = (await asyncio.to_thread(fetch_market_regime, symbol))
                 lev_extra = f"""
 Додаткові дані:
 Хто контролює: {regime.get('controller', '')}

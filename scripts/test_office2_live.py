@@ -575,6 +575,31 @@ def test_brain_modules_audit_is_honest():
     assert not any("OI/funding" in x for x in m["active"])        # FLOW не в рішенні
 
 
+def test_loop_lag_watchdog_reports_blocker_and_scan_is_nonblocking():
+    """Синхронні мережеві виклики в proactive_market_scan блокували цикл подій після рестарту (доставка Office2 чекала 10+ хв). Тепер вони в потоках; сторожовий потік показує блокувальника."""
+    import asyncio
+    import re
+    import time as _t
+    import office_runtime_guard as RG
+
+    logs = []
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        RG.start_loop_lag_watchdog(loop, log=logs.append, threshold_sec=0.6, period_sec=0.2)
+        await asyncio.sleep(0.5)
+        _t.sleep(1.6)                  # імітація синхронного блокування циклу
+        await asyncio.sleep(0.5)
+
+    asyncio.run(main())
+    assert any("[loop-lag]" in x and "test_office2_live.py" in x for x in logs), logs
+    src = Path(__file__).resolve().parent.parent.joinpath("office_relay_wizard.py").read_text(encoding="utf-8")
+    a, b = src.index("async def proactive_market_scan"), src.index("async def monitor_proactive_scanner")
+    body = src[a:b]
+    assert not re.search(r"(?<![\w.])(?<!to_thread, )(fetch_candles|fetch_top_movers|fetch_atr_context|fetch_market_regime|compute_gerchik_ops|fetch_liquidations_proxy|fetch_open_interest)\(", re.sub(r"(from|import)[^\n]*\n", "", body)), "синхронний мережевий виклик у async-сканері"
+    assert "start_loop_lag_watchdog" in src
+
+
 def test_relay_delivery_task_has_all_names():
     """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
     import ast
