@@ -1,0 +1,52 @@
+name: Office 2.0 FLOW-1 money flow incremental value (Binance archive, research only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      d0:
+        description: 'Початок (YYYY-MM-DD)'
+        default: '2024-01-01'
+      d1:
+        description: 'Кінець (YYYY-MM-DD)'
+        default: '2024-12-31'
+      symbols:
+        description: 'Символи через кому (порожньо = стандартний список)'
+        default: ''
+      phase:
+        description: 'dev (всередині train) або test (одноразово, docs/office2/FLOW1_FROZEN.md)'
+        default: 'dev'
+  push:
+    branches:
+      - claude/office2-shadow
+    paths:
+      - '.github/workflows/office2-flow.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  flow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 175
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install numpy pandas -r requirements.txt
+      - name: 'Self-test (синтетика; без lookahead, засіяний сигнал/нуль)'
+        run: python scripts/test_office2.py
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/o2cache
+          key: o2f-${{ inputs.d0 || '2024-01-01' }}-${{ inputs.d1 || '2024-12-31' }}-v1
+      - name: FLOW-1
+        run: python scripts/office2_flow_run.py --d0 "${{ inputs.d0 || '2024-01-01' }}" --d1 "${{ inputs.d1 || '2024-12-31' }}" --symbols "${{ inputs.symbols || '' }}" --phase "${{ inputs.phase || 'dev' }}" --cache /tmp/o2cache --md /tmp/office2_flow.md | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: office2-flow-results
+          path: /tmp/office2_flow.md
+          if-no-files-found: ignore
+          retention-days: 30

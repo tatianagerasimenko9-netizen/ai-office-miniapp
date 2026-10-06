@@ -1,0 +1,23 @@
+name: Office 2.0 data sources probe (read-only, research)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - claude/office2-shadow
+    paths:
+      - '.github/workflows/office2-sources.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python scripts/office2_probe_sources.py | tee -a "$GITHUB_STEP_SUMMARY"

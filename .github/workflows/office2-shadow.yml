@@ -1,0 +1,63 @@
+name: Office 2.0 shadow replay (1m Binance archive, research only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      d0:
+        description: 'Початок (YYYY-MM-DD)'
+        default: '2026-08-01'
+      d1:
+        description: 'Кінець (YYYY-MM-DD)'
+        default: '2026-10-03'
+      symbols:
+        description: 'Символи через кому (порожньо = стандартний список ~40)'
+        default: ''
+      k_buf:
+        description: 'Буфер SL, ATR(M15)'
+        default: '0.5'
+      open_test:
+        description: 'true = відкрити test для ЗАФІКСОВАНИХ гіпотез (одноразово)'
+        default: 'false'
+      mode:
+        description: 'explore (hold-out не завантажується) або final (лише hold-out; одноразово для зафіксованої версії)'
+        default: 'explore'
+
+  push:
+    branches:
+      - claude/office2-shadow
+    paths:
+      - '.github/workflows/office2-shadow.yml'
+      - 'office2/**'
+      - 'scripts/office2_shadow_run.py'
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install numpy pandas -r requirements.txt
+      - name: 'Self-test (синтетика, без мережі; lookahead, first-touch, калібрування, Risk Manager)'
+        run: python scripts/test_office2.py
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/o2cache
+          key: o2-${{ inputs.d0 || '2026-08-01' }}-${{ inputs.d1 || '2026-10-03' }}-v1
+      - name: Shadow replay
+        run: python scripts/office2_shadow_run.py --d0 "${{ inputs.d0 || '2026-08-01' }}" --d1 "${{ inputs.d1 || '2026-10-03' }}" --symbols "${{ inputs.symbols || '' }}" --k-buf "${{ inputs.k_buf || '0.5' }}" --mode "${{ inputs.mode || 'explore' }}" ${{ inputs.open_test == 'true' && '--open-test' || '' }} --cache /tmp/o2cache --md /tmp/office2.md --json /tmp/office2_rows.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: office2-shadow-results
+          path: |
+            /tmp/office2.md
+            /tmp/office2_rows.json
+          if-no-files-found: ignore
+          retention-days: 30
