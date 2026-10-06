@@ -6945,6 +6945,21 @@ EV позитивне: {prob.get('ev_positive', '')}
                     act = str(fu.get("action") or "")
                     if act == "confirm":
                         okey = str(st.get("scenario_id") or key)
+                        if os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0":
+                            # Cutover на Office2 LIVE BETA: старий READY користувачу НЕ шлемо; план лишається внутрішнім (hypothetical-трекінг) для порівняння OLD vs OFFICE2 у БД. Відкат: OFFICE_OLD_READY_DELIVERY=1.
+                            try:
+                                import office_signal_track as _trk_c
+
+                                _now_x = time.time()
+                                _tf_x = str(st.get("timeframe") or "H1")
+                                _trk_c.record_plan(db_path, scenario_id=okey, symbol=sym_f, direction=str(st.get("direction") or ""), tf=_tf_x, entry=fu.get("price") or px_f, sl=st.get("sl"),
+                                                   tp1=st.get("tp1"), tp2=st.get("tp2"), tp3=None, max_entry=None, confirmed_ts=_now_x, valid_until_ts=_lc.valid_until_ts(_now_x, _tf_x),
+                                                   rejected=True, reason="OLD_LEV_CUTOVER: користувацьку доставку READY перейняв Office2 LIVE BETA", gate=None)
+                            except Exception as exc_cut:
+                                print(f"[cutover] shadow record failed {sym_f}: {type(exc_cut).__name__}: {exc_cut}")
+                            print(f"[cutover] старий READY {sym_f} {st.get('direction')} не доставлено (OFFICE_OLD_READY_DELIVERY=0); лишається внутрішнім")
+                            live_drop(key)
+                            continue
                         cg = may_emit_telegram(
                             key=okey,
                             intent="CONFIRM",
@@ -7630,6 +7645,22 @@ EV позитивне: {prob.get('ev_positive', '')}
             await asyncio.sleep(45)
 
     asyncio.create_task(monitor_scenario_milestones())
+
+    async def monitor_office2_delivery() -> None:
+        """Office2 LIVE BETA: доставка READY з outbox (office2_live_signal) через send_proactive і запис плану в lifecycle. Лише за OFFICE2_LIVE_DELIVERY=1."""
+        from office2 import delivery as _o2d
+        import office_ready_card as _o2card
+
+        await asyncio.sleep(75)
+        while True:
+            try:
+                if _o2d.delivery_enabled():
+                    await _o2d.deliver_pending(db_path, send_proactive, fetch_candles, _o2card.render, EVENT_TRADE_UPDATE)
+            except Exception as exc_o2d:
+                print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
+            await asyncio.sleep(30)
+
+    asyncio.create_task(monitor_office2_delivery())
 
     async def monitor_manual_trades() -> None:
         """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.

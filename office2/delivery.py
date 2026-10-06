@@ -1,0 +1,112 @@
+"""Доставка Office2 READY у Telegram через ті самі канали, що й старий READY (send_proactive: ідемпотентність, ledger), і запис у lifecycle (SIGNAL_PLAN).
+
+Після доставки office_signal_track/monitor_scenario_milestones самі ведуть ENTRY/TP1/TP2/TP3/SL/EXPIRED для цього плану (за confirm_msg_id).
+Функції приймають залежності аргументами (send, fetch, render), тож весь ланцюг перевіряється офлайн.
+"""
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+LABEL = "OFFICE2 · LIVE BETA"
+STALE_PENDING_SEC = 25 * 60       # READY, не доставлений за 25 хв, уже неактуальний: не шлемо із запізненням
+MAX_PER_PASS = 3
+
+
+def delivery_enabled() -> bool:
+    import os
+
+    return os.getenv("OFFICE2_LIVE_DELIVERY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def build_caption(snap: Dict[str, Any]) -> str:
+    """Telegram: за 3–5 секунд. Лише числа з рішення; без «ринок сильний»."""
+    import office_ready_card as card
+    import office_ready_core as rc
+
+    th = snap["thesis"]
+    sym = snap["symbol"]
+    tg = th.get("targets") or []
+    entry = th["entry"]
+    trig = float(th.get("trigger_level") or entry)
+    zone = [min(trig, entry), max(trig, entry)]
+    body = card.caption(symbol=sym, direction=snap["direction"], entry=entry, sl=th["sl"], tp1=(tg[0]["p"] if len(tg) > 0 else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
+                        tp3=(tg[2]["p"] if len(tg) > 2 else None), zone=zone, risk_usd=(th.get("sizing") or {}).get("risk_usd"),
+                        valid_until=rc.kyiv_stamp(snap["valid_until_ts"]), why=snap.get("why") or "")
+    return f"{LABEL}\n{body}"
+
+
+def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
+    import office_ready_core as rc
+
+    th = snap["thesis"]
+    tg = th.get("targets") or []
+    t = lambda i: (tg[i]["p"] if len(tg) > i else None)  # noqa: E731
+    trig = float(th.get("trigger_level") or th["entry"])
+    g = rc.gate_snapshot(direction=snap["direction"], entry=th["entry"], sl=th["sl"], tp1=t(0), tp2=t(1), tp3=t(2), zone_lo=min(trig, th["entry"]), zone_hi=max(trig, th["entry"]))
+    g["office2"] = {"label": LABEL, "brain": snap.get("brain"), "evidence_status": snap.get("evidence_status"), "scenario": th.get("id"), "trace": snap.get("trace"), "why": snap.get("why")}
+    return g
+
+
+async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]], fetch: Callable[[str, str, int], Any], render: Callable[..., Dict[str, Any]],
+                          event_type: str, now: Optional[float] = None, log: Callable[[str], None] = print) -> int:
+    """Один прохід по outbox. Повертає число доставлених. Помилка одного сигналу не зачіпає інші."""
+    import asyncio
+    import tempfile
+    import os
+
+    import office_signal_track as trk
+    from office_bridge import _execute, _fetchall, log_event
+
+    t = time.time() if now is None else now
+    rows = await asyncio.to_thread(_fetchall, db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal WHERE status = 'PENDING' ORDER BY created_ts ASC LIMIT ?", (MAX_PER_PASS,))
+    sent = 0
+    for sid, sym, d, created, valid, sj in rows:
+        if t - float(created) > STALE_PENDING_SEC or t > float(valid):
+            await asyncio.to_thread(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", ("не доставлено вчасно", sid))
+            log(f"[office2] suppressed stale {sid}")
+            continue
+        try:
+            snap = json.loads(sj)
+            snap["valid_until_ts"] = float(valid)
+            cap = build_caption(snap)
+            th = snap["thesis"]
+            tg = th.get("targets") or []
+            candles = await asyncio.to_thread(fetch, sym, "15m", 96)
+            import office_ready_evidence as evd
+
+            chart = evd.freeze_chart(candles if isinstance(candles, list) else [], t, "15m", symbol=sym)
+            trig = float(th.get("trigger_level") or th["entry"])
+            img: Dict[str, Any] = {}
+            try:
+                img = await asyncio.to_thread(render, symbol=sym, direction=d, candles=evd.candles_from_chart(chart) if chart.get("candles") else (candles if isinstance(candles, list) else []),
+                                              entry=th["entry"], zone=[min(trig, th["entry"]), max(trig, th["entry"])], sl=th["sl"], tp1=(tg[0]["p"] if tg else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
+                                              tp3=(tg[2]["p"] if len(tg) > 2 else None), ready_price=th["entry"], key_level=trig, key_label="пробій" if th["kind"] == "PULLBACK_BREAK" else "рівень",
+                                              path=os.path.join(tempfile.gettempdir(), f"o2ready_{sym}_{int(t)}.png"))
+            except Exception as exc_img:  # noqa: BLE001
+                img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
+            mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
+            if not mid:
+                await asyncio.to_thread(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", ("Telegram не підтвердив доставку", sid))
+                log(f"[office2] delivery not verified {sid}: лишаю для повтору")
+                continue
+            gate = build_gate(snap)
+            gate["chart"] = chart
+            tf = "M15"
+            await asyncio.to_thread(trk.record_plan, db, scenario_id=sid, symbol=sym, direction=d, tf=tf, entry=th["entry"], sl=th["sl"], tp1=(tg[0]["p"] if tg else None),
+                                    tp2=(tg[1]["p"] if len(tg) > 1 else None), tp3=(tg[2]["p"] if len(tg) > 2 else None), max_entry=None, confirmed_ts=float(created),
+                                    valid_until_ts=float(valid), rejected=False, confirm_msg_id=mid, gate=gate)
+            await asyncio.to_thread(_execute, db, "UPDATE office2_live_signal SET status = 'DELIVERED', msg_id = ?, delivered_ts = ?, last_error = NULL WHERE scenario_id = ?", (int(mid), t, sid))
+            await asyncio.to_thread(log_event, db, "OFFICE2_READY_SENT", {"scenario_id": sid, "symbol": sym, "direction": d, "text": cap, "telegram_msg_id": mid, "image_ok": bool(img.get("ok")),
+                                                                         "image_error": None if img.get("ok") else img.get("reason"), "chart_sha256": chart.get("sha256")}, sid)
+            sent += 1
+            log(f"[office2] READY delivered {sym} {d} id={mid}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"[office2] delivery error {sid}: {type(exc).__name__}: {exc}")
+            try:
+                await asyncio.to_thread(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"{type(exc).__name__}: {exc}"[:300], sid))
+            except Exception:  # noqa: BLE001
+                pass
+    return sent
