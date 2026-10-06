@@ -1,0 +1,85 @@
+<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Office2 · сигнал</title>
+<style>
+:root{--bg:#0f1420;--fg:#e8ecf3;--mu:#8a96ab;--card:#171e2e;--ln:#26304a;--g:#2ebd85;--r:#e5534b;--y:#f2c230;--b:#7aa2ff}
+@media(prefers-color-scheme:light){:root{--bg:#f6f8fb;--fg:#162033;--mu:#5b6880;--card:#fff;--ln:#d8dfeb}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 -apple-system,system-ui,sans-serif;padding:12px 14px calc(70px + env(safe-area-inset-bottom));max-width:640px;margin:auto}
+a{color:var(--b)}.mu{color:var(--mu)}.g{color:var(--g)}.r{color:var(--r)}.y{color:var(--y)}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:14px;padding:12px 14px;margin:10px 0}
+.hero{font-size:22px;font-weight:700}.sub{font-size:13px;color:var(--mu);margin-top:2px}
+.tag{display:inline-block;border:1px solid var(--ln);border-radius:8px;padding:1px 8px;font-size:12px;margin-right:4px}
+.lv{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;font-variant-numeric:tabular-nums}.lv b{font-weight:600}.lv span:last-child{text-align:right;color:var(--mu)}
+h2{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--mu);margin:0 0 6px}
+.row{padding:3px 0}.tabs{display:flex;gap:6px;position:sticky;top:0;background:var(--bg);padding:6px 0;z-index:5}
+.tabs button{flex:1;padding:10px 4px;border:1px solid var(--ln);background:var(--card);color:var(--fg);border-radius:10px;font:inherit;font-size:14px}.tabs button.on{border-color:var(--b);color:var(--b);font-weight:600}
+.sk{background:linear-gradient(90deg,var(--card),var(--ln),var(--card));background-size:200% 100%;animation:sh 1.2s infinite;border-radius:10px;height:18px;margin:8px 0}@keyframes sh{to{background-position:-200% 0}}
+button.retry{padding:12px 18px;border-radius:10px;border:1px solid var(--b);background:transparent;color:var(--b);font:inherit}
+details{margin:8px 0}summary{cursor:pointer;color:var(--b);padding:6px 0}pre{white-space:pre-wrap;word-break:break-word;font-size:11px;margin:4px 0}
+svg{width:100%;height:auto;display:block}table{width:100%;border-collapse:collapse;font-size:14px}td{padding:6px 4px;border-bottom:1px solid var(--ln);vertical-align:top}
+</style></head><body>
+<div><a href="/">← у Mini App</a></div>
+<div class="tabs" id="tabs"><button data-t="sig" class="on">Сигнал</button><button data-t="radar">Радар</button><button data-t="tech">Технічні</button></div>
+<div id="box"><div class="sk" style="height:34px"></div><div class="sk"></div><div class="sk"></div><div class="sk" style="height:140px"></div></div>
+<script>
+var f=function(x,d){d=d==null?2:d;return x==null?'—':(typeof x==='number'?x.toFixed(d).replace('.',','):x)};
+var px=function(x){if(x==null)return '—';var a=Math.abs(x);return f(x,a>=100?2:a>=1?4:a>=0.1?5:7)};
+var dt=function(t){return t?new Date(t*1000).toLocaleString('uk-UA',{timeZone:'Europe/Kyiv',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'};
+var tm=function(t){return t?new Date(t*1000).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'}):'—'};
+var esc=function(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})};
+var J=function(x){return '<pre>'+esc(JSON.stringify(x,null,1))+'</pre>'};
+var FQ=new URLSearchParams(location.search).get('id')||'';
+var D=null,TAB='sig';
+var LV={ENTRY:'Вхід торкнуто',TP1:'TP1 досягнуто',TP2:'TP2 досягнуто',TP3:'TP3 досягнуто',SL:'Стоп спрацював',EXPIRED:'Строк вийшов, входу не було'};
+function chart(s){
+ var ch=s.chart,th=(s.frozen||{}).thesis||{};if(!ch||!ch.candles||!ch.candles.length)return '<div class="mu">Графік моменту сигналу недоступний.</div>';
+ var c=ch.candles,W=360,H=210,pl=4,pr=58,n=c.length,lines=[];
+ var tg=th.targets||[];lines.push(['Вхід',th.entry,'#7aa2ff']);lines.push(['SL',th.sl,'#e5534b']);tg.forEach(function(t,i){lines.push(['TP'+(i+1),t.p,'#2ebd85'])});
+ var now=(s.market_now||{}).price;if(now!=null)lines.push(['Зараз',now,'#f2c230']);
+ var vals=[];c.forEach(function(k){vals.push(k[2],k[3])});lines.forEach(function(l){if(l[1]!=null)vals.push(l[1])});
+ var hi=Math.max.apply(null,vals),lo=Math.min.apply(null,vals),pad=(hi-lo)*.04;hi+=pad;lo-=pad;
+ var Y=function(v){return 6+(hi-v)/(hi-lo)*(H-12)},bw=(W-pl-pr)/n,o='<svg viewBox="0 0 '+W+' '+H+'">';
+ c.forEach(function(k,i){var x=pl+i*bw+bw/2,up=k[4]>=k[1],col=up?'#2ebd85':'#e5534b';o+='<line x1="'+x+'" x2="'+x+'" y1="'+Y(k[2])+'" y2="'+Y(k[3])+'" stroke="'+col+'" stroke-width="1"/><rect x="'+(x-bw*.35)+'" width="'+bw*.7+'" y="'+Y(Math.max(k[1],k[4]))+'" height="'+Math.max(1,Math.abs(Y(k[1])-Y(k[4])))+'" fill="'+col+'"/>'});
+ lines.forEach(function(l){if(l[1]==null)return;var y=Y(l[1]);o+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="'+l[2]+'" stroke-dasharray="4 3" stroke-width="1"/><text x="'+(W-pr+3)+'" y="'+(y+3)+'" font-size="9" fill="'+l[2]+'">'+l[0]+' '+px(l[1])+'</text>'});
+ return o+'</svg><div class="sub">Свічки M15 на момент сигналу (ті самі, що в Telegram). Жовта лінія — ціна зараз.</div>';
+}
+function signal(s){
+ if(!s)return '<div class="card">Сигналів Office2 ще не було.</div>';
+ var fr=s.frozen||{},th=fr.thesis||{},ch=s.changed||{},m0=(fr.market_at_signal||{}).market||{},m1=(s.market_now||{}).market||{},long=s.direction==='LONG',tg=th.targets||[];
+ var risk=th.entry!=null&&th.sl!=null?Math.abs(th.entry-th.sl):null,pc=function(v){return th.entry?(Math.abs(v-th.entry)/th.entry*100):null};
+ var o='<div class="card"><div class="hero '+(long?'g':'r')+'">'+(long?'🟢 LONG':'🔴 SHORT')+' · '+esc(s.symbol.replace('USDT',''))+'</div><div class="sub"><span class="tag">LIVE BETA</span><span class="tag">'+esc(s.status_ua)+'</span> '+dt(s.created_ts)+' Київ · діє до '+dt(s.valid_until_ts)+'</div></div>';
+ o+='<div class="card">'+chart(s)+'</div>';
+ o+='<div class="card"><h2>Рівні</h2><div class="lv"><span>Вхід</span><b>'+px(th.entry)+'</b><span></span><span>SL</span><b class="r">'+px(th.sl)+'</b><span>−'+f(pc(th.sl))+'%</span>'+tg.map(function(t,i){return '<span>TP'+(i+1)+'</span><b class="g">'+px(t.p)+'</b><span>+'+f(pc(t.p))+'% · '+f(t.r,1)+' R</span>'}).join('')+'</div></div>';
+ o+='<div class="card"><h2>Чому '+(long?'LONG':'SHORT')+'</h2><div class="row">'+esc(fr.why||'')+'</div>'+((fr.alignment||[]).map(function(a){var ag=a.verdict.indexOf('ПРОТИ')===0,fo=a.verdict.indexOf('ЗА')===0;return '<div class="row '+(ag?'r':fo?'g':'mu')+'">'+(ag?'⚠ ':fo?'✓ ':'· ')+esc(a.text)+'</div>'}).join('')||'')+(fr.alignment_derived?'<div class="sub">обчислено зі збережених значень знімка</div>':'')+'</div>';
+ o+='<div class="card"><h2>Ринок на момент сигналу</h2><div>BTC '+f(m0.btc_ret_1h)+'% за 1г · альти вгору (4г) '+(m0.breadth_up_4h!=null?Math.round(m0.breadth_up_4h*100)+'%':'—')+' · відносна сила '+f(((fr.market_at_signal||{}).relative||{}).rs_vs_btc_1h)+' п.п.</div></div>';
+ o+='<div class="card"><h2>Зараз</h2>'+(ch.price_now!=null?'<div>Ціна '+px(ch.price_now)+' · від входу '+f(ch.move_r)+' R ('+f(ch.move_pct)+'%) · до SL '+f(ch.sl_distance_r)+' R</div><div class="sub">BTC '+f(m1.btc_ret_1h)+'% за 1г · оновлено '+tm((s.market_now||{}).ts_epoch)+' Київ</div>':'<div class="mu">Поточних даних немає.</div>')+'</div>';
+ var dl=function(k){return ch[k]&&ch[k].delta!=null?f(ch[k].delta):'—'};
+ o+='<div class="card"><h2>Що змінилося</h2><div>BTC: '+dl('btc_ret_1h')+' п.п. · частка альтів вгору (4г): '+dl('breadth_up_4h')+'</div></div>';
+ var lc=s.lifecycle||[];
+ o+='<div class="card"><h2>Хід сигналу</h2>'+(lc.length?lc.map(function(m){return '<div class="row">'+tm(m.touched_ts)+' Київ — '+(LV[m.level]||m.level)+' ('+px(m.price)+')</div>'}).join(''):'<div class="mu">Подій ще не було.</div>')+'</div>';
+ return o;
+}
+function radar(){
+ var sc=D.scenarios||[];return '<div class="card"><h2>Усі сценарії</h2><table>'+sc.map(function(x){return '<tr><td>'+esc(x.symbol.replace('USDT',''))+'<div class="sub">'+(x.direction==='LONG'?'LONG':'SHORT')+'</div></td><td>'+esc(x.state_ua)+'<div class="sub">'+esc(x.reason||'')+'</div></td><td class="mu">'+tm(x.updated_ts)+'</td></tr>'}).join('')+'</table></div>'+
+ '<div class="card"><h2>Інші сигнали</h2>'+D.signals.map(function(x){return '<div class="row"><a href="?id='+encodeURIComponent(x.id)+'">'+(x.direction==='LONG'?'🟢':'🔴')+' '+esc(x.symbol.replace('USDT',''))+'</a> <span class="mu">'+esc(x.status_ua)+' · '+dt(x.created_ts)+'</span></div>'}).join('')+'</div>';
+}
+function tech(){
+ var s=D.signals[0],fr=(s&&s.frozen)||{},fl=D.flags;
+ return '<div class="card"><h2>Статус</h2><div>LIVE BETA · статистика накопичується (докази ще не зібрані: це підтримка рішення, а не доведена стратегія).</div><div class="sub">Шар '+(fl.OFFICE2_LIVE==='1'?'ON':'OFF')+' · Telegram '+(fl.OFFICE2_LIVE_DELIVERY==='1'?'ON':'OFF')+' · старий READY '+(fl.OFFICE_OLD_READY_DELIVERY==='0'?'OFF':'ON')+'<br>Останній цикл '+dt(D.last_cycle_ts)+' Київ · монет за годину '+D.symbols_last_hour+'</div></div>'+
+ (s?'<div class="card"><h2>Технічні деталі · '+esc(s.symbol)+'</h2><details><summary>Decision trace (заморожено)</summary>'+J(fr.trace)+'</details><details><summary>Теза та структурна інвалідація</summary>'+J(fr.thesis)+'</details><details><summary>Контекст на момент сигналу</summary>'+J(fr.context)+'</details><details><summary>Старий Лев на цю монету</summary>'+J(fr.old_lev)+'</details></div>':'')+
+ '<div class="card"><h2>Модулі</h2><div class="row g">Активні: '+esc(D.modules.active.join('; '))+'</div><div class="row y">Лише контекст: '+esc(D.modules.context_only.join('; '))+'</div><div class="row r">Недоступні сьогодні: '+esc(D.modules.unavailable_today.join('; '))+'</div></div>';
+}
+function render(){
+ var b=document.getElementById('box');
+ if(!D){return}
+ var s=D.signals.filter(function(x){return x.id===D.focus})[0];
+ var o=(FQ&&!D.focus_found?'<div class="card r">Сигнал '+esc(FQ)+' не знайдено (він старший за 20 останніх).</div>':'');
+ b.innerHTML=o+(TAB==='sig'?signal(s):TAB==='radar'?radar():tech());
+}
+function fail(msg){document.getElementById('box').innerHTML='<div class="card"><div class="r">Не вдалося завантажити: '+esc(msg)+'</div><div class="sub">Повільний інтернет або сервер зайнятий. Дані в безпеці — просто повторіть.</div><p><button class="retry" onclick="load()">Повторити</button></p></div>'}
+function load(){
+ document.getElementById('box').innerHTML='<div class="sk" style="height:34px"></div><div class="sk"></div><div class="sk"></div><div class="sk" style="height:140px"></div>';
+ var ac=new AbortController(),tmr=setTimeout(function(){ac.abort()},15000);
+ fetch('/api/v2/office2'+(FQ?'?id='+encodeURIComponent(FQ):''),{signal:ac.signal}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(d){clearTimeout(tmr);D=d;render()}).catch(function(e){clearTimeout(tmr);fail(e&&e.name==='AbortError'?'час очікування вичерпано (15 с)':(e&&e.message)||e)});
+}
+document.getElementById('tabs').addEventListener('click',function(e){var t=e.target.getAttribute&&e.target.getAttribute('data-t');if(!t)return;TAB=t;Array.prototype.forEach.call(this.children,function(x){x.className=x.getAttribute('data-t')===t?'on':''});render()});
+load();
+</script></body></html>

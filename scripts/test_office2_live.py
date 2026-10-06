@@ -227,8 +227,10 @@ def test_delivery_end_to_end_and_lifecycle():
         pl = WV.payload(db, now=created + 120)
         sg = pl["signals"][0]
         assert pl["label"] == "OFFICE2 · LIVE BETA" and sg["frozen"]["trace"] and sg["frozen"]["thesis"]["sl"] and sg["status"] == "DELIVERED" and "changed" in sg
-        assert "РИНОК НА МОМЕНТ СИГНАЛУ".lower() in WV.html().lower() or "Ринок на момент сигналу" in WV.html()
-        assert "Ринок зараз" in WV.html() and "Що змінилося" in WV.html()
+        h = WV.html()
+        assert "Ринок на момент сигналу" in h and ">Зараз<" in h.replace("<h2>", ">").replace("</h2>", "<") or "<h2>Зараз</h2>" in h
+        assert "Що змінилося" in h and "Хід сигналу" in h and "Технічні" in h
+        assert sg["status_ua"] == "Надіслано" and sg["lifecycle"] is not None and "chart" in sg
         # рестарт/повтор: другого повідомлення немає
         n2 = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: _candles(b), card.render, "TRADE_UPDATE", now=created + 90, log=lambda m: None))
         assert n2 == 0 and len(sent.calls) == 1
@@ -393,6 +395,47 @@ def test_office2_has_own_thread_pool_not_starved():
     assert "to_thread" not in ast.get_source_segment(src, fn)
 
 
+def test_miniapp_ux_mobile_structure():
+    """UX: сигнал першим екраном, сирий trace/JSON лише у «Технічних», службові статуси українською, loading/error/retry."""
+    from office2 import webview as WV
+
+    h = WV.html()
+    main = h[h.index("function signal(s)"):h.index("function radar()")]
+    assert "JSON.stringify" not in main and "trace" not in main.lower() and "old_lev" not in main     # сирі дані не в основному екрані
+    assert "function tech()" in h and "Decision trace" in h.split("function tech()")[1]
+    for bad in ("UNPROVEN", "DELIVERED", "SUPPRESSED"):
+        assert bad not in main, bad
+    assert "AbortController" in h and "Повторити" in h and "class=\"sk\"" in h                          # skeleton, таймаут, retry
+    assert WV.STATUS_UA["DELIVERED"] == "Надіслано" and WV.STATUS_UA["SUPPRESSED"] == "Не надіслано"
+    assert "viewport-fit=cover" in h
+
+
+def test_miniapp_summary_never_waits_for_binance():
+    """Регресія: health-check Render (/api/summary, 5 с) не має чекати на Binance: BTC беремо з кешу, оновлення у фоні."""
+    import time as _t
+    import office_mini_app as MA
+
+    calls = []
+
+    def slow_refresh():
+        calls.append(1)
+        _t.sleep(3)
+        MA._BTC_CACHE["busy"] = False
+
+    real = MA._btc_refresh
+    MA._btc_refresh = slow_refresh
+    MA._BTC_CACHE.update(ts=0.0, val=None, busy=False)
+    try:
+        t0 = _t.time()
+        r = MA._btc_cached()
+        assert _t.time() - t0 < 0.5 and r["price"] is None            # перший запит не блокується, значення ще немає
+        MA._BTC_CACHE.update(ts=_t.time(), val={"price": 100.0, "change_24h": 1.0, "regime": None, "dom": None})
+        assert MA._btc_cached()["price"] == 100.0                      # свіжий кеш: без мережі
+    finally:
+        MA._btc_refresh = real
+        MA._BTC_CACHE.update(ts=0.0, val=None, busy=False)
+
+
 def test_relay_delivery_task_has_all_names():
     """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
     import ast
@@ -440,7 +483,7 @@ def test_miniapp_opens_office2_scenario_ids():
         al = pl["signals"][0]["frozen"]["alignment"]
         assert al and any(a["verdict"].startswith(("ЗА", "ПРОТИ", "НЕЙТРАЛЬНО")) for a in al)
         assert not WV.payload(db, focus="O2|нема|1")["focus_found"]
-        assert "FQ" in WV.html() and "Узгодженість з напрямом" in WV.html()
+        assert "FQ" in WV.html() and "Чому" in WV.html() and "alignment" in WV.html()
 
 
 def main() -> int:
