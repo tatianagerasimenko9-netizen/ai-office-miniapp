@@ -369,7 +369,7 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             try:
                 from office2 import engine as EN
 
-                lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, old_lev_state(db, sym, now))
+                lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, lambda: old_lev_state(db, sym, now))   # старий Лев читається ліниво: лише при READY (LIKE по office_events дорогий)
                 res["live"] = {k: res.get("live", {}).get(k, 0) + v for k, v in lv.items()}
             except Exception as exc:  # noqa: BLE001
                 _bump("errors")

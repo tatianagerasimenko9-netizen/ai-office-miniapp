@@ -251,6 +251,11 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     from office_bridge import _execute
 
     pack = B.context_pack(ctx, now)
+    if callable(old_lev):
+        try:
+            old_lev = old_lev()
+        except Exception:  # noqa: BLE001
+            old_lev = None
     why = why_text(th, mc, rel, sym)
     snap = {"version": VERSION, "brain": B.VERSION, "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "old_lev": old_lev,
