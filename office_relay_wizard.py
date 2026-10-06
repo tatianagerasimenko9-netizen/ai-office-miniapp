@@ -2799,6 +2799,7 @@ async def run() -> None:
         direction: str = "",
         skip_gate: bool = False,
         scenario_id: str = "",
+        link_scenario_id: str = "",
     ) -> Optional[int]:
         if not skip_gate:
             tg = gate_outbound_telegram(
@@ -2829,7 +2830,7 @@ async def run() -> None:
 
                 btn_markup = mini_app_button(
                     symbol=_extract_first_usdt_symbol(text_part) or "",
-                    scenario_id=scenario_id,
+                    scenario_id=link_scenario_id or scenario_id,   # кнопка веде на батьківський сценарій, а не на id події (ключ дедуплікації лишається scenario_id)
                     base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
                 )
             token = agent_bot_tokens.get(agent_key or "")
@@ -2918,6 +2919,7 @@ async def run() -> None:
         *,
         reply_to_message_id: Optional[int] = None,
         scenario_id: str = "",
+        link_scenario_id: str = "",
         intent: str = "",
         event_type: str = "",
         symbol: str = "",
@@ -2946,7 +2948,7 @@ async def run() -> None:
 
         photo_btn = mini_app_button(
             symbol=symbol or _extract_first_usdt_symbol(cap) or "",
-            scenario_id=scenario_id,
+            scenario_id=link_scenario_id or scenario_id,
             base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
         )
         if token:
@@ -3135,6 +3137,7 @@ async def run() -> None:
         canonical_id: str = "",
         scenario_event: str = "",
         photo_path: str = "",
+        link_scenario_id: str = "",
     ) -> Optional[int]:
         if not may_send_proactive(event_type):
             print(f"[relay] silent {event_type}: {str(message or '')[:160]}")
@@ -3252,6 +3255,7 @@ async def run() -> None:
                         stream=st,
                         reply_to_message_id=reply_to_message_id,
                         scenario_id=str(canonical_id or ""),
+                        link_scenario_id=str(link_scenario_id or ""),
                         intent=intent,
                         event_type=event_type,
                         symbol=sym,
@@ -3282,6 +3286,7 @@ async def run() -> None:
                     direction=direction,
                     skip_gate=True,
                     scenario_id=str(canonical_id or ""),
+                    link_scenario_id=str(link_scenario_id or ""),
                 )
 
         finally:
@@ -7636,7 +7641,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price")),
                         reply_to_message_id=m.get("confirm_msg_id"), symbol=str(m["symbol"]), direction=str(m["direction"]),
                         kind="SCENARIO_EVENT", intent="SCENARIO_EVENT", canonical_id=f"{m['scenario_id']}|{m['confirmed_ts']}|{m['level']}",
-                        scenario_event=str(m["level"]),
+                        scenario_event=str(m["level"]), link_scenario_id=str(m["scenario_id"]),
                     )
                     if mid:
                         await _th(trk.record_milestone, db_path, m, mid)
@@ -7689,7 +7694,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     mid = await send_proactive(
                         EVENT_TRADE_UPDATE, it["text"], reply_to_message_id=reply, symbol=str(pos["symbol"]), direction=str(pos["direction"]),
                         kind=it["code"], intent="POSITION_MANAGE", confirmed_position=True, position_id=str(pos["trade_id"]), position_open=True,
-                        canonical_id=str(pos["trade_id"]), scenario_event=it["code"],
+                        canonical_id=str(pos["trade_id"]), scenario_event=it["code"], link_scenario_id=str(pos.get("scenario_id") or ""),
                     )
                     if mid:
                         await asyncio.to_thread(tu.record, db_path, str(pos["trade_id"]), it["code"], mid)

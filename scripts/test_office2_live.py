@@ -213,7 +213,7 @@ def test_delivery_end_to_end_and_lifecycle():
         n = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: _candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
         assert n == 1 and len(sent.calls) == 1
         ev, text, kw = sent.calls[0]
-        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "Вхід:" in text and "Стоп:" in text and "TP1:" in text and "Ризик: 10 $" in text and "⏳ до" in text
+        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "READY:" in text and "Стоп:" in text and "TP1:" in text and "Ризик: 10 $" in text and "⏳ до" in text
         assert not AG.text_grants_entry(text) and not AG.text_instructs_position_change(text), text      # проходить той самий Telegram-шлюз, що й старий READY
         assert kw["intent"] == "CONFIRM" and kw["kind"] == "CONFIRM" and kw["canonical_id"].startswith("O2|")
         assert kw["photo_path"] and Path(kw["photo_path"]).exists()                                        # реальний chart
@@ -434,6 +434,77 @@ def test_miniapp_summary_never_waits_for_binance():
     finally:
         MA._btc_refresh = real
         MA._BTC_CACHE.update(ts=0.0, val=None, busy=False)
+
+
+def _sol_snap(sid="O2|solhash|1791300000"):
+    return {"symbol": "SOLUSDT", "direction": "SHORT", "valid_until_ts": 1791321600.0, "why": "Sweep PWH і повернення M15 нижче рівня.", "label": "OFFICE2 · LIVE BETA", "brain": "o2-brain-1",
+            "thesis": {"id": sid, "kind": "SWEEP_RECLAIM", "entry": 120.99, "trigger_level": 121.53, "sl": 122.02, "level": {"p": 121.53, "kind": "PWH"},
+                       "targets": [{"p": 119.0, "r": 1.9, "kind": "LONDON_L"}, {"p": 117.0, "r": 3.9, "kind": "ASIA_L"}], "sizing": {"risk_usd": 10.0}},
+            "market_at_signal": {}, "trace": [], "context": {}, "alignment": []}
+
+
+def test_entry_zone_semantics_telegram_and_miniapp_agree():
+    """Регресія (SOL): Telegram показував зону 120,99–121,53, а Mini App — «Вхід 120,99» і SL −0,85% лише від одного краю. Тепер: READY-ціна окремо, зона окремо, ризик/R — діапазон по краях зони; одна математика."""
+    from office2 import delivery as DL
+    from office2 import levels as LVL
+
+    snap = _sol_snap()
+    cap = DL.build_caption(snap)
+    assert "READY: 120,99" in cap and "Зона входу: 120,99–121,53" in cap, cap
+    assert "Вхід:" not in cap and "Стоп: 122,02 (−0,40…−0,85%)" in cap, cap
+    v = LVL.view_from_thesis(snap["thesis"])
+    assert v["ready_price"] == 120.99 and v["zone"] == [120.99, 121.53]
+    assert abs(v["sl_pct"][1] - (122.02 - 120.99) / 120.99 * 100) < 1e-9 and abs(v["sl_pct"][0] - (122.02 - 121.53) / 121.53 * 100) < 1e-9
+    t1 = v["targets"][0]       # R від кожного краю: від 121,53 R більший, ніж від 120,99
+    assert abs(t1["r"][0] - (120.99 - 119.0) / (122.02 - 120.99)) < 1e-9 and abs(t1["r"][1] - (121.53 - 119.0) / (122.02 - 121.53)) < 1e-9
+    assert "TP1: 119" in cap and "…+" in cap
+    # без зони (тригер = READY-ціна): одне число, без діапазонів
+    th2 = dict(snap["thesis"], trigger_level=120.99)
+    cap2 = DL.build_caption(dict(snap, thesis=th2))
+    assert "Зона входу" not in cap2 and "Стоп: 122,02 (−0,85%)" in cap2 and "…" not in cap2, cap2
+    # Mini App отримує ті самі числа з того самого модуля
+    from office2 import webview as WV
+    import office_bridge as OB
+
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                    ("O2|solhash|1791300000", "SOLUSDT", "SHORT", 1791300000.0, 1791321600.0, "DELIVERED", json.dumps(snap), "t"))
+        pl = WV.payload(db, now=1791300500.0, focus="O2|solhash|1791300000")
+        assert pl["signals"][0]["levels"] == json.loads(json.dumps(v))
+    h = WV.html()
+    assert "READY" in h and "Зона входу" in h and "Вхід</span>" not in h
+
+
+def test_lifecycle_button_opens_parent_scenario():
+    """Регресія: «📊 Сценарій» під TP1/SL мала id події («…|ct|TP1») → «Сигнал не знайдено». Тепер релей передає scenario_id батька; сервер також розв'язує старі посилання подій за БД."""
+    import ast
+    from office2 import webview as WV
+    import office_bridge as OB
+
+    src = Path(__file__).resolve().parent.parent.joinpath("office_relay_wizard.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "monitor_scenario_milestones")
+    body = ast.get_source_segment(src, fn)
+    assert 'link_scenario_id=str(m["scenario_id"])' in body
+    assert src.count("scenario_id=link_scenario_id or scenario_id") == 2        # і текстова, і фото-відправка
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        for k in range(25):          # батьківський сценарій старший за «останні 20»
+            sid = f"O2|h{k:02d}|{1791200000 + k * 900}"
+            OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                        (sid, f"C{k}USDT", "SHORT", 1791200000.0 + k * 900, 1791300000.0, "DELIVERED", json.dumps(_sol_snap(sid)), "t"))
+        parent = "O2|h00|1791200000"
+        OB.log_event(db, "SCENARIO_MILESTONE", {"scenario_id": parent, "level": "TP1", "touched_ts": 1791200900.0, "sent_ts": 1791200950.0, "price": 119.0}, parent)
+        OB.log_event(db, "SCENARIO_MILESTONE", {"scenario_id": parent, "level": "SL", "touched_ts": 1791201900.0, "sent_ts": 1791201950.0, "price": 122.02}, parent)
+        for ev_id in (parent, parent + "|1791200000.0|TP1", parent + "|1791200000.0|SL"):      # прямий id та id lifecycle-подій
+            pl = WV.payload(db, now=1791202000.0, focus=ev_id)
+            assert pl["focus"] == parent and pl["focus_found"], ev_id
+            top = pl["signals"][0]
+            assert top["id"] == parent and [m["level"] for m in top["lifecycle"]] == ["TP1", "SL"]       # «Хід сигналу» актуальний
+        pl = WV.payload(db, now=1791202000.0, focus="O2|nope|1")                      # невідомий id: чесно «не знайдено», але загальний список завантажується окремо
+        assert pl["focus_found"] is False and pl["focus"] == "" and len(pl["signals"]) == 20
+    h = WV.html()
+    assert "Не вдалося знайти цей сценарій" in h
 
 
 def test_relay_delivery_task_has_all_names():

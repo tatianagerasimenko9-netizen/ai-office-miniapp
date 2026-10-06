@@ -75,14 +75,35 @@ def _frozen_chart(db: str, sid: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def resolve_scenario_id(db: str, ident: str) -> str:
+    """Стабільний зв'язок подія → сценарій на боці сервера (не в UI). Повертає scenario_id батьківського Office2-сценарію або "".
+    Приймає сам scenario_id або ідентифікатор lifecycle-події (повідомлення, надіслані до виправлення, містять «<scenario_id>|<confirmed_ts>|<рівень>»):
+    це той самий сценарій, якщо він є в БД і ідентифікатор події починається з його id + «|»."""
+    ident = str(ident or "").strip()
+    if not ident:
+        return ""
+    if _rows(db, "SELECT 1 FROM office2_live_signal WHERE scenario_id = ?", (ident,)):
+        return ident
+    if "|" in ident:
+        for (sid,) in _rows(db, "SELECT scenario_id FROM office2_live_signal ORDER BY LENGTH(scenario_id) DESC"):
+            if ident.startswith(sid + "|"):
+                return sid
+    return ""
+
+
 def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, Any]:
     t = time.time() if now is None else now
     states = {r[0]: r[1] for r in _rows(db, "SELECT state, COUNT(*) FROM office2_live_scenario GROUP BY state")}
     last = _rows(db, "SELECT MAX(ts_epoch), COUNT(DISTINCT symbol) FROM office2_shadow_state WHERE ts_epoch > ?", (int(t - 3600),))
     scen = [{"id": r[0], "symbol": r[1], "direction": r[2], "kind": r[3], "state": r[4], "state_ua": STATE_UA.get(r[4], r[4]), "reason": r[5], "updated_ts": r[6]}
             for r in _rows(db, "SELECT scenario_id, symbol, direction, kind, state, reason, updated_ts FROM office2_live_scenario ORDER BY updated_ts DESC LIMIT 80")]
-    rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json FROM office2_live_signal ORDER BY created_ts DESC LIMIT 20")
-    if not focus and rows:
+    cols = "scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json"
+    rows = _rows(db, f"SELECT {cols} FROM office2_live_signal ORDER BY created_ts DESC LIMIT 20")
+    requested = focus
+    focus = resolve_scenario_id(db, focus) if focus else ""
+    if focus and not any(r[0] == focus for r in rows):     # батьківський сценарій старший за останні 20 — беремо його за scenario_id напряму
+        rows = _rows(db, f"SELECT {cols} FROM office2_live_signal WHERE scenario_id = ?", (focus,)) + rows
+    if not focus and not requested and rows:
         focus = rows[0][0]    # без id відкриваємо найновіший сигнал, а не стрічку
     sigs = []
     for sid, sym, d, ct, vu, status, msg, sj in rows:
@@ -101,6 +122,9 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
                 snap["alignment_derived"] = True
             miles = _milestones(db, sid)
             item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived")}
+            from office2 import levels as LVL
+
+            item["levels"] = LVL.view_from_thesis(th)
             item["market_now"] = ({"ts_epoch": ns.get("ts_epoch"), "price": ns.get("price"), "market": ns.get("market"), "ret_1h": ns.get("ret_1h"), "rs_vs_btc_1h": ns.get("rs_vs_btc_1h")} if ns else None)
             item["changed"] = what_changed(snap, ns, miles)
             item["lifecycle"] = [{"level": m.get("level"), "touched_ts": m.get("touched_ts"), "sent_ts": m.get("sent_ts"), "price": m.get("price")} for m in miles]
@@ -114,7 +138,7 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
             "flags": {"OFFICE2_SHADOW": os.getenv("OFFICE2_SHADOW", ""), "OFFICE2_LIVE": os.getenv("OFFICE2_LIVE", ""), "OFFICE2_LIVE_DELIVERY": os.getenv("OFFICE2_LIVE_DELIVERY", ""),
                       "OFFICE_OLD_READY_DELIVERY": os.getenv("OFFICE_OLD_READY_DELIVERY", "1")},
             "scenario_counts": states, "last_cycle_ts": last[0][0] if last and last[0][0] else None, "symbols_last_hour": last[0][1] if last else 0, "collected": cnt,
-            "signals": sigs, "scenarios": scen, "modules": B.MODULES, "focus": focus, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
+            "signals": sigs, "scenarios": scen, "modules": B.MODULES, "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
 
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "webview.html"), encoding="utf-8").read()

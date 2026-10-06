@@ -42,12 +42,13 @@ function chart(s){
  return o+'</svg><div class="sub">Свічки M15 на момент сигналу (ті самі, що в Telegram). Жовта лінія — ціна зараз.</div>';
 }
 function signal(s){
- if(!s)return '<div class="card">Сигналів Office2 ще не було.</div>';
+ if(!s){if(FQ)return '<div class="card r">Не вдалося знайти цей сценарій.</div>'+recent();return '<div class="card">Сигналів Office2 ще не було.</div>'}
  var fr=s.frozen||{},th=fr.thesis||{},ch=s.changed||{},m0=(fr.market_at_signal||{}).market||{},m1=(s.market_now||{}).market||{},long=s.direction==='LONG',tg=th.targets||[];
  var risk=th.entry!=null&&th.sl!=null?Math.abs(th.entry-th.sl):null,pc=function(v){return th.entry?(Math.abs(v-th.entry)/th.entry*100):null};
  var o='<div class="card"><div class="hero '+(long?'g':'r')+'">'+(long?'🟢 LONG':'🔴 SHORT')+' · '+esc(s.symbol.replace('USDT',''))+'</div><div class="sub"><span class="tag">LIVE BETA</span><span class="tag">'+esc(s.status_ua)+'</span> '+dt(s.created_ts)+' Київ · діє до '+dt(s.valid_until_ts)+'</div></div>';
  o+='<div class="card">'+chart(s)+'</div>';
- o+='<div class="card"><h2>Рівні</h2><div class="lv"><span>Вхід</span><b>'+px(th.entry)+'</b><span></span><span>SL</span><b class="r">'+px(th.sl)+'</b><span>−'+f(pc(th.sl))+'%</span>'+tg.map(function(t,i){return '<span>TP'+(i+1)+'</span><b class="g">'+px(t.p)+'</b><span>+'+f(pc(t.p))+'% · '+f(t.r,1)+' R</span>'}).join('')+'</div></div>';
+ var lv=s.levels,rg=function(r,sg){return !r?'—':(r[0].toFixed(2)===r[1].toFixed(2)?sg+f(r[0]):sg+f(r[0])+'…'+sg+f(r[1]))};
+ if(lv){o+='<div class="card"><h2>Рівні</h2><div class="lv"><span>READY</span><b>'+px(lv.ready_price)+'</b><span>ціна підтвердження</span>'+(lv.zone?'<span>Зона входу</span><b>'+px(lv.zone[0])+'–'+px(lv.zone[1])+'</b><span></span>':'')+'<span>SL</span><b class="r">'+px(lv.sl)+'</b><span>'+rg(lv.sl_pct,'−')+'%</span>'+lv.targets.map(function(t,i){return '<span>TP'+(i+1)+'</span><b class="g">'+px(t.p)+'</b><span>'+rg(t.pct,'+')+'% · '+rg(t.r,'').replace(/^/,'')+' R</span>'}).join('')+'</div>'+(lv.zone?'<div class="sub">Ризик і R залежать від ціни входу в зоні — показано діапазон по краях зони. Хід сигналу (вхід/TP/SL) рахується від READY-ціни.</div>':'')+'</div>'}
  o+='<div class="card"><h2>Чому '+(long?'LONG':'SHORT')+'</h2><div class="row">'+esc(fr.why||'')+'</div>'+((fr.alignment||[]).map(function(a){var ag=a.verdict.indexOf('ПРОТИ')===0,fo=a.verdict.indexOf('ЗА')===0;return '<div class="row '+(ag?'r':fo?'g':'mu')+'">'+(ag?'⚠ ':fo?'✓ ':'· ')+esc(a.text)+'</div>'}).join('')||'')+(fr.alignment_derived?'<div class="sub">обчислено зі збережених значень знімка</div>':'')+'</div>';
  o+='<div class="card"><h2>Ринок на момент сигналу</h2><div>BTC '+f(m0.btc_ret_1h)+'% за 1г · альти вгору (4г) '+(m0.breadth_up_4h!=null?Math.round(m0.breadth_up_4h*100)+'%':'—')+' · відносна сила '+f(((fr.market_at_signal||{}).relative||{}).rs_vs_btc_1h)+' п.п.</div></div>';
  o+='<div class="card"><h2>Зараз</h2>'+(ch.price_now!=null?'<div>Ціна '+px(ch.price_now)+' · від входу '+f(ch.move_r)+' R ('+f(ch.move_pct)+'%) · до SL '+f(ch.sl_distance_r)+' R</div><div class="sub">BTC '+f(m1.btc_ret_1h)+'% за 1г · оновлено '+tm((s.market_now||{}).ts_epoch)+' Київ</div>':'<div class="mu">Поточних даних немає.</div>')+'</div>';
@@ -57,6 +58,7 @@ function signal(s){
  o+='<div class="card"><h2>Хід сигналу</h2>'+(lc.length?lc.map(function(m){return '<div class="row">'+tm(m.touched_ts)+' Київ — '+(LV[m.level]||m.level)+' ('+px(m.price)+')</div>'}).join(''):'<div class="mu">Подій ще не було.</div>')+'</div>';
  return o;
 }
+function recent(){var a=(D.signals||[]);return a.length?'<div class="card"><h2>Останні сигнали</h2>'+a.map(function(x){return '<div class="row"><a href="?id='+encodeURIComponent(x.id)+'">'+(x.direction==='LONG'?'🟢':'🔴')+' '+esc(x.symbol.replace('USDT',''))+'</a> <span class="mu">'+esc(x.status_ua)+' · '+dt(x.created_ts)+'</span></div>'}).join('')+'</div>':''}
 function radar(){
  var sc=D.scenarios||[];return '<div class="card"><h2>Усі сценарії</h2><table>'+sc.map(function(x){return '<tr><td>'+esc(x.symbol.replace('USDT',''))+'<div class="sub">'+(x.direction==='LONG'?'LONG':'SHORT')+'</div></td><td>'+esc(x.state_ua)+'<div class="sub">'+esc(x.reason||'')+'</div></td><td class="mu">'+tm(x.updated_ts)+'</td></tr>'}).join('')+'</table></div>'+
  '<div class="card"><h2>Інші сигнали</h2>'+D.signals.map(function(x){return '<div class="row"><a href="?id='+encodeURIComponent(x.id)+'">'+(x.direction==='LONG'?'🟢':'🔴')+' '+esc(x.symbol.replace('USDT',''))+'</a> <span class="mu">'+esc(x.status_ua)+' · '+dt(x.created_ts)+'</span></div>'}).join('')+'</div>';
@@ -71,7 +73,7 @@ function render(){
  var b=document.getElementById('box');
  if(!D){return}
  var s=D.signals.filter(function(x){return x.id===D.focus})[0];
- var o=(FQ&&!D.focus_found?'<div class="card r">Сигнал '+esc(FQ)+' не знайдено (він старший за 20 останніх).</div>':'');
+ var o='';
  b.innerHTML=o+(TAB==='sig'?signal(s):TAB==='radar'?radar():tech());
 }
 function fail(msg){document.getElementById('box').innerHTML='<div class="card"><div class="r">Не вдалося завантажити: '+esc(msg)+'</div><div class="sub">Повільний інтернет або сервер зайнятий. Дані в безпеці — просто повторіть.</div><p><button class="retry" onclick="load()">Повторити</button></p></div>'}
