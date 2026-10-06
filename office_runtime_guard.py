@@ -63,3 +63,34 @@ def default_executor_workers() -> int:
         return max(8, min(64, int(os.getenv("OFFICE_THREADPOOL_WORKERS", "24"))))
     except ValueError:
         return 24
+
+
+def start_loop_lag_watchdog(loop, log: Callable[[str], None] = print, threshold_sec: float = 3.0, period_sec: float = 1.0) -> threading.Thread:
+    """Сторожовий потік: якщо цикл подій asyncio не відповідає понад threshold_sec — пише в лог стек потоку циклу (хто саме блокує).
+    Причина затримок Office2 після рестарту: синхронні мережеві виклики всередині async-задач старого Лева. Викликати З потоку циклу."""
+    import sys
+    import traceback
+
+    loop_tid = threading.get_ident()
+
+    def run() -> None:
+        last_report = 0.0
+        while True:
+            ev = threading.Event()
+            t0 = time.time()
+            try:
+                loop.call_soon_threadsafe(ev.set)
+            except RuntimeError:
+                return
+            while not ev.wait(0.25):
+                lag = time.time() - t0
+                if lag >= threshold_sec and time.time() - last_report >= 30:
+                    last_report = time.time()
+                    fr = sys._current_frames().get(loop_tid)
+                    stack = " <- ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in reversed(traceback.extract_stack(fr)[-6:])) if fr else "?"
+                    log(f"[loop-lag] цикл подій заблоковано {lag:.1f} с; стек: {stack}")
+            time.sleep(period_sec)
+
+    t = threading.Thread(target=run, name="loop-lag", daemon=True)
+    t.start()
+    return t
