@@ -68,6 +68,8 @@ jobs:
         run: python scripts/test_risk_officer.py
       - name: Office2 LIVE BETA (мозок, стани, доставка, lifecycle, без lookahead)
         run: python scripts/test_office2_live.py
+      - name: Office2 Strong Candle
+        run: python scripts/test_office2_strongcandle.py
       - name: Office2 brain v2 (sequence engine + evidence)
         run: python scripts/test_office2_brain2.py
       - name: Evidence-backed market thesis contract (offline, no orders)

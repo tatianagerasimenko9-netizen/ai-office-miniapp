@@ -123,6 +123,21 @@ def collect(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float,
         items.append(_item("volume / taker-delta / CVD", "EVIDENCE", "USED", f"CVD з моменту події {cvd:+.4g} ({share * 100:+.0f}% обсягу): {'ЗА' if sg * share > 0.02 else 'ПРОТИ' if sg * share < -0.02 else 'нейтрально'} {direction}", 1 if sg * share > 0.02 else -1 if sg * share < -0.02 else 0, {"cvd": cvd, "share": share}))
     else:
         items.append(_item("volume / taker-delta / CVD", "EVIDENCE", "UNAVAILABLE", "замало барів"))
+    # Strong Candle (OUR_IMPLEMENTATION, EVIDENCE) + Fibonacci OTE/розширення від неї
+    try:
+        from office2 import strongcandle as SC
+
+        r = SC.for_thesis(m15r, k, direction, e_ts or float(m15r["t"][max(0, k - 20)]), [float(zone[0]), float(zone[1])])
+        if r:
+            c_ = r["candle"]
+            fnd = (f"сильна свічка M15 за напрямом: тіло {c_['body_atr']:.1f} ATR, обсяг ×{c_['vol_rel']:.1f}, дельта {c_['delta_dir'] or 'н/д'}"
+                   + ("; МАНІПУЛЯЦІЯ (дельта проти кольору)" if c_["manipulation"] else "") + f"; зона входу {'перетинає' if r['zone_overlaps_ote'] else 'не перетинає'} її OTE 61,8–78,6 %")
+            sup = 0 if c_["manipulation"] else (1 if r["zone_overlaps_ote"] else 0)
+            items.append(_item("Strong Candle (наша реалізація sc-ours-1)", "EVIDENCE", "USED", fnd, -1 if c_["manipulation"] else sup, {"candle": c_, "fib": r["fib"]}))
+        else:
+            items.append(_item("Strong Candle (наша реалізація sc-ours-1)", "EVIDENCE", "USED", "сильної свічки за напрямом з моменту події немає", 0))
+    except Exception as exc:  # noqa: BLE001
+        items.append(_item("Strong Candle (наша реалізація sc-ours-1)", "EVIDENCE", "UNAVAILABLE", f"{type(exc).__name__}"))
     # OI / funding / L:S / ліквідації (RESEARCH)
     if flow_fetch is not None:
         try:

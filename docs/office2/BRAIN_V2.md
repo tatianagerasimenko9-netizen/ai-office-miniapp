@@ -23,3 +23,21 @@ HTF → BTC/ETH/ринок → сильні рівні/mirror/люфт → PDH/P
 | DOM, GEX/options, макро-календар | NOT_CONNECTED | ні | ні | немає джерела/не підключено |
 
 Evidence-модулі не голосують: вони не блокують і не відкривають READY, а потрапляють у знімок (`evidence`, `evidence_counts`) і в Mini App (картки «Послідовність до READY», «Що перевірено»). Кожна ПРОТИ-кількість зберігається для пакетного аналізу.
+
+## Матриця provenance (що існує, що впливає на READY)
+| Модуль | Файл | Працює | Роль | Впливає на READY | У trace | Тест |
+|---|---|---|---|---|---|---|
+| HTF MN/W1/D1/H4/H1 | office2/brain.htf_context | так | CONTEXT | ні | так | live/brain2 |
+| Level Engine (PDH/PDL/PWH/PWL/PMH/PML, swing H1/H4/D1/W1, сесії, EQH/EQL, BSL/SSL) | office2/brain.all_levels | так | GATE | подія, інвалідація, цілі | так | live/brain2 |
+| Gerchik: люфт рівня (медіана проколів) | brain2.level_luft | так | GATE | SL | так | brain2 |
+| Gerchik: mirror (role-flip) | evidence.mirror_level | так (наша реалізація, не авторські правила) | EVIDENCE | ні | так | brain2 |
+| Sweep, MSS/BOS, displacement, OTE, OB/FVG зона | brain2 | так | GATE | так | так | brain2 |
+| Strong Candle | office2/strongcandle.py | так, **OUR_IMPLEMENTATION** (Pine ict_smc_hunter_v9_9: vol>2×SMA20, range>1.2×ATR14); формулу документа Tester не розкрито | EVIDENCE | ні (edge не доведено) | так, з параметрами/версією | strongcandle |
+| Fibonacci OTE/розширення від Strong Candle | strongcandle.fib | так | EVIDENCE | ні | так | strongcandle |
+| Volume / taker-delta / CVD | evidence | так (Binance tbv) | EVIDENCE | ні | так | brain2 |
+| Wyckoff (spring/upthrust/фаза), Bulkowski, regression channel | office_wyckoff / office_bulkowski / office_regression_channel | так, H1 | EVIDENCE/CONTEXT | ні | так | існуючі |
+| RSI/divergence | office_* (старий Лев) | не підключено до Office2 | — | ні | ні | — |
+| OI/funding/L:S/ліквідації | office_market_data | так, лише для кандидата | RESEARCH | ні (FLOW-1 FAIL) | так | brain2 |
+| DOM, GEX/options | — | немає джерела | NOT_CONNECTED | ні | позначено | brain2 |
+| Макро-календар | office_calendar (старий Лев) | не підключено до Office2 | NOT_CONNECTED | ні | позначено | — |
+| Portfolio Risk | engine.portfolio_gate | так | GATE | так | так | live |

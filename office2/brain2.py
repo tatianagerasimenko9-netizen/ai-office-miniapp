@@ -42,6 +42,7 @@ REGISTRY: Dict[str, Dict[str, str]] = {
     "реальні TP + простір ≥ 1R": {"role": "GATE", "note": "TP1/2/3 від рівнів; значущої перешкоди < 1R немає"},
     "fixed-$ розмір + portfolio risk": {"role": "GATE", "note": "engine.portfolio_gate (ємність сценаріїв)"},
     "Wyckoff (spring/upthrust, тест)": {"role": "EVIDENCE", "note": "H1; факт у трасі"},
+    "Strong Candle (наша реалізація sc-ours-1)": {"role": "EVIDENCE", "note": "OUR_IMPLEMENTATION (Pine ict_smc_hunter_v9_9); авторську формулу документа Tester не розкрито; Fibonacci OTE/розширення — факти"},
     "Bulkowski (формалізовані фігури)": {"role": "EVIDENCE", "note": "H1; підтверджена фігура за напрямом"},
     "regression channel": {"role": "CONTEXT", "note": "H1; межа каналу в зоні"},
     "volume / taker-delta / CVD": {"role": "EVIDENCE", "note": "M15, з tbv"},
