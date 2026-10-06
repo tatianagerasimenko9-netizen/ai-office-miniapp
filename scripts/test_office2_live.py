@@ -339,6 +339,35 @@ def test_live_cycle_integration_engine_on():
         os.environ.pop("OFFICE2_LIVE", None)
 
 
+def test_capacity_counts_only_really_active_scenarios():
+    """Регресія: недоставлені PENDING-«призраки» (доставка лежала) займали ємність і давали «кластер ALT 40$ > 30$»; завершені (SL/EXPIRED) і SUPPRESSED — теж ні."""
+    import office_bridge as OB
+
+    now = 1_790_100_000.0
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+
+        def put(sid, sym, status, age):
+            OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                        (sid, sym, "LONG", now - age, now + 3600, status, json.dumps({"thesis": {}}), "t"))
+
+        for i, sym in enumerate(("AAAUSDT", "BBBUSDT", "CCCUSDT")):
+            put(f"O2|g{i}|1", sym, "PENDING", 3 * 3600)               # давні недоставлені (призраки)
+        put("O2|s|1", "SSSUSDT", "SUPPRESSED", 100)
+        put("O2|e|1", "EEEUSDT", "DELIVERED", 100)
+        OB.log_event(db, "SCENARIO_MILESTONE", {"level": "EXPIRED", "sent_ts": now - 10}, "O2|e|1")   # завершений сценарій
+        assert EN.open_signals(db, now) == []
+        assert EN.portfolio_gate(db, "DDDUSDT", "LONG", None, now) is None
+        put("O2|f|1", "FFFUSDT", "PENDING", 60)                          # свіжий PENDING ще чекає доставки: місце займає
+        assert [o["symbol"] for o in EN.open_signals(db, now)] == ["FFFUSDT"]
+        deny = EN.portfolio_gate(db, "FFFUSDT", "LONG", None, now)
+        assert deny
+        for i, sym in enumerate(("HHHUSDT", "IIIUSDT")):
+            put(f"O2|d{i}|1", sym, "DELIVERED", 60)
+        deny = EN.portfolio_gate(db, "JJJUSDT", "LONG", None, now)
+        assert deny and "ємність" in deny and "не твій особистий ризик" in deny, deny
+
+
 def test_relay_delivery_task_has_all_names():
     """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
     import ast

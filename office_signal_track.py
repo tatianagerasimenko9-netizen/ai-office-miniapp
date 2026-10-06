@@ -265,9 +265,10 @@ def _prio():
         return contextlib.nullcontext()
 
 
-def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None, scope: str = "all") -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
-    Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача."""
+    Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача.
+    scope: "all" — усі плани; "o2" — лише Office2 (scenario_id «O2|…»), швидкий цикл; "other" — усі, крім Office2 (повільний цикл по сотнях старих планів не затримує Office2)."""
     if fetch is None:
         from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
     now = time.time() if now_ts is None else now_ts
@@ -279,6 +280,9 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue
         sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
+        is_o2 = str(sid or "").startswith("O2|")
+        if (scope == "o2" and not is_o2) or (scope == "other" and is_o2):
+            continue
         if (sid, ct) in _MS_DONE:
             continue
         if now > float(p.get("valid_until_ts") or 0) + MAX_TRACK_SEC + 3600:

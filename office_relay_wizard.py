@@ -7615,15 +7615,15 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_signal_tracks())
 
-    async def monitor_scenario_milestones() -> None:
+    async def monitor_scenario_milestones(scope: str = "other", pause: int = 45, first: int = 150) -> None:
         """Подія рівня для КОЖНОГО доставленого «Плану готовий»: ціна досягла TP1/TP2/TP3 або стоп-рівня сценарію.
         Не залежить від кнопки «Я відкрила угоду» (та лише додає ведення твоєї позиції). Один раз на рівень, відповіддю на повідомлення плану."""
         import office_signal_track as trk
 
-        await asyncio.sleep(150)
+        await asyncio.sleep(first)
         while True:
             try:
-                for m in await asyncio.to_thread(trk.pending_milestones, db_path):
+                for m in await asyncio.to_thread(trk.pending_milestones, db_path, None, None, scope):
                     if m.get("silent"):   # ENTRY / EXPIRED: життя сценарію для статистики, без Telegram
                         await asyncio.to_thread(trk.record_milestone, db_path, m, None)
                         print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
@@ -7642,9 +7642,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")
             except Exception as exc_ms:
                 print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
-            await asyncio.sleep(45)
+            await asyncio.sleep(pause)
 
-    asyncio.create_task(monitor_scenario_milestones())
+    asyncio.create_task(monitor_scenario_milestones("other", 45, 150))
+    asyncio.create_task(monitor_scenario_milestones("o2", 15, 20))   # Office2: окремий швидкий цикл (кілька планів), не чекає на огляд сотень старих планів
 
     async def monitor_office2_delivery() -> None:
         """Office2 LIVE BETA: доставка READY з outbox (office2_live_signal) через send_proactive і запис плану в lifecycle. Лише за OFFICE2_LIVE_DELIVERY=1."""

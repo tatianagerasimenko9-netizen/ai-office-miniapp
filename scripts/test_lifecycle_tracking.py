@@ -130,3 +130,15 @@ plan("SCN|F2|SHORT|H1|1", "FORM2USDT", "SHORT", 30.0, 30.6, [28.0], ts=BASE + 11
 only_forming = c1(BASE + 11, [(30.0, 30.7, 29.9, 30.5)])
 assert levels(run({"FORM2USDT": only_forming}, BASE + 11 + 20), "FORM2USDT") == [], "вхід у формованій свічці не фіксуємо (порядок торкань невідомий)"
 print("test_lifecycle_tracking: OK")
+
+# 99) scope: Office2-плани (O2|…) переглядаються окремим швидким циклом і не залежать від повільного огляду старих планів
+plan("O2|abc|1", "FASTUSDT", "SHORT", 10.0, 10.5, [9.5])
+plan("SCN|OLD|SHORT|H1|9", "OLDUSDT", "SHORT", 10.0, 10.5, [9.5])
+cf = c1(T0, [(10.0, 10.0, 9.9, 9.95), (9.95, 9.96, 9.4, 9.45)])
+seen_calls = []
+ms_o2 = T.pending_milestones(db, lambda s, tf, lim: (seen_calls.append(s), {"FASTUSDT": cf, "OLDUSDT": cf}[s])[1], now_ts=T0 + 5 * 60, scope="o2")
+assert set(seen_calls) == {"FASTUSDT"} and {m["symbol"] for m in ms_o2} == {"FASTUSDT"}, (seen_calls, ms_o2)
+seen_calls.clear()
+ms_ot = T.pending_milestones(db, lambda s, tf, lim: (seen_calls.append(s), {"FASTUSDT": cf, "OLDUSDT": cf}[s])[1], now_ts=T0 + 5 * 60, scope="other")
+assert "FASTUSDT" not in seen_calls and "OLDUSDT" in seen_calls, seen_calls
+print("scope o2/other OK")
