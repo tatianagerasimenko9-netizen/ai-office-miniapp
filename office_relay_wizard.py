@@ -7650,12 +7650,13 @@ EV позитивне: {prob.get('ev_positive', '')}
         """Office2 LIVE BETA: доставка READY з outbox (office2_live_signal) через send_proactive і запис плану в lifecycle. Лише за OFFICE2_LIVE_DELIVERY=1."""
         from office2 import delivery as _o2d
         import office_ready_card as _o2card
+        from office_market_data import fetch_candles as _o2_fetch
 
         await asyncio.sleep(75)
         while True:
             try:
                 if _o2d.delivery_enabled():
-                    await _o2d.deliver_pending(db_path, send_proactive, fetch_candles, _o2card.render, EVENT_TRADE_UPDATE)
+                    await _o2d.deliver_pending(db_path, send_proactive, _o2_fetch, _o2card.render, EVENT_TRADE_UPDATE)
             except Exception as exc_o2d:
                 print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
             await asyncio.sleep(30)
