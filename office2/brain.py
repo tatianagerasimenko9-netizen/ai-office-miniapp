@@ -20,6 +20,7 @@ VERSION = "o2-brain-1"
 EVIDENCE_STATUS = "UNPROVEN"
 MIN_RISK_PCT, MAX_RISK_PCT = 0.15, 6.0
 MIN_STOP_ATR15 = 1.0       # структурний стоп має бути ДАЛІ за нормальний шум: ≥ 1 ATR(M15) (діапазон однієї середньої свічки). Інакше інвалідація тези не відрізняється від шуму → NO TRADE, стоп НЕ розширюємо
+MAJOR_OBSTACLE_KINDS = ("PDH", "PDL", "PWH", "PWL", "PMH", "PML", "H4SW", "D1SW", "W1SW")   # значущі перешкоди перед TP1: добові/тижневі/місячні рівні та H4/D1-свінги. Сесійні (ASIA/LONDON/NY), H1SW, M15SW — лише у trace
 MIN_TP1_R = 1.0            # як у старому гейті «RR до цілі 1 ≥ 1,0»: ціль ближче за ризик — не угода
 MAX_CHASE_R = 0.6          # входити не далі 0.6 ризику від рівня пробою/reclaim
 IMPULSE_ATR = 3.0          # N2-визначення «сильного імпульсу» на H1
@@ -408,7 +409,7 @@ def decide(thesis: Dict[str, Any], ctx: Dict[str, Any], now: float, risk_usd: fl
     lv = all_levels(ctx, now)
     tgd = targets_for(thesis["dir"], entry, risk, lv)
     tg = tgd["targets"]
-    major_obs = [o for o in tgd["obstacles_before_tp1"] if o["kind"] != "M15SW"]   # дрібні M15-свінги — не перешкода; сесійні/H1+/добові/тижневі рівні — так
+    major_obs = [o for o in tgd["obstacles_before_tp1"] if o["kind"] in MAJOR_OBSTACLE_KINDS]   # контрфактика за добу: «будь-який рівень» блокував би 12 з 14 READY (Office мертвий); блокують лише HTF-значущі
     if major_obs:   # найближча РЕАЛЬНА значуща ціль (рівень ≥0.25 R) ближче за мінімум простору → до неї немає нормального запасу
         o = major_obs[0]
         return dict(thesis, state="NO_TRADE", reason=f"до першої реальної цілі {o['kind']} {o['p']:.6g} лише {o['r']:.2f} R (< {MIN_TP1_R:g}); ціль не пропускаємо, стоп не стискаємо",
