@@ -5381,6 +5381,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                 active_rows = signal_get_active(db_path)
                 processed_watching_symbols: set[str] = set()
                 for row in active_rows:
+                    await asyncio.sleep(0)   # віддаємо цикл подій між сигналами (синхронні БД/HTTP не мають блокувати Office2)
                     try:
                         signal_id = str(row.get("signal_id") or "")
                         symbol = str(row.get("symbol") or "")
@@ -6439,6 +6440,7 @@ EV позитивне: {prob.get('ev_positive', '')}
 
             try:
                 for symbol in RADAR_SYMBOLS:
+                    await asyncio.sleep(0)   # віддаємо цикл подій між сигналами (синхронні БД/HTTP не мають блокувати Office2)
                     try:
                         ms = market_state_get(db_path, symbol) or {}
                         if scanner_signal_blocked(ms.get("bot_action")):
@@ -6624,6 +6626,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                     f"deep={len(deep_syms)} gold={((screen.gold or {}).get('source'))}"
                 )
                 for rsym in deep_syms:
+                    await asyncio.sleep(0)   # віддаємо цикл подій між сигналами (синхронні БД/HTTP не мають блокувати Office2)
                     try:
                         rd1 = fetch_candles(rsym, "1d", 30)
                         rh4 = fetch_candles(rsym, "4h", 30)
@@ -6938,6 +6941,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                 )
 
                 for key, st in live_items():
+                    await asyncio.sleep(0)   # віддаємо цикл подій між сигналами (синхронні БД/HTTP не мають блокувати Office2)
                     sym_f = str(st.get("symbol") or "")
                     if not sym_f:
                         continue

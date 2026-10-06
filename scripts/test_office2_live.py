@@ -656,6 +656,16 @@ def test_relay_delivery_task_has_all_names():
     assert "deliver_pending(db_path, send_proactive, _o2_fetch," in body
 
 
+def test_old_lev_monitors_yield_event_loop_between_signals():
+    """Watchdog у production: monitor_active_signals блокував цикл подій до 600 с (синхронні Postgres/HTTP по сотнях сигналів), доставка Office2 чекала. Тепер цикл віддається між сигналами."""
+    import re
+
+    src = Path(__file__).resolve().parent.parent.joinpath("office_relay_wizard.py").read_text(encoding="utf-8")
+    for loop_head in (r"for row in active_rows:", r"for symbol in RADAR_SYMBOLS:", r"for rsym in deep_syms:", r"for key, st in live_items\(\):"):
+        m = re.search(r"\n(\s+)" + loop_head + r"\n(\s+)await asyncio\.sleep\(0\)", src)
+        assert m, loop_head
+
+
 def test_alignment_labels_against_and_for():
     from office2 import align as AL
 
