@@ -34,20 +34,32 @@ def delivery_enabled() -> bool:
 
 
 def build_caption(snap: Dict[str, Any]) -> str:
-    """Telegram: за 3–5 секунд. Лише числа з рішення; без «ринок сильний»."""
+    """Telegram: за 3–5 секунд. Лише числа з рішення; без «ринок сильний». Рівні — з office2.levels (та сама математика, що в Mini App)."""
     import office_ready_card as card
     import office_ready_core as rc
+    from office_user_messages import ticker
+    from office2 import levels as LVL
 
     th = snap["thesis"]
     sym = snap["symbol"]
-    tg = th.get("targets") or []
-    entry = th["entry"]
-    trig = float(th.get("trigger_level") or entry)
-    zone = [min(trig, entry), max(trig, entry)]
-    body = card.caption(symbol=sym, direction=snap["direction"], entry=entry, sl=th["sl"], tp1=(tg[0]["p"] if len(tg) > 0 else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
-                        tp3=(tg[2]["p"] if len(tg) > 2 else None), zone=zone, risk_usd=(th.get("sizing") or {}).get("risk_usd"),
-                        valid_until=rc.kyiv_stamp(snap["valid_until_ts"]), why=snap.get("why") or "")
-    return f"{LABEL}\n{body}"
+    v = LVL.view_from_thesis(th)
+    if not v:
+        raise ValueError("немає рівнів тези")
+    n = lambda x: card._num(x, sym)  # noqa: E731
+    L = [LABEL, f"{'🟢 LONG' if snap['direction'] == 'LONG' else '🔴 SHORT'} · {ticker(sym)}"]
+    if snap.get("why"):
+        L.append(f"Чому: {snap['why']}")
+    L.append("")
+    L.append(f"READY: {n(v['ready_price'])}")
+    if v["zone"]:
+        L.append(f"Зона входу: {n(v['zone'][0])}–{n(v['zone'][1])}")
+    L.append(f"Стоп: {n(v['sl'])}" + LVL.pct_txt(v["sl_pct"], "−"))
+    for i, t in enumerate(v["targets"][:3], 1):
+        L.append(f"TP{i}: {n(t['p'])}" + LVL.pct_txt(t["pct"], "+"))
+    if (th.get("sizing") or {}).get("risk_usd"):
+        L.append(f"Ризик: {float(th['sizing']['risk_usd']):.0f} $" + (" (від READY-ціни)" if v["zone"] else ""))
+    L.append(f"⏳ до {rc.kyiv_stamp(snap['valid_until_ts'])}")
+    return "\n".join(L)
 
 
 def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
