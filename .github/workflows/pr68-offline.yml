@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - 'office_*.py'
+      - 'office2/**'
       - 'scripts/test_pr68_canonical.py'
       - 'scripts/test_telegram_position_gate.py'
       - 'scripts/test_*.py'

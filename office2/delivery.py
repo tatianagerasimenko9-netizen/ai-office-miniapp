@@ -50,6 +50,30 @@ def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
     return g
 
 
+def _late_reason(snap: Dict[str, Any], fetch: Callable[[str, str, int], Any], sym: str, direction: str) -> Optional[str]:
+    """Свіжа ціна (1m) перед відправкою: якщо вона за структурним SL або втекла далі за MAX_CHASE_R від рівня тригера — READY не шлемо."""
+    from office2 import brain as B
+
+    th = snap["thesis"]
+    try:
+        rows = fetch(sym, "1m", 2)
+        px = float(rows[-1]["close"]) if isinstance(rows, list) and rows else None
+    except Exception:  # noqa: BLE001
+        px = None
+    if px is None:
+        return None   # немає свіжої ціни: рішення за закритим баром лишається в силі (стале за часом відсікається окремо)
+    sl, entry = float(th["sl"]), float(th["entry"])
+    risk = abs(entry - sl)
+    long_ = direction == "LONG"
+    if (long_ and px <= sl) or ((not long_) and px >= sl):
+        return f"ціна {px:.6g} уже за структурним SL {sl:.6g}"
+    trig = float(th.get("trigger_level") or entry)
+    chase = ((px - trig) if long_ else (trig - px)) / risk if risk > 0 else 0.0
+    if chase > B.MAX_CHASE_R:
+        return f"на момент доставки ціна {px:.6g} уже {chase:.2f} R від рівня {trig:.6g}: вхід пізній (MISSED)"
+    return None
+
+
 async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]], fetch: Callable[[str, str, int], Any], render: Callable[..., Dict[str, Any]],
                           event_type: str, now: Optional[float] = None, log: Callable[[str], None] = print) -> int:
     """Один прохід по outbox. Повертає число доставлених. Помилка одного сигналу не зачіпає інші."""
@@ -71,6 +95,11 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
         try:
             snap = json.loads(sj)
             snap["valid_until_ts"] = float(valid)
+            why_late = await asyncio.to_thread(_late_reason, snap, fetch, sym, d)
+            if why_late:   # no-chase і структурна інвалідація перевіряються ще раз у момент доставки (рішення могло застаріти за час циклу)
+                await asyncio.to_thread(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why_late[:300], sid))
+                log(f"[office2] suppressed at delivery {sym} {d}: {why_late}")
+                continue
             cap = build_caption(snap)
             th = snap["thesis"]
             tg = th.get("targets") or []

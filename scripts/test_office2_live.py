@@ -246,6 +246,32 @@ def test_delivery_end_to_end_and_lifecycle():
         assert res2["stopped"] and res2["status"] == "STOP"
 
 
+def test_delivery_rechecks_chase_and_sl_at_send_time():
+    import office_bridge as OB
+    import office_ready_card as card
+
+    bars, _ = S.build()
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        _drive(db, bars, [[103.6], [103.6, 103.8], [103.6, 103.8, 103.9]])
+        b = extend(bars, [103.6, 103.8, 103.9])
+        created = OB._fetchone(db, "SELECT created_ts FROM office2_live_signal")[0]
+        sent = _Sent()
+        far = _candles(extend(bars, [103.6, 103.8, 103.9, 109.0]))      # ціна втекла вгору за час доставки
+        asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: far if tf == "1m" else _candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+        r = OB._fetchone(db, "SELECT status, last_error FROM office2_live_signal")
+        assert not sent.calls and r[0] == "SUPPRESSED" and "пізній" in r[1], r
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        _drive(db, bars, [[103.6], [103.6, 103.8], [103.6, 103.8, 103.9]])
+        created = OB._fetchone(db, "SELECT created_ts FROM office2_live_signal")[0]
+        sent = _Sent()
+        down = _candles(extend(bars, [103.6, 103.8, 103.9, 99.0]))      # ціна впала за структурний SL
+        asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: down, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+        r = OB._fetchone(db, "SELECT status, last_error FROM office2_live_signal")
+        assert not sent.calls and r[0] == "SUPPRESSED" and "SL" in r[1], r
+
+
 def test_delivery_failure_keeps_pending_and_stale_is_suppressed():
     import office_bridge as OB
     import office_ready_card as card

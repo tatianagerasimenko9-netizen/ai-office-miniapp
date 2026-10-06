@@ -142,7 +142,7 @@ def _rows_to_arr(rows: list, drop_open_at: Optional[float] = None) -> Optional[D
 class Feed:
     """Завантаження klines із паузами між запитами; HTF кешуються довше. Спільний ліміт/пауза Binance береться з office_market_data."""
 
-    def __init__(self, getter: Optional[Callable[[str, Dict[str, Any]], Any]] = None, pause: float = 0.6):
+    def __init__(self, getter: Optional[Callable[[str, Dict[str, Any]], Any]] = None, pause: float = float(os.getenv("OFFICE2_FEED_PAUSE", "0.35") or 0.35)):
         self._get = getter or self._default_get
         self.pause = pause
         self._cache: Dict[Tuple[str, str], Tuple[float, Any]] = {}
@@ -214,11 +214,11 @@ def symbol_state(sym: str, ctx: Dict[str, Any], now: float) -> Optional[Dict[str
     pos24 = (price - rng24[1]) / (rng24[0] - rng24[1]) if rng24[0] > rng24[1] else None
     up = sorted([lv for lv in ctx["levels"] if lv["known"] <= now and lv["side"] == "high" and lv["p"] > price], key=lambda x: x["p"])[:3]
     dn = sorted([lv for lv in ctx["levels"] if lv["known"] <= now and lv["side"] == "low" and lv["p"] < price], key=lambda x: -x["p"])[:3]
-    lvl = lambda L: [{"p": float(x["p"]), "kind": x["kind"], "strength": int(x["strength"]), "dist_atr": float(abs(x["p"] - price) / atr[-1])} for x in L]  # noqa: E731
+    lvl = lambda L: [{"p": float(x["p"]), "kind": x["kind"], "strength": int(x["strength"]), "dist_atr": (float(abs(x["p"] - price) / atr[-1]) if atr[-1] > 0 else None)} for x in L]  # noqa: E731
     tbv_last = float(2.0 * m15["tbv"][-1] - m15["v"][-1]) if np.isfinite(m15["tbv"][-1]) else None
     return {"price": price, "atr15_pct": atr_pct, "vol_regime_7d": vol_regime, "reg4": int(ctx["reg4"][k4]) if k4 >= 0 else 0,
             "regd": int(ctx["regd"][kd]) if kd >= 0 else 0, "ret_1h": _ret(m15, 4), "ret_4h": _ret(m15, 16), "ret_24h": _ret(m15, 96),
-            "pos_24h_range": pos24, "range_24h_atr": float((rng24[0] - rng24[1]) / atr[-1]), "taker_delta_last_bar": tbv_last,
+            "pos_24h_range": pos24, "range_24h_atr": (float((rng24[0] - rng24[1]) / atr[-1]) if atr[-1] > 0 else None), "taker_delta_last_bar": tbv_last,
             "levels_up": lvl(up), "levels_dn": lvl(dn), "bar_close_ts": float(m15["t"][-1] + 900)}
 
 
@@ -328,22 +328,45 @@ def store_event(db: str, event_id: str, now: float, sym: str, kind: str, directi
 def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None) -> Dict[str, int]:
     """Один цикл. now — момент закриття щойно завершеного M15-бару. state: пам'ять між циклами {'last_plan_id': int}."""
     syms = syms or universe()
+    t_cycle = time.time()
     ctxs: Dict[str, Dict[str, Any]] = {}
     states: Dict[str, Dict[str, Any]] = {}
-    for sym in syms:
+    prio: set = set()
+    if engine_enabled():
+        try:
+            from office_bridge import _fetchall
+
+            prio = {r[0] for r in _fetchall(db, "SELECT DISTINCT symbol FROM office2_live_scenario WHERE state IN ('WATCH','WAIT')")}
+        except Exception:  # noqa: BLE001
+            prio = set()
+    # спершу BTC/ETH (контекст), потім монети з живими WATCH/WAIT (вони можуть стати READY), решта — після
+    order = sorted(syms, key=lambda x: (0 if x in ("BTCUSDT", "ETHUSDT") else 1 if x in prio else 2))
+    abort = {"on": False}
+
+    def _one(sym: str):
+        if abort["on"]:
+            return sym, None, None
         try:
             ctx = build_ctx(feed, sym, now)
             if not ctx:
-                continue
-            st = symbol_state(sym, ctx, now)
-            if st:
-                ctxs[sym], states[sym] = ctx, st
+                return sym, None, None
+            return sym, ctx, symbol_state(sym, ctx, now)
         except Exception as exc:  # noqa: BLE001
             _bump("errors")
             with _LOCK:
                 _STATS["last_error"] = f"{sym}: {str(exc)[:100]}"
             if "backoff" in str(exc) or "429" in str(exc) or "RateLimited" in type(exc).__name__:
-                break   # Binance просить паузу — цикл закінчуємо
+                abort["on"] = True   # Binance просить паузу — решту пропускаємо
+            return sym, None, None
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = max(1, int(os.getenv("OFFICE2_FETCH_WORKERS", "4") or 4))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for sym, ctx, st in ex.map(_one, order):
+            if ctx is not None and st:
+                ctxs[sym], states[sym] = ctx, st
+    t_fetch = time.time() - t_cycle
     mc = market_context(states)
     res = {"states": 0, "events": 0, "old_lev": 0}
     ts_bar = int(now)
@@ -402,6 +425,8 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
                        "version": VERSION, "source": SOURCE})
         store_event(db, _eid("OLDLEV", pid), now, sym, "OLD_LEV", plan["direction"], plan.get("entry"), plan.get("sl"), plan.get("tp1"), snap)
         res["old_lev"] += 1
+    res["fetch_s"] = int(t_fetch)
+    res["total_s"] = int(time.time() - t_cycle)
     _bump("states", res["states"])
     _bump("events", res["events"])
     _bump("old_lev", res["old_lev"])
