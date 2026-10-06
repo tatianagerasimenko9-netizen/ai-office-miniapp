@@ -74,27 +74,45 @@ def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
     return g
 
 
-def _late_reason(snap: Dict[str, Any], fetch: Callable[[str, str, int], Any], sym: str, direction: str) -> Optional[str]:
-    """Свіжа ціна (1m) перед відправкою: якщо вона за структурним SL або втекла далі за MAX_CHASE_R від рівня тригера — READY не шлемо."""
+def _late_reason(snap: Dict[str, Any], fetch: Callable[[str, str, int], Any], sym: str, direction: str, now: Optional[float] = None) -> Optional[str]:
+    """Перед відправкою: що сталося з цінею ВІД МОМЕНТУ РІШЕННЯ (1m-свічки, їхні high/low, а не лише остання ціна).
+    SL торкнули після рішення → сценарій зламано (не шлемо); ціна пішла далі за MAX_CHASE_R від рівня тригера → вхід пізній (MISSED)."""
     from office2 import brain as B
+    from office_patterns import _ts as _iso
+
+    def _ts(v: Any) -> Optional[float]:
+        if isinstance(v, (int, float)):
+            return float(v / 1000.0 if v > 1e11 else v)
+        return _iso(v)
 
     th = snap["thesis"]
+    t = time.time() if now is None else now
+    decided = float(snap.get("decided_ts") or 0.0)
+    n = 2 if not decided else max(2, min(1000, int((t - decided) // 60) + 3))
     try:
-        rows = fetch(sym, "1m", 2)
-        px = float(rows[-1]["close"]) if isinstance(rows, list) and rows else None
+        rows = fetch(sym, "1m", n)
     except Exception:  # noqa: BLE001
-        px = None
-    if px is None:
+        rows = None
+    if not isinstance(rows, list) or not rows:
         return None   # немає свіжої ціни: рішення за закритим баром лишається в силі (стале за часом відсікається окремо)
+    since = [r for r in rows if isinstance(r, dict) and (not decided or (_ts(r.get("ts")) is not None and float(_ts(r["ts"])) >= decided - 1))] or rows[-1:]
+    try:
+        px = float(rows[-1]["close"])
+        hi = max(float(r["high"]) for r in since)
+        lo = min(float(r["low"]) for r in since)
+    except (KeyError, TypeError, ValueError):
+        return None
     sl, entry = float(th["sl"]), float(th["entry"])
     risk = abs(entry - sl)
     long_ = direction == "LONG"
-    if (long_ and px <= sl) or ((not long_) and px >= sl):
-        return f"ціна {px:.6g} уже за структурним SL {sl:.6g}"
+    if (long_ and lo <= sl) or ((not long_) and hi >= sl):
+        ext = lo if long_ else hi
+        return f"після рішення ціна вже торкнулась структурного SL {sl:.6g} (екстремум {ext:.6g}): сценарій зламано до відправки (INVALIDATED)"
     trig = float(th.get("trigger_level") or entry)
-    chase = ((px - trig) if long_ else (trig - px)) / risk if risk > 0 else 0.0
+    fav = hi if long_ else lo
+    chase = max(((px - trig) if long_ else (trig - px)), ((fav - trig) if long_ else (trig - fav))) / risk if risk > 0 else 0.0
     if chase > B.MAX_CHASE_R:
-        return f"на момент доставки ціна {px:.6g} уже {chase:.2f} R від рівня {trig:.6g}: вхід пізній (MISSED)"
+        return f"на момент доставки ціна {px:.6g} (екстремум {fav:.6g}) уже {chase:.2f} R від рівня {trig:.6g}: вхід пізній (MISSED)"
     return None
 
 
@@ -121,7 +139,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             snap["valid_until_ts"] = float(valid)
             tm = {"pickup_s": round(time.time() - float(snap.get("emitted_wall_ts") or created), 1) if snap.get("emitted_wall_ts") else None}
             t_a = time.time()
-            why_late = await run_o2(_late_reason, snap, fetch, sym, d)
+            why_late = await run_o2(_late_reason, snap, fetch, sym, d, t)
             tm["late_check_s"] = round(time.time() - t_a, 1)
             if why_late:   # no-chase і структурна інвалідація перевіряються ще раз у момент доставки (рішення могло застаріти за час циклу)
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why_late[:300], sid))

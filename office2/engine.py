@@ -277,6 +277,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "structural invalidation", "value": th.get("invalidation")},
                 {"step": "SL", "value": th.get("sl")},
                 {"step": "targets", "value": th.get("targets")},
+                {"step": "перевірки якості (стоп vs шум M15, запас до першої реальної цілі)", "value": th.get("quality")},
                 {"step": "risk", "value": th.get("sizing")},
                 {"step": "decision", "value": "READY (LIVE BETA, UNPROVEN)"}]}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",

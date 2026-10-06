@@ -600,6 +600,50 @@ def test_loop_lag_watchdog_reports_blocker_and_scan_is_nonblocking():
     assert "start_loop_lag_watchdog" in src
 
 
+def test_btc_case_noise_stop_and_room_to_first_real_target_are_no_trade():
+    """Регресія (BTC 06.10): SHORT READY зі стопом 0,67 ATR(M15) (всередині шуму) і реальним рівнем NY_L на 0,71 R до TP1 → через хвилини SL. Тепер: NO TRADE з числами, стоп не розширюємо і не стискаємо."""
+    bars, _ = S.build()
+    b = extend(bars, [103.6, 103.8, 103.9])
+    ctx = ctx_at(b)
+    now = now_of(b)
+    base = B.pullback_break(ctx, "LONG", now)
+    ok = B.decide(dict(base), ctx, now)
+    assert ok["state"] == "READY" and ok["quality"]["risk_atr15"] >= B.MIN_STOP_ATR15 and ok["quality"]["first_target_r"] >= B.MIN_TP1_R
+    k = F.last_closed(ctx["m15"], 900, now)
+    entry, a15 = float(ctx["m15"]["c"][k]), float(ctx["atr15"][k])
+    tight = dict(base, sl=entry - 0.67 * a15, trigger_level=entry)                       # стоп у межах однієї свічки
+    d = B.decide(tight, ctx, now)
+    assert d["state"] == "NO_TRADE" and "всередині нормального шуму" in d["reason"] and d["quality"]["risk_atr15"] < 1.0, d
+    risk = entry - float(base["sl"])
+    real_levels = [{"p": entry + 0.7 * risk, "side": "high", "kind": "NEW_YORK_H", "known": 0.0, "strength": 1}, {"p": entry + 3.0 * risk, "side": "high", "kind": "PDH", "known": 0.0, "strength": 2}]
+    orig = B.all_levels
+    try:
+        B.all_levels = lambda c, n: real_levels
+        d2 = B.decide(dict(base), ctx, now)
+        assert d2["state"] == "NO_TRADE" and "до першої реальної цілі NEW_YORK_H" in d2["reason"] and abs(d2["quality"]["first_target_r"] - 0.7) < 1e-6, d2
+        B.all_levels = lambda c, n: [dict(real_levels[0], kind="M15SW"), real_levels[1]]   # дрібний M15-свінг — не перешкода
+        d3 = B.decide(dict(base), ctx, now)
+        assert d3["state"] == "READY" and d3["targets"][0]["kind"] == "PDH", d3
+    finally:
+        B.all_levels = orig
+
+
+def test_late_guard_catches_sl_touched_before_delivery():
+    """Регресія (BTC): SL торкнули о 18:01, а READY відправили о 18:02 — гарда дивилась лише на останню ціну. Тепер дивиться на high/low усіх 1m-свічок від моменту рішення."""
+    from office2 import delivery as DL
+
+    snap = {"decided_ts": 1000.0, "thesis": {"entry": 100.0, "sl": 101.0, "trigger_level": 100.2}}
+    def mk(ts, o, h, l, c):
+        return {"ts": ts, "open": o, "high": h, "low": l, "close": c}
+    rows = [mk(940.0, 100, 100.3, 99.9, 100.1), mk(1000.0, 100, 100.4, 99.8, 100.0), mk(1060.0, 100.0, 101.2, 99.9, 100.1), mk(1120.0, 100.1, 100.2, 99.7, 99.9)]   # хвилина 1060: high ≥ SL, далі ціна повернулась
+    why = DL._late_reason(snap, lambda s, tf, n: rows, "BTCUSDT", "SHORT", now=1200.0)
+    assert why and "торкнулась структурного SL" in why, why
+    ok_rows = [mk(1000.0, 100, 100.4, 99.8, 100.0), mk(1060.0, 100.0, 100.5, 99.9, 100.1)]
+    assert DL._late_reason(snap, lambda s, tf, n: ok_rows, "BTCUSDT", "SHORT", now=1200.0) is None
+    old = [mk(940.0, 100, 101.5, 99.9, 100.1)] + ok_rows                                  # свічка ДО рішення з high ≥ SL не рахується
+    assert DL._late_reason(snap, lambda s, tf, n: old, "BTCUSDT", "SHORT", now=1200.0) is None
+
+
 def test_relay_delivery_task_has_all_names():
     """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
     import ast

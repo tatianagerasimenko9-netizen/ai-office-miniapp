@@ -19,6 +19,7 @@ from office2 import features as F
 VERSION = "o2-brain-1"
 EVIDENCE_STATUS = "UNPROVEN"
 MIN_RISK_PCT, MAX_RISK_PCT = 0.15, 6.0
+MIN_STOP_ATR15 = 1.0       # структурний стоп має бути ДАЛІ за нормальний шум: ≥ 1 ATR(M15) (діапазон однієї середньої свічки). Інакше інвалідація тези не відрізняється від шуму → NO TRADE, стоп НЕ розширюємо
 MIN_TP1_R = 1.0            # як у старому гейті «RR до цілі 1 ≥ 1,0»: ціль ближче за ризик — не угода
 MAX_CHASE_R = 0.6          # входити не далі 0.6 ризику від рівня пробою/reclaim
 IMPULSE_ATR = 3.0          # N2-визначення «сильного імпульсу» на H1
@@ -399,15 +400,26 @@ def decide(thesis: Dict[str, Any], ctx: Dict[str, Any], now: float, risk_usd: fl
         return dict(thesis, state="MISSED", reason="пробій/reclaim були понад 2 год тому")
     if chase > MAX_CHASE_R:
         return dict(thesis, state="MISSED", reason=f"ціна пішла на {chase:.2f} R від рівня {trig:.6g}: вхід пізній", chase_r=float(chase))
+    a15k = float(ctx["atr15"][k]) if "atr15" in ctx and np.isfinite(ctx["atr15"][k]) else None
+    risk_atr = (risk / a15k) if a15k and a15k > 0 else None
+    if risk_atr is not None and risk_atr < MIN_STOP_ATR15:
+        return dict(thesis, state="NO_TRADE", reason=f"структурна інвалідація всередині нормального шуму: стоп {risk_atr:.2f} ATR(M15) < {MIN_STOP_ATR15:g}; стоп не розширюємо під R",
+                    quality={"risk_atr15": float(risk_atr), "risk_pct": float(risk_pct)})
     lv = all_levels(ctx, now)
     tgd = targets_for(thesis["dir"], entry, risk, lv)
     tg = tgd["targets"]
+    major_obs = [o for o in tgd["obstacles_before_tp1"] if o["kind"] != "M15SW"]   # дрібні M15-свінги — не перешкода; сесійні/H1+/добові/тижневі рівні — так
+    if major_obs:   # найближча РЕАЛЬНА значуща ціль (рівень ≥0.25 R) ближче за мінімум простору → до неї немає нормального запасу
+        o = major_obs[0]
+        return dict(thesis, state="NO_TRADE", reason=f"до першої реальної цілі {o['kind']} {o['p']:.6g} лише {o['r']:.2f} R (< {MIN_TP1_R:g}); ціль не пропускаємо, стоп не стискаємо",
+                    quality={"risk_atr15": float(risk_atr) if risk_atr is not None else None, "first_target_r": float(o["r"]), "obstacles_before_tp1": tgd["obstacles_before_tp1"]})
     if not tg:
         near = tgd["obstacles_before_tp1"]
         why = f"; найближча перешкода {near[0]['kind']} {near[0]['p']:.6g} лише {near[0]['r']:.2f} R" if near else ""
         return dict(thesis, state="NO_TRADE", reason=f"немає реальної цілі ≥{MIN_TP1_R} R за напрямом{why}")
     size = risk_usd / (risk / entry) if risk > 0 else 0.0
-    return dict(thesis, state="READY", entry=entry, risk=float(risk), risk_pct=float(risk_pct), chase_r=float(chase), targets=tg, obstacles_before_tp1=tgd["obstacles_before_tp1"],
+    return dict(thesis, state="READY", entry=entry, risk=float(risk), risk_pct=float(risk_pct), chase_r=float(chase), targets=tg,
+                quality={"risk_atr15": float(risk_atr) if risk_atr is not None else None, "first_target_r": float(tg[0]["r"]), "min_stop_atr15": MIN_STOP_ATR15, "min_tp1_r": MIN_TP1_R}, obstacles_before_tp1=tgd["obstacles_before_tp1"],
                 sizing={"risk_usd": risk_usd, "notional_usd": float(size), "stop_pct": float(risk_pct), "fee_slip_note": "комісія+slippage ≈0.15% кола не входять у стоп"})
 
 
