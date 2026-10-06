@@ -91,6 +91,15 @@ def resolve_scenario_id(db: str, ident: str) -> str:
     return ""
 
 
+def _stats(db: str) -> Optional[Dict[str, Any]]:
+    try:
+        from office2 import stats as ST
+
+        return ST.collect(db)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, Any]:
     t = time.time() if now is None else now
     states = {r[0]: r[1] for r in _rows(db, "SELECT state, COUNT(*) FROM office2_live_scenario GROUP BY state")}
@@ -138,7 +147,7 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
             "flags": {"OFFICE2_SHADOW": os.getenv("OFFICE2_SHADOW", ""), "OFFICE2_LIVE": os.getenv("OFFICE2_LIVE", ""), "OFFICE2_LIVE_DELIVERY": os.getenv("OFFICE2_LIVE_DELIVERY", ""),
                       "OFFICE_OLD_READY_DELIVERY": os.getenv("OFFICE_OLD_READY_DELIVERY", "1")},
             "scenario_counts": states, "last_cycle_ts": last[0][0] if last and last[0][0] else None, "symbols_last_hour": last[0][1] if last else 0, "collected": cnt,
-            "signals": sigs, "scenarios": scen, "modules": B.MODULES, "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
+            "signals": sigs, "scenarios": scen, "modules": B.MODULES, "stats": _stats(db), "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
 
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "webview.html"), encoding="utf-8").read()

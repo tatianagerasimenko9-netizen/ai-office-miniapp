@@ -53,7 +53,7 @@ def build_caption(snap: Dict[str, Any]) -> str:
     L.append(f"READY: {n(v['ready_price'])}")
     if v["zone"]:
         L.append(f"Зона входу: {n(v['zone'][0])}–{n(v['zone'][1])}")
-    L.append(f"Стоп: {n(v['sl'])}" + LVL.pct_txt(v["sl_pct"], "−"))
+    L.append(f"SL: {n(v['sl'])} · ризик {LVL.range_txt(v['sl_pct'])}%")
     for i, t in enumerate(v["targets"][:3], 1):
         L.append(f"TP{i}: {n(t['p'])}" + LVL.pct_txt(t["pct"], "+"))
     if (th.get("sizing") or {}).get("risk_usd"):

@@ -39,3 +39,10 @@ def pct_txt(r: List[float], sign: str) -> str:
     f = lambda v: (f"{v:.2f}" if v < 10 else f"{v:.1f}").replace(".", ",")  # noqa: E731
     a, b = f(r[0]), f(r[1])
     return f" ({sign}{a}%)" if a == b else f" ({sign}{a}…{sign}{b}%)"
+
+
+def range_txt(r: List[float]) -> str:
+    """«0,40–0,85» (діапазон) або «0,85» (краї збігаються)."""
+    f = lambda v: (f"{v:.2f}" if v < 10 else f"{v:.1f}").replace(".", ",")  # noqa: E731
+    a, b = f(r[0]), f(r[1])
+    return a if a == b else f"{a}–{b}"
