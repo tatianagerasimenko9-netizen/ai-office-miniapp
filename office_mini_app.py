@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -660,6 +661,36 @@ def _null_btc() -> dict:
     return {"price": None, "change_24h": None, "regime": None, "dom": None}
 
 
+_BTC_CACHE: dict = {"ts": 0.0, "val": None, "busy": False}
+_BTC_TTL_SEC = 30.0
+
+
+def _btc_refresh() -> None:
+    try:
+        from office_market_data import _http_get_json
+
+        raw = _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": "BTCUSDT"})
+        if isinstance(raw, dict):
+            px, ch = raw.get("lastPrice"), raw.get("priceChangePercent")
+            _BTC_CACHE["val"] = {"price": float(px) if px not in (None, "") else None, "change_24h": float(ch) if ch not in (None, "") else None, "regime": None, "dom": None}
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        _BTC_CACHE["ts"] = time.time()
+        _BTC_CACHE["busy"] = False
+
+
+def _btc_cached() -> dict:
+    """BTC для Home. HTTP-запит (health-check Render = /api/summary, ліміт 5 с) НІКОЛИ не чекає на Binance: віддаємо останнє значення з кешу, оновлення — у фоні."""
+    if time.time() - float(_BTC_CACHE["ts"]) > _BTC_TTL_SEC and not _BTC_CACHE["busy"]:
+        _BTC_CACHE["busy"] = True
+        import threading
+
+        threading.Thread(target=_btc_refresh, daemon=True, name="btc-ticker").start()
+    v = _BTC_CACHE["val"]
+    return dict(v) if isinstance(v, dict) else _null_btc()
+
+
 def build_live_state(
     *,
     summary_events: list | None = None,
@@ -669,22 +700,7 @@ def build_live_state(
     from office_session_radar import session_clock
     from office_t7_health import t7_health_payload
 
-    btc = _null_btc()
-    try:
-        from office_market_data import _http_get_json
-
-        raw = _http_get_json("https://fapi.binance.com/fapi/v1/ticker/24hr", {"symbol": "BTCUSDT"})
-        if isinstance(raw, dict):
-            px = raw.get("lastPrice")
-            ch = raw.get("priceChangePercent")
-            btc = {
-                "price": float(px) if px not in (None, "") else None,
-                "change_24h": float(ch) if ch not in (None, "") else None,
-                "regime": None,
-                "dom": None,
-            }
-    except Exception:
-        btc = _null_btc()
+    btc = _btc_cached()
 
     t7_status = None
     last_event_ago = None
