@@ -507,6 +507,26 @@ def test_lifecycle_button_opens_parent_scenario():
     assert "Не вдалося знайти цей сценарій" in h
 
 
+def test_runtime_guard_and_delivery_timing():
+    """Стійкість worker: пул потоків ≥8, memory guard не падає, delivery пише тайминги етапів, старий Лев після cutover — тихий і рідший."""
+    import ast
+    import office_runtime_guard as RG
+
+    assert RG.default_executor_workers() >= 8
+    r = RG.rss_mb()
+    assert r is None or r > 10
+    assert RG.trim_memory() in (True, False)
+    root = Path(__file__).resolve().parent.parent
+    src = root.joinpath("office_relay_wizard.py").read_text(encoding="utf-8")
+    assert "set_default_executor" in src and "start_memory_guard" in src
+    body = ast.get_source_segment(src, next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "monitor_scenario_milestones"))
+    assert "_legacy_quiet" in body and "OFFICE_OLD_READY_DELIVERY" in body and "300" in body
+    dsrc = root.joinpath("office2", "delivery.py").read_text(encoding="utf-8")
+    for k in ("pickup_s", "late_check_s", "fetch_s", "render_s", "send_s", "emit_to_sent_s"):
+        assert k in dsrc, k
+    assert "emitted_wall_ts" in root.joinpath("office2", "engine.py").read_text(encoding="utf-8")
+
+
 def test_relay_delivery_task_has_all_names():
     """Регресія: у production monitor_office2_delivery падав NameError (fetch_candles імпортується локально в інших функціях relay)."""
     import ast

@@ -2511,6 +2511,17 @@ async def run() -> None:
         or "office_bridge.db"
     )
 
+    # Стійкість worker (Render 512 МБ): більший пул потоків для asyncio.to_thread + контроль пам'яті (див. office_runtime_guard).
+    try:
+        import concurrent.futures as _cf
+        import office_runtime_guard as _rg
+
+        asyncio.get_running_loop().set_default_executor(_cf.ThreadPoolExecutor(max_workers=_rg.default_executor_workers(), thread_name_prefix="relay-io"))
+        _rg.start_memory_guard()
+        print(f"[relay] runtime guard: пул потоків {_rg.default_executor_workers()}, rss {(_rg.rss_mb() or 0):.0f} МБ")
+    except Exception as exc_rg:  # noqa: BLE001
+        print(f"[relay] runtime guard не запущено: {exc_rg!r}")
+
     # Office 2.0 SHADOW: пасивний спостерігач (окремі таблиці, без Telegram, не впливає на рішення Лева). Лише за OFFICE2_SHADOW=1.
     try:
         from office2 import live as _office2_live
@@ -7631,8 +7642,9 @@ EV позитивне: {prob.get('ev_positive', '')}
                 from office2.delivery import run_o2 as _run_o2
 
                 _th = _run_o2 if scope == "o2" else asyncio.to_thread   # Office2 — власний пул потоків (не чекає на чужі довгі запити)
+                _legacy_quiet = scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0"   # старий Лев вимкнено для користувача: його плани доводимо до кінця лише для статистики, без Telegram
                 for m in await _th(trk.pending_milestones, db_path, None, None, scope):
-                    if m.get("silent"):   # ENTRY / EXPIRED: життя сценарію для статистики, без Telegram
+                    if m.get("silent") or _legacy_quiet:   # ENTRY / EXPIRED (і всі події старого Лева після cutover): життя сценарію для статистики, без Telegram
                         await _th(trk.record_milestone, db_path, m, None)
                         print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
                         continue
@@ -7650,7 +7662,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")
             except Exception as exc_ms:
                 print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
-            await asyncio.sleep(pause)
+            await asyncio.sleep(300 if (scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0") else pause)   # старі плани — лише статистика: рідший огляд (менше Binance REST)
 
     asyncio.create_task(monitor_scenario_milestones("other", 45, 150))
     asyncio.create_task(monitor_scenario_milestones("o2", 15, 20))   # Office2: окремий швидкий цикл (кілька планів), не чекає на огляд сотень старих планів
@@ -7661,14 +7673,14 @@ EV позитивне: {prob.get('ev_positive', '')}
         import office_ready_card as _o2card
         from office_market_data import fetch_candles as _o2_fetch
 
-        await asyncio.sleep(75)
+        await asyncio.sleep(20)
         while True:
             try:
                 if _o2d.delivery_enabled():
                     await _o2d.deliver_pending(db_path, send_proactive, _o2_fetch, _o2card.render, EVENT_TRADE_UPDATE)
             except Exception as exc_o2d:
                 print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(10)
 
     asyncio.create_task(monitor_office2_delivery())
 
