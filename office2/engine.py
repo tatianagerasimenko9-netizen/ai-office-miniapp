@@ -257,11 +257,15 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         except Exception:  # noqa: BLE001
             old_lev = None
     why = why_text(th, mc, rel, sym)
+    from office2 import align as AL
+
+    aligned = AL.alignment(th["dir"], mc, rel, pack.get("htf"))
     snap = {"version": VERSION, "brain": B.VERSION, "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
-            "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "old_lev": old_lev,
+            "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
                 {"step": "HTF context", "value": {k: (v.get("trend") if isinstance(v, dict) else v) for k, v in pack["htf"].items()}},
                 {"step": "BTC/ETH/market", "value": mc},
+                {"step": "узгодженість факторів з напрямом (ЗА/ПРОТИ)", "value": aligned},
                 {"step": "key levels / liquidity", "value": pack["liquidity"]},
                 {"step": "POI", "value": th.get("zone")},
                 {"step": "price behaviour", "value": {"attacks": th.get("attacks"), "compression": th.get("compression"), "sweep": th.get("sweep"), "reclaim": th.get("reclaim")}},

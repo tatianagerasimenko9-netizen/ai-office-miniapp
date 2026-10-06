@@ -460,6 +460,10 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
     sid = str(sid or "").strip()
     if not sid:
         return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["scenario_id"]}
+    if sid.startswith("O2|"):   # OFFICE2 · LIVE BETA: власна сторінка з повним decision trace (office2/webview.py)
+        from urllib.parse import quote
+
+        return {"ok": False, "data_status": "OFFICE2", "redirect": "/office2?id=" + quote(sid, safe="")}
     row = None
     watch_thesis = None
     if sid.startswith("W-"):

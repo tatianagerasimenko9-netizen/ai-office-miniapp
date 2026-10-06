@@ -1454,7 +1454,7 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v2/office2":
                 from office2.webview import payload as _o2_payload
 
-                data = _o2_payload(_db_target_for_identity())
+                data = _o2_payload(_db_target_for_identity(), focus=_q("id"))
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")

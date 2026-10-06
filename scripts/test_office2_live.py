@@ -351,6 +351,44 @@ def test_relay_delivery_task_has_all_names():
     assert "deliver_pending(db_path, send_proactive, _o2_fetch," in body
 
 
+def test_alignment_labels_against_and_for():
+    from office2 import align as AL
+
+    # FIL SHORT: монета сильніша за BTC на +0,29 п.п. → ПРОТИ SHORT; BTC −0,34% → ЗА SHORT
+    it = AL.alignment("SHORT", {"btc_ret_1h": -0.34, "breadth_up_4h": 0.3}, {"rs_vs_btc_1h": 0.29}, {"H4": {"trend": -1}, "D1": {"trend": 1}})
+    by = {i["factor"]: i for i in it}
+    assert by["відносна сила vs BTC (1г)"]["verdict"] == "ПРОТИ SHORT" and "відносна сила: ПРОТИ SHORT" in by["відносна сила vs BTC (1г)"]["text"]
+    assert by["BTC за годину"]["verdict"] == "ЗА SHORT" and by["breadth альтів 4г"]["verdict"] == "ЗА SHORT"
+    assert by["тренд H4"]["verdict"] == "ЗА SHORT" and by["тренд D1"]["verdict"] == "ПРОТИ SHORT"
+    assert AL.alignment("LONG", {}, {"rs_vs_btc_1h": 0.05})[0]["verdict"] == "НЕЙТРАЛЬНО"
+    assert AL.summary(it) == {"for": 3, "against": 2, "neutral": 0}
+
+
+def test_miniapp_opens_office2_scenario_ids():
+    """Регресія: Mini App показував «Сценарій недоступний» для O2|… (сценарій є лише в office2_live_signal)."""
+    import office_mini_v2 as MV
+    import office_ready_card as card
+    import office_bridge as OB
+    from office2 import webview as WV
+
+    sid = "O2|abc123|1791291600"
+    r = MV.scenario_detail(sid)
+    assert not r["ok"] and r["redirect"].startswith("/office2?id=O2%7Cabc123%7C")
+    html = Path(__file__).resolve().parent.parent.joinpath("office_web", "mini_v2.html").read_text(encoding="utf-8")
+    assert "startsWith('O2|')" in html and "d.redirect" in html and "location.href='/office2?id='" in html
+    bars, _ = S.build()
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        _drive(db, bars, [[103.6], [103.6, 103.8], [103.6, 103.8, 103.9]])
+        real = OB._fetchone(db, "SELECT scenario_id FROM office2_live_signal")[0]
+        pl = WV.payload(db, focus=real)
+        assert pl["focus_found"] and pl["signals"][0]["id"] == real
+        al = pl["signals"][0]["frozen"]["alignment"]
+        assert al and any(a["verdict"].startswith(("ЗА", "ПРОТИ", "НЕЙТРАЛЬНО")) for a in al)
+        assert not WV.payload(db, focus="O2|нема|1")["focus_found"]
+        assert "FQ" in WV.html() and "Узгодженість з напрямом" in WV.html()
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):
