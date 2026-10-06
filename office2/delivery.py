@@ -68,8 +68,10 @@ def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
     th = snap["thesis"]
     tg = th.get("targets") or []
     t = lambda i: (tg[i]["p"] if len(tg) > i else None)  # noqa: E731
-    trig = float(th.get("trigger_level") or th["entry"])
-    g = rc.gate_snapshot(direction=snap["direction"], entry=th["entry"], sl=th["sl"], tp1=t(0), tp2=t(1), tp3=t(2), zone_lo=min(trig, th["entry"]), zone_hi=max(trig, th["entry"]))
+    from office2 import levels as LVL
+
+    zl, zh = LVL.zone_of(th)
+    g = rc.gate_snapshot(direction=snap["direction"], entry=th["entry"], sl=th["sl"], tp1=t(0), tp2=t(1), tp3=t(2), zone_lo=zl, zone_hi=zh)
     g["office2"] = {"label": LABEL, "brain": snap.get("brain"), "evidence_status": snap.get("evidence_status"), "scenario": th.get("id"), "trace": snap.get("trace"), "why": snap.get("why")}
     return g
 
@@ -155,11 +157,14 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             import office_ready_evidence as evd
 
             chart = evd.freeze_chart(candles if isinstance(candles, list) else [], t, "15m", symbol=sym)
+            from office2 import levels as LVL
+
+            zl, zh = LVL.zone_of(th)
             trig = float(th.get("trigger_level") or th["entry"])
             img: Dict[str, Any] = {}
             try:
                 img = await run_o2(render, symbol=sym, direction=d, candles=evd.candles_from_chart(chart) if chart.get("candles") else (candles if isinstance(candles, list) else []),
-                                              entry=th["entry"], zone=[min(trig, th["entry"]), max(trig, th["entry"])], sl=th["sl"], tp1=(tg[0]["p"] if tg else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
+                                              entry=th["entry"], zone=[zl, zh], sl=th["sl"], tp1=(tg[0]["p"] if tg else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
                                               tp3=(tg[2]["p"] if len(tg) > 2 else None), ready_price=th["entry"], key_level=trig, key_label="пробій" if th["kind"] == "PULLBACK_BREAK" else "рівень",
                                               path=os.path.join(tempfile.gettempdir(), f"o2ready_{sym}_{int(t)}.png"))
             except Exception as exc_img:  # noqa: BLE001

@@ -13,8 +13,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+import os
+
 from office2 import brain as B
+from office2 import brain2 as B2
 from office2 import risk as RK
+
+BRAIN_V2 = os.environ.get("OFFICE2_BRAIN", "2") != "1"   # OFFICE2_BRAIN=1 — відкат до brain v1 (thesis A/B)
 
 VERSION = "o2-live-1"
 TTL_SEC = {"WATCH": 8 * 3600, "WAIT": 6 * 3600}
@@ -86,10 +91,10 @@ def save_scenario(db: str, sym: str, th: Dict[str, Any], state: str, now: float,
     _execute(db, """INSERT INTO office2_live_scenario(scenario_id, symbol, direction, kind, state, created_ts, updated_ts, expires_ts, reason, thesis_json, version)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT (scenario_id) DO UPDATE SET state=excluded.state, updated_ts=excluded.updated_ts, expires_ts=excluded.expires_ts, reason=excluded.reason, thesis_json=excluded.thesis_json""",
-             (th["id"], sym, th["dir"], th["kind"], state, created or now, now, exp, reason[:400], _j(th), VERSION))
+             (th["id"], sym, th["dir"], th["kind"], state, created or now, now, exp, reason[:400], _j(th), brain_version()))
     if prev != state:
         _execute(db, "INSERT INTO office2_live_transition(scenario_id, ts, from_state, to_state, reason, version) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-                 (th["id"], now, prev, state, reason[:400], VERSION))
+                 (th["id"], now, prev, state, reason[:400], brain_version()))
 
 
 # ------------------------------------------------------------------ портфельний ризик
@@ -175,7 +180,12 @@ def why_text(th: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], symbol
         return format_px(x, symbol).replace(".", ",")
 
     parts = []
-    if th["kind"] == "PULLBACK_BREAK":
+    if th["kind"] in ("SWEEP_SEQ", "ORIGIN_SEQ"):
+        ok = [x for x in (th.get("sequence") or []) if x.get("ok")]
+        ez = th.get("entry_zone") or th.get("zone")
+        lv = th.get("level") or {}
+        parts.append(f"{'Sweep' if th['kind'] == 'SWEEP_SEQ' else 'Захист зони'} {lv.get('kind', '')} {px(lv['p']) if lv.get('p') else ''} → зсув структури → ретрейс у зону {px(ez[0])}–{px(ez[1])} → тригер M15 ({len(ok)} кроків пройдено).")
+    elif th["kind"] == "PULLBACK_BREAK":
         z = th["zone"]
         a = th["attacks"]
         parts.append(f"Після імпульсу +{n(th['impulse']['size_pct'], 1)}% відкат {n(th['retrace'] * 100, 0)}% тримається в зоні {px(z[0])}–{px(z[1])} ({a['n']} атак); "
@@ -192,8 +202,12 @@ def why_text(th: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], symbol
     return " ".join(parts[:2])
 
 
+def brain_version() -> str:
+    return B2.VERSION if BRAIN_V2 else B.VERSION
+
+
 def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]] = None,
-                allow_ready: bool = True) -> Dict[str, int]:
+                allow_ready: bool = True, flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> Dict[str, int]:
     """Один символ на закритому барі: детектори → переходи. Повертає лічильники переходів."""
     res = {"watch": 0, "wait": 0, "ready": 0, "no_trade": 0, "missed": 0, "invalidated": 0, "expired": 0}
     allsc = load_scenarios(db, sym, ALL_STATES)
@@ -201,6 +215,11 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     levels = B.all_levels(ctx, now)
     found: Dict[str, Dict[str, Any]] = {}
     for d in ("LONG", "SHORT"):
+        if BRAIN_V2:
+            th = B2.thesis(ctx, d, now, levels, RISK_USD)
+            if th:
+                found[th["id"]] = th
+            continue
         for th in (B.pullback_break(ctx, d, now), B.reclaim_thesis(ctx, d, now, levels)):
             if th:
                 found[th["id"]] = B.decide(th, ctx, now, RISK_USD)
@@ -242,7 +261,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
                 res["no_trade"] += 1
                 continue
-            emit_ready(db, sym, th, ctx, st, mc, rel, now, old_lev)
+            emit_ready(db, sym, th, ctx, st, mc, rel, now, old_lev, flow_fetch, m5_fetch)
             save_scenario(db, sym, th, "READY", now, prev["created_ts"], prev["state"], th.get("reason", ""))
             res["ready"] += 1
         else:
@@ -251,7 +270,8 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     return res
 
 
-def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]]) -> None:
+def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]],
+               flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> None:
     from office_bridge import _execute
 
     pack = B.context_pack(ctx, now)
@@ -264,14 +284,25 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     from office2 import align as AL
 
     aligned = AL.alignment(th["dir"], mc, rel, pack.get("htf"))
-    snap = {"version": VERSION, "brain": B.VERSION, "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+    evid = []
+    if th.get("kind") in ("SWEEP_SEQ", "ORIGIN_SEQ"):
+        try:
+            from office2 import evidence as EV
+
+            evid = EV.collect(ctx, th, th["dir"], now, B.all_levels(ctx, now), flow_fetch=flow_fetch, m5_fetch=m5_fetch)
+        except Exception as exc:  # noqa: BLE001
+            evid = [{"module": "evidence", "role": "EVIDENCE", "status": "UNAVAILABLE", "finding": f"{type(exc).__name__}: {str(exc)[:80]}", "supports": 0, "data": None}]
+    snap = {"version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None),
+            "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
                 {"step": "HTF context", "value": {k: (v.get("trend") if isinstance(v, dict) else v) for k, v in pack["htf"].items()}},
                 {"step": "BTC/ETH/market", "value": mc},
                 {"step": "узгодженість факторів з напрямом (ЗА/ПРОТИ)", "value": aligned},
                 {"step": "key levels / liquidity", "value": pack["liquidity"]},
-                {"step": "POI", "value": th.get("zone")},
+                {"step": "послідовність (подія → зсув → ретрейс → тригер)", "value": th.get("sequence")},
+                {"step": "модулі: ЗА/ПРОТИ/недоступно (GATE/CONTEXT/EVIDENCE/RESEARCH)", "value": evid},
+                {"step": "POI / зона входу", "value": th.get("entry_zone") or th.get("zone")},
                 {"step": "price behaviour", "value": {"attacks": th.get("attacks"), "compression": th.get("compression"), "sweep": th.get("sweep"), "reclaim": th.get("reclaim")}},
                 {"step": "local structure/trigger", "value": th.get("break") or th.get("reclaim")},
                 {"step": "structural invalidation", "value": th.get("invalidation")},
@@ -281,4 +312,4 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "risk", "value": th.get("sizing")},
                 {"step": "decision", "value": "READY (LIVE BETA, UNPROVEN)"}]}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
-             (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), VERSION))
+             (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
