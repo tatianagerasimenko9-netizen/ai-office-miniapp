@@ -7623,9 +7623,12 @@ EV позитивне: {prob.get('ev_positive', '')}
         await asyncio.sleep(first)
         while True:
             try:
-                for m in await asyncio.to_thread(trk.pending_milestones, db_path, None, None, scope):
+                from office2.delivery import run_o2 as _run_o2
+
+                _th = _run_o2 if scope == "o2" else asyncio.to_thread   # Office2 — власний пул потоків (не чекає на чужі довгі запити)
+                for m in await _th(trk.pending_milestones, db_path, None, None, scope):
                     if m.get("silent"):   # ENTRY / EXPIRED: життя сценарію для статистики, без Telegram
-                        await asyncio.to_thread(trk.record_milestone, db_path, m, None)
+                        await _th(trk.record_milestone, db_path, m, None)
                         print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
                         continue
                     mid = await send_proactive(
@@ -7636,7 +7639,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                         scenario_event=str(m["level"]),
                     )
                     if mid:
-                        await asyncio.to_thread(trk.record_milestone, db_path, m, mid)
+                        await _th(trk.record_milestone, db_path, m, mid)
                         print(f"[milestone] sent {m['symbol']} {m['level']} id={mid}")
                     else:
                         print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")

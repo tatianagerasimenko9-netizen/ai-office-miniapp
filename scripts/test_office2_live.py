@@ -370,6 +370,31 @@ def test_capacity_counts_only_really_active_scenarios():
         assert deny and "ємність" in deny and "не твій особистий ризик" in deny, deny
 
 
+def test_office2_has_own_thread_pool_not_starved():
+    """Регресія: доставка Office2 стояла в черзі за довгими задачами загального пулу (рішення 14:32 → відправка 14:53). Власний пул не залежить від нього."""
+    import asyncio
+    import time as _t
+    from office2 import delivery as DL
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        blockers = [loop.run_in_executor(None, _t.sleep, 1.5) for _ in range(64)]      # забиваємо загальний пул
+        t0 = _t.time()
+        r = await DL.run_o2(lambda a, b: a + b, 1, 2)
+        dt = _t.time() - t0
+        starved = None
+        await asyncio.gather(*blockers)
+        return r, dt, starved
+
+    r, dt, _ = asyncio.run(main())
+    assert r == 3 and dt < 0.5, (r, dt)
+    import ast
+
+    src = Path(__file__).resolve().parent.parent.joinpath("office2", "delivery.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.AsyncFunctionDef) and n.name == "deliver_pending")
+    assert "to_thread" not in ast.get_source_segment(src, fn)
+
+
 def test_miniapp_ux_mobile_structure():
     """UX: сигнал першим екраном, сирий trace/JSON лише у «Технічних», службові статуси українською, loading/error/retry."""
     from office2 import webview as WV
