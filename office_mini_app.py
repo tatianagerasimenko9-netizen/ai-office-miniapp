@@ -1451,6 +1451,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = lev_payload(_q("q"), _q("symbol"))
             elif u.path == "/api/v2/session":
                 data = session_payload(_q("symbol") or "BTCUSDT")
+            elif u.path == "/api/v2/office2":
+                from office2.webview import payload as _o2_payload
+
+                data = _o2_payload(_db_target_for_identity())
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -1509,6 +1513,16 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path == "/office2":
+            from office2.webview import html as _o2_html
+
+            body = _o2_html().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

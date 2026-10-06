@@ -39,8 +39,8 @@ OUTCOME_AFTER_SEC = 48 * 3600
 CYCLE_SEC = 900
 KL_URL = "https://fapi.binance.com/fapi/v1/klines"
 TF_SEC = {"15m": 900, "4h": 4 * 3600, "1d": 86400, "1w": 7 * 86400}
-TF_TTL = {"15m": 0, "4h": 3600, "1d": 6 * 3600, "1w": 24 * 3600}   # як довго тримаємо завантажене до повторного запиту
-TF_LIMIT = {"15m": 500, "4h": 300, "1d": 120, "1w": 40}
+TF_TTL = {"15m": 0, "4h": 3600, "1d": 6 * 3600, "1w": 24 * 3600, "1M": 24 * 3600}   # як довго тримаємо завантажене до повторного запиту
+TF_LIMIT = {"15m": 500, "4h": 300, "1d": 120, "1w": 40, "1M": 8}
 _LOCK = threading.Lock()
 _STATS: Dict[str, Any] = {"cycles": 0, "states": 0, "events": 0, "old_lev": 0, "outcomes": 0, "errors": 0, "last_cycle": None, "last_error": None}
 
@@ -64,6 +64,11 @@ def enabled() -> bool:
 def universe() -> List[str]:
     raw = os.getenv("OFFICE2_SHADOW_SYMBOLS", "").strip()
     return [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else list(DEFAULT_UNIVERSE)
+
+
+def engine_enabled() -> bool:
+    """OFFICE2_LIVE=1: рушій WATCH/WAIT/READY працює й пише сценарії в БД. Доставка в Telegram — окремо (OFFICE2_LIVE_DELIVERY=1 у worker)."""
+    return os.getenv("OFFICE2_LIVE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def stats() -> Dict[str, Any]:
@@ -176,8 +181,15 @@ def build_ctx(feed: Feed, sym: str, now: float) -> Optional[Dict[str, Any]]:
     w1 = feed.klines(sym, "1w", now)
     if not (m15 and h4 and d1 and w1) or len(m15["t"]) < 60 or len(h4["t"]) < 30 or len(d1["t"]) < 20:
         return None
-    return {"m15": m15, "h4": h4, "d1": d1, "w1": w1, "atr15": F.atr(m15, 14), "reg4": F.regime_by_bar(h4), "regd": F.regime_by_bar(d1),
-            "levels": F.build_levels(h4, d1, w1)}
+    mn = None
+    if engine_enabled():
+        try:
+            mn = feed.klines(sym, "1M", now)
+        except Exception:  # noqa: BLE001
+            mn = None
+    from office2 import brain as BR
+
+    return BR.build_full_ctx(m15, h4, d1, w1, mn)
 
 
 # ---------------------------------------------------------------- ознаки стану (лише закриті бари; CONTEXT)
@@ -222,7 +234,7 @@ def market_context(states: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         v = [s[key] for s in alts if s.get(key) is not None]
         return float(np.median(v)) if len(v) >= 5 else None
 
-    return {"n_alts": len(alts), "breadth_up_1h": frac("ret_1h"), "breadth_up_4h": frac("ret_4h"), "breadth_up_24h": frac("ret_24h"),
+    return {"n_alts": len(alts), "btc_ret_1h": btc.get("ret_1h") if btc else None, "eth_ret_1h": eth.get("ret_1h") if eth else None, "breadth_up_1h": frac("ret_1h"), "breadth_up_4h": frac("ret_4h"), "breadth_up_24h": frac("ret_24h"),
             "median_alt_ret_4h": med("ret_4h"), "median_alt_ret_24h": med("ret_24h"), "median_vol_regime": med("vol_regime_7d"),
             "btc_ret_4h": btc.get("ret_4h") if btc else None, "btc_ret_24h": btc.get("ret_24h") if btc else None, "btc_reg4": btc.get("reg4") if btc else None,
             "btc_regd": btc.get("regd") if btc else None, "btc_vol_regime": btc.get("vol_regime_7d") if btc else None,
@@ -233,7 +245,7 @@ def relative_strength(st: Dict[str, Any], mc: Dict[str, Any]) -> Dict[str, Optio
     def d(a: Optional[float], b: Optional[float]) -> Optional[float]:
         return None if a is None or b is None else float(a - b)
 
-    return {"rs_vs_btc_4h": d(st.get("ret_4h"), mc.get("btc_ret_4h")), "rs_vs_eth_4h": d(st.get("ret_4h"), mc.get("eth_ret_4h")),
+    return {"coin_ret_1h": st.get("ret_1h"), "rs_vs_btc_1h": d(st.get("ret_1h"), mc.get("btc_ret_1h")), "rs_vs_btc_4h": d(st.get("ret_4h"), mc.get("btc_ret_4h")), "rs_vs_eth_4h": d(st.get("ret_4h"), mc.get("eth_ret_4h")),
             "rs_vs_btc_24h": d(st.get("ret_24h"), mc.get("btc_ret_24h")), "rs_vs_alts_4h": d(st.get("ret_4h"), mc.get("median_alt_ret_4h"))}
 
 
@@ -353,6 +365,16 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             with _LOCK:
                 _STATS["last_error"] = f"cand {sym}: {str(exc)[:100]}"
             continue
+        if engine_enabled():
+            try:
+                from office2 import engine as EN
+
+                lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, old_lev_state(db, sym, now))
+                res["live"] = {k: res.get("live", {}).get(k, 0) + v for k, v in lv.items()}
+            except Exception as exc:  # noqa: BLE001
+                _bump("errors")
+                with _LOCK:
+                    _STATS["last_error"] = f"engine {sym}: {str(exc)[:140]}"
         for c in cands:
             if abs(c["t_entry"] - now) > 1:
                 continue   # лише кандидати, чий тригер = щойно закритий бар
@@ -453,6 +475,10 @@ def _next_bar_close(now: float) -> float:
 def run_forever(db: str, feed: Optional[Feed] = None) -> None:
     feed = feed or Feed()
     init_db(db)
+    if engine_enabled():
+        from office2 import engine as EN
+
+        EN.init_db(db)
     state: Dict[str, Any] = {"last_plan_id": last_event_id(db)}   # лише нові рішення Лева, без вичитування історії
     _log(f"старт {VERSION}: символів {len(universe())}, db ok; Telegram не використовується")
     while True:
