@@ -736,10 +736,12 @@ function readyBottom(hm){
 
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
+  if(String(id||'').startsWith('O2|')){ location.href='/office2?id='+encodeURIComponent(id); return; }   // сигнали OFFICE2 · LIVE BETA мають власну сторінку з повним decision trace
   const T0=++RT;
   killPoll();
   app.innerHTML='<div class="sk"></div><div class="sk"></div>';
   let d; try{d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'сценарій');}
+  if(d.redirect){ location.href=d.redirect; return; }
   if(!d.ok){ app.innerHTML='<button class="back" id="back">← Сценарії</button><div class="empty">Сценарій недоступний</div>'; $('back').onclick=()=>go('scenarios'); return; }
   const s=d.scenario||{}, dp=s.display||{}, st=s.status||{};
   const story=s.story&&s.story.ok?s.story.text:'';
