@@ -264,7 +264,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     from office2 import align as AL
 
     aligned = AL.alignment(th["dir"], mc, rel, pack.get("htf"))
-    snap = {"version": VERSION, "brain": B.VERSION, "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+    snap = {"version": VERSION, "brain": B.VERSION, "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
                 {"step": "HTF context", "value": {k: (v.get("trend") if isinstance(v, dict) else v) for k, v in pack["htf"].items()}},

@@ -119,7 +119,10 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
         try:
             snap = json.loads(sj)
             snap["valid_until_ts"] = float(valid)
+            tm = {"pickup_s": round(time.time() - float(snap.get("emitted_wall_ts") or created), 1) if snap.get("emitted_wall_ts") else None}
+            t_a = time.time()
             why_late = await run_o2(_late_reason, snap, fetch, sym, d)
+            tm["late_check_s"] = round(time.time() - t_a, 1)
             if why_late:   # no-chase і структурна інвалідація перевіряються ще раз у момент доставки (рішення могло застаріти за час циклу)
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why_late[:300], sid))
                 log(f"[office2] suppressed at delivery {sym} {d}: {why_late}")
@@ -127,7 +130,10 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             cap = build_caption(snap)
             th = snap["thesis"]
             tg = th.get("targets") or []
+            t_a = time.time()
             candles = await run_o2(fetch, sym, "15m", 96)
+            tm["fetch_s"] = round(time.time() - t_a, 1)
+            t_a = time.time()
             import office_ready_evidence as evd
 
             chart = evd.freeze_chart(candles if isinstance(candles, list) else [], t, "15m", symbol=sym)
@@ -140,11 +146,15 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                                               path=os.path.join(tempfile.gettempdir(), f"o2ready_{sym}_{int(t)}.png"))
             except Exception as exc_img:  # noqa: BLE001
                 img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
+            tm["render_s"] = round(time.time() - t_a, 1)
+            t_a = time.time()
             mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
             if not mid:
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", ("Telegram не підтвердив доставку", sid))
                 log(f"[office2] delivery not verified {sid}: лишаю для повтору")
                 continue
+            tm["send_s"] = round(time.time() - t_a, 1)
+            tm["emit_to_sent_s"] = round(time.time() - float(snap["emitted_wall_ts"]), 1) if snap.get("emitted_wall_ts") else None
             gate = build_gate(snap)
             gate["chart"] = chart
             tf = "M15"
@@ -153,9 +163,9 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                                     valid_until_ts=float(valid), rejected=False, confirm_msg_id=mid, gate=gate)
             await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'DELIVERED', msg_id = ?, delivered_ts = ?, last_error = NULL WHERE scenario_id = ?", (int(mid), t, sid))
             await run_o2(log_event, db, "OFFICE2_READY_SENT", {"scenario_id": sid, "symbol": sym, "direction": d, "text": cap, "telegram_msg_id": mid, "image_ok": bool(img.get("ok")),
-                                                                         "image_error": None if img.get("ok") else img.get("reason"), "chart_sha256": chart.get("sha256")}, sid)
+                                                                         "image_error": None if img.get("ok") else img.get("reason"), "chart_sha256": chart.get("sha256"), "timing": tm}, sid)
             sent += 1
-            log(f"[office2] READY delivered {sym} {d} id={mid}")
+            log(f"[office2] READY delivered {sym} {d} id={mid} timing={tm}")
         except Exception as exc:  # noqa: BLE001
             log(f"[office2] delivery error {sid}: {type(exc).__name__}: {exc}")
             try:
