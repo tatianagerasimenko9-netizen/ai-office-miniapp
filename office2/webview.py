@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Tuple, Any, Dict, List, Optional
 
 
 def _rows(db: str, sql: str, args: tuple = ()) -> list:
@@ -100,6 +100,24 @@ def _stats(db: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+RADAR_GROUPS = {0: "Готово (READY)", 1: "ARMED 3/3 — лишився тригер M15", 2: "WAIT 2/3 — чекаю ретрейс у зону", 3: "WAIT 1/3 — чекаю зсув структури", 4: "Інші, що формуються", 5: "Не торгувати", 6: "Запізно (MISSED)", 7: "Скасовано / строк вийшов"}
+
+
+def radar_group(state: str, reason: Any) -> Tuple[int, str]:
+    """Порядок Radar: що ближче до входу — вище. Етап береться з тексту причини Brain v2 (WAIT n/3)."""
+    from office2.engine import stage_tag
+
+    if state == "READY":
+        g = 0
+    elif state == "WAIT":
+        g = {"WAIT 3/3": 1, "WAIT 2/3": 2, "WAIT 1/3": 3}.get(stage_tag(reason), 4)
+    elif state == "WATCH":
+        g = 4
+    else:
+        g = {"NO_TRADE": 5, "MISSED": 6}.get(state, 7)
+    return g, RADAR_GROUPS[g]
+
+
 def _funnel(db: str, t: float) -> Dict[str, Any]:
     """Воронка Brain: скільки (символ×напрям) на якому етапі за останній цикл і за 24 год, з причинами відсіву (NO_TRADE/MISSED/INVALIDATED)."""
     try:
@@ -119,8 +137,14 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
     t = time.time() if now is None else now
     states = {r[0]: r[1] for r in _rows(db, "SELECT state, COUNT(*) FROM office2_live_scenario GROUP BY state")}
     last = _rows(db, "SELECT MAX(ts_epoch), COUNT(DISTINCT symbol) FROM office2_shadow_state WHERE ts_epoch > ?", (int(t - 3600),))
-    scen = [{"id": r[0], "symbol": r[1], "direction": r[2], "kind": r[3], "state": r[4], "state_ua": STATE_UA.get(r[4], r[4]), "reason": r[5], "updated_ts": r[6]}
-            for r in _rows(db, "SELECT scenario_id, symbol, direction, kind, state, reason, updated_ts FROM office2_live_scenario ORDER BY updated_ts DESC LIMIT 80")]
+    cols_s = "scenario_id, symbol, direction, kind, state, reason, updated_ts"
+    live_rows = _rows(db, f"SELECT {cols_s} FROM office2_live_scenario WHERE state IN ('WATCH','WAIT','READY') ORDER BY updated_ts DESC LIMIT 150")
+    done_rows = _rows(db, f"SELECT {cols_s} FROM office2_live_scenario WHERE state IN ('NO_TRADE','MISSED','INVALIDATED','EXPIRED') ORDER BY updated_ts DESC LIMIT 25")
+    scen = []
+    for r in list(live_rows) + list(done_rows):
+        g, g_ua = radar_group(r[4], r[5])
+        scen.append({"id": r[0], "symbol": r[1], "direction": r[2], "kind": r[3], "state": r[4], "state_ua": STATE_UA.get(r[4], r[4]), "reason": r[5], "updated_ts": r[6], "group": g, "group_ua": g_ua})
+    scen.sort(key=lambda x: (x["group"], -float(x["updated_ts"] or 0)))
     cols = "scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json"
     rows = _rows(db, f"SELECT {cols} FROM office2_live_signal ORDER BY created_ts DESC LIMIT 20")
     requested = focus

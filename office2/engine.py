@@ -210,10 +210,13 @@ def why_text(th: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], symbol
 
     parts = []
     if th["kind"] in ("SWEEP_SEQ", "ORIGIN_SEQ"):
-        ok = [x for x in (th.get("sequence") or []) if x.get("ok")]
         ez = th.get("entry_zone") or th.get("zone")
         lv = th.get("level") or {}
-        parts.append(f"{'Sweep' if th['kind'] == 'SWEEP_SEQ' else 'Захист зони'} {lv.get('kind', '')} {px(lv['p']) if lv.get('p') else ''} → зсув структури → ретрейс у зону {px(ez[0])}–{px(ez[1])} → тригер M15 ({len(ok)} кроків пройдено).")
+        ev = th.get("event") or {}
+        br = th.get("break") or {}
+        head = (f"Sweep {lv.get('kind', '')} {px(lv['p'])} (екстремум {px(ev['extreme'])})" if th["kind"] == "SWEEP_SEQ" and lv.get("p") and ev.get("extreme") else "Захист origin-зони")
+        mid = f" → зсув: закриття {'вище' if th['dir'] == 'LONG' else 'нижче'} {px(br['level'])} (тіло {n(br['body_atr'], 1)} ATR)" if br.get("level") else ""
+        parts.append(f"{head}{mid} → ретрейс у зону {px(ez[0])}–{px(ez[1])} → тригер M15.")
     elif th["kind"] == "PULLBACK_BREAK":
         z = th["zone"]
         a = th["attacks"]

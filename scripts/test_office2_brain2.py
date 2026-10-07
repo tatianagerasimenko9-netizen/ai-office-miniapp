@@ -227,6 +227,119 @@ def test_funnel_stage_mapping():
     assert EN.funnel_stage({"state": "READY", "reason": ""})[0] == "READY"
 
 
+def test_shift_accepts_displacement_after_weak_break_and_cap_keeps_advanced_event():
+    """Логічні суперечності, а не послаблення: (1) перший злам swing звичайною свічкою + displacement на наступному барі = зсув (раніше swing назавжди ставав «неможливим»);
+    без displacement у вікні зсуву немає; (2) просунутий старий сценарій не витісняється ≥4 новішими sweep-подіями."""
+    n = 40
+    t = np.arange(n) * 900.0 + 1.7e9
+    o = np.full(n, 100.0)
+    c = np.full(n, 100.0)
+    h = np.full(n, 100.5)
+    l = np.full(n, 99.5)
+    # подія e=10 (low 98), swing-high на 14 (101), підтверджений на 16
+    l[10], c[10] = 98.0, 99.0
+    h[14], c[14] = 101.0, 100.4
+    c[15], h[15] = 100.2, 100.6
+    c[16], h[16] = 100.1, 100.5
+    o[17], c[17], h[17], l[17] = 100.1, 101.2, 101.3, 100.0      # перший закриття над 101 (злам), тіло 1.1 — слабке (ATR 1.0 → поріг 1.2)
+    o[18], c[18], h[18], l[18] = 101.2, 102.6, 102.7, 101.1      # наступний бар: тіло 1.4 ATR, закриття у верхніх 35% → displacement
+    bars = {"t": t, "o": o, "h": h, "l": l, "c": c, "v": np.ones(n), "tbv": np.ones(n)}
+    a15 = np.full(n, 1.0)
+    r = B2._shift(bars, a15, 20, 10)
+    assert r and r["j"] == 17 and r["jd"] == 18, r
+    c2 = c.copy()
+    o2 = o.copy()
+    c2[18], o2[18], h[18] = 101.3, 101.2, 101.4                   # без displacement у вікні (3 бари)
+    c2[19] = 101.2
+    c2[20] = 101.25
+    o2[19], o2[20] = 101.15, 101.2
+    bars2 = dict(bars, c=c2, o=o2)
+    assert B2._shift(bars2, a15, 20, 10) is None
+    # (2) cap подій
+    c_, seq = closes_long()
+    b, ctx = mk(c_, seq["top"])
+    now = float(b["t"][-1] + 900)
+    real = B2._sweep_events(B.view(ctx["m15"], 1), F.atr(ctx["m15"], 14), F.last_closed(ctx["m15"], 900, now), LEVELS, 1)
+    assert real
+    k = F.last_closed(ctx["m15"], 900, now)
+    fakes = [dict(real[0], e=k - 1 - i, extreme=float(ctx["m15"]["l"][k - 1 - i])) for i in range(8)]
+    orig = B2._sweep_events
+    B2._sweep_events = lambda *a, **kw: fakes + real[:1]
+    try:
+        th = B2.thesis(ctx, "LONG", now, LEVELS, 10.0)
+    finally:
+        B2._sweep_events = orig
+    assert th and th.get("entry_zone"), th                    # просунутий (старший) сценарій обраний, а не затертий 8 новішими
+
+
+def test_radar_groups_order():
+    from office2 import webview as WV
+
+    assert WV.radar_group("READY", "")[0] == 0
+    assert WV.radar_group("WAIT", "WAIT 3/3 · ARMED (x)")[0] == 1 < WV.radar_group("WAIT", "WAIT 2/3 · ретрейс: x")[0] < WV.radar_group("WAIT", "WAIT 1/3 · зсув: x")[0]
+    assert WV.radar_group("NO_TRADE", "x")[0] == 5 and WV.radar_group("MISSED", "")[0] == 6 and WV.radar_group("INVALIDATED", "")[0] == 7
+
+
+def _v2_e2e(short):
+    """E2E на синтетичному ланцюжку: READY brain v2 → доставка (не «пізній вхід» через trigger_level) → план lifecycle → Mini App. Раніше trigger_level = екстремум події → chase > 0.6 R → кожен READY v2 відсікався б при доставці."""
+    import asyncio
+    import datetime as dt
+    import tempfile
+
+    import office_bridge as OB
+    import office_ready_card as card
+    import office_signal_track as trk
+    from office2 import delivery as DL
+    from office2 import engine as EN
+    from office2 import webview as WV
+
+    class Sent:
+        def __init__(self):
+            self.calls = []
+
+        async def __call__(self, event_type, text, **kw):
+            self.calls.append((event_type, text, kw))
+            return 7000 + len(self.calls)
+
+    c, seq = closes_long()
+    lv = LEVELS
+    if short:
+        c = [200.0 - x for x in c]
+        lv = [{"p": 200.0 - x["p"], "side": "high" if x["side"] == "low" else "low", "kind": x["kind"], "strength": 1, "known": 0.0} for x in LEVELS]
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: lv
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "o2.db")
+            OB.init_office_db(db)
+            EN.init_db(db)
+            st = lambda b: {"price": float(b["c"][-1]), "ret_1h": 0.3, "ret_4h": 1.0, "ret_24h": 2.0, "atr15_pct": 0.3, "vol_regime_7d": 0.5, "pos_24h_range": 0.6}  # noqa: E731
+            for upto in (seq["sweep"], seq["top"], seq["bear_in_zone"], seq["trigger"]):
+                b, ctx = mk(c, upto)
+                EN.step_symbol(db, "XUSDT", ctx, st(b), {"btc_ret_1h": 0.1, "eth_ret_1h": 0.1, "breadth_up_1h": 0.5, "n_alts": 20}, {"coin_ret_1h": 0.3, "rs_vs_btc_1h": 0.2, "rs_vs_btc_4h": 0.1}, float(b["t"][-1] + 900), None)
+            created = OB._fetchone(db, "SELECT created_ts FROM office2_live_signal")[0]
+            candles = [{"ts": dt.datetime.fromtimestamp(float(b["t"][i]), tz=dt.timezone.utc).isoformat(), "open": float(b["o"][i]), "high": float(b["h"][i]), "low": float(b["l"][i]), "close": float(b["c"][i]),
+                        "volume": 100.0, "src": "binance_futures"} for i in range(len(b["t"]) - 96, len(b["t"]))]
+            sent = Sent()
+            n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: candles, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+            assert n == 1 and len(sent.calls) == 1, (n, OB._fetchall(db, "SELECT status, last_error FROM office2_live_signal"))
+            text = sent.calls[0][1]
+            assert text.startswith("OFFICE2 · LIVE BETA\n" + ("🔴 SHORT" if short else "🟢 LONG") + " · X") and "Зона входу:" in text and "SL:" in text and "TP1:" in text and "Ризик: 10 $" in text, text
+            plan = trk.plan_for(db, sent.calls[0][2]["canonical_id"])
+            assert plan and ((plan["sl"] > plan["entry"] > plan["tp1"]) if short else (plan["sl"] < plan["entry"] < plan["tp1"]))
+            pl = WV.payload(db, now=created + 120)
+            sg = pl["signals"][0]
+            assert sg["frozen"]["thesis"]["kind"] in ("SWEEP_SEQ", "ORIGIN_SEQ") and sg["frozen"]["sequence"] and sg["frozen"]["evidence"] and sg["status"] == "DELIVERED"
+            assert pl["scenarios"][0]["group"] == 0 and pl["scenarios"][0]["state"] == "READY"       # Radar: READY угорі
+    finally:
+        B.all_levels = orig
+
+
+def test_v2_ready_delivered_long_and_short():
+    _v2_e2e(False)
+    _v2_e2e(True)
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for f in fns:
