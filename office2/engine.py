@@ -202,6 +202,13 @@ def why_text(th: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], symbol
     return " ".join(parts[:2])
 
 
+def scoped_id(sym: str, tid: str) -> str:
+    """Стабільний id сценарію В МЕЖАХ СИМВОЛУ: той самий thesis-id на різних монетах (однаковий напрям/вид/час події) не повинен збігатися."""
+    import hashlib
+
+    return "O2|" + hashlib.sha256(f"{sym}|{tid}".encode()).hexdigest()[:12]
+
+
 def brain_version() -> str:
     return B2.VERSION if BRAIN_V2 else B.VERSION
 
@@ -218,6 +225,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         if BRAIN_V2:
             th = B2.thesis(ctx, d, now, levels, RISK_USD)
             if th:
+                th = dict(th, id=scoped_id(sym, th["id"]), symbol=sym)   # id теза-незалежний від монети збігався б між символами на одному барі → перезапис чужих сценаріїв
                 found[th["id"]] = th
             continue
         for th in (B.pullback_break(ctx, d, now), B.reclaim_thesis(ctx, d, now, levels)):
