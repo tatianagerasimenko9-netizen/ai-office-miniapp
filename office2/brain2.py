@@ -23,6 +23,8 @@ from office2 import features as F
 VERSION = "o2-brain-2.0"
 OTE_LO, OTE_HI, DEEP = 0.62, 0.79, 0.90        # ретрейс ноги: OTE-діапазон і межа глибокого ретрейсу
 DISP_BODY_ATR = 1.2                              # displacement: тіло ≥ 1.2 ATR(M15) і закриття в верхніх 35% діапазону
+DISP_WINDOW = 3                                  # displacement може бути на барі злому або в наступних DISP_WINDOW-1 барах (закриття лишаються над зламаним swing)
+MAX_EVENTS = 10                                  # скільки подій на напрям оцінюємо за цикл (раніше 4 найновіших: просунутий старий сценарій витіснявся новими sweep-ами)
 MIN_LEG_ATR = 2.0                                # нога зміщення ≥ 2 ATR(M15): менше — не структура
 MISS_R = 3.0                                     # ціна відійшла від зони на > 3 R (від верху зони до інвалідації) без ретрейсу → MISSED
 MAX_WAIT_BARS = 32                               # 8 год після зсуву: ретрейс не прийшов → MISSED
@@ -113,9 +115,18 @@ def _origin_events(ctx: Dict[str, Any], direction: str, now: float, sg: int, m15
 
 
 # ------------------------------------------------------------------ зсув структури
-def _shift(m15: Dict[str, np.ndarray], a15: np.ndarray, k: int, e: int) -> Optional[Dict[str, Any]]:
-    """Перший бар j>e: закриття за останнім локальним swing-high (сформованим після події) з displacement."""
-    sh, _ = F.swings(m15, 2)
+def _ev_txt(ev: Dict[str, Any], sg: int) -> str:
+    lv = ev.get("level")
+    if lv:
+        return f"sweep {lv['kind']} {lv['p']:.6g} (екстремум {sg * ev['extreme']:.6g})"
+    return f"захист origin-зони (екстремум {sg * ev['extreme']:.6g})"
+
+
+def _shift(m15: Dict[str, np.ndarray], a15: np.ndarray, k: int, e: int, swings: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+    """Зсув структури (MSS/BOS): ПЕРШЕ закриття за останнім локальним swing-high, сформованим після події (j = злам), + displacement:
+    свічка з тілом ≥ DISP_BODY_ATR·ATR і закриттям у верхніх 35% діапазону на барі зламу або в наступних DISP_WINDOW-1 барах, поки закриття лишаються над зламаним рівнем.
+    (Раніше displacement вимагався саме на барі першого закриття над swing: якщо перший злам був звичайною свічкою, цей swing назавжди ставав «неможливим» — суперечність між ґейтами.)"""
+    sh = swings if swings is not None else F.swings(m15, 2)[0]
     sh = [s for s in sh if s[0] > e and s[1] <= k]
     for j in range(e + 3, k + 1):
         cand = [s for s in sh if s[1] < j]
@@ -123,10 +134,13 @@ def _shift(m15: Dict[str, np.ndarray], a15: np.ndarray, k: int, e: int) -> Optio
             continue
         lh = cand[-1][2]
         if m15["c"][j] > lh and all(m15["c"][x] <= lh for x in range(cand[-1][1] + 1, j)):
-            body = float(m15["c"][j] - m15["o"][j])
-            rng = float(m15["h"][j] - m15["l"][j])
-            if np.isfinite(a15[j]) and body >= DISP_BODY_ATR * a15[j] and rng > 0 and m15["c"][j] >= m15["l"][j] + 0.65 * rng:
-                return {"j": j, "level": float(lh), "body_atr": float(body / a15[j])}
+            for d in range(j, min(j + DISP_WINDOW, k + 1)):
+                if m15["c"][d] <= lh:
+                    break
+                body = float(m15["c"][d] - m15["o"][d])
+                rng = float(m15["h"][d] - m15["l"][d])
+                if np.isfinite(a15[d]) and body >= DISP_BODY_ATR * a15[d] and rng > 0 and m15["c"][d] >= m15["l"][d] + 0.65 * rng:
+                    return {"j": j, "jd": d, "level": float(lh), "body_atr": float(body / a15[d])}
     return None
 
 
@@ -155,26 +169,25 @@ def _entry_zone(m15: Dict[str, np.ndarray], e: int, j: int, k: int, lo: float, h
 
 # ------------------------------------------------------------------ оцінка однієї події
 def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: float, sg: int, m15: Dict[str, np.ndarray], m15r: Dict[str, np.ndarray],
-              a15: np.ndarray, k: int, levels: List[Dict[str, Any]], risk_usd: float) -> Optional[Dict[str, Any]]:
+              a15: np.ndarray, k: int, levels: List[Dict[str, Any]], risk_usd: float, swings: Optional[Any] = None) -> Optional[Dict[str, Any]]:
     e = ev["e"]
     lo = ev["extreme"]
     kind = "SWEEP_SEQ" if ev["src"] == "SWEEP" else "ORIGIN_SEQ"
     base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin")},
                             "level": ev["level"] or {"p": sg * lo, "kind": "ORIGIN_LOW"}, "invalidation": {"price": sg * lo, "why": "екстремум події (sweep/захист origin): закриття M15 за ним — теза хибна"}}
     base["trigger_level"] = sg * lo
-    sh = _shift(m15, a15, k, e)
+    sh = _shift(m15, a15, k, e, swings)
     seq = [{"step": "подія", "ok": True, "value": f"{ev['src']} {sg * lo:.6g}"}]
     if sh is None:
-        sh_sw, _ = F.swings(m15, 2)
-        hs = [s for s in sh_sw if s[0] > e and s[1] <= k]
+        hs = [s for s in (swings if swings is not None else F.swings(m15, 2)[0]) if s[0] > e and s[1] <= k]
         need = f"закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * hs[-1][2]:.6g} з displacement (тіло ≥ {DISP_BODY_ATR:g} ATR)" if hs else f"локальний swing-{'high' if sg > 0 else 'low'} після події, потім його злам з displacement"
-        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: подія {ev['src']} є; потрібен зсув структури: {need}", sequence=seq + [{"step": "зсув структури (MSS/BOS)", "ok": False}], zone=[sg * lo, sg * lo], entry_zone=None)
+        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: {_ev_txt(ev, sg)}; потрібен зсув структури: {need}; зараз {sg * float(m15['c'][k]):.6g}; скасування — закриття M15 {'нижче' if sg > 0 else 'вище'} {sg * lo:.6g}", sequence=seq + [{"step": "зсув структури (MSS/BOS)", "ok": False}], zone=[sg * lo, sg * lo], entry_zone=None)
     j = sh["j"]
     hi = float(m15["h"][j:k + 1].max())
     leg = hi - lo
     leg_atr = leg / float(a15[k]) if np.isfinite(a15[k]) and a15[k] > 0 else 0.0
     seq.append({"step": "зсув структури (MSS/BOS)", "ok": True, "value": f"закриття {'вище' if sg > 0 else 'нижче'} {sg * sh['level']:.6g}, тіло {sh['body_atr']:.2f} ATR"})
-    base["break"] = {"ts": float(m15r["t"][j]), "level": sg * sh["level"], "body_atr": sh["body_atr"], "bars_held": int(k - j)}
+    base["break"] = {"ts": float(m15r["t"][j]), "level": sg * sh["level"], "body_atr": sh["body_atr"], "bars_held": int(k - j), "disp_ts": float(m15r["t"][sh["jd"]])}
     if leg_atr < MIN_LEG_ATR:
         return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: нога зміщення {leg_atr:.1f} ATR < {MIN_LEG_ATR:g}: структура замала", sequence=seq + [{"step": "нога зміщення", "ok": False, "value": f"{leg_atr:.2f} ATR"}], zone=[sg * lo, sg * lo], entry_zone=None)
     ez = _entry_zone(m15, e, j, k, lo, hi)
@@ -182,6 +195,7 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     seq.append({"step": "нога зміщення і зона входу", "ok": True, "value": f"нога {sg * lo:.6g}→{sg * hi:.6g} ({leg_atr:.1f} ATR); зона {'+'.join(ez['composition'])}"})
     px, lk, ck, ok_ = float(m15["c"][k]), float(m15["l"][k]), float(m15["c"][k]), float(m15["o"][k])
     zone_real = sorted([sg * zl, sg * zh])
+    base["trigger_level"] = zone_real[1] if sg > 0 else zone_real[0]   # межа «не доганяємо»: край зони входу в бік руху (delivery._late_reason міряє пізній вхід від неї, а не від екстремуму події)
     base.update({"zone": zone_real, "entry_zone": zone_real, "leg": {"from": sg * lo, "to": sg * hi, "atr": leg_atr}, "zone_parts": ez["composition"], "impulse": (ev.get("origin") or {}).get("impulse")})
     if np.any(m15["c"][j:k + 1] < lo) or px < ez["deep_limit"]:
         return dict(base, state="INVALIDATED", reason=f"ретрейс зламав структуру: закриття {sg * px:.6g} за інвалідацією/глибоким ретрейсом {sg * min(lo, ez['deep_limit']):.6g}", sequence=seq + [{"step": "ретрейс", "ok": False}])
@@ -250,9 +264,10 @@ def thesis(ctx: Dict[str, Any], direction: str, now: float, levels: List[Dict[st
         return None
     events = _sweep_events(m15, a15, k, levels, sg) + _origin_events(ctx, direction, now, sg, m15)
     best, rank = None, -1
+    swings_all = F.swings(m15, 2)[0]
     order = {"READY": 5, "NO_TRADE": 4, "WAIT": 3, "MISSED": 2, "INVALIDATED": 1}
-    for ev in sorted(events, key=lambda z: -z["e"])[:4]:
-        th = _evaluate(ctx, ev, direction, now, sg, m15, m15r, a15, k, levels, risk_usd)
+    for ev in sorted(events, key=lambda z: -z["e"])[:MAX_EVENTS]:
+        th = _evaluate(ctx, ev, direction, now, sg, m15, m15r, a15, k, levels, risk_usd, swings_all)
         if th is None:
             continue
         r = order.get(th["state"], 0) * 10 + (1 if th.get("entry_zone") else 0)
