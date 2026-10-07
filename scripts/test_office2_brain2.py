@@ -183,8 +183,26 @@ def test_scenario_ids_unique_per_symbol():
             import json as _j
 
             assert all(_j.loads(r[2]).get("symbol") == r[1] for r in rows), "thesis має належати символу рядка"
+            fr = OB._fetchall(db, "SELECT symbol, direction, stage FROM office2_brain_funnel")
+            assert {(r[0], r[1]) for r in fr} == {(s_, d_) for s_ in ("AUSDT", "BUSDT") for d_ in ("LONG", "SHORT")}, fr        # кожна пара (символ×напрям) має етап воронки, навіть без події
+            from office2 import webview as WV
+
+            f = WV.payload(db, now)["funnel"]
+            assert f["last"] and sum(x["n"] for x in f["last"]["stages"]) == 4, f
     finally:
         B.all_levels = orig
+
+
+def test_funnel_stage_mapping():
+    from office2 import engine as EN
+
+    assert EN.funnel_stage(None) == ("NO_EVENT", "")
+    assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 1/3 · зсув структури: x"})[0] == "WAIT_1_SHIFT"
+    assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 2/3 · ретрейс: x"})[0] == "WAIT_2_ZONE"
+    assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 3/3 · ARMED (x)"})[0] == "ARMED_3"
+    assert EN.funnel_stage({"state": "NO_TRADE", "reason": "до першої реальної цілі PDL 1 лише 0.5 R"}) == ("NO_TRADE", "простір до цілі")
+    assert EN.funnel_stage({"state": "NO_TRADE", "reason": "структурна інвалідація всередині нормального шуму: x"}) == ("NO_TRADE", "стоп у шумі")
+    assert EN.funnel_stage({"state": "READY", "reason": ""})[0] == "READY"
 
 
 def main():
