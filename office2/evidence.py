@@ -65,17 +65,32 @@ def collect(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float,
     zone = th.get("entry_zone") or th.get("zone") or [th.get("entry"), th.get("entry")]
     mid = (float(zone[0]) + float(zone[1])) / 2.0
 
-    # HTF + premium/discount (CONTEXT)
+    # HTF + premium/discount (CONTEXT/EVIDENCE): актуальний стан TF (trend_eff), dealing range без «−209 %»
     htf = B.htf_context(ctx, now)
-    agree = [name for name in ("D1", "H4", "H1") if isinstance(htf.get(name), dict) and htf[name].get("trend") == sg]
-    against = [name for name in ("D1", "H4", "H1") if isinstance(htf.get(name), dict) and htf[name].get("trend") == -sg]
-    items.append(_item("HTF MN/W1/D1/H4/H1", "CONTEXT", "USED", f"за напрямом: {','.join(agree) or '—'}; проти: {','.join(against) or '—'}", (1 if len(agree) > len(against) else -1 if len(against) > len(agree) else 0), {k_: (v.get("trend") if isinstance(v, dict) else v) for k_, v in htf.items()}))
+
+    def _eff(name: str) -> Optional[int]:
+        r = htf.get(name) or {}
+        return r.get("trend_eff") if r.get("status") == "USED" else None
+
+    agree = [name for name in ("D1", "H4", "H1") if _eff(name) == sg]
+    against = [name for name in ("D1", "H4", "H1") if _eff(name) == -sg]
+    broken = [f"{name} зламано {'вниз' if htf[name].get('broken') == 'down' else 'вгору'}" for name in ("D1", "H4", "H1") if (htf.get(name) or {}).get("broken")]
+    items.append(_item("HTF MN/W1/4D/3D/D1/H4/H1", "CONTEXT", "USED", f"за напрямом: {','.join(agree) or '—'}; проти: {','.join(against) or '—'}" + (f"; {'; '.join(broken)}" if broken else ""),
+                       (1 if len(agree) > len(against) else -1 if len(against) > len(agree) else 0),
+                       {k_: ({"trend": v.get("trend"), "trend_eff": v.get("trend_eff"), "broken": v.get("broken")} if isinstance(v, dict) and v.get("status") == "USED" else (v if not isinstance(v, list) else None)) for k_, v in htf.items()}))
     h4 = htf.get("H4") or {}
-    if h4.get("last_swing_high") is not None and h4.get("last_swing_low") is not None and h4["last_swing_high"] > h4["last_swing_low"]:
-        pos = (mid - h4["last_swing_low"]) / (h4["last_swing_high"] - h4["last_swing_low"])
-        good = (pos < 0.5) if sg > 0 else (pos > 0.5)
-        items.append(_item("OB / FVG / OTE (premium-discount)", "EVIDENCE", "USED", f"зона в {'discount' if pos < 0.5 else 'premium'} діапазону H4 ({pos * 100:.0f}%): {'ЗА' if good else 'ПРОТИ'} {direction}", 1 if good else -1,
-                           {"pos_in_h4_range": float(pos), "zone_parts": th.get("zone_parts")}))
+    if h4.get("status") == "USED":
+        rng = h4["range"]
+        raw = (mid - rng["lo"]) / max(1e-12, rng["hi"] - rng["lo"])
+        if raw < 0 or raw > 1:
+            below = raw < 0
+            items.append(_item("OB / FVG / OTE (premium-discount)", "EVIDENCE", "USED",
+                               f"зона {mid:.6g} {'нижче' if below else 'вище'} діапазону H4 ({rng['lo']:.6g}–{rng['hi']:.6g}): premium/discount не визначається — ціна вийшла з діапазону ({'структура вниз' if below else 'структура вгору'})",
+                               (-1 if (below and sg > 0) or ((not below) and sg < 0) else 0), {"raw_pos": float(raw), "zone_parts": th.get("zone_parts")}))
+        else:
+            good = (raw < 0.5) if sg > 0 else (raw > 0.5)
+            items.append(_item("OB / FVG / OTE (premium-discount)", "EVIDENCE", "USED", f"зона в {'discount' if raw < 0.5 else 'premium'} діапазону H4 ({raw * 100:.0f}%): {'ЗА' if good else 'ПРОТИ'} {direction}", 1 if good else -1,
+                               {"pos_in_h4_range": float(raw), "zone_parts": th.get("zone_parts")}))
     # mirror level
     ml = mirror_level(ctx, [float(zone[0]), float(zone[1])], direction, now, levels)
     items.append(_item("Gerchik mirror level + люфт", "EVIDENCE", "USED", (f"mirror {ml['kind']} {ml['level']:.6g}: був {'опором' if sg > 0 else 'підтримкою'}, ретестів {ml['retests']}" if ml else "mirror-рівня біля зони немає") + f"; люфт: {(th.get('invalidation') or {}).get('buffer_basis', '—')}", 1 if ml else 0, ml or None))

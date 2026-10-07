@@ -153,6 +153,8 @@ jobs:
         run: python scripts/ui_smoke_mini_v2.py
       - name: READY-картка (ієрархія, «зараз», прогрес, телефон/десктоп)
         run: python scripts/ui_ready_card.py
+      - name: Office2 Mini App card (цілісна теза, карта зверху вниз)
+        run: python scripts/ui_office2_card.py
 
   postgres-integration:
     runs-on: ubuntu-latest

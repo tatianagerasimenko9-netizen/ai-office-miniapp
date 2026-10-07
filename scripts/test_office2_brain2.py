@@ -143,7 +143,7 @@ def test_engine_integration_v2_trace_and_evidence():
             assert snap["version_id"] == B2.VERSION and snap["sequence"] and snap["thesis"]["kind"] in ("SWEEP_SEQ", "ORIGIN_SEQ")
             mods = {m["module"]: m for m in snap["evidence"]}
             assert mods["DOM / order book"]["status"] == "NOT_CONNECTED" and mods["OI / funding / L:S / ліквідації"]["status"] == "UNAVAILABLE" and mods["M5/M1 тригер"]["status"] == "UNAVAILABLE"
-            assert mods["HTF MN/W1/D1/H4/H1"]["role"] == "CONTEXT" and mods["volume / taker-delta / CVD"]["status"] in ("USED", "UNAVAILABLE")
+            assert mods["HTF MN/W1/4D/3D/D1/H4/H1"]["role"] == "CONTEXT" and mods["volume / taker-delta / CVD"]["status"] in ("USED", "UNAVAILABLE")
             steps = [t["step"] for t in snap["trace"]]
             assert any("послідовність" in x for x in steps) and any("модулі" in x for x in steps)
             sc_states = [r[0] for r in OB._fetchall(db, "SELECT to_state FROM office2_live_transition ORDER BY ts ASC")]
@@ -338,6 +338,126 @@ def _v2_e2e(short):
 def test_v2_ready_delivered_long_and_short():
     _v2_e2e(False)
     _v2_e2e(True)
+
+
+def _fake_htf(h4=1, d1=1, h1=1, broken_h4=None):
+    def row(te, broken=None):
+        return {"status": "USED", "trend": te, "trend_eff": te, "broken": broken, "atr": 1.0, "close": 100.0, "last_swing_high": 101.0, "last_swing_low": 99.0, "range": {"hi": 105.0, "lo": 95.0, "bars": 30},
+                "range_pos": 0.5, "range_pos_raw": 0.5, "outside_range": None, "zone": "discount"}
+    h = {"MN": {"status": "UNAVAILABLE"}, "W1": row(0), "4D": row(0), "3D": row(0), "D1": row(d1), "H4": row(h4, broken_h4), "H1": row(h1), "M15": row(0)}
+    h["_order"] = ["MN", "W1", "4D", "3D", "D1", "H4", "H1", "M15"]
+    return h
+
+
+def test_integral_counter_trend_needs_proof_or_htf_location():
+    """Контртренд (H4 проти) + локальна подія + немає доказу повернення → WAIT 3/3 з числовою умовою; HTF-локація, доказ повернення або співпадіння зі структурою → READY. Докази читаються ДО рішення."""
+    c, seq = closes_long()
+    local = [dict(x, kind="LONDON_L") if x["kind"] == "PDL" else x for x in LEVELS]
+    orig_h = B.htf_context
+    try:
+        B.htf_context = lambda ctx, now: _fake_htf(h4=-1, d1=0, h1=-1, broken_h4="down")
+        th = run(c, seq["trigger"], levels=local)
+        assert th["state"] == "WAIT" and th["reason"].startswith("WAIT 3/3 · ARMED, але контртренд без доказу") and th.get("blocked_ready"), th
+        assert th["integral"]["verdict"] == "BLOCK" and th["integral"]["against"] and th["evidence"] and th["map"]["tfs"], "докази і карта зібрані ДО рішення"
+        assert any(i["did_affect_decision"] for i in th["integral"]["inputs"]) and any(not i["did_affect_decision"] for i in th["integral"]["inputs"])
+        assert "закриття H1 вище" in th["reason"]
+        th = run(c, seq["trigger"])                                   # те саме, але подія на PDL (HTF-локація)
+        assert th["state"] == "READY" and th["integral"]["classification"] == "HTF_LOCATION"
+        B.htf_context = lambda ctx, now: _fake_htf(h4=-1, d1=0, h1=1, broken_h4="down")
+        th = run(c, seq["trigger"], levels=local)                     # локальна подія, але H1 уже в напрямі = доказ повернення
+        assert th["state"] == "READY" and th["integral"]["classification"] == "COUNTER_WITH_PROOF"
+        B.htf_context = lambda ctx, now: _fake_htf(h4=1, d1=1, h1=-1)
+        th = run(c, seq["trigger"], levels=local)                     # H1 проти, але H4/D1 за напрямом (відкат) — не контртренд
+        assert th["state"] == "READY" and th["integral"]["classification"] == "WITH_TREND"
+    finally:
+        B.htf_context = orig_h
+
+
+def test_levels_lifecycle_pdh_and_taken_and_obstacles():
+    c, seq = closes_long()
+    b, ctx = mk(c, seq["trigger"])
+    now = float(b["t"][-1] + 900)
+    t_old = float(b["t"][20])
+    ctx = dict(ctx, levels=[{"p": 100.35, "side": "high", "kind": "PDH", "known": t_old, "strength": 1},      # давній «PDH»: ціна потім його перевищила
+                            {"p": 130.0, "side": "high", "kind": "PDH", "known": float(b["t"][200]), "strength": 1},   # свіжа попередня доба — живий пул
+                            {"p": 90.0, "side": "low", "kind": "PDL", "known": t_old, "strength": 1}])
+    lv = B.all_levels(ctx, now)
+    kinds = {(x["p"], x["kind"]): x for x in lv if x["p"] in (100.35, 130.0, 90.0)}
+    assert (130.0, "PDH") in kinds and (100.35, "D1H") in kinds, kinds                      # лише найновіший — PDH
+    assert kinds[(100.35, "D1H")]["taken_ts"] is not None and kinds[(130.0, "PDH")]["taken_ts"] is None and kinds[(90.0, "PDL")]["taken_ts"] is None
+    liq = B.liquidity_map(lv, 100.0, 1.0)
+    assert 100.35 not in [x["p"] for x in liq["bsl_above"]] and 130.0 in [x["p"] for x in liq["bsl_above"]]            # знятий рівень не є пулом
+    assert B.eff_trend(1, 100.0, 110.0, 105.0) == (-1, "down") and B.eff_trend(-1, 100.0, 95.0, 90.0) == (1, "up") and B.eff_trend(1, 100.0, 110.0, 95.0) == (1, None)
+    # перешкода ближче 0.25 R більше не губиться
+    lv2 = [{"p": 100.15, "side": "high", "kind": "PDH", "known": 0.0, "strength": 1}, {"p": 103.0, "side": "high", "kind": "PWH", "known": 0.0, "strength": 1}]
+    t_old_ = B.targets_for("LONG", 100.0, 1.0, lv2)
+    t_new = B.targets_for("LONG", 100.0, 1.0, lv2, near_r=0.0)
+    assert not t_old_["obstacles_before_tp1"] and t_new["obstacles_before_tp1"] and t_new["obstacles_before_tp1"][0]["kind"] == "PDH"
+
+
+def test_premium_discount_outside_range_is_not_discount():
+    from office2 import evidence as EV
+
+    c, seq = closes_long()
+    th = run(c, seq["trigger"])
+    b, ctx = mk(c, seq["trigger"])
+    now = float(b["t"][-1] + 900)
+    orig = B.htf_context
+
+    def below(ctx_, now_):
+        h = _fake_htf(h4=1)
+        h["H4"] = dict(h["H4"], range={"hi": 130.0, "lo": 120.0, "bars": 42}, broken="down", trend_eff=-1)
+        return h
+    B.htf_context = below
+    try:
+        items = EV.collect(ctx, th, "LONG", now, LEVELS)
+    finally:
+        B.htf_context = orig
+    pd = next(i for i in items if i["module"].startswith("OB / FVG"))
+    assert "нижче діапазону H4" in pd["finding"] and "%" not in pd["finding"] and pd["supports"] <= 0, pd
+
+
+def test_replay_at_uses_only_bars_closed_before_moment():
+    """Реплей на момент: те саме рішення з «майбутнім» у фіді і без нього (нема lookahead); результат пишеться в office2_replay_result (LONG+SHORT)."""
+    import json
+    import tempfile
+
+    import office_bridge as OB
+    from office2 import live as LV
+    from office2 import replay_at as RA
+
+    c, seq = closes_long()
+    rng = np.random.default_rng(7)
+    pre = list(100.3 + np.cumsum(rng.normal(0, 0.04, 4200)) * 0.3)           # ≈44 доби історії, щоб були D1/W1
+    base = c[:seq["trigger"]]
+    full = S._bars_from_closes(pre + base + [90.0, 80.0, 70.0, 60.0])
+    n_cut = len(pre) + len(base)
+    cut = {k: v[:n_cut] for k, v in full.items()}                            # те саме минуле, без «майбутнього»
+    widths = {"15m": 900, "4h": 4 * 3600, "1d": 86400, "1w": 7 * 86400, "1M": 30 * 86400}
+
+    def mk_getter(src):
+        def getter(url, params):
+            w = widths[params["interval"]]
+            a = src if w == 900 else F.resample(src, w, offset=(F.WEEK_OFFSET if w == 7 * 86400 else 0))
+            rows = []
+            for i in range(len(a["t"])):
+                if a["t"][i] * 1000 >= params.get("endTime", 1e18):
+                    break
+                rows.append([a["t"][i] * 1000, a["o"][i], a["h"][i], a["l"][i], a["c"][i], a["v"][i], (a["t"][i] + w) * 1000 - 1, 0, 0, a["tbv"][i]])
+            return rows[-int(params["limit"]):]
+        return getter
+
+    ts = float(cut["t"][-1] + 900)
+    r_full = RA.decide_at(LV.Feed(getter=mk_getter(full), pause=0), "XUSDT", ts)
+    r_cut = RA.decide_at(LV.Feed(getter=mk_getter(cut), pause=0), "XUSDT", ts)
+    assert "directions" in r_full and "directions" in r_cut, (r_full, r_cut)
+    dump = lambda r: json.dumps(r, sort_keys=True, default=str)  # noqa: E731
+    assert dump(r_full) == dump(r_cut), "майбутні бари змінили рішення на момент ts"
+    with tempfile.TemporaryDirectory() as td:
+        db = os.path.join(td, "r.db")
+        OB.init_office_db(db)
+        assert RA.run_jobs(db, LV.Feed(getter=mk_getter(full), pause=0), f"XUSDT@{int(ts)}", log=lambda m: None) == 1
+        assert OB._fetchone(db, "SELECT count(*) FROM office2_replay_result")[0] == 2
 
 
 def main():

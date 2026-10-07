@@ -20,7 +20,7 @@ VERSION = "o2-brain-1"
 EVIDENCE_STATUS = "UNPROVEN"
 MIN_RISK_PCT, MAX_RISK_PCT = 0.15, 6.0
 MIN_STOP_ATR15 = 1.0       # структурний стоп має бути ДАЛІ за нормальний шум: ≥ 1 ATR(M15) (діапазон однієї середньої свічки). Інакше інвалідація тези не відрізняється від шуму → NO TRADE, стоп НЕ розширюємо
-MAJOR_OBSTACLE_KINDS = ("PDH", "PDL", "PWH", "PWL", "PMH", "PML", "H4SW", "D1SW", "W1SW")   # значущі перешкоди перед TP1: добові/тижневі/місячні рівні та H4/D1-свінги. Сесійні (ASIA/LONDON/NY), H1SW, M15SW — лише у trace
+MAJOR_OBSTACLE_KINDS = ("PDH", "PDL", "PWH", "PWL", "PMH", "PML", "H4SW", "D1SW", "W1SW", "D1H", "D1L", "W1H", "W1L")   # значущі перешкоди перед TP1: добові/тижневі/місячні рівні та H4/D1-свінги. Сесійні (ASIA/LONDON/NY), H1SW, M15SW — лише у trace
 MIN_TP1_R = 1.0            # як у старому гейті «RR до цілі 1 ≥ 1,0»: ціль ближче за ризик — не угода
 MAX_CHASE_R = 0.6          # входити не далі 0.6 ризику від рівня пробою/reclaim
 IMPULSE_ATR = 3.0          # N2-визначення «сильного імпульсу» на H1
@@ -89,25 +89,88 @@ def noise_buffer(m15: Dict[str, np.ndarray], atr15: float) -> Tuple[float, str]:
     return 0.2 * atr15, "fallback 0.2·ATR(M15): мало проколів"
 
 
+# вікно «dealing range» (кількість барів) і ширина бару для кожного TF
+TF_RANGE_BARS = {"W1": 26, "D1": 30, "H4": 42, "H1": 48, "M15": 96, "4D": 20, "3D": 20, "MN": 6}
+
+
+def eff_trend(trend: int, price: float, swing_high: Optional[float], swing_low: Optional[float]) -> Tuple[int, Optional[str]]:
+    """Актуальний структурний стан: ціна за останнім підтвердженим swing-low = злам вниз (−1), за swing-high = злам вгору (+1), інакше базовий тренд. Повертає (trend_eff, broken)."""
+    if swing_low is not None and price < swing_low:
+        return -1, "down"
+    if swing_high is not None and price > swing_high:
+        return 1, "up"
+    return int(trend), None
+
+
+def _tf_row(bars: Dict[str, np.ndarray], width: int, now: float, price: float, name: str, swing_n: int = 2, closed_idx: Optional[int] = None) -> Dict[str, Any]:
+    k = closed_idx if closed_idx is not None else F.last_closed(bars, width, now)
+    if k < 3:
+        return {"status": "UNAVAILABLE"}
+    reg = F.regime_by_bar(bars)
+    a = F.atr(bars, 14) if len(bars["t"]) > 14 else np.full(len(bars["t"]), np.nan)
+    sh, sl = F.swings(bars, swing_n)
+    sh = [s for s in sh if s[1] <= k][-2:]
+    sl = [s for s in sl if s[1] <= k][-2:]
+    lsh, lsl = (sh[-1][2] if sh else None), (sl[-1][2] if sl else None)
+    n = TF_RANGE_BARS.get(name, 30)
+    lo_i = max(0, k - n + 1)
+    hi, lo = float(bars["h"][lo_i:k + 1].max()), float(bars["l"][lo_i:k + 1].min())
+    raw = (price - lo) / max(1e-12, hi - lo)
+    tr = int(reg[k]) if len(reg) > k else 0
+    te, broken = eff_trend(tr, price, lsh, lsl)
+    return {"status": "USED", "trend": tr, "trend_eff": te, "broken": broken, "atr": _f(a[k]), "close": float(bars["c"][k]), "last_swing_high": lsh, "last_swing_low": lsl,
+            "range": {"hi": hi, "lo": lo, "bars": n}, "range_pos": _f(min(1.0, max(0.0, raw))), "range_pos_raw": _f(raw), "outside_range": ("below" if raw < 0 else "above" if raw > 1 else None),
+            "zone": ("premium" if raw > 0.5 else "discount")}
+
+
 def htf_context(ctx: Dict[str, Any], now: float) -> Dict[str, Any]:
+    """Карта TF зверху вниз: MN → W1 → 4D → 3D → D1 → H4 → H1 → M15. Для кожного: базовий тренд, АКТУАЛЬНИЙ стан (trend_eff з урахуванням зламу swing ціною зараз), dealing range
+    (екстремуми вікна, premium/discount лише всередині діапазону), останні swing high/low. 4D/3D — ресемпл D1 (прив'язка до епохи, не календарна), MN — закриті місяці з фіду."""
     out: Dict[str, Any] = {}
-    for name, bars, width in (("W1", ctx["w1"], 7 * F.DAY), ("D1", ctx["d1"], F.DAY), ("H4", ctx["h4"], 4 * 3600), ("H1", ctx["h1"], 3600), ("M15", ctx["m15"], 900)):
-        k = F.last_closed(bars, width, now)
-        if k < 5:
+    m15 = ctx["m15"]
+    k15 = F.last_closed(m15, 900, now)
+    price = float(m15["c"][k15])
+    mn = ctx.get("mn")
+    if mn is not None and len(mn["t"]) >= 4:
+        out["MN"] = _tf_row(mn, 30 * F.DAY, now, price, "MN", swing_n=1, closed_idx=len(mn["t"]) - 2)
+        out["MN"]["note"] = "місячні бари з фіду; swing n=1; останній бар — поточний місяць (не враховано)"
+    else:
+        out["MN"] = {"status": "UNAVAILABLE"}
+    out["W1"] = _tf_row(ctx["w1"], 7 * F.DAY, now, price, "W1")
+    d1 = ctx["d1"]
+    for name, mult in (("4D", 4), ("3D", 3)):
+        try:
+            rs = F.resample(d1, mult * F.DAY)
+            row = _tf_row(rs, mult * F.DAY, now, price, name)
+            if row.get("status") == "USED":
+                row["note"] = f"ресемпл D1×{mult} (прив'язка до епохи)"
+            out[name] = row
+        except Exception:  # noqa: BLE001
             out[name] = {"status": "UNAVAILABLE"}
-            continue
-        reg = F.regime_by_bar(bars)
-        a = F.atr(bars, 14)
-        sh, sl = F.swings(bars, 2)
-        sh = [s for s in sh if s[1] <= k][-2:]
-        sl = [s for s in sl if s[1] <= k][-2:]
-        out[name] = {"trend": int(reg[k]), "atr": _f(a[k]), "close": float(bars["c"][k]), "last_swing_high": sh[-1][2] if sh else None, "last_swing_low": sl[-1][2] if sl else None,
-                     "range_pos": _f((bars["c"][k] - bars["l"][max(0, k - 20):k + 1].min()) / max(1e-12, bars["h"][max(0, k - 20):k + 1].max() - bars["l"][max(0, k - 20):k + 1].min()))}
-    for name in ("MN", "3D"):
-        b = ctx.get(name.lower())
-        out[name] = {"status": "CONTEXT"} if b is not None else {"status": "UNAVAILABLE"}
-    out["4D"] = {"status": "UNAVAILABLE"}
+    out["D1"] = _tf_row(d1, F.DAY, now, price, "D1")
+    out["H4"] = _tf_row(ctx["h4"], 4 * 3600, now, price, "H4")
+    out["H1"] = _tf_row(ctx["h1"], 3600, now, price, "H1")
+    out["M15"] = _tf_row(m15, 900, now, price, "M15")
+    out["_order"] = ["MN", "W1", "4D", "3D", "D1", "H4", "H1", "M15"]
     return out
+
+
+def _taken_ts(ctx: Dict[str, Any], side: str, p: float, known: float, now: float) -> Optional[float]:
+    """Коли ціна ВПЕРШЕ торкнулась рівня ПІСЛЯ того, як він став відомим (high > p для high-рівня, low < p для low-рівня). None = рівень не знято (живий пул ліквідності).
+    Перевіряємо M15 (останні дні), далі H4, далі D1 для давніших; лише закриті бари ≤ now."""
+    first: Optional[float] = None
+    for bars, width in ((ctx["d1"], F.DAY), (ctx["h4"], 4 * 3600), (ctx["m15"], 900)):
+        t = bars["t"]
+        i0 = int(np.searchsorted(t, known, side="left"))
+        i1 = int(np.searchsorted(t + width, now, side="right"))
+        if i1 <= i0:
+            continue
+        seg = bars["h"][i0:i1] if side == "high" else bars["l"][i0:i1]
+        hit = np.flatnonzero(seg > p) if side == "high" else np.flatnonzero(seg < p)
+        if len(hit):
+            ts = float(t[i0 + int(hit[0])])
+            first = ts if first is None else min(first, ts)
+    return first
 
 
 def session_levels(m15: Dict[str, np.ndarray], now: float) -> List[Dict[str, Any]]:
@@ -136,7 +199,16 @@ def swing_levels(bars: Dict[str, np.ndarray], now: float, width: int, kind: str,
 
 
 def all_levels(ctx: Dict[str, Any], now: float) -> List[Dict[str, Any]]:
-    lv = [x for x in ctx["levels"] if x["known"] <= now]
+    """Рівні ліквідності на now. PDH/PDL/PWH/PWL — ЛИШЕ попередня завершена доба/тиждень; давніші добові/тижневі екстремуми — D1H/D1L/W1H/W1L (раніше всі мали мітку PDH/PWH).
+    Кожен рівень має taken_ts: коли ціна вже торкнулась його після появи (None = живий пул). Цілі, перешкоди й карта ліквідності беруть лише не зняті рівні."""
+    lv = [dict(x) for x in ctx["levels"] if x["known"] <= now]
+    for kind, hist in (("PDH", "D1H"), ("PDL", "D1L"), ("PWH", "W1H"), ("PWL", "W1L")):
+        same = [x for x in lv if x["kind"] == kind]
+        if same:
+            newest = max(x["known"] for x in same)
+            for x in same:
+                if x["known"] < newest:
+                    x["kind"] = hist
     lv += session_levels(ctx["m15"], now)
     lv += swing_levels(ctx["h1"], now, 3600, "H1SW")
     lv += swing_levels(ctx["m15"], now, 900, "M15SW", last=4)
@@ -144,22 +216,29 @@ def all_levels(ctx: Dict[str, Any], now: float) -> List[Dict[str, Any]]:
     if mn is not None and len(mn["t"]) >= 2:   # PMH/PML: попередній (закритий) місяць
         lv.append({"p": float(mn["h"][-2]), "side": "high", "kind": "PMH", "known": float(mn["t"][-1]), "strength": 1})
         lv.append({"p": float(mn["l"][-2]), "side": "low", "kind": "PML", "known": float(mn["t"][-1]), "strength": 1})
+    for x in lv:
+        x["taken_ts"] = _taken_ts(ctx, x["side"], float(x["p"]), float(x["known"]), now)
     return lv
+
+
+def untouched(levels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [x for x in levels if x.get("taken_ts") is None]
 
 
 def liquidity_map(levels: List[Dict[str, Any]], price: float, atr: float) -> Dict[str, Any]:
     """BSL/SSL найближчі над/під ціною та EQH/EQL (рівні з strength ≥2 — кілька майже рівних екстремумів)."""
+    levels = untouched(levels)
     up = sorted([x for x in levels if x["side"] == "high" and x["p"] > price], key=lambda x: x["p"])[:4]
     dn = sorted([x for x in levels if x["side"] == "low" and x["p"] < price], key=lambda x: -x["p"])[:4]
     f = lambda L: [{"p": x["p"], "kind": x["kind"], "strength": int(x.get("strength", 1)), "dist_atr": _f(abs(x["p"] - price) / atr) if atr else None, "eq": int(x.get("strength", 1)) >= 2} for x in L]  # noqa: E731
     return {"bsl_above": f(up), "ssl_below": f(dn)}
 
 
-def targets_for(direction: str, entry: float, risk: float, levels: List[Dict[str, Any]], min_tp1_r: float = MIN_TP1_R) -> Dict[str, Any]:
+def targets_for(direction: str, entry: float, risk: float, levels: List[Dict[str, Any]], min_tp1_r: float = MIN_TP1_R, near_r: float = 0.25) -> Dict[str, Any]:
     """TP — РЕАЛЬНІ перешкоди за напрямом (рівні/свінги), не від RR. TP1 — найближча перешкода від min_tp1_r ризику; ближчі (≥0.25 R) не губимо, а повертаємо як obstacles
     (трасується в знімку: ціна може зупинитись там). TP2/TP3 — наступні, ≥0.5 R від попередньої."""
     long_ = direction == "LONG"
-    cand = [x for x in levels if (x["side"] == "high") == long_ and ((x["p"] - entry) if long_ else (entry - x["p"])) >= 0.25 * risk]
+    cand = [x for x in untouched(levels) if (x["side"] == "high") == long_ and ((x["p"] - entry) if long_ else (entry - x["p"])) > near_r * risk]
     cand.sort(key=lambda x: x["p"] if long_ else -x["p"])
     obstacles: List[Dict[str, Any]] = []
     out: List[Dict[str, Any]] = []
