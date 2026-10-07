@@ -156,6 +156,37 @@ def test_engine_integration_v2_trace_and_evidence():
         B.all_levels = orig
 
 
+def test_scenario_ids_unique_per_symbol():
+    """Регресія: однакова подія (напрям/вид/час) на двох монетах → різні scenario_id і окремі рядки в БД, thesis не перемішується."""
+    import tempfile
+
+    import office_bridge as OB
+    from office2 import engine as EN
+
+    assert EN.scoped_id("AUSDT", "O2|abc") != EN.scoped_id("BUSDT", "O2|abc") and EN.scoped_id("AUSDT", "O2|abc") == EN.scoped_id("AUSDT", "O2|abc")
+    c, seq = closes_long()
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: LEVELS
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "o2.db")
+            OB.init_office_db(db)
+            EN.init_db(db)
+            b, ctx = mk(c, seq["top"])
+            now = float(b["t"][-1] + 900)
+            st = {"price": float(b["c"][-1]), "ret_1h": 0.3, "ret_4h": 1.0, "ret_24h": 2.0, "atr15_pct": 0.3, "vol_regime_7d": 0.5, "pos_24h_range": 0.6}
+            mc, rel = {"btc_ret_1h": 0.1, "eth_ret_1h": 0.1, "breadth_up_1h": 0.5, "n_alts": 20}, {"coin_ret_1h": 0.3, "rs_vs_btc_1h": 0.2, "rs_vs_btc_4h": 0.1}
+            for sym in ("AUSDT", "BUSDT"):
+                EN.step_symbol(db, sym, ctx, st, mc, rel, now, None)
+            rows = OB._fetchall(db, "SELECT scenario_id, symbol, thesis_json FROM office2_live_scenario")
+            assert len({r[0] for r in rows}) == len(rows) >= 2 and {r[1] for r in rows} == {"AUSDT", "BUSDT"}, rows
+            import json as _j
+
+            assert all(_j.loads(r[2]).get("symbol") == r[1] for r in rows), "thesis має належати символу рядка"
+    finally:
+        B.all_levels = orig
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for f in fns:
