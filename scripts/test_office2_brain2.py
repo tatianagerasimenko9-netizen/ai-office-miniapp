@@ -187,6 +187,26 @@ def test_scenario_ids_unique_per_symbol():
         B.all_levels = orig
 
 
+def test_stats_split_by_brain_version():
+    import json
+    import tempfile
+
+    import office_bridge as OB
+    from office2 import engine as EN
+    from office2 import stats as ST
+
+    with tempfile.TemporaryDirectory() as td:
+        db = os.path.join(td, "o2.db")
+        OB.init_office_db(db)
+        EN.init_db(db)
+        for sid, brain in (("O2|a", "o2-brain-1"), ("O2|b", "o2-brain-2.0")):
+            snap = {"brain": brain, "thesis": {"targets": [{"p": 1, "r": 1.2}], "entry": 1}, "alignment_summary": {"against": 0}}
+            OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                        (sid, "XUSDT", "LONG", 1000.0, 9e9, "DELIVERED", json.dumps(snap), brain))
+        out = ST.collect(db)
+        assert set(out["by_brain"]) == {"o2-brain-1", "o2-brain-2.0"} and out["by_brain"]["o2-brain-1"]["delivered"] == 1, out["by_brain"]
+
+
 def main():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for f in fns:

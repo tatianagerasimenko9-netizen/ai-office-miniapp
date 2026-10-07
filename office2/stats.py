@@ -56,6 +56,7 @@ def collect(db: str) -> Dict[str, Any]:
     total = {"ready": 0, "delivered": 0, "not_sent": 0, "waiting_entry": 0, "active": 0, "sl": 0, "tp": 0, "expired": 0}
     buckets: Dict[str, Dict[str, Any]] = {k: {"n": 0, "closed": 0, "sum_r": 0.0} for k in ("0", "1", "2+")}
     items = []
+    by_brain: Dict[str, Dict[str, Any]] = {}
     for sid, sym, d, ct, status, sj in rows:
         snap = json.loads(sj or "{}")
         total["ready"] += 1
@@ -72,8 +73,17 @@ def collect(db: str) -> Dict[str, Any]:
         if oc["r"] is not None:
             b["closed"] += 1
             b["sum_r"] += oc["r"]
-        items.append({"id": sid, "symbol": sym, "direction": d, "against": ag, **oc})
+        bv = str(snap.get("version_id") or snap.get("brain") or "unknown")   # статистика різних версій Brain не змішується
+        bb = by_brain.setdefault(bv, {"delivered": 0, "closed": 0, "tp": 0, "sl": 0, "sum_r": 0.0})
+        bb["delivered"] += 1
+        if oc["r"] is not None:
+            bb["closed"] += 1
+            bb["sum_r"] += oc["r"]
+            bb["tp" if oc["r"] > 0 else "sl"] += 1
+        items.append({"id": sid, "symbol": sym, "direction": d, "against": ag, "brain": bv, **oc})
     for b in buckets.values():
         b["sum_r"] = round(b["sum_r"], 2)
-    return {"total": total, "by_against": buckets, "items": items[-30:],
+    for b in by_brain.values():
+        b["sum_r"] = round(b["sum_r"], 2)
+    return {"total": total, "by_against": buckets, "by_brain": by_brain, "items": items[-30:],
             "note": "LIVE BETA · статистика накопичується; R брутто до комісій; результат сценарію ≠ особиста угода; висновків про прибутковість немає"}
