@@ -40,7 +40,36 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS office2_live_signal (
         scenario_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, direction TEXT NOT NULL, created_ts DOUBLE PRECISION NOT NULL, valid_until_ts DOUBLE PRECISION NOT NULL,
         status TEXT NOT NULL, msg_id BIGINT, delivered_ts DOUBLE PRECISION, last_error TEXT, snapshot_json TEXT NOT NULL, version TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS office2_brain_funnel (
+        ts BIGINT NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, stage TEXT NOT NULL, code TEXT, version TEXT NOT NULL,
+        PRIMARY KEY (ts, symbol, direction, version))""",
 )
+
+FUNNEL_KEEP_SEC = 7 * 86400
+
+
+def funnel_stage(th: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    """Етап воронки Brain для (символ, напрям) на цьому циклі: (stage, code відсіву). Лише з поля тези, без вигадок."""
+    if not th:
+        return "NO_EVENT", ""
+    st, rs = th.get("state"), str(th.get("reason") or "")
+    if st == "WAIT":
+        if rs.startswith("WAIT 1/3"):
+            return "WAIT_1_SHIFT", "нога замала" if "нога зміщення" in rs else "чекаємо зсув"
+        if rs.startswith("WAIT 2/3"):
+            return "WAIT_2_ZONE", "глибокий ретрейс" if "глибокий ретрейс" in rs else "чекаємо ретрейс"
+        if rs.startswith("WAIT 3/3"):
+            return "ARMED_3", "чекаємо тригер M15"
+        return "WAIT_OTHER", rs[:40]
+    if st == "NO_TRADE":
+        code = ("простір до цілі" if "першої реальної цілі" in rs else "стоп у шумі" if "всередині нормального шуму" in rs else "стоп поза %-діапазоном" if "поза допустимим" in rs
+                else "немає цілі" if "немає реальної цілі" in rs else "ціна за інвалідацією" if "за структурною інвалідацією" in rs else "ємність/портфель" if "ємність" in rs else "інше")
+        return "NO_TRADE", code
+    if st == "MISSED":
+        return "MISSED", "пішла без ретрейсу"
+    if st == "INVALIDATED":
+        return "INVALIDATED", "ретрейс зламав структуру" if "ретрейс зламав" in rs else "умови тези зникли"
+    return str(st or "?"), ""
 
 
 def init_db(db: str) -> None:
@@ -213,6 +242,20 @@ def brain_version() -> str:
     return B2.VERSION if BRAIN_V2 else B.VERSION
 
 
+def record_funnel(db: str, sym: str, rows: list, now: float) -> None:
+    """Один INSERT на символ (кожне Postgres-з'єднання дороге); ts = закритий бар. Старе чистимо раз на цикл (на BTC)."""
+    from office_bridge import _execute
+
+    ts = int(now)
+    vals, args = [], []
+    for d, stage, code in rows:
+        vals.append("(?,?,?,?,?,?)")
+        args += [ts, sym, d, stage, code, brain_version()]
+    _execute(db, "INSERT INTO office2_brain_funnel(ts, symbol, direction, stage, code, version) VALUES " + ",".join(vals) + " ON CONFLICT DO NOTHING", tuple(args))
+    if sym == "BTCUSDT":
+        _execute(db, "DELETE FROM office2_brain_funnel WHERE ts < ?", (ts - FUNNEL_KEEP_SEC,))
+
+
 def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]] = None,
                 allow_ready: bool = True, flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> Dict[str, int]:
     """Один символ на закритому барі: детектори → переходи. Повертає лічильники переходів."""
@@ -221,16 +264,23 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     live = {k: v for k, v in allsc.items() if v["state"] in LIVE_STATES}
     levels = B.all_levels(ctx, now)
     found: Dict[str, Dict[str, Any]] = {}
+    funnel: list = []
     for d in ("LONG", "SHORT"):
         if BRAIN_V2:
             th = B2.thesis(ctx, d, now, levels, RISK_USD)
             if th:
                 th = dict(th, id=scoped_id(sym, th["id"]), symbol=sym)   # id теза-незалежний від монети збігався б між символами на одному барі → перезапис чужих сценаріїв
                 found[th["id"]] = th
+            funnel.append((d, *funnel_stage(th)))
             continue
         for th in (B.pullback_break(ctx, d, now), B.reclaim_thesis(ctx, d, now, levels)):
             if th:
                 found[th["id"]] = B.decide(th, ctx, now, RISK_USD)
+    if funnel:
+        try:
+            record_funnel(db, sym, funnel, now)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[funnel] {sym}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
     # один живий сценарій на (символ, напрям, вид): якщо детектор бачить новий id цього ж виду — старий WATCH/WAIT закривається як застарілий
     for sid, sc in list(live.items()):
         if sid not in found:

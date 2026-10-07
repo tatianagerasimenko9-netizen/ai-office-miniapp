@@ -100,6 +100,21 @@ def _stats(db: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _funnel(db: str, t: float) -> Dict[str, Any]:
+    """Воронка Brain: скільки (символ×напрям) на якому етапі за останній цикл і за 24 год, з причинами відсіву (NO_TRADE/MISSED/INVALIDATED)."""
+    try:
+        last = _rows(db, "SELECT MAX(ts) FROM office2_brain_funnel")
+        ts = last[0][0] if last and last[0][0] else None
+        if ts is None:
+            return {"last": None, "day": []}
+        now_rows = _rows(db, "SELECT stage, COUNT(*) FROM office2_brain_funnel WHERE ts = ? GROUP BY stage ORDER BY 2 DESC", (ts,))
+        day = _rows(db, "SELECT stage, code, COUNT(*) FROM office2_brain_funnel WHERE ts > ? GROUP BY stage, code ORDER BY 3 DESC LIMIT 40", (int(t - 86400),))
+        cyc = _rows(db, "SELECT COUNT(DISTINCT ts) FROM office2_brain_funnel WHERE ts > ?", (int(t - 86400),))
+        return {"last": {"ts": ts, "stages": [{"stage": a, "n": b} for a, b in now_rows]}, "day": [{"stage": a, "code": b, "n": c} for a, b, c in day], "cycles_24h": cyc[0][0] if cyc else 0}
+    except Exception:  # noqa: BLE001
+        return {"last": None, "day": []}
+
+
 def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, Any]:
     t = time.time() if now is None else now
     states = {r[0]: r[1] for r in _rows(db, "SELECT state, COUNT(*) FROM office2_live_scenario GROUP BY state")}
@@ -147,7 +162,7 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
             "flags": {"OFFICE2_SHADOW": os.getenv("OFFICE2_SHADOW", ""), "OFFICE2_LIVE": os.getenv("OFFICE2_LIVE", ""), "OFFICE2_LIVE_DELIVERY": os.getenv("OFFICE2_LIVE_DELIVERY", ""),
                       "OFFICE_OLD_READY_DELIVERY": os.getenv("OFFICE_OLD_READY_DELIVERY", "1")},
             "scenario_counts": states, "last_cycle_ts": last[0][0] if last and last[0][0] else None, "symbols_last_hour": last[0][1] if last else 0, "collected": cnt,
-            "signals": sigs, "scenarios": scen, "modules": B.MODULES, "stats": _stats(db), "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
+            "signals": sigs, "scenarios": scen, "funnel": _funnel(db, t), "modules": B.MODULES, "stats": _stats(db), "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
 
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "webview.html"), encoding="utf-8").read()
