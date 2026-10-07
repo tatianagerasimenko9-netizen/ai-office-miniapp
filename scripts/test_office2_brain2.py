@@ -198,7 +198,7 @@ def test_funnel_stage_mapping():
 
     assert EN.funnel_stage(None) == ("NO_EVENT", "")
     assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 1/3 · зсув структури: x"})[0] == "WAIT_1_SHIFT"
-    assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 2/3 · ретрейс: x"})[0] == "WAIT_2_RETRACE"
+    assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 2/3 · ретрейс: x"})[0] == "WAIT_2_ZONE"
     assert EN.funnel_stage({"state": "WAIT", "reason": "WAIT 3/3 · ARMED (x)"})[0] == "ARMED_3"
     assert EN.funnel_stage({"state": "NO_TRADE", "reason": "до першої реальної цілі PDL 1 лише 0.5 R"}) == ("NO_TRADE", "простір до цілі")
     assert EN.funnel_stage({"state": "NO_TRADE", "reason": "структурна інвалідація всередині нормального шуму: x"}) == ("NO_TRADE", "стоп у шумі")

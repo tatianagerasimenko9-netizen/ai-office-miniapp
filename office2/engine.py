@@ -57,7 +57,7 @@ def funnel_stage(th: Optional[Dict[str, Any]]) -> Tuple[str, str]:
         if rs.startswith("WAIT 1/3"):
             return "WAIT_1_SHIFT", "нога замала" if "нога зміщення" in rs else "чекаємо зсув"
         if rs.startswith("WAIT 2/3"):
-            return "WAIT_2_RETRACE", "глибокий ретрейс" if "глибокий ретрейс" in rs else "чекаємо ретрейс"
+            return "WAIT_2_ZONE", "глибокий ретрейс" if "глибокий ретрейс" in rs else "чекаємо ретрейс"
         if rs.startswith("WAIT 3/3"):
             return "ARMED_3", "чекаємо тригер M15"
         return "WAIT_OTHER", rs[:40]
