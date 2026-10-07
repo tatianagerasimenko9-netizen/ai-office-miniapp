@@ -20,7 +20,7 @@ import numpy as np
 from office2 import brain as B
 from office2 import features as F
 
-VERSION = "o2-brain-2.0"
+VERSION = "o2-brain-2.1"
 OTE_LO, OTE_HI, DEEP = 0.62, 0.79, 0.90        # ретрейс ноги: OTE-діапазон і межа глибокого ретрейсу
 DISP_BODY_ATR = 1.2                              # displacement: тіло ≥ 1.2 ATR(M15) і закриття в верхніх 35% діапазону
 DISP_WINDOW = 3                                  # displacement може бути на барі злому або в наступних DISP_WINDOW-1 барах (закриття лишаються над зламаним swing)
@@ -32,7 +32,7 @@ SWEEP_LOOKBACK = 64                              # бари M15 (16 год), у 
 
 # Роль кожного модуля у рішенні (GATE = блокує/дозволяє READY; EVIDENCE = факти в тезі й трасі; CONTEXT = пояснення; RESEARCH = лише збір; NOT_CONNECTED = даних/коду немає)
 REGISTRY: Dict[str, Dict[str, str]] = {
-    "HTF MN/W1/D1/H4/H1": {"role": "CONTEXT", "note": "тренд/діапазон; ЗА/ПРОТИ у трасі; не блокує (немає доведеного edge)"},
+    "HTF MN/W1/4D/3D/D1/H4/H1": {"role": "CONTEXT", "note": "тренд/діапазон; ЗА/ПРОТИ у трасі; не блокує (немає доведеного edge)"},
     "BTC/ETH/breadth/relative strength": {"role": "EVIDENCE", "note": "ЗА/ПРОТИ у трасі; не блокує"},
     "ключові рівні PDH/PDL/PWH/PWL/PMH/PML, H4/D1 swing, сесії, EQH/EQL": {"role": "GATE", "note": "POI події (sweep) і цілі; значущі рівні перед TP1 блокують"},
     "Gerchik mirror level + люфт": {"role": "EVIDENCE", "note": "role-flip рівня біля зони; люфт = медіана проколів рівня → буфер SL"},
@@ -236,7 +236,7 @@ def _finalize(ctx, base, m15, a15, k, now, lo, px, levels, risk_usd, sg, ev, seq
         return dict(base, state="NO_TRADE", reason=f"структурна інвалідація всередині нормального шуму: стоп {risk_atr:.2f} ATR(M15) < {B.MIN_STOP_ATR15:g}; стоп не розширюємо", quality={"risk_atr15": float(risk_atr), "risk_pct": float(risk_pct)}, sequence=seq)
     # цілі й простір — у реальних координатах (levels реальні)
     entry_r, risk_r = sg * entry, risk
-    tgd = B.targets_for("LONG" if sg > 0 else "SHORT", entry_r, risk_r, levels)
+    tgd = B.targets_for("LONG" if sg > 0 else "SHORT", entry_r, risk_r, levels, near_r=0.0)   # жодна перешкода не зникає мовчки через близькість
     tg = tgd["targets"]
     major = [o for o in tgd["obstacles_before_tp1"] if o["kind"] in B.MAJOR_OBSTACLE_KINDS]
     seq_sl = {"step": "SL", "ok": True, "value": f"інвалідація {sg * lo:.6g} − люфт {luft:.6g} ({luft_why}) = {sg * sl:.6g}; {risk_atr:.2f} ATR(M15)" if risk_atr else f"{sg * sl:.6g}"}
@@ -253,7 +253,97 @@ def _finalize(ctx, base, m15, a15, k, now, lo, px, levels, risk_usd, sg, ev, seq
                 sizing={"risk_usd": risk_usd, "notional_usd": float(size), "stop_pct": float(risk_pct), "fee_slip_note": "комісія+slippage ≈0.15% кола не входять у стоп"}, sequence=seq)
 
 
-def thesis(ctx: Dict[str, Any], direction: str, now: float, levels: List[Dict[str, Any]], risk_usd: float = 10.0) -> Optional[Dict[str, Any]]:
+# ------------------------------------------------------------------ ЦІЛІСНА ТЕЗА: карта TF + докази ДО рішення
+HTF_LOCATION_KINDS = ("D1SW", "H4SW", "W1SW", "PDH", "PDL", "PWH", "PWL", "PMH", "PML", "D1H", "D1L", "W1H", "W1L")
+
+
+def _location(th: Dict[str, Any]) -> Tuple[str, str]:
+    """Де сталася подія: HTF (старша локація/ліквідність) чи LOCAL (сесійний/M15/H1 рівень)."""
+    ev, lv = th.get("event") or {}, th.get("level") or {}
+    if ev.get("src") == "ORIGIN":
+        return "HTF", "origin-зона імпульсу H1 (≥3 ATR)"
+    kind, st = str(lv.get("kind")), int(lv.get("strength", 1))
+    p = lv.get("p")
+    if kind in HTF_LOCATION_KINDS:
+        return "HTF", f"{kind} {p:.6g}"
+    if kind == "H1SW" and st >= 2:
+        return "HTF", f"EQ-рівень H1SW {p:.6g} (strength {st})"
+    return "LOCAL", f"{kind} {p:.6g} — сесійний/локальний рівень (strength {st}); старшого рівня в точці події немає"
+
+
+def build_map(ctx: Dict[str, Any], now: float, sg: int, entry: float, risk: float, atr15: float, levels: List[Dict[str, Any]], htf: Dict[str, Any]) -> Dict[str, Any]:
+    """Карта ринку зверху вниз для знімка: кожен TF (стан/діапазон/свінги/відстань) + живі (не зняті) пули ліквідності над/під ціною з відстанню в $, %, ATR і R."""
+    rows: List[Dict[str, Any]] = []
+    for tf in htf.get("_order", []):
+        r = htf.get(tf) or {}
+        if r.get("status") != "USED":
+            rows.append({"tf": tf, "status": "UNAVAILABLE"})
+            continue
+        rows.append({"tf": tf, "status": "USED", "trend": r["trend"], "trend_eff": r["trend_eff"], "broken": r["broken"], "zone": r["zone"], "range_pos": r["range_pos"], "outside_range": r["outside_range"],
+                     "range": r["range"], "last_swing_high": r["last_swing_high"], "last_swing_low": r["last_swing_low"], "with_trade": bool(r["trend_eff"] == sg), "against_trade": bool(r["trend_eff"] == -sg), "note": r.get("note")})
+
+    def dist(x: Dict[str, Any]) -> Dict[str, Any]:
+        d = abs(float(x["p"]) - entry)
+        return {"kind": x["kind"], "p": float(x["p"]), "strength": int(x.get("strength", 1)), "dist_usd": d, "dist_pct": d / entry * 100.0, "dist_atr": (d / atr15 if atr15 > 0 else None), "dist_r": (d / risk if risk > 0 else None)}
+
+    live = B.untouched(levels)
+    above = sorted([x for x in live if x["p"] > entry], key=lambda x: x["p"])[:5]
+    below = sorted([x for x in live if x["p"] < entry], key=lambda x: -x["p"])[:5]
+    return {"tfs": rows, "pools_above": [dist(x) for x in above], "pools_below": [dist(x) for x in below]}
+
+
+def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, levels: List[Dict[str, Any]], mc: Optional[Dict[str, Any]], rel: Optional[Dict[str, Any]], hooks: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Кандидат READY читає ВСІ підключені факти ДО рішення (HTF-карта, локація, ліквідність, ринок BTC, докази модулів) і формує цілісну тезу ЗА/ПРОТИ.
+    Докази самі нічого не блокують. Єдина умова, що змінює рішення: КОНТРТРЕНД без доказу — старша структура (H4, або D1 коли H4 не за напрямом) проти напряму, подія на ЛОКАЛЬНОМУ
+    рівні (не HTF) і немає доказу повернення (H1 вже в напрямі або H1 CHoCH/BOS у напрямі). Тоді READY → WAIT 3/3 з числовою умовою; за доказу або HTF-локації — READY."""
+    from office2 import align as AL
+    from office2 import evidence as EV
+
+    sg = 1 if direction == "LONG" else -1
+    m15r = ctx["m15"]
+    k = F.last_closed(m15r, 900, now)
+    a15 = float(F.atr(m15r, 14)[k])
+    entry, risk = float(th["entry"]), float(th["risk"])
+    htf = B.htf_context(ctx, now)
+    hooks = hooks or {}
+    ev_items = EV.collect(ctx, th, direction, now, levels, flow_fetch=hooks.get("flow"), m5_fetch=hooks.get("m5"))
+    al = AL.alignment(direction, mc or {}, rel or {}, htf)
+    loc, loc_txt = _location(th)
+    eff = {tf: (htf.get(tf) or {}).get("trend_eff") if (htf.get(tf) or {}).get("status") == "USED" else None for tf in ("W1", "D1", "H4", "H1")}
+    counter = bool(eff["H4"] == -sg or (eff["D1"] == -sg and eff["H4"] != sg))
+    h1_row = htf.get("H1") or {}
+    h1_struct = B.local_structure(ctx["h1"], now, 3600)
+    proof_h1 = bool(eff["H1"] == sg or (h1_struct.get("event") and h1_struct["event"]["dir"] == ("bullish" if sg > 0 else "bearish")))
+    need = h1_row.get("last_swing_high") if sg > 0 else h1_row.get("last_swing_low")
+    fors = [i["finding"] for i in ev_items if i["supports"] > 0 and i["status"] == "USED"] + [x["text"] for x in al if x["verdict"].startswith("ЗА")]
+    agns = [i["finding"] for i in ev_items if i["supports"] < 0 and i["status"] == "USED"] + [x["text"] for x in al if x["verdict"].startswith("ПРОТИ")]
+    tfs_txt = ", ".join(f"{tf} {'вгору' if (v or 0) > 0 else 'вниз' if (v or 0) < 0 else 'діапазон'}" for tf, v in eff.items() if v is not None)
+    if counter and loc == "LOCAL" and not proof_h1:
+        cls, verdict = "COUNTER_NO_PROOF", "BLOCK"
+        broken = [f"{tf} зламано {'вниз' if sg > 0 else 'вгору'} (ціна {(htf[tf]['last_swing_low'] if sg > 0 else htf[tf]['last_swing_high']):.6g})" for tf in ("H4", "D1") if (htf.get(tf) or {}).get("broken") == ("down" if sg > 0 else "up")]
+        why = (f"контртренд без доказу: старша структура проти {direction} ({tfs_txt}{'; ' + '; '.join(broken) if broken else ''}); локація — {loc_txt}; "
+               f"доказу повернення немає (H1 {'вгору' if eff['H1'] == sg else 'не в напрямі'}"
+               + (f", потрібне закриття H1 {'вище' if sg > 0 else 'нижче'} {need:.6g}" if need is not None else "") + ") — або подія від HTF-рівня")
+    elif counter and proof_h1 and loc == "LOCAL":
+        cls, verdict, why = "COUNTER_WITH_PROOF", "ALLOW", f"контртренд ({tfs_txt}) з доказом повернення: H1 уже в напрямі/CHoCH у напрямі; локація {loc_txt}"
+    elif loc == "HTF":
+        cls, verdict, why = "HTF_LOCATION", "ALLOW", f"подія на старшій локації: {loc_txt}; стан TF: {tfs_txt}"
+    else:
+        cls, verdict, why = "WITH_TREND", "ALLOW", f"старша структура не проти {direction} ({tfs_txt}); локація {loc_txt}"
+    inputs = [{"name": "старша структура H4/D1 (trend_eff)", "role": "GATE (умовно)", "did_affect_decision": True, "value": {k_: v for k_, v in eff.items()}},
+              {"name": "локація події (HTF/LOCAL)", "role": "GATE (умовно)", "did_affect_decision": True, "value": loc_txt},
+              {"name": "доказ повернення H1", "role": "GATE (умовно)", "did_affect_decision": counter and loc == "LOCAL", "value": bool(proof_h1)}]
+    inputs += [{"name": i["module"], "role": i["role"], "did_affect_decision": False, "status": i["status"], "value": i["finding"]} for i in ev_items]
+    inputs += [{"name": f"BTC/ринок: {x['factor']}", "role": "EVIDENCE", "did_affect_decision": False, "value": x["verdict"]} for x in al]
+    integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "inputs": inputs}
+    out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
+    if verdict == "BLOCK":
+        out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True)
+    return out
+
+
+def thesis(ctx: Dict[str, Any], direction: str, now: float, levels: List[Dict[str, Any]], risk_usd: float = 10.0, mc: Optional[Dict[str, Any]] = None,
+           rel: Optional[Dict[str, Any]] = None, hooks: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """Найрозвиненіша теза напряму (READY > WAIT(зона/ретрейс) > WAIT(зсув) > WATCH) або None."""
     sg = 1 if direction == "LONG" else -1
     m15r = ctx["m15"]
@@ -270,6 +360,8 @@ def thesis(ctx: Dict[str, Any], direction: str, now: float, levels: List[Dict[st
         th = _evaluate(ctx, ev, direction, now, sg, m15, m15r, a15, k, levels, risk_usd, swings_all)
         if th is None:
             continue
+        if th["state"] == "READY":
+            th = assess(ctx, th, direction, now, levels, mc, rel, hooks)
         r = order.get(th["state"], 0) * 10 + (1 if th.get("entry_zone") else 0)
         if r > rank:
             best, rank = th, r

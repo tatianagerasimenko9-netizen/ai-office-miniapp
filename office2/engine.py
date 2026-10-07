@@ -59,7 +59,7 @@ def funnel_stage(th: Optional[Dict[str, Any]]) -> Tuple[str, str]:
         if rs.startswith("WAIT 2/3"):
             return "WAIT_2_ZONE", "глибокий ретрейс" if "глибокий ретрейс" in rs else "чекаємо ретрейс"
         if rs.startswith("WAIT 3/3"):
-            return "ARMED_3", "чекаємо тригер M15"
+            return "ARMED_3", ("контртренд без доказу" if "контртренд" in rs else "чекаємо тригер M15")
         return "WAIT_OTHER", rs[:40]
     if st == "NO_TRADE":
         code = ("простір до цілі" if "першої реальної цілі" in rs else "стоп у шумі" if "всередині нормального шуму" in rs else "стоп поза %-діапазоном" if "поза допустимим" in rs
@@ -278,7 +278,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     funnel: list = []
     for d in ("LONG", "SHORT"):
         if BRAIN_V2:
-            th = B2.thesis(ctx, d, now, levels, RISK_USD)
+            th = B2.thesis(ctx, d, now, levels, RISK_USD, mc=mc, rel=rel, hooks={"flow": flow_fetch, "m5": m5_fetch})
             if th:
                 th = dict(th, id=scoped_id(sym, th["id"]), symbol=sym)   # id теза-незалежний від монети збігався б між символами на одному барі → перезапис чужих сценаріїв
                 found[th["id"]] = th
@@ -360,15 +360,16 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     from office2 import align as AL
 
     aligned = AL.alignment(th["dir"], mc, rel, pack.get("htf"))
-    evid = []
-    if th.get("kind") in ("SWEEP_SEQ", "ORIGIN_SEQ"):
+    evid = th.get("evidence")   # зібрано ДО рішення (brain2.assess) і вже читалось у цілісній тезі
+    if evid is None and th.get("kind") in ("SWEEP_SEQ", "ORIGIN_SEQ"):
         try:
             from office2 import evidence as EV
 
             evid = EV.collect(ctx, th, th["dir"], now, B.all_levels(ctx, now), flow_fetch=flow_fetch, m5_fetch=m5_fetch)
         except Exception as exc:  # noqa: BLE001
             evid = [{"module": "evidence", "role": "EVIDENCE", "status": "UNAVAILABLE", "finding": f"{type(exc).__name__}: {str(exc)[:80]}", "supports": 0, "data": None}]
-    snap = {"version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None),
+    evid = evid or []
+    snap = {"version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
             "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
@@ -377,6 +378,8 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "узгодженість факторів з напрямом (ЗА/ПРОТИ)", "value": aligned},
                 {"step": "key levels / liquidity", "value": pack["liquidity"]},
                 {"step": "послідовність (подія → зсув → ретрейс → тригер)", "value": th.get("sequence")},
+                {"step": "карта ринку зверху вниз (TF, живі пули ліквідності)", "value": th.get("map")},
+                {"step": "цілісна теза ДО рішення: ЗА / ПРОТИ / що вплинуло", "value": th.get("integral")},
                 {"step": "модулі: ЗА/ПРОТИ/недоступно (GATE/CONTEXT/EVIDENCE/RESEARCH)", "value": evid},
                 {"step": "POI / зона входу", "value": th.get("entry_zone") or th.get("zone")},
                 {"step": "price behaviour", "value": {"attacks": th.get("attacks"), "compression": th.get("compression"), "sweep": th.get("sweep"), "reclaim": th.get("reclaim")}},

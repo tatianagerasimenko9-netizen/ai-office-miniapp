@@ -156,20 +156,22 @@ class Feed:
             raise RuntimeError(f"backoff {MD.backoff_left():.0f}s")
         return MD._http_get_json(url, params)
 
-    def klines(self, sym: str, tf: str, now: float, limit: Optional[int] = None, start_ms: Optional[int] = None) -> Optional[Dict[str, np.ndarray]]:
+    def klines(self, sym: str, tf: str, now: float, limit: Optional[int] = None, start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> Optional[Dict[str, np.ndarray]]:
         key = (sym, tf)
         ttl = TF_TTL.get(tf, 0)
         hit = self._cache.get(key)
-        if start_ms is None and hit and ttl and now - hit[0] < ttl:
+        if start_ms is None and end_ms is None and hit and ttl and now - hit[0] < ttl:
             return hit[1]
         params: Dict[str, Any] = {"symbol": sym, "interval": tf, "limit": limit or TF_LIMIT.get(tf, 500)}
         if start_ms is not None:
             params["startTime"] = int(start_ms)
+        if end_ms is not None:
+            params["endTime"] = int(end_ms)
         time.sleep(self.pause) if self.pause else None
         self.requests += 1
         rows = self._get(KL_URL, params)
         arr = _rows_to_arr(rows, drop_open_at=now)
-        if start_ms is None and arr is not None:
+        if start_ms is None and end_ms is None and arr is not None:
             self._cache[key] = (now, arr)
         return arr
 
@@ -522,6 +524,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
         from office2 import engine as EN
 
         EN.init_db(db)
+    if os.getenv("OFFICE2_REPLAY_AT", "").strip():   # разовий реплей рішення Brain на момент часу (діагностика; без lifecycle/доставки)
+        threading.Thread(target=_replay_job, args=(db, feed), name="office2-replay", daemon=True).start()
     state: Dict[str, Any] = {"last_plan_id": last_event_id(db)}   # лише нові рішення Лева, без вичитування історії
     _log(f"старт {VERSION}: символів {len(universe())}, db ok; Telegram не використовується")
     while True:
@@ -539,6 +543,15 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
                 _STATS["last_error"] = str(exc)[:160]
             _log(f"помилка циклу (гаситься): {exc!r}")
             time.sleep(30)
+
+
+def _replay_job(db: str, feed: "Feed") -> None:
+    try:
+        from office2 import replay_at as RA
+
+        RA.run_jobs(db, feed, os.getenv("OFFICE2_REPLAY_AT", ""))
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")
 
 
 def start_background(db: str) -> bool:

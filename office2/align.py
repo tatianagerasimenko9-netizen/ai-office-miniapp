@@ -40,7 +40,8 @@ def alignment(direction: str, market: Dict[str, Any], rel: Dict[str, Any], htf: 
         v = _verdict(s, d)
         out.append({"factor": "breadth альтів 4г", "value": br, "verdict": v, "text": f"{round(br * 100)}% альтів вгору за 4 год: {v}"})
     for tf in ("H4", "D1"):
-        tr = ((htf or {}).get(tf) or {}).get("trend")
+        row = (htf or {}).get(tf) or {}
+        tr = row.get("trend_eff", row.get("trend"))   # актуальний стан (з урахуванням зламу swing ціною зараз), не лише базовий тренд
         if tr is not None:
             v = _verdict(int(tr), d)
             out.append({"factor": f"тренд {tf}", "value": tr, "verdict": v, "text": f"тренд {tf} ({'вгору' if tr > 0 else 'вниз' if tr < 0 else 'діапазон'}): {v}"})

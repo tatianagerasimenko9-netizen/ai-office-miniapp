@@ -169,7 +169,7 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
                 snap["alignment"] = AL.alignment(d, ms.get("market") or {}, ms.get("relative") or {}, ((snap.get("context") or {}).get("htf")))
                 snap["alignment_derived"] = True
             miles = _milestones(db, sid)
-            item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id")}
+            item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map")}
             from office2 import levels as LVL
 
             item["levels"] = LVL.view_from_thesis(th)
