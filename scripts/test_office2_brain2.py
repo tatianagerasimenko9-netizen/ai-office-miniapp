@@ -148,6 +148,8 @@ def test_engine_integration_v2_trace_and_evidence():
             assert any("послідовність" in x for x in steps) and any("модулі" in x for x in steps)
             sc_states = [r[0] for r in OB._fetchall(db, "SELECT to_state FROM office2_live_transition ORDER BY ts ASC")]
             assert "WAIT" in sc_states and sc_states[-1] == "READY", sc_states
+            stages = [(r[0], r[1]) for r in OB._fetchall(db, "SELECT from_state, to_state FROM office2_live_transition WHERE from_state LIKE 'WAIT _/3' ORDER BY ts ASC")]
+            assert ("WAIT 2/3", "WAIT 3/3") in stages, stages                                   # етапи WAIT залишають слід переходів
             cap = DL.build_caption(dict(snap, valid_until_ts=snap["decided_ts"] + 3600))
             th = snap["thesis"]
             assert "Зона входу:" in cap and "READY:" in cap and "Чому:" in cap, cap

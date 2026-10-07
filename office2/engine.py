@@ -242,6 +242,14 @@ def brain_version() -> str:
     return B2.VERSION if BRAIN_V2 else B.VERSION
 
 
+def stage_tag(reason: Any) -> str:
+    """«WAIT 2/3» з тексту причини brain2 (порожньо для v1/інших станів)."""
+    import re
+
+    m = re.match(r"^WAIT (\d)/3", str(reason or ""))
+    return f"WAIT {m.group(1)}/3" if m else ""
+
+
 def record_funnel(db: str, sym: str, rows: list, now: float) -> None:
     """Один INSERT на символ (кожне Postgres-з'єднання дороге); ts = закритий бар. Старе чистимо раз на цикл (на BTC)."""
     from office_bridge import _execute
@@ -301,6 +309,13 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         if state in ("WATCH", "WAIT"):
             if prev is None or prev["state"] != state or prev["thesis"].get("reason") != th.get("reason"):
                 save_scenario(db, sym, th, state, now, prev["created_ts"] if prev else None, prev["state"] if prev else None, th.get("reason", ""))
+                if prev is not None and prev["state"] == state == "WAIT":   # перехід етапу всередині WAIT (1/3 → 2/3 → 3/3) лишає слід: потрібен для конверсії воронки
+                    a, b = stage_tag(prev.get("reason") or prev["thesis"].get("reason")), stage_tag(th.get("reason"))
+                    if a and b and a != b:
+                        from office_bridge import _execute
+
+                        _execute(db, "INSERT INTO office2_live_transition(scenario_id, ts, from_state, to_state, reason, version) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                                 (th["id"], now, a, b, str(th.get("reason", ""))[:400], brain_version()))
                 res[state.lower()] += 1 if (prev is None or prev["state"] != state) else 0
             continue
         if prev is None and state in ("READY", "NO_TRADE", "MISSED"):
