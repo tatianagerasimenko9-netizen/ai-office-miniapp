@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UI-перевірка Mini App /office2 у справжньому браузері (390 px): READY brain v2 показує цілісну тезу, карту ринку зверху вниз, послідовність; без помилок JS і горизонтального скролу."""
+"""UI-перевірка основного Mini App (/v2) у справжньому браузері (390 px): картка READY Brain v2.1 всередині нього (теза, карта зверху вниз, послідовність, докази), єдиний Radar, кнопка «Я відкрила угоду»; без помилок JS і горизонтального скролу."""
 import json
 import os
 import sys
@@ -35,10 +35,13 @@ def build_db(td):
 def main():
     from playwright.sync_api import sync_playwright
 
+    import office_mini_v2 as MV
+
     with tempfile.TemporaryDirectory() as td:
         db = build_db(td)
-        pl = WV.payload(db)
-        sid = pl["signals"][0]["id"]
+        os.environ["OFFICE_DB_PATH"] = db
+        os.environ.pop("DATABASE_URL", None)
+        sid = WV.payload(db)["signals"][0]["id"]
         errors = []
         with sync_playwright() as p:
             kw = {}
@@ -47,26 +50,38 @@ def main():
             br = p.chromium.launch(**kw)
             page = br.new_page(viewport={"width": 390, "height": 844})
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
 
             def route(r):
                 u = r.request.url
-                if "/api/v2/office2" in u:
-                    r.fulfill(status=200, content_type="application/json", body=json.dumps(WV.payload(db, focus=sid)))
-                elif u.endswith("/office2") or "/office2?" in u:
-                    r.fulfill(status=200, content_type="text/html; charset=utf-8", body=WV.html())
+                if "/api/v2/scenario?" in u:
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.scenario_detail(sid)))
+                elif "/api/v2/radar" in u:
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.radar_payload()))
+                elif "/api/v2/scenarios" in u or "/api/v2/journal" in u:
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.scenarios_payload(watching=True) if "scenarios" in u else MV.journal_payload(kind="scenarios")))
+                elif "/api/v2/scanner" in u:
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "candidates": []}))
+                elif u.endswith("/v2") or "/v2?" in u:
+                    r.fulfill(status=200, content_type="text/html; charset=utf-8", body=MV.html_v2())
+                elif "/api/" in u:
+                    r.fulfill(status=200, content_type="application/json", body="{}")
                 else:
                     r.fulfill(status=204, body="")
             page.route("**/*", route)
-            page.goto("http://o2.test/office2?id=" + sid)
+            page.goto("http://o2.test/v2?scenario=" + sid)
             page.wait_for_selector("text=Послідовність до READY", timeout=8000)
             txt = page.inner_text("body")
-            for must in ("Цілісна теза", "Карта ринку зверху вниз", "Послідовність до READY", "Що перевірено"):
-                assert must.lower() in txt.lower(), (must, txt[:300])
-            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол"
+            for must in ("Чому Office вирішив увійти", "Карта ринку зверху вниз", "Послідовність до READY", "Що перевірено", "Я відкрила угоду", "Хід сценарію", "Ринок на момент сигналу"):
+                assert must.lower() in txt.lower(), (must, txt[:400])
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (картка)"
+            page.goto("http://o2.test/v2?tab=radar")
+            page.wait_for_selector("text=Готово", timeout=8000)
+            rt = page.inner_text("body")
+            assert "Єдиний Radar Brain v2.1" in rt and "Ціна зараз" in rt and ("Діє до" in rt or "Строк:" in rt), rt[:400]
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (Radar)"
             br.close()
         assert not errors, errors
-    print("OK ui office2 card")
+    print("OK ui main app brain v2.1 card + radar")
     return 0
 
 

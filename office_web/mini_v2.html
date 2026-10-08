@@ -104,6 +104,14 @@ details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0
 .prog span.on{border-color:var(--long);color:var(--long)}.prog span.stop{border-color:var(--short);color:var(--short)}
 .why{margin:0;padding:0;list-style:none}.why li{padding:5px 0;font-size:14px;line-height:1.4}.why li:before{content:"✓ ";color:var(--long)}
 .srcs{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Brain v2.1 всередині основного Mini App */
+.o2row{padding:4px 0;font-size:13px;line-height:1.45;overflow-wrap:anywhere}.o2g{color:var(--long)}.o2r{color:var(--short)}.o2m{color:var(--mut)}.o2y{color:var(--watch)}
+.o2sub{font-size:11px;color:var(--mut);margin-top:4px;line-height:1.4}
+.o2tag{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:1px 8px;font-size:11px;color:var(--mut);margin-right:4px}
+.o2need{background:var(--raise);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px;line-height:1.45}
+details.o2d>summary{cursor:pointer;color:var(--acc);font-size:13px;padding:6px 0}
+details.o2d pre{white-space:pre-wrap;word-break:break-word;font-size:11px;margin:4px 0;color:var(--mut)}
 </style>
 </head>
 <body>
@@ -221,6 +229,8 @@ async function office(){
       <div class="kpi"><div class="mut">Режим</div><b>${esc(d.market_regime||'Не визначено')}</b><div class="mut">${d.market_regime?'BTC · з Worker':'немає даних режиму'}</div></div>
     </div>
     ${sessionHtml(ses)}
+    <h2>Brain v2.1 · найближче до входу</h2>
+    <div class="card" id="o2box"><div class="mut">Завантажую Radar…</div></div>
     <h2>Що відстежує Лев</h2>
     <div class="card" id="watchbox"><div class="mut">Завантажую…</div></div>
     <h2>Запитати Лева</h2>
@@ -251,6 +261,15 @@ async function office(){
         return; }
       await new Promise(r=>setTimeout(r,3000)); }
     const b2=$('mktbox'); if(b2) b2.innerHTML='<div class="mut">📊 РИНОК ЗАРАЗ</div><div style="margin-top:6px">Цифри ринку тимчасово недоступні.</div>';
+  })();
+  (async()=>{ const box=$('o2box'); if(!box) return;
+    try{ const r=await j('/api/v2/radar'); if(T0!==RT) return;
+      const g=(r.groups||[]); const cnt=g.map(x=>`${esc(x.title.split(' — ')[0])}: <b>${x.items.length}</b>`).join(' · ');
+      const near=g.filter(x=>x.group<=2).reduce((a,x)=>a.concat(x.items),[]).slice(0,4);
+      box.innerHTML=(near.length?near.map(it=>`<div class="kv"><span><b>${esc(it.sym||it.symbol)}</b> ${String(it.direction).toUpperCase()==='SHORT'?'▼':'▲'} · ${esc(it.state_ua)}</span><b>${esc(it.need_text||it.reason||'')}</b></div>`).join(''):'<div class="mut">Зараз немає сценаріїв на етапах READY / ARMED / 2/3.</div>')
+        +`<div class="o2sub" style="margin-top:6px">${cnt||'Brain зараз нічого не формує'}</div><div class="acts"><button class="btn" id="o2go">Відкрити Radar</button></div>`;
+      const bt=$('o2go'); if(bt) bt.onclick=()=>go('radar');
+    }catch(e){ if(!e.stale) box.innerHTML='<div class="mut">Radar Brain недоступний.</div>'; }
   })();
   (async()=>{ const box=$('watchbox'); if(!box) return;
     try{ const r=await j('/api/v2/watches');
@@ -290,7 +309,10 @@ function sessionHtml(b){
 async function radar(){
   const T0=++RT;
   app.innerHTML='<div class="sk"></div>';
-  let d,sc; try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
+  let d,sc,o2=null;
+  try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
+  try{o2=await j('/api/v2/radar');}catch(e){if(e.stale) return; o2=null;}
+  if(T0!==RT) return;
   const rows=d.candidates||[];
   const watch=(sc.scenarios||[]).filter(s=>(s.status||{}).group==='watch');
   const f=S.rf;
@@ -298,13 +320,12 @@ async function radar(){
       ${c.stale?'<span class="pill watch">⌛ застаріло</span>':'<span class="pill">кандидат</span>'}
       <span class="mut" style="margin-left:auto">${ago(c.as_of)}</span></div>
       <div class="mut" style="margin-top:6px">${esc((c.reasons||[]).join(' · ')||'причину не записано')}</div></div>`).join('');
-  const shortlist=`<div class="mut" style="margin-bottom:8px">Shortlist сканера — кандидати на аналіз Лева, не сигнали.</div>
+  const shortlist=`<div class="mut" style="margin-bottom:8px">Shortlist сканера — кандидати на аналіз, не сигнали.</div>
     ${rows.length?body:`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}`;
   const wl=watch.map(scCard).join('')||'<div class="empty">Лев зараз ні за чим не спостерігає</div>';
-  app.innerHTML=`<div class="banner">Радар показує, чому монета в полі зору. Готовий сигнал дає лише Лев.</div>
-    ${chips([['all','Усе'],['short','Shortlist'],['watch','WATCHING']],f,'rf')}
-    ${f!=='watch'?`<h2>Shortlist</h2>${shortlist}`:''}
-    ${f!=='short'?`<h2>Під спостереженням Лева</h2>${wl}`:''}`;
+  app.innerHTML=`${chips([['all','Усе'],['brain','Brain v2.1'],['short','Shortlist і Лев']],f,'rf')}
+    ${f!=='short'?o2RadarHtml(o2):''}
+    ${f!=='brain'?`<h2>Shortlist сканера</h2>${shortlist}<h2>Додаткові спостереження Лева</h2>${wl}`:''}`;
   app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
   bindCards();
 }
@@ -345,7 +366,7 @@ async function journal(){
     body=blk('Сигнали Лева (відстежено мовчки)',d.signals||{})+blk('Відхилені плани (що зробила ціна)',d.rejected||{})+`<div class="mut">${esc(d.note||'')}</div>`;
   } else if(kind==='stats'){
     body=`<div class="card"><pre style="white-space:pre-wrap;font-size:12px;margin:0">${esc(d.message||d.note||'мало даних')}</pre>
-      <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>`;
+      <div class="mut">${d.wr_shown?'' : esc(d.note||'WR/криву не показуємо без n≥20 і outcome')}</div></div>${o2StatsHtml(d.office2)}`;
   } else if(kind==='positions'){
     body=posHtml(d);
   } else if(kind==='audit'){
@@ -734,14 +755,161 @@ function readyBottom(hm){
     ${hm.news?`<div class="sec"><h3>Новини</h3>${newsHtml(hm.news)}</div>`:''}`;
 }
 
+
+/* ---------- Brain v2.1: спільні помічники ---------- */
+const o2f=(x,d)=>{d=d==null?2:d;return x==null?'—':(typeof x==='number'?x.toFixed(d).replace('.',','):x);};
+const o2px=x=>{if(x==null)return '—';const a=Math.abs(x);return o2f(x,a>=100?2:a>=1?4:a>=0.1?5:7);};
+const o2kt=t=>{if(!t) return '—'; const d=new Date(t*1000);
+  return d.toLocaleString('uk-UA',{timeZone:'Europe/Kyiv',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' Київ ('+d.toLocaleTimeString('uk-UA',{timeZone:'UTC',hour:'2-digit',minute:'2-digit'})+' UTC)';};
+const o2hm=t=>t?new Date(t*1000).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'}):'—';
+const O2_LV={ENTRY:'Вхід торкнуто',TP1:'TP1 досягнуто',TP2:'TP2 досягнуто',TP3:'TP3 досягнуто',SL:'Стоп сценарію (модель)',EXPIRED:'Строк вийшов, входу не було'};
+const O2_CLS={COUNTER_NO_PROOF:'контртренд без доказу',COUNTER_WITH_PROOF:'контртренд з доказом повернення',HTF_LOCATION:'від старшої локації',WITH_TREND:'за старшою структурою'};
+const O2_RL={GATE:'умова',CONTEXT:'контекст',EVIDENCE:'доказ',RESEARCH:'дослідження',NOT_CONNECTED:'не підключено'};
+const o2rg=(r,sg)=>!r?'—':(o2f(r[0])===o2f(r[1])?sg+o2f(r[0]):sg+o2f(r[0])+'…'+sg+o2f(r[1]));
+
+function o2MapHtml(MM){
+  if(!MM) return '';
+  const rows=(MM.tfs||[]).map(r=>{
+    if(r.status!=='USED') return `<div class="o2row o2m">∅ ${esc(r.tf)}: недоступно${r.note?` (${esc(r.note)})`:''}</div>`;
+    const st=r.trend_eff>0?'вгору':r.trend_eff<0?'вниз':'діапазон';
+    const zone=r.outside_range?('ціна '+(r.outside_range==='below'?'нижче':'вище')+' діапазону'):esc(r.zone||'');
+    return `<div class="o2row ${r.with_trade?'o2g':r.against_trade?'o2r':'o2m'}"><b>${esc(r.tf)}</b>: ${st}${r.broken?` (зламано ${r.broken==='down'?'вниз':'вгору'})`:''} · ${zone} · swing ${o2f(r.last_swing_low,4)}–${o2f(r.last_swing_high,4)}</div>`;}).join('');
+  const pool=(a,sg)=>(a||[]).map(x=>`<div class="o2row o2m">${esc(x.kind)} ${o2px(x.p)} · ${sg}${o2f(x.dist_pct,2)}% · ${o2f(x.dist_atr,1)} ATR · ${o2f(x.dist_r,2)} R</div>`).join('');
+  return `<div class="sec"><h3>Карта ринку зверху вниз (MN → M15)</h3>${rows}
+    <div class="o2sub">Живі пули ліквідності над входом</div>${pool(MM.pools_above,'+')}<div class="o2sub">Під входом</div>${pool(MM.pools_below,'−')}</div>`;
+}
+function o2EvidenceHtml(ev){
+  if(!(ev&&ev.length)) return '';
+  return `<div class="sec"><h3>Що перевірено · ЗА / ПРОТИ / недоступно</h3>${ev.map(m=>{
+    const cls=m.status!=='USED'?'o2m':m.supports>0?'o2g':m.supports<0?'o2r':'o2m';
+    const ic=m.status!=='USED'?'∅ ':m.supports>0?'✓ ':m.supports<0?'⚠ ':'· ';
+    return `<div class="o2row ${cls}">${ic}<b>${esc(m.module)}</b> <span class="o2sub">(${esc(O2_RL[m.role]||m.role)})</span><br>${esc(m.finding||'')}</div>`;}).join('')}</div>`;
+}
+
+/* ---------- Картка сценарію Brain v2.1 (у тому ж Mini App) ---------- */
+async function openO2(d, T0){
+  const s=d.scenario||{}, o=d.o2||{}, fr=o.frozen||{}, th=fr.thesis||{}, lv=o.levels||{}, ch=o.changed||{}, I=fr.integral;
+  const long_=String(s.direction||'').toUpperCase()!=='SHORT', sd=long_?'L':'S', st=s.status||{};
+  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts;
+  const mn=(o.market_now||{}), m0=((fr.market_at_signal||{}).market)||{}, m1=mn.market||{};
+  const cells=[`<div class="en"><span>Вхід (ціна READY)</span><b>${o2px(lv.ready_price)}</b>${lv.zone?`<small>зона ${o2px(lv.zone[0])}–${o2px(lv.zone[1])}</small>`:''}</div>`,
+    `<div class="sl"><span>SL</span><b>${o2px(lv.sl)}</b><small>−${o2rg(lv.sl_pct,'').replace(/^/,'')}%</small></div>`]
+    .concat((lv.targets||[]).map((t,i)=>`<div class="tp"><span>TP${i+1}</span><b>${o2px(t.p)}</b><small>+${o2rg(t.pct,'')}% · ${o2rg(t.r,'')} R</small></div>`));
+  const doneLv=(o.lifecycle||[]).map(m=>m.level);
+  const prog=['ENTRY','TP1','TP2','TP3'].map(k=>`<span class="${doneLv.includes(k)?'on':''}">${doneLv.includes(k)?'✓ ':''}${esc(({ENTRY:'вхід',TP1:'TP1',TP2:'TP2',TP3:'TP3'})[k])}</span>`).join('')
+    +(doneLv.includes('SL')?'<span class="stop">стоп сценарію</span>':'')+(doneLv.includes('EXPIRED')?'<span class="stop">строк вийшов, входу не було</span>':'');
+  const mv=ch.price_now!=null?`від входу ${o2f(ch.move_r)} R (${o2f(ch.move_pct)}%) · до SL ${o2f(ch.sl_distance_r)} R`:'';
+  const ex=d.execution;
+  const nowCls=st.code==='HIT_SL'||st.code==='EXPIRED'?'r':st.group==='done'?'n':(ex&&ex.eligible===false?'r':'g');
+  const top=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
+    <div class="rh ${sd}"><div class="rt1"><b>${long_?'🟢':'🔴'} ${esc(String(s.symbol||'').replace(/USDT$/,''))}</b><span class="${sd}">${long_?'LONG':'SHORT'}</span><span class="o2tag">Brain ${esc((s.brain==='v2.1')?'v2.1':'v1')}</span></div>
+      <div class="rst">READY · ${o2kt(o.created_ts)}</div>
+      <div class="rnm">${esc(I?(O2_CLS[I.classification]||I.classification)+' · '+((I.location||{}).text||''):(fr.why||'').slice(0,140))}</div>
+      <div class="rg">${cells.join('')}</div>
+      <div class="mut" style="margin-top:6px">${o.valid_until_ts?`увійти можна до ${o2kt(o.valid_until_ts)}`:''}</div></div>
+    <div class="nowbar ${nowCls}"><b>Зараз${ch.price_now!=null?` · ціна ${o2px(ch.price_now)}`:''}${mn.ts_epoch?` · ${o2hm(mn.ts_epoch)} Київ`:''}</b>${esc(st.text||'')}${mv?`<div class="mut" style="margin-top:4px">${esc(mv)}</div>`:''}
+      ${ex&&st.group!=='done'?`<div class="mut" style="margin-top:4px">${esc(ex.text||'')}</div>`:''}</div>
+    <div class="prog">${prog}</div>`;
+  const chartBlock=`<div id="chart" class="chart"></div>
+    <div class="mut" id="asof" style="margin:6px 0 6px"></div>
+    ${chips(['M1','M5','M15','H1','H4','D1'].map(t=>[t,t]),S.tf,'tf')}
+    <div class="chips" id="lay">
+      <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
+      <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
+      <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
+      <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
+      <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
+    <div class="mut">Рівні на графіку — заморожені на момент сигналу, свічки — живі.</div>`;
+  const iopen='<div class="acts" style="margin:8px 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>';
+  const inputs=(I&&I.inputs||[]).filter(x=>x.did_affect_decision).map(x=>esc(x.name)).join(' · ');
+  const why=`<div class="sec"><h3>Чому Office вирішив увійти тут і зараз</h3>
+      <p>${esc(fr.why||'')}</p>
+      ${I?`<div class="o2row ${I.verdict==='ALLOW'?'o2g':'o2r'}">${I.verdict==='ALLOW'?'✓ ':'⚠ '}${esc(O2_CLS[I.classification]||I.classification)}: ${esc(I.why||'')}</div>
+        ${(I.for||[]).map(t=>`<div class="o2row o2g">ЗА · ${esc(t)}</div>`).join('')}${(I.against||[]).map(t=>`<div class="o2row o2r">ПРОТИ · ${esc(t)}</div>`).join('')}
+        <div class="o2sub">${(I.against||[]).length&&I.verdict==='ALLOW'?'Дозволено попри ПРОТИ: '+esc(I.why||'')+'. ':''}Вплинули на рішення: ${inputs||'—'}. Решта прочитана ДО рішення, але не блокує (доведеного edge немає).</div>`:''}</div>`;
+  const seq=(fr.sequence&&fr.sequence.length)?`<div class="sec"><h3>Послідовність до READY</h3>${fr.sequence.map(x=>`<div class="o2row ${x.ok?'o2g':'o2r'}">${x.ok?'✓ ':'✗ '}${esc(x.step)}${x.value?': '+esc(String(x.value)):''}</div>`).join('')}
+      <div class="o2sub">Brain ${esc(fr.version_id||'')} · LIVE BETA · статистика накопичується</div></div>`:'';
+  const q=th.quality;
+  const quality=q?`<div class="sec"><h3>Перевірки Brain</h3><div class="o2row o2g">✓ Стоп ${o2f(q.risk_atr15,2)} ATR(M15) (мін. ${o2f(q.min_stop_atr15,1)}) — за межами нормального шуму</div><div class="o2row o2g">✓ До першої реальної цілі ${o2f(q.first_target_r,2)} R (мін. ${o2f(q.min_tp1_r,1)})</div></div>`:'';
+  const dl=k=>ch[k]&&ch[k].delta!=null?o2f(ch[k].delta):'—';
+  const market=`<div class="sec"><h3>Ринок на момент сигналу → зараз → що змінилося</h3>
+      <div class="o2row">Тоді: BTC ${o2f(m0.btc_ret_1h)}% за 1г · альти вгору (4г) ${m0.breadth_up_4h!=null?Math.round(m0.breadth_up_4h*100)+'%':'—'} · відносна сила ${o2f(((fr.market_at_signal||{}).relative||{}).rs_vs_btc_1h)} п.п.</div>
+      <div class="o2row">Зараз: ${ch.price_now!=null?`ціна ${o2px(ch.price_now)} · ${esc(mv)}`:'поточних даних немає'}${mn.ts_epoch?` · BTC ${o2f(m1.btc_ret_1h)}% за 1г`:''}</div>
+      <div class="o2row o2m">Змінилося: BTC ${dl('btc_ret_1h')} п.п. · частка альтів вгору (4г) ${dl('breadth_up_4h')}</div></div>`;
+  const course=`<div class="sec"><h3>Хід сценарію</h3>${(o.lifecycle||[]).length?`<div class="tl">${o.lifecycle.map(m=>`<div><span class="mut num">${o2hm(m.touched_ts)} Київ</span> — ${esc(O2_LV[m.level]||m.level)} (${o2px(m.price)})</div>`).join('')}</div>`:'<div class="mut">Подій ще не було: вхід у зону не торкнуто.</div>'}</div>`;
+  const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
+  const J=x=>`<pre>${esc(JSON.stringify(x,null,1))}</pre>`;
+  const tech=`<details class="dbg"><summary>Технічні деталі та докази</summary>
+      ${execHtml(d.execution)}
+      <details class="o2d"><summary>Decision trace (заморожено)</summary>${J(fr.trace)}</details>
+      <details class="o2d"><summary>Теза та структурна інвалідація</summary>${J(fr.thesis)}</details>
+      <details class="o2d"><summary>Контекст на момент сигналу</summary>${J(fr.context)}</details>
+      <details class="o2d"><summary>Старий Лев на цю монету (довідково, не впливає)</summary>${J(fr.old_lev)}</details>
+      <div class="sec"><h3>Журнал подій</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає.</div>'}</div>
+      <div class="mut">ID ${esc(s.scenario_id)} · Telegram повідомлення ${esc(o.telegram_msg_id||'—')} · ${esc(o.status_ua||'')}</div></details>`;
+  if(T0!==RT) return;
+  app.innerHTML=`${top}${chartBlock}${iopen}${why}${seq}${o2MapHtml(fr.market_map)}${o2EvidenceHtml(fr.evidence)}${quality}${market}${course}${tech}`;
+  $('back').onclick=()=>{killPoll(); go('scenarios');};
+  $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
+    sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};
+  const el=$('chart');
+  await paintChart(el, s);
+  app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=async()=>{
+    S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
+    app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+  $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
+  poll=setInterval(async()=>{
+    if(document.hidden) return;
+    let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(s.symbol)}&tf=${S.tf}&limit=180`);}catch(e){if(!e.stale) setHealth('bad','немає зв’язку'); return;}
+    const last=(pack.candles||[]).slice(-1)[0];
+    if(!last||!last.time) return;
+    if(last.time>S.lastBar) { await paintChart(el,s); return; }
+    if(usingLW && series) series.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
+    else paintChart(el,s);
+  }, 8000);
+}
+
+/* ---------- Radar: етапи Brain v2.1 ---------- */
+function o2RadarHtml(r){
+  if(!r||r.ok===false) return '<div class="empty">Radar Brain тимчасово недоступний</div>';
+  const NM={NO_EVENT:'Немає події',WATCH:'Спостерігаю',WAIT_1_SHIFT:'1/3 чекаю зсув структури',WAIT_2_ZONE:'2/3 чекаю ретрейс у зону',ARMED_3:'3/3 ARMED: чекаю тригер M15',NO_TRADE:'Не торгувати',MISSED:'Запізно',INVALIDATED:'Скасовано',READY:'Готово'};
+  const f=r.funnel||{};
+  const fun=f.last?`<div class="o2sub">Останній цикл (${o2hm(f.last.ts)} Київ): ${(f.last.stages||[]).map(x=>esc(NM[x.stage]||x.stage)+' '+x.n).join(' · ')}</div>`:'';
+  const card=it=>{
+    const dir=String(it.direction||'').toUpperCase()==='SHORT';
+    const open=(it.state==='READY'&&it.signal_id);
+    return `<div class="card ${open?'tap':''}" ${open?`data-id="${esc(sid(it.signal_id))}"`:''}>
+      <div class="top"><span class="sym">${esc(it.sym||it.symbol)}</span><span class="side ${dir?'S':'L'}">${dir?'▼ SHORT':'▲ LONG'}</span>
+        <span class="pill ${it.state==='READY'?'ok':'watch'}">${esc(it.state_ua)}</span><span class="mut" style="margin-left:auto">${o2hm(it.updated_ts)} Київ</span></div>
+      <div class="kv"><span>Ціна зараз</span><b class="num">${it.price!=null?o2px(it.price):'немає свіжої'}</b></div>
+      ${it.need_text?`<div class="o2need"><b>Потрібно:</b> ${esc(it.need_text)}${it.need_px!=null&&it.dist_pct!=null?` · до рівня ${o2f(it.dist_pct>0?it.dist_pct:-it.dist_pct,2)}% ${it.dist_pct>0?'вище':'нижче'}`:''}${it.invalidation!=null?`<br><span class="o2m">Скасування: закриття M15 за ${o2px(it.invalidation)}</span>`:''}</div>`:`<div class="o2need">${esc(it.reason||'')}</div>`}
+      <div class="mut" style="margin-top:6px">${it.expires_ts?`Діє до ${o2kt(it.expires_ts)}`:'Строк: до зміни ситуації'}</div>
+      ${it.need_text?`<details class="o2d"><summary>Повна причина</summary><div class="o2sub">${esc(it.reason||'')}</div></details>`:''}</div>`;};
+  const groups=r.groups||[];
+  return `<div class="banner">Єдиний Radar Brain v2.1: від найближчих до входу до відхилених. «Сценарій ≠ позиція»; готовий сигнал — лише у групі READY.${fun}</div>
+    ${groups.map(g=>`<h2>${esc(g.title)} · ${g.items.length}</h2>${g.items.map(card).join('')}`).join('')||'<div class="empty">Brain зараз не формує жодного сценарію</div>'}`;
+}
+function o2StatsHtml(t){
+  if(!t||!t.total) return '';
+  const T=t.total;
+  return `<h2>Статистика Brain (сценарії Office, не ваші угоди)</h2><div class="card">
+    <div class="kv"><span>Сценаріїв READY</span><b>${esc(T.ready)}</b></div><div class="kv"><span>Надіслано / не надіслано</span><b>${esc(T.delivered)} / ${esc(T.not_sent)}</b></div>
+    <div class="kv"><span>Очікують входу · у русі</span><b>${esc(T.waiting_entry)} · ${esc(T.active)}</b></div><div class="kv"><span>TP · SL · строк вийшов</span><b>${esc(T.tp)} · ${esc(T.sl)} · ${esc(T.expired)}</b></div>
+    ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, закрито ${b.closed} (TP ${b.tp} / SL ${b.sl}, сума ${o2f(b.sum_r,1)} R)</div>`;}).join('')}
+    <div class="o2sub">${esc(t.note||'')}</div></div>`;
+}
+
 /* ---------- Картка сценарію ---------- */
 async function openSc(id){
-  if(String(id||'').startsWith('O2|')){ location.href='/office2?id='+encodeURIComponent(id); return; }   // сигнали OFFICE2 · LIVE BETA мають власну сторінку з повним decision trace
   const T0=++RT;
   killPoll();
   app.innerHTML='<div class="sk"></div><div class="sk"></div>';
   let d; try{d=await j('/api/v2/scenario?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'сценарій');}
   if(d.redirect){ location.href=d.redirect; return; }
+  if(d.ok&&d.brain==='o2') return openO2(d,T0);
   if(!d.ok){ app.innerHTML='<button class="back" id="back">← Сценарії</button><div class="empty">Сценарій недоступний</div>'; $('back').onclick=()=>go('scenarios'); return; }
   const s=d.scenario||{}, dp=s.display||{}, st=s.status||{};
   const story=s.story&&s.story.ok?s.story.text:'';
@@ -849,7 +1017,7 @@ function go(r){
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.r));
 const qs=new URLSearchParams(location.search);
-if(qs.get('scenario')) openSc(qs.get('scenario')); else go('office');
+if(qs.get('scenario')) openSc(qs.get('scenario')); else go(routes[qs.get('tab')]?qs.get('tab'):'office');
 </script>
 </body>
 </html>

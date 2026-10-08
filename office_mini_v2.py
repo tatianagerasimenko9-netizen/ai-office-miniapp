@@ -173,6 +173,7 @@ STATUS_UA = {
     "HIT_ENTRY": ("📍", "ЗОНА ВХОДУ", "Ціна в зоні входу · не позиція"),
     "HIT_TP1": ("🏁", "TP1 (модель)", "Модельний TP1 · не PnL угоди"),
     "HIT_TP2": ("🏁", "TP2 (модель)", "Модельний TP2 · не PnL угоди"),
+    "HIT_TP3": ("🏁", "TP3 (модель)", "Модельний TP3 · не PnL угоди"),
     "HIT_SL": ("⛔", "SL (модель)", "Модельний SL · не збиток угоди"),
     "CANCELLED": ("✖", "СКАСОВАНО", "Сценарій скасовано до входу"),
     "EXPIRED": ("⌛", "ПРОСТРОЧЕНО", "Термін сценарію минув"),
@@ -180,7 +181,7 @@ STATUS_UA = {
     "PIERCE_WATCHING": ("👁", "WATCHING", "Спостереження після проколу рівня · входу немає"),
     "RANGE_WATCHING": ("👁", "WATCHING", "Спостереження за діапазоном · входу немає"),
 }
-_DONE = ("HIT_TP1", "HIT_TP2", "HIT_SL", "CANCELLED", "EXPIRED", "INVALIDATED", "CLOSED")
+_DONE = ("HIT_TP1", "HIT_TP2", "HIT_TP3", "HIT_SL", "CANCELLED", "EXPIRED", "INVALIDATED", "CLOSED")
 _LIVE = ("ACTIVE", "CONFIRMED", "HIT_ENTRY")
 
 
@@ -349,7 +350,170 @@ def list_scenarios(*, include_watching: bool = False) -> List[Dict[str, Any]]:
                 get_explicit_open_position(_db(), r.get("symbol") or "", r.get("direction") or "").get("ok")
             )
         out.append(scenario_card(r, has_position=pos_cache[ck]))
+    out = out + o2_cards()
+    out.sort(key=_epoch_of, reverse=True)
     return out
+
+
+# ---------- Brain v2.1 (Office2) всередині основного Mini App ----------
+def _iso(ts: Any) -> Optional[str]:
+    try:
+        return datetime.fromtimestamp(float(ts), timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _o2_status(levels: List[Any], valid_until: Any, now: float) -> str:
+    """Статус сценарію Office2 лише з фактичних віх трекера (вхід/TP/SL/строк). Без віх — ACTIVE до кінця строку дії."""
+    lv = set(levels or [])
+    if "SL" in lv:
+        return "HIT_SL"
+    if "TP3" in lv:
+        return "HIT_TP3"
+    if "EXPIRED" in lv:
+        return "EXPIRED"
+    if "ENTRY" in lv or "TP1" in lv or "TP2" in lv:
+        return "HIT_ENTRY"
+    try:
+        if now > float(valid_until):
+            return "EXPIRED"
+    except (TypeError, ValueError):
+        pass
+    return "ACTIVE"
+
+
+_O2_PROGRESS = {"HIT_ENTRY": "вхід торкнуто, сценарій у русі", "ACTIVE": "очікує входу в зоні", "HIT_SL": "стоп сценарію (модель, не збиток угоди)",
+                "HIT_TP3": "TP3 досягнуто (модель, не PnL угоди)", "EXPIRED": "строк вийшов"}
+
+
+def o2_card(rec: Dict[str, Any], *, has_position: bool = False, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Надісланий READY Brain v2.1 у тій самій формі картки, що й сценарії Лева (список, журнал, головна). Знімок рівнів заморожений."""
+    from office2 import levels as LVL
+
+    th = rec.get("thesis") or {}
+    try:
+        zl, zh = LVL.zone_of(th)
+        entry, sl = float(th["entry"]), float(th["sl"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    sym, side = str(rec["symbol"]), str(rec["direction"]).upper()
+    tg = th.get("targets") or []
+    tp = [(float(t["p"]) if t.get("p") is not None else None) for t in tg[:3]] + [None] * 3
+    risk = abs(entry - sl)
+    rr = (abs(tp[0] - entry) / risk) if tp[0] is not None and risk > 0 else None
+    t = time.time() if now is None else now
+    raw = _o2_status(rec.get("levels"), rec.get("valid_until_ts"), t)
+    st = dict(status_view(raw))
+    st["text"] = _O2_PROGRESS.get(raw, st["text"])
+    if raw in ("HIT_ENTRY", "ACTIVE"):
+        st = {"code": raw, "icon": "🎯" if raw == "ACTIVE" else "📍", "short": "ПЛАН" if raw == "ACTIVE" else "У РУСІ", "text": _O2_PROGRESS[raw], "group": "live"}
+    life = lifecycle_from_status(raw, confirms=["ltf"], has_position=has_position, ttl_done=raw == "EXPIRED")
+    display = {"zone": format_level_span(zl, zh, sym), "entry": format_px(entry, sym), "sl": format_px(sl, sym, side=side, kind="SL"),
+               "tp1": format_px(tp[0], sym, side=side, kind="TP1") if tp[0] is not None else None, "tp2": format_px(tp[1], sym, side=side, kind="TP2") if tp[1] is not None else None,
+               "tp3": format_px(tp[2], sym, side=side, kind="TP3") if tp[2] is not None else None, "rr": rr_text(rr), "rr_basis": "від ціни READY до TP1" if rr is not None else None,
+               "potential": None if tp[0] is None else f"{abs(tp[0] - entry) / entry * 100:.1f}%", "tick": format(tick_size_for(sym, entry), "f")}
+    why = str(rec.get("why") or th.get("reason") or "")
+    return {"scenario_id": rec["id"], "human": {"icon": "🟢" if side == "LONG" else "🔴", "tone": "g" if raw in ("ACTIVE", "HIT_ENTRY") else ("r" if raw == "HIT_SL" else "n"),
+                                                  "text": f"Brain v2.1 · {st['text']}" + (f" · {why[:110]}" if why and raw in ("ACTIVE", "HIT_ENTRY") else "")},
+            "symbol": sym, "direction": side, "status_raw": raw, "lifecycle": life, "grade": "", "timeframe": "M15", "zone_lo": zl, "zone_hi": zh, "entry": entry, "sl": sl,
+            "tp1": tp[0], "tp2": tp[1], "tp3": tp[2], "rr": rr, "display": display, "status": st, "wait": None, "cancel": None, "why": why or None, "potential_pct": None,
+            "tp1_filter_ok": None, "as_of": _iso(rec.get("created_ts")), "created_at": _iso(rec.get("created_ts")), "story": None, "opens_position": False,
+            "kind": "brain_v2", "brain": "v2.1" if str(rec.get("version_id") or "").startswith("o2-brain-2") else "v1", "legacy_range": False,
+            "valid_until": _iso(rec.get("valid_until_ts"))}
+
+
+def o2_cards(*, limit: int = 40) -> List[Dict[str, Any]]:
+    try:
+        from office2 import webview as W
+        from office_alert_gate import get_explicit_open_position
+
+        out = []
+        pos_cache: Dict[str, bool] = {}
+        for rec in W.delivered(_db(), limit):
+            c = o2_card(rec)
+            if not c:
+                continue
+            if c["status_raw"] in ("ACTIVE", "HIT_ENTRY"):   # позицію перевіряємо лише для живих сценаріїв і раз на (монета, напрям): кожен запит у БД — окреме з'єднання
+                k = f"{rec['symbol']}|{rec['direction']}"
+                if k not in pos_cache:
+                    try:
+                        pos_cache[k] = bool(get_explicit_open_position(_db(), rec["symbol"], rec["direction"]).get("ok"))
+                    except Exception:  # noqa: BLE001
+                        pos_cache[k] = False
+                if pos_cache[k]:
+                    c = o2_card(rec, has_position=True) or c
+            out.append(c)
+        return out
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mini] o2 cards failed: {type(exc).__name__}: {exc}")
+        return []
+
+
+def _epoch_of(c: Dict[str, Any]) -> float:
+    v = c.get("created_at")
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        pass
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def o2_scenario_detail(sid: str) -> Dict[str, Any]:
+    from office2 import webview as W
+
+    pack = W.scenario(_db(), sid)
+    if not pack:
+        return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["сценарій"]}
+    th = ((pack.get("frozen") or {}).get("thesis")) or {}
+    rec = {"id": pack["id"], "symbol": pack["symbol"], "direction": pack["direction"], "created_ts": pack["created_ts"], "valid_until_ts": pack["valid_until_ts"], "thesis": th,
+           "levels": [m.get("level") for m in (pack.get("lifecycle") or [])], "version_id": (pack.get("frozen") or {}).get("version_id"), "why": (pack.get("frozen") or {}).get("why")}
+    pos, pos_known = False, None
+    try:
+        from office_alert_gate import get_explicit_open_position
+
+        pos = bool(get_explicit_open_position(_db(), pack["symbol"], pack["direction"]).get("ok"))
+        pos_known = pos
+    except Exception:  # noqa: BLE001
+        pos = False
+    card = o2_card(rec, has_position=pos)
+    if not card:
+        return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["рівні сценарію"]}
+    card["sid"] = pack["id"]
+    execution = None
+    if (card.get("status") or {}).get("group") != "done":
+        try:
+            execution = execution_payload(card, has_open_position=pos_known, tp2=card.get("tp2"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[mini] o2 execution failed: {type(exc).__name__}: {exc}")
+    return {"ok": True, "readonly": True, "data_status": "DATA_OK", "brain": "o2", "scenario": card, "o2": pack, "events": scenario_events(pack["id"]), "execution": execution,
+            "has_position": pos, "hypothetical": not pos}
+
+
+def radar_payload() -> Dict[str, Any]:
+    """Єдиний Radar Brain v2.1: усі етапи в одному списку (WATCH · WAIT 1/3 · 2/3 · ARMED 3/3 · READY · NO_TRADE · MISSED · INVALIDATED)."""
+    try:
+        from office2 import webview as W
+
+        d = W.radar(_db())
+        for g in d["groups"]:
+            for it in g["items"]:
+                it["sym"] = str(it["symbol"]).replace("USDT", "")
+        return d
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(exc).__name__}", "groups": [], "n": 0}
+
+
+def o2_stats() -> Optional[Dict[str, Any]]:
+    try:
+        from office2 import stats as ST
+
+        return ST.collect(_db())
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _btc_regime() -> Optional[str]:
@@ -460,10 +624,8 @@ def scenario_detail(sid: str) -> Dict[str, Any]:
     sid = str(sid or "").strip()
     if not sid:
         return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["scenario_id"]}
-    if sid.startswith("O2|"):   # OFFICE2 · LIVE BETA: власна сторінка з повним decision trace (office2/webview.py)
-        from urllib.parse import quote
-
-        return {"ok": False, "data_status": "OFFICE2", "redirect": "/office2?id=" + quote(sid, safe="")}
+    if sid.startswith("O2|"):   # Brain v2.1: та сама картка сценарію в основному Mini App (знімок моменту сигналу + «зараз»)
+        return o2_scenario_detail(sid)
     row = None
     watch_thesis = None
     if sid.startswith("W-"):
@@ -976,8 +1138,9 @@ def journal_payload(*, kind: str = "scenarios") -> Dict[str, Any]:
                 "curve": None,
                 "wr_shown": False,
                 "note": f"n={n} < {MIN_GROUP} — WR/криву не показуємо",
+                "office2": o2_stats(),
             }
-        return {**st, "wr_shown": True}
+        return {**st, "wr_shown": True, "office2": o2_stats()}
     if k == "signals":
         import office_signal_track as trk
 

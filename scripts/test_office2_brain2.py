@@ -331,8 +331,59 @@ def _v2_e2e(short):
             sg = pl["signals"][0]
             assert sg["frozen"]["thesis"]["kind"] in ("SWEEP_SEQ", "ORIGIN_SEQ") and sg["frozen"]["sequence"] and sg["frozen"]["evidence"] and sg["status"] == "DELIVERED"
             assert pl["scenarios"][0]["group"] == 0 and pl["scenarios"][0]["state"] == "READY"       # Radar: READY угорі
+            _integrated(db, sent.calls[0][2]["canonical_id"], short)
     finally:
         B.all_levels = orig
+
+
+def _integrated(db, sid, short):
+    """Один продукт: Brain v2.1 живе в основному Mini App — список сценаріїв, картка (знімок + «зараз»), єдиний Radar, статистика окремо за версією Brain."""
+    import time as _t
+
+    import office_bridge as OB
+    import office_mini_v2 as MV
+
+    prev = os.environ.get("OFFICE_DB_PATH")
+    os.environ["OFFICE_DB_PATH"] = db
+    os.environ.pop("DATABASE_URL", None)
+    created = OB._fetchone(db, "SELECT created_ts FROM office2_live_signal")[0]
+    real_time = _t.time
+    _t.time = lambda: created + 120            # синтетичні свічки з минулого: «зараз» = момент через 2 хв після READY
+    try:
+        d = MV.scenario_detail(sid)
+        assert d["ok"] and d["brain"] == "o2" and "redirect" not in d and d["scenario"]["scenario_id"] == sid
+        sc = d["scenario"]
+        assert sc["direction"] == ("SHORT" if short else "LONG") and sc["kind"] == "brain_v2" and sc["status"]["group"] == "live" and sc["status_raw"] == "ACTIVE"
+        assert sc["zone_lo"] < sc["zone_hi"] and sc["tp1"] and sc["sl"] and sc["display"]["tp1"] and sc["lifecycle"]["key"] == "confirmed"
+        fr = d["o2"]["frozen"]
+        assert fr["integral"] and fr["market_map"]["tfs"] and fr["sequence"] and fr["evidence"] and d["o2"]["levels"]["targets"]
+        lst = MV.list_scenarios(include_watching=True)
+        assert any(c["scenario_id"] == sid and c["brain"] == "v2.1" for c in lst)                    # той самий список, що й сценарії Лева
+        assert MV.scenarios_payload()["scenarios"][0]["scenario_id"] == sid
+        r = MV.radar_payload()
+        assert r["groups"][0]["group"] == 0 and r["groups"][0]["items"][0]["state"] == "READY"
+        it = r["groups"][0]["items"][0]
+        assert "price" in it and it["expires_ts"] and it["sym"] == "X", it                      # монета, ціна зараз, термін дії
+        st = MV.journal_payload(kind="stats")
+        assert "office2" in st and st["office2"]["by_brain"]
+        card = MV.o2_card({"id": sid, "symbol": "XUSDT", "direction": sc["direction"], "created_ts": 1.0, "valid_until_ts": 2.0, "thesis": fr["thesis"], "levels": ["ENTRY", "TP1", "SL"]})
+        assert card["status_raw"] == "HIT_SL" and card["status"]["group"] == "done"                  # SL сценарію — стан моделі, не особистий збиток
+        assert MV.o2_card({**{"id": sid, "symbol": "XUSDT", "direction": "LONG", "created_ts": 1.0, "valid_until_ts": 2.0, "thesis": fr["thesis"]}, "levels": ["TP1"]})["status_raw"] == "HIT_ENTRY"
+    finally:
+        _t.time = real_time
+        if prev is None:
+            os.environ.pop("OFFICE_DB_PATH", None)
+        else:
+            os.environ["OFFICE_DB_PATH"] = prev
+
+
+def test_radar_need_fields_for_wait_stages():
+    """Кожен WAIT має структуру «потрібно»: рівень (де є) і текст умови, щоб Radar показував наступну умову числом."""
+    c, seq = closes_long()
+    th = run(c, seq["sweep"])
+    assert th["state"] == "WAIT" and th["reason"].startswith("WAIT 1/3") and th["need"]["text"], th
+    th = run(c, seq["top"])
+    assert th["state"] == "WAIT" and th["reason"].startswith("WAIT 2/3") and th["need"]["px"] is not None and "ретрейс" in th["need"]["text"] + th["reason"], th
 
 
 def test_v2_ready_delivered_long_and_short():
