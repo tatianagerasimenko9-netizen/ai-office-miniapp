@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from office2.webview import _rows
+from office2.webview import _rows, parent_id
 
 
 def _ms(db: str, sid: str) -> List[Dict[str, Any]]:
@@ -22,42 +22,58 @@ def _ms(db: str, sid: str) -> List[Dict[str, Any]]:
 
 
 def scenario_outcome(snap: Dict[str, Any], created_ts: float, miles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Модельний підсумок сценарію за фактичними віхами (вхід/TP1-3/SL/строк). Правила виходу в системі НЕ визначено, тому реалізованого PnL тут немає:
+    лише факти — що було першим (TP чи SL), яка найдальша ціль досягнута і її R за початковим ризиком (потенціал при утриманні, не прибуток)."""
     th = snap.get("thesis") or {}
     tg = th.get("targets") or []
     lv = {m.get("level"): m for m in miles}
+    tt = lambda k: float(lv[k].get("touched_ts") or 0)    # noqa: E731
     entry = lv.get("ENTRY")
-    state = "WAITING_ENTRY"
-    r = None
-    if "EXPIRED" in lv and not entry:
+    reached = [i for i in (1, 2, 3) if f"TP{i}" in lv]
+    first = None
+    if "SL" in lv and (not reached or tt("SL") <= tt(f"TP{reached[0]}")):
+        first = "SL"
+    elif reached:
+        first = "TP"
+    top = max(reached) if reached else 0
+    if "TP3" in lv:
+        state = "TP3"
+    elif "SL" in lv and entry:
+        state = "SL" if first == "SL" else f"TP{top}→SL"
+    elif "EXPIRED" in lv and not entry:
         state = "EXPIRED"
+    elif reached:
+        state = f"TP{top}"                  # проміжний етап: сценарій триває до TP3 або SL
     elif entry:
         state = "ACTIVE"
-        reached = [i for i in (1, 2, 3) if f"TP{i}" in lv]
-        if "SL" in lv and (not reached or float(lv["SL"].get("touched_ts") or 0) <= float(lv[f"TP{reached[0]}"].get("touched_ts") or 1e18)):
-            state, r = "SL", -1.0
-        elif reached:
-            top = max(reached)
-            state = f"TP{top}"
-            r = float(tg[top - 1]["r"]) if len(tg) >= top and tg[top - 1].get("r") is not None else None
-            if "SL" in lv:
-                state += "→SL"
-        elif "SL" in lv:
-            state, r = "SL", -1.0
-    first_tp = next((lv[k] for k in ("TP1", "TP2", "TP3") if k in lv), None)
-    terminal = lv.get("SL") or first_tp
-    return {"state": state, "r": r, "entry_touched_ts": entry.get("touched_ts") if entry else None,
-            "time_to_entry_s": (float(entry["touched_ts"]) - created_ts) if entry and entry.get("touched_ts") else None,
-            "time_to_first_result_s": (float(terminal["touched_ts"]) - created_ts) if terminal and terminal.get("touched_ts") else None,
+    else:
+        state = "WAITING_ENTRY"
+    final = state in ("TP3", "SL", "EXPIRED", "TP1→SL", "TP2→SL")
+    max_r = float(tg[top - 1]["r"]) if top and len(tg) >= top and tg[top - 1].get("r") is not None else None
+    last_ts = max([float(m.get("touched_ts") or 0) for m in miles] or [0.0])
+    return {"state": state, "final": final, "first": first, "max_tp": top, "max_r": max_r, "entry_touched_ts": entry.get("touched_ts") if entry else None,
+            "time_to_entry_s": (float(entry["touched_ts"]) - created_ts) if entry and entry.get("touched_ts") else None, "finished_ts": last_ts if final else None,
             "order": [m.get("level") for m in sorted(miles, key=lambda m: float(m.get("touched_ts") or 0))]}
 
 
+def _median(xs: List[float]) -> Any:
+    xs = sorted(xs)
+    return None if not xs else round((xs[len(xs) // 2] + xs[(len(xs) - 1) // 2]) / 2.0, 2)
+
+
 def collect(db: str) -> Dict[str, Any]:
+    """Унікальні сценарії (за батьківським scenario id, не за повідомленнями Telegram і не за циклами), окремо за версією Brain."""
     rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, status, snapshot_json FROM office2_live_signal ORDER BY created_ts ASC")
-    total = {"ready": 0, "delivered": 0, "not_sent": 0, "waiting_entry": 0, "active": 0, "sl": 0, "tp": 0, "expired": 0}
-    buckets: Dict[str, Dict[str, Any]] = {k: {"n": 0, "closed": 0, "sum_r": 0.0} for k in ("0", "1", "2+")}
-    items = []
+    total = {"ready": 0, "delivered": 0, "not_sent": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0}
     by_brain: Dict[str, Dict[str, Any]] = {}
+    items = []
+    seen = set()
+    maxr: Dict[str, List[float]] = {}
     for sid, sym, d, ct, status, sj in rows:
+        parent = parent_id(sid)
+        if parent in seen:
+            continue
+        seen.add(parent)
         snap = json.loads(sj or "{}")
         total["ready"] += 1
         if status != "DELIVERED":
@@ -65,25 +81,27 @@ def collect(db: str) -> Dict[str, Any]:
             continue
         total["delivered"] += 1
         oc = scenario_outcome(snap, float(ct), _ms(db, sid))
-        st = oc["state"]
-        total["waiting_entry" if st == "WAITING_ENTRY" else "active" if st == "ACTIVE" else "expired" if st == "EXPIRED" else "sl" if st == "SL" else "tp"] += 1
-        ag = int((snap.get("alignment_summary") or {}).get("against", 0))
-        b = buckets["0" if ag == 0 else "1" if ag == 1 else "2+"]
-        b["n"] += 1
-        if oc["r"] is not None:
-            b["closed"] += 1
-            b["sum_r"] += oc["r"]
-        bv = str(snap.get("version_id") or snap.get("brain") or "unknown")   # статистика різних версій Brain не змішується
-        bb = by_brain.setdefault(bv, {"delivered": 0, "closed": 0, "tp": 0, "sl": 0, "sum_r": 0.0})
+        bv = str(snap.get("version_id") or snap.get("brain") or "unknown")   # версії Brain не змішуються
+        bb = by_brain.setdefault(bv, {"delivered": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0, "median_max_r": None})
         bb["delivered"] += 1
-        if oc["r"] is not None:
-            bb["closed"] += 1
-            bb["sum_r"] += oc["r"]
-            bb["tp" if oc["r"] > 0 else "sl"] += 1
-        items.append({"id": sid, "symbol": sym, "direction": d, "against": ag, "brain": bv, **oc})
-    for b in buckets.values():
-        b["sum_r"] = round(b["sum_r"], 2)
-    for b in by_brain.values():
-        b["sum_r"] = round(b["sum_r"], 2)
-    return {"total": total, "by_against": buckets, "by_brain": by_brain, "items": items[-30:],
-            "note": "LIVE BETA · статистика накопичується; R брутто до комісій; результат сценарію ≠ особиста угода; висновків про прибутковість немає"}
+        for tgt in (total, bb):
+            if oc["entry_touched_ts"]:
+                tgt["entered"] += 1
+            if oc["first"] == "TP":
+                tgt["tp1_first"] += 1
+            if oc["first"] == "SL":
+                tgt["sl_first"] += 1
+            if oc["state"] == "TP3":
+                tgt["tp3"] += 1
+            if oc["state"] == "EXPIRED":
+                tgt["expired"] += 1
+            if not oc["final"]:
+                tgt["unresolved"] += 1
+        if oc["max_r"] is not None:
+            maxr.setdefault(bv, []).append(oc["max_r"])
+        items.append({"id": sid, "symbol": sym, "direction": d, "brain": bv, **oc})
+    for bv, b in by_brain.items():
+        b["median_max_r"] = _median(maxr.get(bv, []))
+    return {"total": total, "by_brain": by_brain, "items": items[-30:],
+            "note": "LIVE BETA · унікальні сценарії; правила виходу в системі не визначено, тому реалізованого PnL і суми R немає. «Макс. R» — найдальша досягнута ціль за початковим ризиком "
+                    "(потенціал при утриманні, не прибуток). Результат сценарію ≠ особиста угода"}

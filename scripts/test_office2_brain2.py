@@ -377,6 +377,113 @@ def _integrated(db, sid, short):
             os.environ["OFFICE_DB_PATH"] = prev
 
 
+def _both(upto_key="trigger"):
+    c, seq = closes_long()
+    cm = [200.0 - x for x in c]
+    lev = [{"p": 200.0 - x["p"], "side": "high" if x["side"] == "low" else "low", "kind": x["kind"], "strength": 1, "known": 0.0} for x in LEVELS]
+    return (run(c, seq[upto_key]), run(cm, seq[upto_key], "SHORT", lev), c, cm, seq, lev)
+
+
+def test_long_short_math_symmetry_and_texts():
+    """Однакова математика LONG/SHORT: SL по напрямку буфера, зона = реальний дотик за OHLC, тексти кроків без суперечностей (LTC SHORT 07.10: «67,91 − 0,03 = 67,94», «low 67,76 у зоні 67,59–67,74»)."""
+    import re
+
+    L, S_, c, cm, seq, lev = _both()
+    assert L["state"] == S_["state"] == "READY"
+    for th, sg in ((L, 1), (S_, -1)):
+        inv, sl, e = th["invalidation"]["price"], th["sl"], th["entry"]
+        assert abs(abs(sl - inv) - th["invalidation"]["buffer"]) < 1e-9 and (sl < inv if sg > 0 else sl > inv)           # люфт зсуває SL ПОЗА екстремум події
+        assert abs(th["risk"] - abs(e - sl)) < 1e-9 and abs(th["risk_pct"] - th["risk"] / abs(e) * 100) < 1e-9
+        for t in th["targets"]:
+            assert abs(t["r"] - abs(t["p"] - e) / th["risk"]) < 1e-9 and abs(t["pct"] - abs(t["p"] - e) / e * 100) < 1e-9 and (t["p"] > e if sg > 0 else t["p"] < e)
+        txt = {x["step"]: x.get("value", "") for x in th["sequence"]}
+        m = re.match(r"інвалідація ([\d.]+) ([−+]) люфт ([\d.e-]+) .*= ([\d.]+);", txt["SL"])
+        a, op, b, r_ = float(m.group(1)), m.group(2), float(m.group(3)), float(m.group(4))
+        assert op == ("−" if sg > 0 else "+") and abs((a - b if sg > 0 else a + b) - r_) < 1e-3, txt["SL"]               # арифметика в тексті сходиться для обох напрямів
+        z = txt["ретрейс у зону"]
+        ext, lo_, hi_ = [float(x) for x in re.findall(r"[\d.]+", z.split("торкнувся")[0] + " " + z.split("зони")[1])[:3]] if False else (None, None, None)
+        m2 = re.match(r"(low|high) ([\d.]+) торкнувся зони ([\d.]+)–([\d.]+)", z)
+        assert m2 and m2.group(1) == ("low" if sg > 0 else "high"), z
+        ext, zl_, zh_ = float(m2.group(2)), float(m2.group(3)), float(m2.group(4))
+        touched = (ext <= zh_) if sg > 0 else (ext >= zl_)                                                              # реальний дотик зони за екстремумом свічки
+        assert touched, z
+        if (ext < zl_) if sg > 0 else (ext > zh_):
+            assert "пройшла зону наскрізь" in z, z                                                                      # екстремум за межею зони — чесно сказано
+    assert abs(L["entry"] + S_["entry"] - 200.0) < 1e-6
+
+
+def test_zone_touch_requires_real_ohlc_contact():
+    """Ціна не торкнулась зони (екстремум свічки не дійшов до її краю) → тригер не вмикається; зона вже пройдена до READY → не «доступний вхід»."""
+    c, seq = closes_long()
+    far = c[:seq["top"]] + [101.9, 101.8, 101.9, 102.0, 102.1]            # без ретрейсу в зону
+    th = run(far, len(far))
+    assert th["state"] in ("WAIT", "MISSED") and "ретрейс" in th["reason"] + th.get("reason", ""), th
+    assert th["state"] != "READY"
+
+
+def test_inputs_did_affect_is_honest():
+    """«Вплинуло на рішення» = змінило результат. Коли READY дозволено (нічого не заблоковано), жоден умовний вхід не помічений як такий, що вплинув; при BLOCK — причина помічена."""
+    L, S_, *_ = _both()
+    for th in (L, S_):
+        ins = th["integral"]["inputs"]
+        assert th["integral"]["verdict"] == "ALLOW" and not any(i["did_affect_decision"] for i in ins) and all("evaluated" in i for i in ins)
+    c, seq = closes_long()
+    local = [dict(x, kind="LONDON_L") if x["kind"] == "PDL" else x for x in LEVELS]
+    orig_h = B.htf_context
+    try:
+        B.htf_context = lambda ctx, now: _fake_htf(h4=-1, d1=0, h1=-1, broken_h4="down")
+        th = run(c, seq["trigger"], levels=local)
+        ins = th["integral"]["inputs"]
+        assert th["integral"]["verdict"] == "BLOCK" and any(i["did_affect_decision"] for i in ins if i["role"] == "GATE (умовно)") and not any(i["did_affect_decision"] for i in ins if i["role"] != "GATE (умовно)")
+    finally:
+        B.htf_context = orig_h
+
+
+def test_htf_swings_use_only_closed_bars_and_map_lists_m5_m1():
+    """Поточний (формується) бар TF не підтверджує swing: додавання незакритого бару не змінює жодного поля рядка TF. M5/M1 — «не перевірено», не вигадані."""
+    c, seq = closes_long()
+    b, ctx = mk(c, seq["trigger"])
+    now = float(b["t"][-1] + 900)
+    base = B.htf_context(ctx, now)
+    h4 = ctx["h4"]
+    n = len(h4["t"])
+    k = F.last_closed(h4, 4 * 3600, now)
+    assert k <= n - 1
+    ext = {kk: np.append(v, v[-1] + (3.0 if kk in ("h", "c") else -3.0 if kk == "l" else 0.0) if kk != "t" else v[-1] + 4 * 3600) for kk, v in h4.items()}   # «формується» бар після k: екстремальний
+    ctx2 = dict(ctx, h4=ext)
+    row = lambda h: {kk: h["H4"][kk] for kk in ("last_swing_high", "last_swing_low", "trend", "trend_eff", "range")}                           # noqa: E731
+    assert row(B.htf_context(ctx2, now)) == row(base)
+    th = run(c, seq["trigger"])
+    tfs = {r["tf"]: r for r in th["map"]["tfs"]}
+    assert tfs["M5"]["status"] == "NOT_CHECKED" and tfs["M1"]["status"] == "NOT_CHECKED" and "swing_stale" in tfs["H4"]
+
+
+def test_scenario_final_state_and_model_result():
+    """Завершений сценарій: головний статус TP3/СТОП/строк, READY — лише історична подія; без реалізованого PnL, лише модельні факти."""
+    from office2 import stats as ST
+
+    th = {"targets": [{"p": 1, "r": 2.8}, {"p": 2, "r": 3.8}, {"p": 3, "r": 11.9}]}
+    m = lambda lv, t: {"level": lv, "touched_ts": t}  # noqa: E731
+    o = ST.scenario_outcome({"thesis": th}, 0.0, [m("ENTRY", 1), m("TP1", 2)])
+    assert o["state"] == "TP1" and not o["final"] and o["first"] == "TP" and o["max_r"] == 2.8                 # TP1 — проміжний етап
+    o = ST.scenario_outcome({"thesis": th}, 0.0, [m("ENTRY", 1), m("TP1", 2), m("TP2", 3), m("TP3", 4)])
+    assert o["state"] == "TP3" and o["final"] and o["max_r"] == 11.9 and o["finished_ts"] == 4
+    o = ST.scenario_outcome({"thesis": th}, 0.0, [m("ENTRY", 1), m("TP1", 2), m("SL", 3)])
+    assert o["state"] == "TP1→SL" and o["final"] and o["first"] == "TP"
+    o = ST.scenario_outcome({"thesis": th}, 0.0, [m("ENTRY", 1), m("SL", 2)])
+    assert o["state"] == "SL" and o["first"] == "SL" and o["max_r"] is None
+    o = ST.scenario_outcome({"thesis": th}, 0.0, [m("EXPIRED", 9)])
+    assert o["state"] == "EXPIRED" and o["final"] and o["entry_touched_ts"] is None
+    import office_mini_v2 as MV
+
+    base = {"id": "O2|x|1", "symbol": "LTCUSDT", "direction": "SHORT", "created_ts": 1.0, "valid_until_ts": 2.0, "thesis": {"entry": 67.45, "sl": 67.94, "entry_zone": [67.5946, 67.7357], "targets": [{"p": 66.07, "r": 2.8}, {"p": 65.59, "r": 3.8}, {"p": 61.63, "r": 11.9}]}}
+    c3 = MV.o2_card(dict(base, levels=["ENTRY", "TP1", "TP2", "TP3"]), now=3.0)
+    assert c3["status_raw"] == "HIT_TP3" and c3["status"]["group"] == "done" and "READY" not in c3["status"]["text"]
+    c2 = MV.o2_card(dict(base, levels=["ENTRY", "TP1", "TP2"]), now=3.0)
+    assert c2["status_raw"] == "HIT_ENTRY" and c2["status"]["group"] == "live" and "TP2" in c2["status"]["text"] and "триває" in c2["status"]["text"]
+    assert MV.o2_card(dict(base, levels=[]), now=1.5)["status_raw"] == "ACTIVE" and MV.o2_card(dict(base, levels=[]), now=5.0)["status_raw"] == "EXPIRED"
+
+
 def test_radar_need_fields_for_wait_stages():
     """Кожен WAIT має структуру «потрібно»: рівень (де є) і текст умови, щоб Radar показував наступну умову числом."""
     c, seq = closes_long()

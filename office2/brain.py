@@ -106,6 +106,7 @@ def _tf_row(bars: Dict[str, np.ndarray], width: int, now: float, price: float, n
     k = closed_idx if closed_idx is not None else F.last_closed(bars, width, now)
     if k < 3:
         return {"status": "UNAVAILABLE"}
+    bars = {kk: (v[:k + 1] if hasattr(v, "__len__") and len(v) > k + 1 else v) for kk, v in bars.items()}   # swing/ATR/режим лише по ЗАКРИТИХ барах: поточний (формується) бар не підтверджує swing
     reg = F.regime_by_bar(bars)
     a = F.atr(bars, 14) if len(bars["t"]) > 14 else np.full(len(bars["t"]), np.nan)
     sh, sl = F.swings(bars, swing_n)

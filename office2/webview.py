@@ -195,6 +195,12 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
             "signals": sigs, "scenarios": scen, "funnel": _funnel(db, t), "modules": B.MODULES, "stats": _stats(db), "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
 
 
+def parent_id(sid: Any) -> str:
+    """id сигналу = id сценарію + «|час підтвердження»; id сценарію («O2|хеш») повертається без змін."""
+    sid = str(sid)
+    return sid.rsplit("|", 1)[0] if sid.count("|") >= 2 else sid
+
+
 def _prices(db: str, t: float, symbols: List[str]) -> Dict[str, float]:
     """Остання відома ціна по монетах з шару офісу (не старіша за 3 год); одним запитом."""
     out: Dict[str, float] = {}
@@ -218,7 +224,7 @@ def radar(db: str, now: Optional[float] = None) -> Dict[str, Any]:
     done = _rows(db, f"SELECT {cols} FROM office2_live_scenario WHERE state IN ('NO_TRADE','MISSED','INVALIDATED','EXPIRED') ORDER BY updated_ts DESC LIMIT 25")
     rows = list(live) + list(done)
     px = _prices(db, t, [r[1] for r in rows])
-    sigs = {r[0].rsplit("|", 1)[0]: (r[0], r[1]) for r in _rows(db, "SELECT scenario_id, valid_until_ts FROM office2_live_signal WHERE created_ts > ? ORDER BY created_ts ASC", (t - 3 * 86400,))}   # id сигналу = id сценарію + «|час»
+    sigs = {parent_id(r[0]): (r[0], r[1]) for r in _rows(db, "SELECT scenario_id, valid_until_ts FROM office2_live_signal WHERE created_ts > ? ORDER BY created_ts ASC", (t - 3 * 86400,))}   # id сигналу = id сценарію + «|час»
     items = []
     for sid, sym, d, kind, state, reason, upd, exp, tj, ver in rows:
         try:
@@ -269,11 +275,3 @@ def scenario(db: str, ident: str) -> Optional[Dict[str, Any]]:
         return None
     rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json FROM office2_live_signal WHERE scenario_id = ?", (sid,))
     return signal_item(db, rows[0], True) if rows else None
-
-
-
-PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "webview.html"), encoding="utf-8").read()
-
-
-def html() -> str:
-    return PAGE
