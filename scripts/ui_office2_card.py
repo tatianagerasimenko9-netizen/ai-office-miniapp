@@ -74,6 +74,15 @@ def main():
             for must in ("Чому Office вирішив увійти", "Карта ринку зверху вниз", "Послідовність до READY", "Що перевірено", "Я відкрила угоду", "Хід сценарію", "Ринок на момент сигналу"):
                 assert must.lower() in txt.lower(), (must, txt[:400])
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (картка)"
+            th = WV.payload(db)["signals"][0]["frozen"]["thesis"]
+            for i, lvl in enumerate(("ENTRY", "TP1", "TP2", "TP3")):                         # сценарій дійшов до TP3: головний статус — завершено, READY лише історична подія
+                OB.log_event(db, "SCENARIO_MILESTONE", {"scenario_id": sid, "level": lvl, "touched_ts": 1790376000.0 + i * 3600, "sent_ts": 1790376030.0 + i * 3600, "price": th["entry"]}, sid)
+            page.goto("http://o2.test/v2?scenario=" + sid)
+            page.wait_for_selector("text=ЗАВЕРШЕНО", timeout=8000)
+            ft = page.inner_text("body")
+            fl = ft.lower()
+            assert "tp3 · завершено" in fl and "підсумок сценарію" in fl and ("не прибуток" in fl or "не pnl угоди" in fl) and "увійти можна до" not in fl, ft
+            assert "після завершення сценарію" in fl or "ціна зараз" not in fl
             page.goto("http://o2.test/v2?tab=radar")
             page.wait_for_selector("text=Готово", timeout=8000)
             rt = page.inner_text("body")

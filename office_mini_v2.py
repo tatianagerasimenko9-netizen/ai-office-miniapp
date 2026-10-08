@@ -403,10 +403,15 @@ def o2_card(rec: Dict[str, Any], *, has_position: bool = False, now: Optional[fl
     rr = (abs(tp[0] - entry) / risk) if tp[0] is not None and risk > 0 else None
     t = time.time() if now is None else now
     raw = _o2_status(rec.get("levels"), rec.get("valid_until_ts"), t)
+    lvset = set(rec.get("levels") or [])
+    top = max([i for i in (1, 2, 3) if f"TP{i}" in lvset] or [0])
     st = dict(status_view(raw))
     st["text"] = _O2_PROGRESS.get(raw, st["text"])
+    if raw == "HIT_SL" and top:
+        st["text"] = f"TP{top} досягнуто, потім стоп сценарію (модель, не збиток угоди)"
     if raw in ("HIT_ENTRY", "ACTIVE"):
-        st = {"code": raw, "icon": "🎯" if raw == "ACTIVE" else "📍", "short": "ПЛАН" if raw == "ACTIVE" else "У РУСІ", "text": _O2_PROGRESS[raw], "group": "live"}
+        txt = _O2_PROGRESS[raw] if not top else f"TP{top} досягнуто (модель) · сценарій триває до TP3 або стопу"
+        st = {"code": raw, "icon": "🎯" if raw == "ACTIVE" else "📍", "short": "ПЛАН" if raw == "ACTIVE" else (f"TP{top}" if top else "У РУСІ"), "text": txt, "group": "live"}
     life = lifecycle_from_status(raw, confirms=["ltf"], has_position=has_position, ttl_done=raw == "EXPIRED")
     display = {"zone": format_level_span(zl, zh, sym), "entry": format_px(entry, sym), "sl": format_px(sl, sym, side=side, kind="SL"),
                "tp1": format_px(tp[0], sym, side=side, kind="TP1") if tp[0] is not None else None, "tp2": format_px(tp[1], sym, side=side, kind="TP2") if tp[1] is not None else None,
@@ -489,7 +494,14 @@ def o2_scenario_detail(sid: str) -> Dict[str, Any]:
             execution = execution_payload(card, has_open_position=pos_known, tp2=card.get("tp2"))
         except Exception as exc:  # noqa: BLE001
             print(f"[mini] o2 execution failed: {type(exc).__name__}: {exc}")
-    return {"ok": True, "readonly": True, "data_status": "DATA_OK", "brain": "o2", "scenario": card, "o2": pack, "events": scenario_events(pack["id"]), "execution": execution,
+    from office2 import stats as ST
+
+    mr = ST.scenario_outcome({"thesis": th}, float(pack["created_ts"]), [{"level": m.get("level"), "touched_ts": m.get("touched_ts")} for m in (pack.get("lifecycle") or [])])
+    tg = th.get("targets") or []
+    mr["potential_r"] = float(tg[-1]["r"]) if tg and tg[-1].get("r") is not None else None     # R найдальшої цілі: потенціал при утриманні, не прибуток
+    if not mr["final"] and card["status_raw"] == "EXPIRED":
+        mr.update(state="EXPIRED", final=True)                                                  # строк входу минув, а віхи ще не записані трекером
+    return {"ok": True, "readonly": True, "data_status": "DATA_OK", "brain": "o2", "model_result": mr, "scenario": card, "o2": pack, "events": scenario_events(pack["id"]), "execution": execution,
             "has_position": pos, "hypothetical": not pos}
 
 

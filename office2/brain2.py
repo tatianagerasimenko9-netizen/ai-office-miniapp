@@ -212,7 +212,10 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
                         need={"px": zone_real[1] if sg > 0 else zone_real[0], "text": f"ретрейс у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
         return dict(base, state="WAIT", reason=f"WAIT 2/3 · ретрейс: ціна {sg * px:.6g} {'нижче' if sg > 0 else 'вище'} зони (глибокий ретрейс); потрібне закриття M15 назад у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "глибше зони"}],
                     need={"px": zone_real[0] if sg > 0 else zone_real[1], "text": f"закриття M15 назад у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
-    seq.append({"step": "ретрейс у зону", "ok": True, "value": f"low {sg * lk:.6g} у зоні {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
+    ext_real = sg * lk                                   # LONG: low свічки; SHORT: high свічки (у дзеркальних координатах low = −high)
+    through = (ext_real < zone_real[0]) if sg > 0 else (ext_real > zone_real[1])
+    seq.append({"step": "ретрейс у зону", "ok": True, "value": f"{'low' if sg > 0 else 'high'} {ext_real:.6g} торкнувся зони {zone_real[0]:.6g}–{zone_real[1]:.6g}"
+                + (f"; свічка пройшла зону наскрізь, закриття {sg * ck:.6g} не за межею зони" if through else f"; закриття {sg * ck:.6g}")})
     mid = (zl + zh) / 2.0
     bullish = ck > ok_ and ck >= mid
     if not bullish:
@@ -244,7 +247,7 @@ def _finalize(ctx, base, m15, a15, k, now, lo, px, levels, risk_usd, sg, ev, seq
     tgd = B.targets_for("LONG" if sg > 0 else "SHORT", entry_r, risk_r, levels, near_r=0.0)   # жодна перешкода не зникає мовчки через близькість
     tg = tgd["targets"]
     major = [o for o in tgd["obstacles_before_tp1"] if o["kind"] in B.MAJOR_OBSTACLE_KINDS]
-    seq_sl = {"step": "SL", "ok": True, "value": f"інвалідація {sg * lo:.6g} − люфт {luft:.6g} ({luft_why}) = {sg * sl:.6g}; {risk_atr:.2f} ATR(M15)" if risk_atr else f"{sg * sl:.6g}"}
+    seq_sl = {"step": "SL", "ok": True, "value": f"інвалідація {sg * lo:.6g} {'−' if sg > 0 else '+'} люфт {luft:.6g} ({luft_why}) = {sg * sl:.6g}; {risk_atr:.2f} ATR(M15)" if risk_atr else f"{sg * sl:.6g}"}
     if major:
         o = major[0]
         return dict(base, state="NO_TRADE", reason=f"до першої реальної цілі {o['kind']} {o['p']:.6g} лише {o['r']:.2f} R (< {B.MIN_TP1_R:g}); ціль не пропускаємо, стоп не стискаємо",
@@ -284,8 +287,12 @@ def build_map(ctx: Dict[str, Any], now: float, sg: int, entry: float, risk: floa
         if r.get("status") != "USED":
             rows.append({"tf": tf, "status": "UNAVAILABLE"})
             continue
+        lsh, lsl = r["last_swing_high"], r["last_swing_low"]
+        stale = bool(lsh is not None and lsl is not None and (float(r.get("close") or 0) > 0) and (entry > lsh or entry < lsl))   # ціна вже поза останніми підтвердженими swing: вони описують старіший діапазон
         rows.append({"tf": tf, "status": "USED", "trend": r["trend"], "trend_eff": r["trend_eff"], "broken": r["broken"], "zone": r["zone"], "range_pos": r["range_pos"], "outside_range": r["outside_range"],
-                     "range": r["range"], "last_swing_high": r["last_swing_high"], "last_swing_low": r["last_swing_low"], "with_trade": bool(r["trend_eff"] == sg), "against_trade": bool(r["trend_eff"] == -sg), "note": r.get("note")})
+                     "range": r["range"], "last_swing_high": lsh, "last_swing_low": lsl, "swing_stale": stale, "with_trade": bool(r["trend_eff"] == sg), "against_trade": bool(r["trend_eff"] == -sg), "note": r.get("note")})
+    for tf_, why_ in (("M5", "структура M5 не рахується; M5 використовується лише як підтвердження тригера (див. докази)"), ("M1", "структура M1 не рахується; M1 — лише для відстеження входу/TP/SL")):
+        rows.append({"tf": tf_, "status": "NOT_CHECKED", "note": why_})
 
     def dist(x: Dict[str, Any]) -> Dict[str, Any]:
         d = abs(float(x["p"]) - entry)
@@ -335,11 +342,12 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
         cls, verdict, why = "HTF_LOCATION", "ALLOW", f"подія на старшій локації: {loc_txt}; стан TF: {tfs_txt}"
     else:
         cls, verdict, why = "WITH_TREND", "ALLOW", f"старша структура не проти {direction} ({tfs_txt}); локація {loc_txt}"
-    inputs = [{"name": "старша структура H4/D1 (trend_eff)", "role": "GATE (умовно)", "did_affect_decision": True, "value": {k_: v for k_, v in eff.items()}},
-              {"name": "локація події (HTF/LOCAL)", "role": "GATE (умовно)", "did_affect_decision": True, "value": loc_txt},
-              {"name": "доказ повернення H1", "role": "GATE (умовно)", "did_affect_decision": counter and loc == "LOCAL", "value": bool(proof_h1)}]
-    inputs += [{"name": i["module"], "role": i["role"], "did_affect_decision": False, "status": i["status"], "value": i["finding"]} for i in ev_items]
-    inputs += [{"name": f"BTC/ринок: {x['factor']}", "role": "EVIDENCE", "did_affect_decision": False, "value": x["verdict"]} for x in al]
+    blocked = verdict == "BLOCK"       # умовна перевірка «впливає на рішення» лише коли вона змінила результат; інакше — перевірено, не заблокувала
+    inputs = [{"name": "старша структура H4/D1 (trend_eff)", "role": "GATE (умовно)", "evaluated": True, "did_affect_decision": blocked and counter, "value": {k_: v for k_, v in eff.items()}},
+              {"name": "локація події (HTF/LOCAL)", "role": "GATE (умовно)", "evaluated": True, "did_affect_decision": blocked and loc == "LOCAL", "value": loc_txt},
+              {"name": "доказ повернення H1", "role": "GATE (умовно)", "evaluated": True, "did_affect_decision": blocked and not proof_h1, "value": bool(proof_h1)}]
+    inputs += [{"name": i["module"], "role": i["role"], "evaluated": i["status"] == "USED", "did_affect_decision": False, "status": i["status"], "value": i["finding"]} for i in ev_items]
+    inputs += [{"name": f"BTC/ринок: {x['factor']}", "role": "EVIDENCE", "evaluated": True, "did_affect_decision": False, "value": x["verdict"]} for x in al]
     integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "inputs": inputs}
     out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
     if verdict == "BLOCK":

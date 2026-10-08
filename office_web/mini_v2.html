@@ -770,10 +770,10 @@ const o2rg=(r,sg)=>!r?'—':(o2f(r[0])===o2f(r[1])?sg+o2f(r[0]):sg+o2f(r[0])+'�
 function o2MapHtml(MM){
   if(!MM) return '';
   const rows=(MM.tfs||[]).map(r=>{
-    if(r.status!=='USED') return `<div class="o2row o2m">∅ ${esc(r.tf)}: недоступно${r.note?` (${esc(r.note)})`:''}</div>`;
+    if(r.status!=='USED') return `<div class="o2row o2m">∅ <b>${esc(r.tf)}</b>: ${r.status==='NOT_CHECKED'?'не перевірено':'недоступно'}${r.note?` (${esc(r.note)})`:''}</div>`;
     const st=r.trend_eff>0?'вгору':r.trend_eff<0?'вниз':'діапазон';
     const zone=r.outside_range?('ціна '+(r.outside_range==='below'?'нижче':'вище')+' діапазону'):esc(r.zone||'');
-    return `<div class="o2row ${r.with_trade?'o2g':r.against_trade?'o2r':'o2m'}"><b>${esc(r.tf)}</b>: ${st}${r.broken?` (зламано ${r.broken==='down'?'вниз':'вгору'})`:''} · ${zone} · swing ${o2f(r.last_swing_low,4)}–${o2f(r.last_swing_high,4)}</div>`;}).join('');
+    return `<div class="o2row ${r.with_trade?'o2g':r.against_trade?'o2r':'o2m'}"><b>${esc(r.tf)}</b>: ${st}${r.broken?` (зламано ${r.broken==='down'?'вниз':'вгору'})`:''} · ${zone} · останні підтверджені swing ${o2f(r.last_swing_low,4)}–${o2f(r.last_swing_high,4)}${r.swing_stale?' (ціна вже поза ними — старіший діапазон)':''}</div>`;}).join('');
   const pool=(a,sg)=>(a||[]).map(x=>`<div class="o2row o2m">${esc(x.kind)} ${o2px(x.p)} · ${sg}${o2f(x.dist_pct,2)}% · ${o2f(x.dist_atr,1)} ATR · ${o2f(x.dist_r,2)} R</div>`).join('');
   return `<div class="sec"><h3>Карта ринку зверху вниз (MN → M15)</h3>${rows}
     <div class="o2sub">Живі пули ліквідності над входом</div>${pool(MM.pools_above,'+')}<div class="o2sub">Під входом</div>${pool(MM.pools_below,'−')}</div>`;
@@ -796,19 +796,27 @@ async function openO2(d, T0){
     `<div class="sl"><span>SL</span><b>${o2px(lv.sl)}</b><small>−${o2rg(lv.sl_pct,'').replace(/^/,'')}%</small></div>`]
     .concat((lv.targets||[]).map((t,i)=>`<div class="tp"><span>TP${i+1}</span><b>${o2px(t.p)}</b><small>+${o2rg(t.pct,'')}% · ${o2rg(t.r,'')} R</small></div>`));
   const doneLv=(o.lifecycle||[]).map(m=>m.level);
+  const mr=d.model_result||{}, fin=!!mr.final;
   const prog=['ENTRY','TP1','TP2','TP3'].map(k=>`<span class="${doneLv.includes(k)?'on':''}">${doneLv.includes(k)?'✓ ':''}${esc(({ENTRY:'вхід',TP1:'TP1',TP2:'TP2',TP3:'TP3'})[k])}</span>`).join('')
     +(doneLv.includes('SL')?'<span class="stop">стоп сценарію</span>':'')+(doneLv.includes('EXPIRED')?'<span class="stop">строк вийшов, входу не було</span>':'');
   const mv=ch.price_now!=null?`від входу ${o2f(ch.move_r)} R (${o2f(ch.move_pct)}%) · до SL ${o2f(ch.sl_distance_r)} R`:'';
   const ex=d.execution;
-  const nowCls=st.code==='HIT_SL'||st.code==='EXPIRED'?'r':st.group==='done'?'n':(ex&&ex.eligible===false?'r':'g');
+  const FIN_UA={TP3:'TP3 · ЗАВЕРШЕНО',SL:'СТОП · ЗАВЕРШЕНО','TP1→SL':'TP1, потім СТОП · ЗАВЕРШЕНО','TP2→SL':'TP2, потім СТОП · ЗАВЕРШЕНО',EXPIRED:'СТРОК ВИЙШОВ · ЗАВЕРШЕНО'};
+  const stLine=fin?(FIN_UA[mr.state]||'ЗАВЕРШЕНО'):(st.short||'У РУСІ');
+  const nowCls=fin?(['SL','TP1→SL','TP2→SL'].includes(mr.state)?'r':'n'):(ex&&ex.eligible===false?'r':'g');
+  const finBox=fin?`<div class="nowbar ${nowCls}"><b>Підсумок сценарію (модель)${mr.finished_ts?` · ${o2kt(mr.finished_ts)}`:''}</b>${esc(st.text||'')}
+      ${mr.max_r!=null?`<div class="mut" style="margin-top:4px">Найдальша досягнута ціль: TP${mr.max_tp} = ${o2f(mr.max_r)} R за початковим ризиком. Це потенціал при утриманні до цієї цілі, а не прибуток: правил виходу й особистої угоди тут немає.</div>`:''}
+      ${ch.price_now!=null?`<div class="mut" style="margin-top:4px">Ціна зараз ${o2px(ch.price_now)} (${mn.ts_epoch?o2hm(mn.ts_epoch)+' Київ':'—'}) — це вже після завершення сценарію і до його результату не належить.</div>`:''}</div>`
+    :`<div class="nowbar ${nowCls}"><b>Зараз${ch.price_now!=null?` · ціна ${o2px(ch.price_now)}`:''}${mn.ts_epoch?` · ${o2hm(mn.ts_epoch)} Київ`:''}</b>${esc(st.text||'')}${mv?`<div class="mut" style="margin-top:4px">${esc(mv)}</div>`:''}
+      ${ex?`<div class="mut" style="margin-top:4px">${esc(ex.text||'')}</div>`:''}</div>`;
   const top=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
     <div class="rh ${sd}"><div class="rt1"><b>${long_?'🟢':'🔴'} ${esc(String(s.symbol||'').replace(/USDT$/,''))}</b><span class="${sd}">${long_?'LONG':'SHORT'}</span><span class="o2tag">Brain ${esc((s.brain==='v2.1')?'v2.1':'v1')}</span></div>
-      <div class="rst">READY · ${o2kt(o.created_ts)}</div>
+      <div class="rst">${esc(stLine)}</div>
       <div class="rnm">${esc(I?(O2_CLS[I.classification]||I.classification)+' · '+((I.location||{}).text||''):(fr.why||'').slice(0,140))}</div>
+      <div class="mut" style="margin-top:4px">Сигнал READY: ${o2kt(o.created_ts)} · ціна READY ${o2px(lv.ready_price)}</div>
       <div class="rg">${cells.join('')}</div>
-      <div class="mut" style="margin-top:6px">${o.valid_until_ts?`увійти можна до ${o2kt(o.valid_until_ts)}`:''}</div></div>
-    <div class="nowbar ${nowCls}"><b>Зараз${ch.price_now!=null?` · ціна ${o2px(ch.price_now)}`:''}${mn.ts_epoch?` · ${o2hm(mn.ts_epoch)} Київ`:''}</b>${esc(st.text||'')}${mv?`<div class="mut" style="margin-top:4px">${esc(mv)}</div>`:''}
-      ${ex&&st.group!=='done'?`<div class="mut" style="margin-top:4px">${esc(ex.text||'')}</div>`:''}</div>
+      <div class="mut" style="margin-top:6px">${(!fin&&!doneLv.includes('ENTRY')&&o.valid_until_ts)?`увійти можна до ${o2kt(o.valid_until_ts)}`:'рівні заморожені на момент сигналу'}</div></div>
+    ${finBox}
     <div class="prog">${prog}</div>`;
   const chartBlock=`<div id="chart" class="chart"></div>
     <div class="mut" id="asof" style="margin:6px 0 6px"></div>
@@ -827,7 +835,7 @@ async function openO2(d, T0){
       <p>${esc(fr.why||'')}</p>
       ${I?`<div class="o2row ${I.verdict==='ALLOW'?'o2g':'o2r'}">${I.verdict==='ALLOW'?'✓ ':'⚠ '}${esc(O2_CLS[I.classification]||I.classification)}: ${esc(I.why||'')}</div>
         ${(I.for||[]).map(t=>`<div class="o2row o2g">ЗА · ${esc(t)}</div>`).join('')}${(I.against||[]).map(t=>`<div class="o2row o2r">ПРОТИ · ${esc(t)}</div>`).join('')}
-        <div class="o2sub">${(I.against||[]).length&&I.verdict==='ALLOW'?'Дозволено попри ПРОТИ: '+esc(I.why||'')+'. ':''}Вплинули на рішення: ${inputs||'—'}. Решта прочитана ДО рішення, але не блокує (доведеного edge немає).</div>`:''}</div>`;
+        <div class="o2sub">${(I.against||[]).length&&I.verdict==='ALLOW'?'Дозволено попри ПРОТИ: '+esc(I.why||'')+'. ':''}${inputs?'Змінило рішення: '+inputs+'.':'Умовна перевірка старшої структури виконана і НЕ блокувала.'} READY визначила послідовність подія → зсув структури → зона → тригер → SL/цілі. Решта фактів прочитана ДО рішення, але не блокує (доведеного edge немає).</div>`:''}</div>`;
   const seq=(fr.sequence&&fr.sequence.length)?`<div class="sec"><h3>Послідовність до READY</h3>${fr.sequence.map(x=>`<div class="o2row ${x.ok?'o2g':'o2r'}">${x.ok?'✓ ':'✗ '}${esc(x.step)}${x.value?': '+esc(String(x.value)):''}</div>`).join('')}
       <div class="o2sub">Brain ${esc(fr.version_id||'')} · LIVE BETA · статистика накопичується</div></div>`:'';
   const q=th.quality;
@@ -837,7 +845,7 @@ async function openO2(d, T0){
       <div class="o2row">Тоді: BTC ${o2f(m0.btc_ret_1h)}% за 1г · альти вгору (4г) ${m0.breadth_up_4h!=null?Math.round(m0.breadth_up_4h*100)+'%':'—'} · відносна сила ${o2f(((fr.market_at_signal||{}).relative||{}).rs_vs_btc_1h)} п.п.</div>
       <div class="o2row">Зараз: ${ch.price_now!=null?`ціна ${o2px(ch.price_now)} · ${esc(mv)}`:'поточних даних немає'}${mn.ts_epoch?` · BTC ${o2f(m1.btc_ret_1h)}% за 1г`:''}</div>
       <div class="o2row o2m">Змінилося: BTC ${dl('btc_ret_1h')} п.п. · частка альтів вгору (4г) ${dl('breadth_up_4h')}</div></div>`;
-  const course=`<div class="sec"><h3>Хід сценарію</h3>${(o.lifecycle||[]).length?`<div class="tl">${o.lifecycle.map(m=>`<div><span class="mut num">${o2hm(m.touched_ts)} Київ</span> — ${esc(O2_LV[m.level]||m.level)} (${o2px(m.price)})</div>`).join('')}</div>`:'<div class="mut">Подій ще не було: вхід у зону не торкнуто.</div>'}</div>`;
+  const course=`<div class="sec"><h3>Хід сценарію</h3>${(o.lifecycle||[]).length?`<div class="tl">${o.lifecycle.map(m=>`<div><span class="mut num">${o2kt(m.touched_ts)}</span> — ${esc(O2_LV[m.level]||m.level)} (${o2px(m.price)})</div>`).join('')}</div>`:'<div class="mut">Подій ще не було: вхід у зону не торкнуто.</div>'}</div>`;
   const ev=(d.events||[]).map(e=>`<div><span class="mut num">${hhmm(e.ts)}</span> — ${esc(e.type)}</div>`).join('');
   const J=x=>`<pre>${esc(JSON.stringify(x,null,1))}</pre>`;
   const tech=`<details class="dbg"><summary>Технічні деталі та докази</summary>
@@ -896,9 +904,10 @@ function o2StatsHtml(t){
   if(!t||!t.total) return '';
   const T=t.total;
   return `<h2>Статистика Brain (сценарії Office, не ваші угоди)</h2><div class="card">
-    <div class="kv"><span>Сценаріїв READY</span><b>${esc(T.ready)}</b></div><div class="kv"><span>Надіслано / не надіслано</span><b>${esc(T.delivered)} / ${esc(T.not_sent)}</b></div>
-    <div class="kv"><span>Очікують входу · у русі</span><b>${esc(T.waiting_entry)} · ${esc(T.active)}</b></div><div class="kv"><span>TP · SL · строк вийшов</span><b>${esc(T.tp)} · ${esc(T.sl)} · ${esc(T.expired)}</b></div>
-    ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, закрито ${b.closed} (TP ${b.tp} / SL ${b.sl}, сума ${o2f(b.sum_r,1)} R)</div>`;}).join('')}
+    <div class="kv"><span>Унікальних сценаріїв READY</span><b>${esc(T.ready)}</b></div><div class="kv"><span>Надіслано · не надіслано</span><b>${esc(T.delivered)} · ${esc(T.not_sent)}</b></div>
+    <div class="kv"><span>Вхід торкнуто</span><b>${esc(T.entered)}</b></div><div class="kv"><span>Першим TP · першим стоп</span><b>${esc(T.tp1_first)} · ${esc(T.sl_first)}</b></div>
+    <div class="kv"><span>Дійшли до TP3</span><b>${esc(T.tp3)}</b></div><div class="kv"><span>Строк вийшов без входу · ще не завершені</span><b>${esc(T.expired)} · ${esc(T.unresolved)}</b></div>
+    ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, вхід ${b.entered}, першим TP ${b.tp1_first} / стоп ${b.sl_first}, TP3 ${b.tp3}, не завершені ${b.unresolved}${b.median_max_r!=null?`, медіана макс. R ${o2f(b.median_max_r,1)} (потенціал, не прибуток)`:''}</div>`;}).join('')}
     <div class="o2sub">${esc(t.note||'')}</div></div>`;
 }
 
