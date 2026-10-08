@@ -136,6 +136,25 @@ def _funnel(db: str, t: float) -> Dict[str, Any]:
         return {"last": None, "day": []}
 
 
+def repair_legacy_texts(seq: Any, direction: str) -> Any:
+    """Знімки до виправлення мали для SHORT неправильні підписи кроків (SL: «− люфт» замість «+ люфт»; ретрейс: «low … у зоні» замість «high … торкнувся зони»).
+    Числа в знімку правильні й не змінюються; виправляється лише текст при показі (знімок у БД лишається незмінним)."""
+    if direction != "SHORT" or not isinstance(seq, list):
+        return seq
+    out = []
+    for x in seq:
+        v = x.get("value") if isinstance(x, dict) else None
+        if isinstance(v, str):
+            if x.get("step") == "SL" and " − люфт" in v:
+                v = v.replace(" − люфт", " + люфт", 1)
+            elif x.get("step") == "ретрейс у зону" and v.startswith("low ") and " у зоні " in v:
+                v = v.replace("low ", "high ", 1).replace(" у зоні ", " торкнувся зони ", 1)
+            if v != x.get("value"):
+                x = dict(x, value=v, repaired_text=True)
+        out.append(x)
+    return out
+
+
 def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
     """Один сигнал Office2: легка форма для списків; для focus — ще заморожений знімок, рівні, «зараз», зміни, хід і графік моменту сигналу."""
     sid, sym, d, ct, vu, status, msg, sj = row
@@ -153,6 +172,7 @@ def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
             snap["alignment_derived"] = True
         miles = _milestones(db, sid)
         item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map")}
+        item["frozen"]["sequence"] = repair_legacy_texts(item["frozen"]["sequence"], d)
         from office2 import levels as LVL
 
         item["levels"] = LVL.view_from_thesis(th)
