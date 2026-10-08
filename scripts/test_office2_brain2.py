@@ -412,6 +412,16 @@ def test_long_short_math_symmetry_and_texts():
     assert abs(L["entry"] + S_["entry"] - 200.0) < 1e-6
 
 
+def test_legacy_short_snapshot_texts_repaired_on_display_only():
+    """Знімок LTC SHORT 07.10 (до виправлення): числа правильні, підписи — ні. При показі виправляємо текст, знімок не чіпаємо."""
+    from office2 import webview as WV
+
+    seq = [{"step": "ретрейс у зону", "ok": True, "value": "low 67.76 у зоні 67.5946–67.7357"}, {"step": "SL", "ok": True, "value": "інвалідація 67.91 − люфт 0.03 (медіана 5 проколів цього рівня) = 67.94; 2.10 ATR(M15)"}]
+    out = WV.repair_legacy_texts(seq, "SHORT")
+    assert out[0]["value"] == "high 67.76 торкнувся зони 67.5946–67.7357" and out[1]["value"].startswith("інвалідація 67.91 + люфт 0.03") and seq[1]["value"].count("−") == 1
+    assert WV.repair_legacy_texts(seq, "LONG") is seq and WV.repair_legacy_texts(out, "SHORT")[1]["value"] == out[1]["value"]
+
+
 def test_zone_touch_requires_real_ohlc_contact():
     """Ціна не торкнулась зони (екстремум свічки не дійшов до її краю) → тригер не вмикається; зона вже пройдена до READY → не «доступний вхід»."""
     c, seq = closes_long()
