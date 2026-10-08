@@ -691,10 +691,8 @@ def test_miniapp_opens_office2_scenario_ids():
     from office2 import webview as WV
 
     sid = "O2|abc123|1791291600"
-    r = MV.scenario_detail(sid)
-    assert not r["ok"] and r["redirect"].startswith("/office2?id=O2%7Cabc123%7C")
     html = Path(__file__).resolve().parent.parent.joinpath("office_web", "mini_v2.html").read_text(encoding="utf-8")
-    assert "startsWith('O2|')" in html and "d.redirect" in html and "location.href='/office2?id='" in html
+    assert "openO2" in html and "location.href='/office2?id='" not in html          # окремої сторінки немає: картка Brain v2.1 живе в основному Mini App
     bars, _ = S.build()
     with tempfile.TemporaryDirectory() as td:
         db = _db(td)
@@ -705,7 +703,12 @@ def test_miniapp_opens_office2_scenario_ids():
         al = pl["signals"][0]["frozen"]["alignment"]
         assert al and any(a["verdict"].startswith(("ЗА", "ПРОТИ", "НЕЙТРАЛЬНО")) for a in al)
         assert not WV.payload(db, focus="O2|нема|1")["focus_found"]
-        assert "FQ" in WV.html() and "Чому" in WV.html() and "alignment" in WV.html()
+        os.environ["OFFICE_DB_PATH"] = db
+        os.environ.pop("DATABASE_URL", None)
+        r = MV.scenario_detail(sid)
+        assert not r["ok"] and "redirect" not in r                                  # невідомий O2-сценарій: чесно «недоступний», без редиректу
+        r = MV.scenario_detail(real)
+        assert r["ok"] and r["brain"] == "o2" and r["scenario"]["scenario_id"] == real and r["o2"]["frozen"]["thesis"]["entry"] and r["o2"]["levels"]
 
 
 def main() -> int:

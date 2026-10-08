@@ -1505,6 +1505,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = lev_payload(_q("q"), _q("symbol"))
             elif u.path == "/api/v2/session":
                 data = session_payload(_q("symbol") or "BTCUSDT")
+            elif u.path == "/api/v2/radar":
+                from office_mini_v2 import radar_payload
+
+                data = radar_payload()
             elif u.path == "/api/v2/office2":
                 from office2.webview import payload as _o2_payload
 
@@ -1571,15 +1575,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if u.path == "/office2":
-            from office2.webview import html as _o2_html
+        if u.path == "/office2":   # окремої сторінки Office2 більше немає: старі посилання ведуть у картку/Radar основного Mini App
+            from urllib.parse import quote
 
-            body = _o2_html().encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            ident = (parse_qs(u.query).get("id") or [""])[0]
+            self.send_response(302)
+            self.send_header("Location", ("/v2?scenario=" + quote(ident, safe="")) if ident else "/v2?tab=radar")
+            self.send_header("Content-Length", "0")
             self.end_headers()
-            self.wfile.write(body)
             return
         if u.path == "/":
             body = html().encode("utf-8")

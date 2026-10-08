@@ -181,7 +181,8 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     if sh is None:
         hs = [s for s in (swings if swings is not None else F.swings(m15, 2)[0]) if s[0] > e and s[1] <= k]
         need = f"закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * hs[-1][2]:.6g} з displacement (тіло ≥ {DISP_BODY_ATR:g} ATR)" if hs else f"локальний swing-{'high' if sg > 0 else 'low'} після події, потім його злам з displacement"
-        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: {_ev_txt(ev, sg)}; потрібен зсув структури: {need}; зараз {sg * float(m15['c'][k]):.6g}; скасування — закриття M15 {'нижче' if sg > 0 else 'вище'} {sg * lo:.6g}", sequence=seq + [{"step": "зсув структури (MSS/BOS)", "ok": False}], zone=[sg * lo, sg * lo], entry_zone=None)
+        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: {_ev_txt(ev, sg)}; потрібен зсув структури: {need}; зараз {sg * float(m15['c'][k]):.6g}; скасування — закриття M15 {'нижче' if sg > 0 else 'вище'} {sg * lo:.6g}", sequence=seq + [{"step": "зсув структури (MSS/BOS)", "ok": False}], zone=[sg * lo, sg * lo], entry_zone=None,
+                    need={"px": (sg * hs[-1][2]) if hs else None, "text": f"закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * hs[-1][2]:.6g} з displacement" if hs else "зсув структури з displacement"})
     j = sh["j"]
     hi = float(m15["h"][j:k + 1].max())
     leg = hi - lo
@@ -189,7 +190,8 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     seq.append({"step": "зсув структури (MSS/BOS)", "ok": True, "value": f"закриття {'вище' if sg > 0 else 'нижче'} {sg * sh['level']:.6g}, тіло {sh['body_atr']:.2f} ATR"})
     base["break"] = {"ts": float(m15r["t"][j]), "level": sg * sh["level"], "body_atr": sh["body_atr"], "bars_held": int(k - j), "disp_ts": float(m15r["t"][sh["jd"]])}
     if leg_atr < MIN_LEG_ATR:
-        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: нога зміщення {leg_atr:.1f} ATR < {MIN_LEG_ATR:g}: структура замала", sequence=seq + [{"step": "нога зміщення", "ok": False, "value": f"{leg_atr:.2f} ATR"}], zone=[sg * lo, sg * lo], entry_zone=None)
+        return dict(base, state="WAIT", reason=f"WAIT 1/3 · зсув структури: нога зміщення {leg_atr:.1f} ATR < {MIN_LEG_ATR:g}: структура замала", sequence=seq + [{"step": "нога зміщення", "ok": False, "value": f"{leg_atr:.2f} ATR"}], zone=[sg * lo, sg * lo], entry_zone=None,
+                    need={"px": None, "text": f"нога зміщення ≥ {MIN_LEG_ATR:g} ATR"})
     ez = _entry_zone(m15, e, j, k, lo, hi)
     zl, zh = ez["zone"]
     seq.append({"step": "нога зміщення і зона входу", "ok": True, "value": f"нога {sg * lo:.6g}→{sg * hi:.6g} ({leg_atr:.1f} ATR); зона {'+'.join(ez['composition'])}"})
@@ -206,13 +208,16 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
         if px > zh:
             if run > MISS_R or bars_since > MAX_WAIT_BARS:
                 return dict(base, state="MISSED", reason=f"ціна {sg * px:.6g} пішла без ретрейсу в зону {zone_real[0]:.6g}–{zone_real[1]:.6g} ({run:.1f} R від зони, {bars_since} барів): не доганяємо", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "не прийшов"}])
-            return dict(base, state="WAIT", reason=f"WAIT 2/3 · ретрейс: ціна {sg * px:.6g}; чекаємо контрольований ретрейс у зону {zone_real[0]:.6g}–{zone_real[1]:.6g} ({'+'.join(ez['composition'])}); MISSED якщо без ретрейсу далі {sg * (zh + MISS_R * (zh - lo)):.6g}; інвалідація — закриття M15 за {sg * lo:.6g}", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "очікуємо"}])
-        return dict(base, state="WAIT", reason=f"WAIT 2/3 · ретрейс: ціна {sg * px:.6g} {'нижче' if sg > 0 else 'вище'} зони (глибокий ретрейс); потрібне закриття M15 назад у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "глибше зони"}])
+            return dict(base, state="WAIT", reason=f"WAIT 2/3 · ретрейс: ціна {sg * px:.6g}; чекаємо контрольований ретрейс у зону {zone_real[0]:.6g}–{zone_real[1]:.6g} ({'+'.join(ez['composition'])}); MISSED якщо без ретрейсу далі {sg * (zh + MISS_R * (zh - lo)):.6g}; інвалідація — закриття M15 за {sg * lo:.6g}", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "очікуємо"}],
+                        need={"px": zone_real[1] if sg > 0 else zone_real[0], "text": f"ретрейс у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
+        return dict(base, state="WAIT", reason=f"WAIT 2/3 · ретрейс: ціна {sg * px:.6g} {'нижче' if sg > 0 else 'вище'} зони (глибокий ретрейс); потрібне закриття M15 назад у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}", sequence=seq + [{"step": "ретрейс", "ok": False, "value": "глибше зони"}],
+                    need={"px": zone_real[0] if sg > 0 else zone_real[1], "text": f"закриття M15 назад у зону {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
     seq.append({"step": "ретрейс у зону", "ok": True, "value": f"low {sg * lk:.6g} у зоні {zone_real[0]:.6g}–{zone_real[1]:.6g}"})
     mid = (zl + zh) / 2.0
     bullish = ck > ok_ and ck >= mid
     if not bullish:
-        return dict(base, state="WAIT", reason=f"WAIT 3/3 · ARMED (зона досягнута, чекаємо тригер M15): ціна в зоні {zone_real[0]:.6g}–{zone_real[1]:.6g}; потрібне {'бичаче' if sg > 0 else 'ведмеже'} закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * mid:.6g}", sequence=seq + [{"step": "тригер M15", "ok": False}])
+        return dict(base, state="WAIT", reason=f"WAIT 3/3 · ARMED (зона досягнута, чекаємо тригер M15): ціна в зоні {zone_real[0]:.6g}–{zone_real[1]:.6g}; потрібне {'бичаче' if sg > 0 else 'ведмеже'} закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * mid:.6g}", sequence=seq + [{"step": "тригер M15", "ok": False}],
+                    need={"px": sg * mid, "text": f"{'бичаче' if sg > 0 else 'ведмеже'} закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * mid:.6g}"})
     seq.append({"step": "тригер M15", "ok": True, "value": f"закриття {sg * ck:.6g} {'≥' if sg > 0 else '≤'} середини зони {sg * mid:.6g}"})
     return _finalize(ctx, base, m15, a15, k, now, lo, px, levels, risk_usd, sg, ev, seq)
 
@@ -338,7 +343,8 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
     integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "inputs": inputs}
     out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
     if verdict == "BLOCK":
-        out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True)
+        out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True,
+                   need={"px": need, "text": f"закриття H1 {'вище' if sg > 0 else 'нижче'} {need:.6g} (доказ повернення) або подія від HTF-рівня" if need is not None else "доказ повернення на H1"})
     return out
 
 

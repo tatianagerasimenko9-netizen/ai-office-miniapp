@@ -84,6 +84,9 @@ def resolve_scenario_id(db: str, ident: str) -> str:
         return ""
     if _rows(db, "SELECT 1 FROM office2_live_signal WHERE scenario_id = ?", (ident,)):
         return ident
+    pre = _rows(db, "SELECT scenario_id FROM office2_live_signal WHERE scenario_id LIKE ? ORDER BY created_ts DESC LIMIT 1", (ident.replace("%", "").replace("_", "") + "|%",))   # id сценарію без «|час» → його сигнал
+    if pre:
+        return pre[0][0]
     if "|" in ident:
         for (sid,) in _rows(db, "SELECT scenario_id FROM office2_live_signal ORDER BY LENGTH(scenario_id) DESC"):
             if ident.startswith(sid + "|"):
@@ -133,6 +136,33 @@ def _funnel(db: str, t: float) -> Dict[str, Any]:
         return {"last": None, "day": []}
 
 
+def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
+    """Один сигнал Office2: легка форма для списків; для focus — ще заморожений знімок, рівні, «зараз», зміни, хід і графік моменту сигналу."""
+    sid, sym, d, ct, vu, status, msg, sj = row
+    snap = json.loads(sj or "{}")
+    th = snap.get("thesis") or {}
+    item: Dict[str, Any] = {"id": sid, "symbol": sym, "direction": d, "created_ts": ct, "valid_until_ts": vu, "status": status, "status_ua": STATUS_UA.get(status, status), "telegram_msg_id": msg,
+                            "light": {"entry": th.get("entry"), "sl": th.get("sl")}}
+    if focus:
+        ns = _latest_state(db, sym)
+        if not snap.get("alignment"):   # знімки до появи поля: узгодженість рахуємо з ЗАМОРОЖЕНИХ значень знімка (не з поточного ринку) і позначаємо це
+            from office2 import align as AL
+
+            ms = snap.get("market_at_signal") or {}
+            snap["alignment"] = AL.alignment(d, ms.get("market") or {}, ms.get("relative") or {}, ((snap.get("context") or {}).get("htf")))
+            snap["alignment_derived"] = True
+        miles = _milestones(db, sid)
+        item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map")}
+        from office2 import levels as LVL
+
+        item["levels"] = LVL.view_from_thesis(th)
+        item["market_now"] = ({"ts_epoch": ns.get("ts_epoch"), "price": ns.get("price"), "market": ns.get("market"), "ret_1h": ns.get("ret_1h"), "rs_vs_btc_1h": ns.get("rs_vs_btc_1h")} if ns else None)
+        item["changed"] = what_changed(snap, ns, miles)
+        item["lifecycle"] = [{"level": m.get("level"), "touched_ts": m.get("touched_ts"), "sent_ts": m.get("sent_ts"), "price": m.get("price")} for m in miles]
+        item["chart"] = _frozen_chart(db, sid)
+    return item
+
+
 def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, Any]:
     t = time.time() if now is None else now
     states = {r[0]: r[1] for r in _rows(db, "SELECT state, COUNT(*) FROM office2_live_scenario GROUP BY state")}
@@ -153,31 +183,7 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
         rows = _rows(db, f"SELECT {cols} FROM office2_live_signal WHERE scenario_id = ?", (focus,)) + rows
     if not focus and not requested and rows:
         focus = rows[0][0]    # без id відкриваємо найновіший сигнал, а не стрічку
-    sigs = []
-    for sid, sym, d, ct, vu, status, msg, sj in rows:
-        is_focus = sid == focus
-        snap = json.loads(sj or "{}")
-        th = snap.get("thesis") or {}
-        item: Dict[str, Any] = {"id": sid, "symbol": sym, "direction": d, "created_ts": ct, "valid_until_ts": vu, "status": status, "status_ua": STATUS_UA.get(status, status), "telegram_msg_id": msg,
-                                "light": {"entry": th.get("entry"), "sl": th.get("sl")}}
-        if is_focus:
-            ns = _latest_state(db, sym)
-            if not snap.get("alignment"):   # знімки до появи поля: узгодженість рахуємо з ЗАМОРОЖЕНИХ значень знімка (не з поточного ринку) і позначаємо це
-                from office2 import align as AL
-
-                ms = snap.get("market_at_signal") or {}
-                snap["alignment"] = AL.alignment(d, ms.get("market") or {}, ms.get("relative") or {}, ((snap.get("context") or {}).get("htf")))
-                snap["alignment_derived"] = True
-            miles = _milestones(db, sid)
-            item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map")}
-            from office2 import levels as LVL
-
-            item["levels"] = LVL.view_from_thesis(th)
-            item["market_now"] = ({"ts_epoch": ns.get("ts_epoch"), "price": ns.get("price"), "market": ns.get("market"), "ret_1h": ns.get("ret_1h"), "rs_vs_btc_1h": ns.get("rs_vs_btc_1h")} if ns else None)
-            item["changed"] = what_changed(snap, ns, miles)
-            item["lifecycle"] = [{"level": m.get("level"), "touched_ts": m.get("touched_ts"), "sent_ts": m.get("sent_ts"), "price": m.get("price")} for m in miles]
-            item["chart"] = _frozen_chart(db, sid)
-        sigs.append(item)
+    sigs = [signal_item(db, r, r[0] == focus) for r in rows]
     from office2 import brain as B
 
     sigs.sort(key=lambda x: 0 if x["id"] == focus else 1)
@@ -187,6 +193,83 @@ def payload(db: str, now: Optional[float] = None, focus: str = "") -> Dict[str, 
                       "OFFICE_OLD_READY_DELIVERY": os.getenv("OFFICE_OLD_READY_DELIVERY", "1")},
             "scenario_counts": states, "last_cycle_ts": last[0][0] if last and last[0][0] else None, "symbols_last_hour": last[0][1] if last else 0, "collected": cnt,
             "signals": sigs, "scenarios": scen, "funnel": _funnel(db, t), "modules": B.MODULES, "stats": _stats(db), "focus": focus, "requested": requested, "focus_found": bool(focus and any(x["id"] == focus for x in sigs))}
+
+
+def _prices(db: str, t: float, symbols: List[str]) -> Dict[str, float]:
+    """Остання відома ціна по монетах з шару офісу (не старіша за 3 год); одним запитом."""
+    out: Dict[str, float] = {}
+    want = set(symbols)
+    for sym, pj in _rows(db, "SELECT symbol, payload_json FROM office2_shadow_state WHERE ts_epoch > ? ORDER BY ts_epoch DESC LIMIT 400", (int(t - 3 * 3600),)):
+        if sym in want and sym not in out:
+            try:
+                px = json.loads(pj).get("price")
+            except ValueError:
+                continue
+            if isinstance(px, (int, float)):
+                out[sym] = float(px)
+    return out
+
+
+def radar(db: str, now: Optional[float] = None) -> Dict[str, Any]:
+    """Єдиний Radar: усі сценарії Brain за етапами. Для кожного — монета, напрям, ціна зараз, потрібний рівень, наступна умова, термін дії."""
+    t = time.time() if now is None else now
+    cols = "scenario_id, symbol, direction, kind, state, reason, updated_ts, expires_ts, thesis_json, version"
+    live = _rows(db, f"SELECT {cols} FROM office2_live_scenario WHERE state IN ('WATCH','WAIT','READY') ORDER BY updated_ts DESC LIMIT 150")
+    done = _rows(db, f"SELECT {cols} FROM office2_live_scenario WHERE state IN ('NO_TRADE','MISSED','INVALIDATED','EXPIRED') ORDER BY updated_ts DESC LIMIT 25")
+    rows = list(live) + list(done)
+    px = _prices(db, t, [r[1] for r in rows])
+    sigs = {r[0].rsplit("|", 1)[0]: (r[0], r[1]) for r in _rows(db, "SELECT scenario_id, valid_until_ts FROM office2_live_signal WHERE created_ts > ? ORDER BY created_ts ASC", (t - 3 * 86400,))}   # id сигналу = id сценарію + «|час»
+    items = []
+    for sid, sym, d, kind, state, reason, upd, exp, tj, ver in rows:
+        try:
+            th = json.loads(tj or "{}")
+        except ValueError:
+            th = {}
+        g, g_ua = radar_group(state, reason)
+        need = th.get("need") or {}
+        now_px = px.get(sym)
+        need_px = need.get("px")
+        dist = ((need_px - now_px) / now_px * 100.0) if isinstance(need_px, (int, float)) and now_px else None
+        items.append({"id": sid, "symbol": sym, "direction": d, "kind": kind, "state": state, "state_ua": STATE_UA.get(state, state), "group": g, "group_ua": g_ua, "reason": reason,
+                      "price": now_px, "need_px": need_px, "need_text": need.get("text"), "dist_pct": dist, "invalidation": (th.get("invalidation") or {}).get("price"),
+                      "zone": th.get("entry_zone"), "updated_ts": upd, "expires_ts": exp or (sigs.get(sid) or (None, None))[1], "signal_id": (sigs.get(sid) or (None, None))[0], "brain": ver or th.get("brain")})
+    items.sort(key=lambda x: (x["group"], -float(x["updated_ts"] or 0)))
+    groups: List[Dict[str, Any]] = []
+    for it in items:
+        if not groups or groups[-1]["group"] != it["group"]:
+            groups.append({"group": it["group"], "title": it["group_ua"], "items": []})
+        groups[-1]["items"].append(it)
+    return {"ok": True, "now": t, "groups": groups, "n": len(items), "funnel": _funnel(db, t)}
+
+
+def delivered(db: str, limit: int = 60) -> List[Dict[str, Any]]:
+    """Надіслані READY Office2 у формі, зручній для списків основного Mini App: легкі поля + підсумок за віхами (вхід/TP/SL/строк)."""
+    rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json FROM office2_live_signal WHERE status = 'DELIVERED' ORDER BY created_ts DESC LIMIT ?", (limit,))
+    miles: Dict[str, List[str]] = {}
+    ids = [r[0] for r in rows]
+    if ids:
+        q = "SELECT signal_id, payload_json FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id IN (%s) ORDER BY id ASC" % ",".join("?" for _ in ids)
+        for sid, pj in _rows(db, q, tuple(ids)):
+            try:
+                miles.setdefault(sid, []).append(json.loads(pj).get("level"))
+            except ValueError:
+                pass
+    out = []
+    for sid, sym, d, ct, vu, st, msg, sj in rows:
+        snap = json.loads(sj or "{}")
+        th = snap.get("thesis") or {}
+        out.append({"id": sid, "symbol": sym, "direction": d, "created_ts": ct, "valid_until_ts": vu, "thesis": th, "levels": miles.get(sid, []), "version_id": snap.get("version_id"), "why": snap.get("why")})
+    return out
+
+
+def scenario(db: str, ident: str) -> Optional[Dict[str, Any]]:
+    """Повний пакет одного сигналу Office2 для картки основного Mini App (за scenario_id або id lifecycle-події)."""
+    sid = resolve_scenario_id(db, ident)
+    if not sid:
+        return None
+    rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, status, msg_id, snapshot_json FROM office2_live_signal WHERE scenario_id = ?", (sid,))
+    return signal_item(db, rows[0], True) if rows else None
+
 
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "webview.html"), encoding="utf-8").read()
