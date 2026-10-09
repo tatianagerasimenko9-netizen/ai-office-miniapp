@@ -8,7 +8,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_office2_brain2 as TB  # noqa: E402
-from office2.integration import compare_shadow, from_brain, from_gerchik, from_smc, gerchik_scenario_inventory, validate_observation  # noqa: E402
+from office2.integration import (  # noqa: E402
+    SOURCE_PARTS,
+    compare_shadow,
+    from_brain,
+    from_gerchik,
+    from_smc,
+    gerchik_scenario_inventory,
+    gerchik_source_rules,
+    validate_observation,
+    validate_source_registry,
+)
 from office2.smc import engine as SE  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 
@@ -219,7 +229,8 @@ def test_shadow_comparison_exposes_opposite_direction_conflict_and_unavailable()
 def test_five_gerchik_scenarios_are_honestly_inventoried():
     scenarios = gerchik_scenario_inventory()
     assert len(scenarios) == 5 and len({x["id"] for x in scenarios}) == 5
-    assert all(x["primary_source_status"] == "SOURCE_UNAVAILABLE" for x in scenarios)
+    assert all(x["primary_source_status"] == "PRIMARY_TEXT_VERIFIED" for x in scenarios)
+    assert all(x["source_refs"] and x["source_conditions"] for x in scenarios)
     by_id = {x["id"]: x for x in scenarios}
     assert by_id["GERCHIK-FALSE-BREAK-1BAR"]["implementation_status"] == "PARTIAL"
     assert by_id["GERCHIK-FALSE-BREAK-2BAR"]["implementation_status"] == "PARTIAL"
@@ -229,6 +240,43 @@ def test_five_gerchik_scenarios_are_honestly_inventoried():
     assert all(x["office2_ready_impact"] != "GERCHIK_GATE" for x in scenarios)
     scenarios[0]["implementation_status"] = "MUTATED"
     assert gerchik_scenario_inventory()[0]["implementation_status"] != "MUTATED"
+
+
+def test_primary_source_registry_is_complete_read_only_metadata():
+    rules = gerchik_source_rules()
+    assert validate_source_registry() == []
+    assert SOURCE_PARTS == tuple(f"P{part:02d}" for part in range(1, 17))
+    strategy_ids = {rule["id"] for rule in rules if rule["scope"] == "EXPLICIT_STRATEGY"}
+    assert strategy_ids == {
+        "GERCHIK-08-VIDBIY",
+        "GERCHIK-09-PROBIY",
+        "GERCHIK-06-LP-1BAR",
+        "GERCHIK-06-LP-2BAR",
+        "GERCHIK-06-LP-COMPLEX",
+    }
+    assert all("state" not in rule and "decision" not in rule for rule in rules)
+    assert max(len(rule["rule_ua"]) for rule in rules) < 500
+    rules[0]["rule_ua"] = "MUTATED"
+    assert gerchik_source_rules()[0]["rule_ua"] != "MUTATED"
+
+
+def test_primary_source_registry_rejects_bad_or_missing_refs():
+    bad_ref = [{"id": "X", "rule_ua": "коротка парафраза", "refs": ["PART17:1"]}]
+    missing_ref = [{"id": "Y", "rule_ua": "коротка парафраза", "refs": []}]
+    assert validate_source_registry(bad_ref) == ["invalid source ref X: PART17:1"]
+    assert validate_source_registry(missing_ref) == ["incomplete rule: Y"]
+
+
+def test_layer_b_remains_internal_and_cannot_emit_ready():
+    _, ctx, now = brain_ready()
+    obs = from_gerchik(
+        {"gerchik_ops_score": 10, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False},
+        ctx, now, "XUSDT", "LONG", fixture=True,
+    )
+    assert obs["source_rule_ids"] == ["GERCHIK-OPS-LAYER-B"]
+    assert obs["ambiguities"][0]["code"] == "LAYER_B_NOT_PRIMARY_SOURCE"
+    assert obs["state"] == "CONFIRMED" and obs["state"] != "ENTRY_READY"
+    assert obs["entry"] is None and obs["targets"] == []
 
 
 def test_validator_rejects_future_and_incomplete_ready():
