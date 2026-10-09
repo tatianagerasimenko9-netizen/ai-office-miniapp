@@ -15,6 +15,7 @@ import office_bridge as OB  # noqa: E402
 from office2 import brain as B  # noqa: E402
 from office2 import engine as EN  # noqa: E402
 from office2 import live as LV  # noqa: E402
+from office2.integration import validate_observation  # noqa: E402
 from office2.smc import shadow as SH  # noqa: E402
 
 MC = {"btc_ret_1h": 0.1, "eth_ret_1h": 0.1, "breadth_up_1h": 0.5, "n_alts": 20}
@@ -90,8 +91,11 @@ def test_shadow_table_rows_idempotent_and_no_lookahead():
         n2 = OB._fetchone(db, "SELECT COUNT(*) FROM office2_smc_shadow")[0]
         assert n1 == n2                                                                  # повторний прохід того ж бару не дублює
         assert SH.stats()["cycles"] >= 2 and out["ms"] >= 0
-        rows = OB._fetchall(db, "SELECT symbol, direction, model, state, ts_bar FROM office2_smc_shadow")
+        rows = OB._fetchall(db, "SELECT symbol, direction, model, state, ts_bar, payload_json FROM office2_smc_shadow")
         assert all(r[0] == "XUSDT" and r[4] == int(now) for r in rows)
+        payloads = [json.loads(r[5]) for r in rows]
+        assert payloads and all(p.get("observation") and not p.get("observation_errors") for p in payloads)
+        assert all(validate_observation(p["observation"]) == [] for p in payloads)
     finally:
         B.all_levels = orig
 
@@ -191,6 +195,9 @@ def test_divergence_feed_and_row_detail_with_overlay():
         f = SH.feed(db, now=now + 600)
         br = [i for i in f["items"] if i["relation"] == "BRAIN_ONLY"]
         assert br and "Brain READY, а SMC на тому барі" in br[0]["why"] and br[0]["symbol"] == "XUSDT"
+        generated = SH.row_detail(db, br[0]["id"])
+        assert generated and generated["observation"] and not generated["observation_errors"]
+        assert validate_observation(generated["observation"]) == []
         # додаємо SMC READY без Brain → SMC_ONLY і детальний рядок з overlay
         v = {"state": "READY", "stage": 7, "model": "REVERSAL", "steps": [{"step": "RAID", "ok": True, "value": "x", "j": 3, "t": 1.0}], "reason": "тест"}
         ov = {"v": 1, "items": [{"k": "line", "p": 1.0, "label": "SL", "role": "sl"}], "events": [], "steps": []}

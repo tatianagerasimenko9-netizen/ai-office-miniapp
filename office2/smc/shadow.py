@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from office2 import brain as B
+from office2.integration import from_smc, validate_observation
 from office2.smc import engine as EN
 from office2.smc import overlay as OV
 
@@ -98,7 +99,7 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
                 best = EN._best(vs)
                 bs = (brain_states or {}).get((sym, d))
                 if best is not None:
-                    n_rows += _put(_execute, db, ts_bar, sym, d, "BEST", best, bs, (time.perf_counter() - t1) * 1000.0, None)
+                    n_rows += _put(_execute, db, ts_bar, sym, d, "BEST", best, bs, (time.perf_counter() - t1) * 1000.0, None, ctx, now)
                 for model, v in mods.items():
                     if not v:
                         continue
@@ -106,7 +107,7 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
                     if v["state"] not in STORE_STATES and not (v["state"] == "WAIT" and v.get("stage", 0) >= 5):
                         continue
                     ov = OV.build(v, m15c, None) if v["state"] in ("READY", "ARMED", "NO_TRADE", "CANDIDATE") else None
-                    n_rows += _put(_execute, db, ts_bar, sym, d, model, v, bs, (time.perf_counter() - t1) * 1000.0, ov)
+                    n_rows += _put(_execute, db, ts_bar, sym, d, model, v, bs, (time.perf_counter() - t1) * 1000.0, ov, ctx, now)
         except Exception as exc:  # noqa: BLE001
             with _LOCK:
                 _STATS["errors"] += 1
@@ -126,10 +127,23 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
 RETENTION_DAYS = 30
 
 
-def _put(execute, db: str, ts_bar: int, sym: str, d: str, model: str, v: Dict[str, Any], brain_state: Optional[str], ms: float, overlay: Optional[Dict[str, Any]]) -> int:
+def _put(execute, db: str, ts_bar: int, sym: str, d: str, model: str, v: Dict[str, Any], brain_state: Optional[str], ms: float, overlay: Optional[Dict[str, Any]],
+         ctx: Optional[Dict[str, Any]] = None, now: Optional[float] = None) -> int:
     payload = {k: v.get(k) for k in ("steps", "zone", "pois", "entry", "sl", "targets", "risk_pct", "risk_atr15", "reason", "need", "bias", "htf_context", "leg", "sweep", "obstacles_before_tp1", "chronology_ok", "model", "aggressive_entry")}
     if overlay:
         payload["overlay"] = overlay
+    # Канонічне спостереження додається лише до shadow payload. Помилка contract
+    # не зупиняє цикл і ніколи не впливає на Brain READY.
+    if ctx is not None and now is not None:
+        try:
+            observation = from_smc(v, ctx, now, sym, overlay=overlay)
+            errors = validate_observation(observation)
+            if errors:
+                payload["observation_errors"] = errors
+            else:
+                payload["observation"] = observation
+        except Exception as exc:  # noqa: BLE001
+            payload["observation_errors"] = [f"{type(exc).__name__}: {str(exc)[:160]}"]
     execute(db, "INSERT INTO office2_smc_shadow (ts_bar, symbol, direction, model, version, state, stage, brain_state, ms, payload_json, created_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT (ts_bar, symbol, direction, model, version) DO NOTHING",
             (ts_bar, sym, d, model, EN.VERSION, v["state"], int(v.get("stage", 0)), brain_state, float(ms), json.dumps(payload, ensure_ascii=False, default=float), time.time()))
@@ -189,6 +203,7 @@ def row_detail(db: str, rid: str) -> Optional[Dict[str, Any]]:
         return None
     pl = json.loads(row[3] or "{}")
     return {"id": rid, "ts": int(ts), "symbol": sym, "dir": d, "model": model, "state": row[0], "stage": row[1], "brain_state": row[2], "payload": pl, "overlay": pl.get("overlay"),
+            "observation": pl.get("observation"), "observation_errors": pl.get("observation_errors") or [],
             "role": "SHADOW (не впливає на READY)"}
 
 
