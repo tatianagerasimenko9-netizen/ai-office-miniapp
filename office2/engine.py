@@ -46,6 +46,7 @@ DDL = (
 )
 
 FUNNEL_KEEP_SEC = 7 * 86400
+CYCLE_TIMES: Dict[str, float] = {}      # віхи поточного циклу (wall-time): закриття бару → пробудження → бар доступний → старт → дані зібрано; потрапляють у знімок READY
 
 
 def funnel_stage(th: Optional[Dict[str, Any]]) -> Tuple[str, str]:
@@ -346,6 +347,16 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     return res
 
 
+def _chart_rows(ctx: Dict[str, Any], n: int = 96) -> List[Dict[str, Any]]:
+    """Останні n ЗАКРИТИХ M15-барів, які вже є в ctx на момент рішення: доставка не ходить по них у Binance REST (було 0,4–26 с на критичному шляху)."""
+    m = ctx["m15"]
+    out = []
+    for i in range(max(0, len(m["t"]) - n), len(m["t"])):
+        out.append({"ts": datetime.fromtimestamp(float(m["t"][i]), tz=timezone.utc).isoformat(), "open": float(m["o"][i]), "high": float(m["h"][i]), "low": float(m["l"][i]), "close": float(m["c"][i]),
+                    "volume": float(m["v"][i]) if "v" in m else None, "src": "binance_futures"})
+    return out
+
+
 def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]],
                flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> None:
     from office_bridge import _execute
@@ -370,7 +381,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
             evid = [{"module": "evidence", "role": "EVIDENCE", "status": "UNAVAILABLE", "finding": f"{type(exc).__name__}: {str(exc)[:80]}", "supports": 0, "data": None}]
     evid = evid or []
     snap = {"version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
-            "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+            "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
                 {"step": "HTF context", "value": {k: (v.get("trend") if isinstance(v, dict) else v) for k, v in pack["htf"].items()}},

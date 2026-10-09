@@ -908,7 +908,20 @@ function o2StatsHtml(t){
     <div class="kv"><span>Вхід торкнуто</span><b>${esc(T.entered)}</b></div><div class="kv"><span>Першим TP · першим стоп</span><b>${esc(T.tp1_first)} · ${esc(T.sl_first)}</b></div>
     <div class="kv"><span>Дійшли до TP3</span><b>${esc(T.tp3)}</b></div><div class="kv"><span>Строк вийшов без входу · ще не завершені</span><b>${esc(T.expired)} · ${esc(T.unresolved)}</b></div>
     ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, вхід ${b.entered}, першим TP ${b.tp1_first} / стоп ${b.sl_first}, TP3 ${b.tp3}, не завершені ${b.unresolved}${b.median_max_r!=null?`, медіана макс. R ${o2f(b.median_max_r,1)} (потенціал, не прибуток)`:''}</div>`;}).join('')}
-    <div class="o2sub">${esc(t.note||'')}</div></div>`;
+    <div class="o2sub">${esc(t.note||'')}</div></div>${o2LatencyHtml(t.latency)}`;
+}
+function o2LatencyHtml(L){
+  if(!L||!L.delivered_n) return '';
+  const sec=v=>v==null?'—':(v/1000).toFixed(1).replace('.',',')+' с';
+  const NM={bar_to_sent_ms:'Закриття M15 → Telegram',decision_to_sent_ms:'Рішення → Telegram',wake_ms:'Закриття бару → старт циклу',bar_wait_ms:'Очікування бару на біржі',fetch_ms:'Збір даних',brain_ms:'Brain',queue_ms:'Черга',chart_ms:'Свічки графіка',late_check_ms:'Перевірка актуальності',render_ms:'Картка',send_ms:'Telegram'};
+  const st=L.stages||{}, w=L.within_target||{};
+  const tgt=(k,a)=>a&&a[1]?`${a[0]} із ${a[1]}`:'—';
+  return `<h2>Затримка READY · факт (${esc(L.days)} дн.)</h2><div class="card">
+    <div class="kv"><span>Надіслано (нового формату)</span><b>${esc(L.delivered_n)} (${esc(L.new_format_n)})</b></div>
+    <div class="kv"><span>Рішення → Telegram ≤ ${sec(L.targets.decision_to_sent_ms)}</span><b>${tgt('d',w.decision_to_sent)}</b></div>
+    <div class="kv"><span>Закриття M15 → Telegram ≤ ${sec(L.targets.bar_to_sent_ms)}</span><b>${tgt('b',w.bar_to_sent)}</b></div>
+    ${Object.keys(NM).filter(k=>st[k]).map(k=>`<div class="kv"><span>${esc(NM[k])}</span><b class="num">p50 ${sec(st[k].p50)} · p95 ${sec(st[k].p95)} · max ${sec(st[k].max)}</b></div>`).join('')}
+    <div class="o2sub">Не надіслано як свіжі: ${Object.keys(L.suppressed||{}).map(k=>esc(k)+' '+L.suppressed[k]).join(' · ')||'—'}. Це заміри з production; локальні тести сюди не входять.</div></div>`;
 }
 
 /* ---------- Картка сценарію ---------- */
