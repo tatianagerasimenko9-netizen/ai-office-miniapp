@@ -88,11 +88,15 @@ def test_public_real_data_adapter_drops_forming_and_rejects_fixture():
         for i in range(3)
     ]
     try:
-        PUB._get = lambda url: {"data_status": "DATA_OK", "fixture": False, "source": "binance_futures", "candles": rows}
+        def fake_get(url):
+            tf = next(expected for _, (query, expected) in PUB.TF.items() if f"tf={query}" in url)
+            return {"data_status": "DATA_OK", "fixture": False, "source": "binance_futures", "tf": tf, "candles": rows}
+        PUB._get = fake_get
         arrs, provenance = PUB.fetch_arrays("https://readonly.example", "TESTUSDT")
-        assert all(len(arrs[k]["t"]) == 2 for k in PUB.TF)
+        assert all(len(arrs[k]["t"]) == 2 for k in PUB.TF) and len(arrs["w1"]["t"]) == 1
         assert all(provenance[k]["source"] == "binance_futures" and provenance[k]["forming_dropped"] for k in PUB.TF)
-        PUB._get = lambda url: {"data_status": "DATA_OK", "fixture": True, "source": "fixture", "candles": rows}
+        assert provenance["w1"]["source"] == "derived_from_binance_futures_d1"
+        PUB._get = lambda url: {"data_status": "DATA_OK", "fixture": True, "source": "fixture", "tf": "15m", "candles": rows}
         try:
             PUB.fetch_arrays("https://readonly.example", "TESTUSDT")
             raise AssertionError("fixture must not be accepted as real replay data")

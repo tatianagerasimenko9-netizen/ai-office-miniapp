@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 from office2.smc import replay as RP  # noqa: E402
 
 
-TF = {"m15": "M15", "h4": "H4", "d1": "D1", "w1": "W1"}
+TF = {"m15": ("M15", "15m"), "h4": ("H4", "4h"), "d1": ("D1", "1d")}
 
 
 def _get(url: str, timeout: float = 30.0) -> Dict[str, Any]:
@@ -32,14 +32,31 @@ def _get(url: str, timeout: float = 30.0) -> Dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _weekly(d1: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """Агрегація D1 у Binance-тижні з понеділка 00:00 UTC."""
+    monday_epoch = 4 * 86400
+    groups = np.floor((d1["t"] - monday_epoch) / 604800).astype(np.int64)
+    starts = np.r_[0, np.flatnonzero(np.diff(groups)) + 1]
+    ends = np.r_[starts[1:] - 1, len(groups) - 1]
+    return {
+        "t": monday_epoch + groups[starts].astype(float) * 604800,
+        "o": d1["o"][starts],
+        "h": np.maximum.reduceat(d1["h"], starts),
+        "l": np.minimum.reduceat(d1["l"], starts),
+        "c": d1["c"][ends],
+        "v": np.add.reduceat(d1["v"], starts),
+        "tbv": np.full(len(starts), np.nan, dtype=float),
+    }
+
+
 def fetch_arrays(base_url: str, symbol: str, limit: int = 500) -> tuple[Dict[str, Optional[Dict[str, np.ndarray]]], Dict[str, Any]]:
     arrays: Dict[str, Optional[Dict[str, np.ndarray]]] = {}
     provenance: Dict[str, Any] = {}
-    for key, tf in TF.items():
+    for key, (tf, expected_tf) in TF.items():
         query = urllib.parse.urlencode({"symbol": symbol, "tf": tf, "limit": limit})
         payload = _get(f"{base_url.rstrip('/')}/api/v2/candles?{query}")
         rows = [r for r in payload.get("candles") or [] if not r.get("forming")]
-        if payload.get("data_status") != "DATA_OK" or payload.get("fixture") or not rows:
+        if payload.get("data_status") != "DATA_OK" or payload.get("fixture") or payload.get("tf") != expected_tf or not rows:
             raise RuntimeError(f"{symbol} {tf}: real DATA_OK bars unavailable")
         arrays[key] = {
             "t": np.asarray([float(r["time"]) for r in rows], dtype=float),
@@ -52,6 +69,9 @@ def fetch_arrays(base_url: str, symbol: str, limit: int = 500) -> tuple[Dict[str
         }
         provenance[key] = {"source": payload.get("source"), "data_status": payload.get("data_status"), "bars": len(rows),
                            "first_open_utc": int(rows[0]["time"]), "last_open_utc": int(rows[-1]["time"]), "forming_dropped": True}
+    arrays["w1"] = _weekly(arrays["d1"])
+    provenance["w1"] = {"source": "derived_from_binance_futures_d1", "data_status": "DATA_OK", "bars": len(arrays["w1"]["t"]),
+                        "first_open_utc": int(arrays["w1"]["t"][0]), "last_open_utc": int(arrays["w1"]["t"][-1]), "forming_dropped": True}
     arrays["mn"] = None
     return arrays, provenance
 
