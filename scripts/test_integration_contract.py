@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_office2_brain2 as TB  # noqa: E402
-from office2.integration import from_brain, from_gerchik, from_smc, validate_observation  # noqa: E402
+from office2.integration import compare_shadow, from_brain, from_gerchik, from_smc, validate_observation  # noqa: E402
 from office2.smc import engine as SE  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 
@@ -135,6 +135,62 @@ def test_gerchik_unavailable_is_explicit_and_prefix_invariant():
     assert a == b, "майбутні M15-бари змінили Gerchik observation"
     assert full["state"] == "CANDIDATE" and full["missing"] == [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]
     assert validate_observation(full) == []
+
+
+def test_three_method_shadow_comparison_preserves_provenance_without_decision():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(
+        thesis, ctx, now, "XUSDT", fixture=True,
+        evidence=[{"module": "MSS/BOS", "status": "USED", "supports": 1, "finding": "структура підтверджена"}],
+    )
+    smc = from_smc(
+        {"state": "ARMED", "stage": 5, "dir": "LONG", "model": "REVERSAL",
+         "evidence_for": ["MSS/BOS structure"], "evidence_against": []},
+        ctx, now, "XUSDT", fixture=True,
+    )
+    gerchik = from_gerchik(
+        {"gerchik_ops_score": 8, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["імпульс/BOS +1"]},
+        ctx, now, "XUSDT", "LONG", fixture=True,
+    )
+    source = [brain, smc, gerchik]
+    before = copy.deepcopy(source)
+    report = compare_shadow(source)
+    assert source == before, "shadow comparison змінив observations"
+    assert report["summary"] == {
+        "observations": 3,
+        "valid": 3,
+        "invalid": 0,
+        "groups": 1,
+        "by_alignment": {
+            "BRAIN_READY_SHADOW_SUPPORT": 1,
+            "BRAIN_READY_NO_SHADOW_SUPPORT": 0,
+            "SHADOW_ONLY": 0,
+            "OBSERVATION_ONLY": 0,
+        },
+    }
+    row = report["rows"][0]
+    assert set(row["methods"]) == {"BRAIN", "SMC", "GERCHIK"}
+    assert row["entry_ready_methods"] == ["BRAIN"] and row["decision"] is None
+    provenance = row["evidence_by_semantic_group"]["structure_break"]
+    assert {x["method"] for x in provenance} == {"BRAIN", "SMC", "GERCHIK"}
+    assert all(x["observation_id"] and x["source_rule_ids"] for x in provenance)
+
+
+def test_shadow_comparison_rejects_future_and_does_not_mix_decision_bars():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(thesis, ctx, now, "XUSDT", fixture=True)
+    invalid = copy.deepcopy(brain)
+    invalid["lineage"]["max_source_ts"] = "2999-01-01T00:00:00+00:00"
+    other_bar = copy.deepcopy(brain)
+    other_bar["method"] = "SMC"
+    other_bar["version"] = "test"
+    other_bar["decision_bar_close_utc"] = "2020-01-01T00:00:00+00:00"
+    other_bar["lineage"]["max_source_ts"] = "2020-01-01T00:00:00+00:00"
+    report = compare_shadow([brain, invalid, other_bar])
+    assert report["summary"]["invalid"] == 1 and report["summary"]["groups"] == 2
+    assert all(len(row["methods"]) == 1 for row in report["rows"])
+    assert report["invalid"][0]["errors"] == ["max_source_ts is after decision_bar_close_utc"]
 
 
 def test_validator_rejects_future_and_incomplete_ready():

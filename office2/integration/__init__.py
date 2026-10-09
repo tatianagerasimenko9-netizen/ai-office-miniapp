@@ -2,5 +2,6 @@
 
 from office2.integration.adapters import from_brain, from_gerchik, from_smc
 from office2.integration.contract import validate_observation
+from office2.integration.shadow_compare import compare_shadow
 
-__all__ = ["from_brain", "from_gerchik", "from_smc", "validate_observation"]
+__all__ = ["compare_shadow", "from_brain", "from_gerchik", "from_smc", "validate_observation"]
