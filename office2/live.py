@@ -157,13 +157,14 @@ class Feed:
     def _default_get(url: str, params: Dict[str, Any]) -> Any:
         import office_market_data as MD
 
-        left = MD.backoff_left()
-        if left > 0:
-            if left <= BACKOFF_WAIT_SEC:      # коротка загальна пауза Binance (429): чекаємо її кінець, а не кидаємо цикл і не пропускаємо монети
-                time.sleep(left + 0.5)
-            else:
-                raise RuntimeError(f"backoff {left:.0f}s")
-        return MD._http_get_json(url, params)
+        with MD.priority():     # свічки для рішення READY не чекають на м'яку паузу ваги (≥1800/2400), яку з'їли скани й старий Лев; справжня пауза (429, ≥2200) діє для всіх
+            left = MD.hard_backoff_left()
+            if left > 0:
+                if left <= BACKOFF_WAIT_SEC:      # коротка загальна пауза Binance (429): чекаємо її кінець, а не кидаємо цикл і не пропускаємо монети
+                    time.sleep(left + 0.5)
+                else:
+                    raise RuntimeError(f"backoff {left:.0f}s")
+            return MD._http_get_json(url, params)
 
     def klines(self, sym: str, tf: str, now: float, limit: Optional[int] = None, start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> Optional[Dict[str, np.ndarray]]:
         key = (sym, tf)
@@ -353,7 +354,35 @@ def store_event(db: str, event_id: str, now: float, sym: str, kind: str, directi
     return True
 
 
-def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None) -> Dict[str, int]:
+_OLEV_LOCK = threading.Lock()
+
+
+def _ingest_old_lev(db: str, feed: "Feed", now: float, states: Dict[str, Dict[str, Any]], mc: Dict[str, Any], state: Dict[str, Any]) -> int:
+    """Нові рішення старого Лева → подія OLD_LEV зі знімком стану Office2 (лише спостереження, на READY не впливає). Для монет поза universe це ще й свічки з Binance (≈3–4 с на монету),
+    тому в production виконується у фоновому потоці й не входить у критичний шлях закриття бару → READY → Telegram."""
+    n = 0
+    for pid, plan in new_old_lev_plans(db, int(state.get("last_plan_id", 0))):
+        state["last_plan_id"] = max(int(state.get("last_plan_id", 0)), pid)
+        sym = str(plan.get("symbol") or "").upper()
+        if not sym or plan.get("direction") not in ("LONG", "SHORT"):
+            continue
+        st = states.get(sym)
+        if st is None:
+            try:
+                ctx = build_ctx(feed, sym, now)
+                st = symbol_state(sym, ctx, now) if ctx else None
+            except Exception:  # noqa: BLE001
+                st = None
+        snap = _clean({"decision": "OLD_LEV_" + ("REJECTED" if plan.get("rejected") else "READY"), "decision_ts": now, "session": session_bucket(now),
+                       "old_lev": {"plan": {k: plan.get(k) for k in ("scenario_id", "direction", "entry", "sl", "tp1", "tp2", "tp3", "max_entry", "confirmed_ts", "valid_until_ts", "rejected", "reason", "tf")}},
+                       "market": mc, "relative": relative_strength(st, mc) if st else None, "state": st, "office2_decision": OBS_ONLY,
+                       "version": VERSION, "source": SOURCE})
+        store_event(db, _eid("OLDLEV", pid), now, sym, "OLD_LEV", plan["direction"], plan.get("entry"), plan.get("sl"), plan.get("tp1"), snap)
+        n += 1
+    return n
+
+
+def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None, old_lev_background: bool = False) -> Dict[str, int]:
     """Один цикл. now — момент закриття щойно завершеного M15-бару. state: пам'ять між циклами {'last_plan_id': int}."""
     syms = syms or universe()
     t_cycle = time.time()
@@ -404,7 +433,13 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
     ts_bar = int(now)
     btc_ctx = ctxs.get("BTCUSDT")
     btc_for_pipe = {"m15": btc_ctx["m15"]} if btc_ctx else None
+    durs: List[Tuple[float, str]] = []
+    _prev: Optional[Tuple[str, float]] = None
     for sym, st in states.items():
+        _tn = time.time()
+        if _prev:
+            durs.append((_tn - _prev[1], _prev[0]))
+        _prev = (sym, _tn)
         rec = dict(st, **relative_strength(st, mc), market=mc, session=session_bucket(now))
         _insert_ignore(db, "office2_shadow_state", ("ts_epoch", "symbol", "version", "payload_json"), (ts_bar, sym, VERSION, _j(_clean(rec))))
         res["states"] += 1
@@ -439,26 +474,30 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             eid = _eid("O2", sym, c["dir"], c["trigger"], int(c["t_entry"]), round(c["lvl_p"], 8))
             store_event(db, eid, now, sym, "O2_CANDIDATE", c["dir"], c["entry"], c["sl"], c["tp"], snap)
             res["events"] += 1
-    # нові рішення старого Лева → подія OLD_LEV зі знімком стану Office2 на той самий момент
-    for pid, plan in new_old_lev_plans(db, int(state.get("last_plan_id", 0))):
-        state["last_plan_id"] = max(int(state.get("last_plan_id", 0)), pid)
-        sym = str(plan.get("symbol") or "").upper()
-        if not sym or plan.get("direction") not in ("LONG", "SHORT"):
-            continue
-        st = states.get(sym)
-        if st is None:
+    t_brain = time.time()
+    if _prev:
+        durs.append((t_brain - _prev[1], _prev[0]))
+    res["slow_ms"] = {sym_: int(d_ * 1000) for d_, sym_ in sorted(durs, reverse=True)[:3]}     # найповільніші символи в циклі Brain
+    if old_lev_background:
+        def _bg() -> None:
+            if not _OLEV_LOCK.acquire(blocking=False):
+                return                                     # попередній фоновий прохід ще йде: нові плани підхопить наступний цикл (last_plan_id не зсунуто)
             try:
-                ctx = build_ctx(feed, sym, now)
-                st = symbol_state(sym, ctx, now) if ctx else None
-            except Exception:  # noqa: BLE001
-                st = None
-        snap = _clean({"decision": "OLD_LEV_" + ("REJECTED" if plan.get("rejected") else "READY"), "decision_ts": now, "session": session_bucket(now),
-                       "old_lev": {"plan": {k: plan.get(k) for k in ("scenario_id", "direction", "entry", "sl", "tp1", "tp2", "tp3", "max_entry", "confirmed_ts", "valid_until_ts", "rejected", "reason", "tf")}},
-                       "market": mc, "relative": relative_strength(st, mc) if st else None, "state": st, "office2_decision": OBS_ONLY,
-                       "version": VERSION, "source": SOURCE})
-        store_event(db, _eid("OLDLEV", pid), now, sym, "OLD_LEV", plan["direction"], plan.get("entry"), plan.get("sl"), plan.get("tp1"), snap)
-        res["old_lev"] += 1
+                t0_ = time.time()
+                n_ = _ingest_old_lev(db, feed, now, states, mc, state)
+                _bump("old_lev", n_)
+                _log(f"[o2shadow] старий Лев (фон): {n_} подій, {time.time() - t0_:.0f} с")
+            except Exception as exc_:  # noqa: BLE001
+                _bump("errors")
+                _log(f"[o2shadow] старий Лев (фон) помилка: {type(exc_).__name__}: {str(exc_)[:120]}")
+            finally:
+                _OLEV_LOCK.release()
+
+        threading.Thread(target=_bg, name="office2-oldlev", daemon=True).start()
+    else:
+        res["old_lev"] = _ingest_old_lev(db, feed, now, states, mc, state)
     res["fetch_s"] = int(t_fetch)
+    res["brain_s"] = int(t_brain - t_cycle - t_fetch)
     res["total_s"] = int(time.time() - t_cycle)
     _bump("states", res["states"])
     _bump("events", res["events"])
@@ -572,7 +611,7 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
 
                 EN.CYCLE_TIMES.clear()
                 EN.CYCLE_TIMES.update(bar_close=now, wake=t_wake, bar_ready=t0)
-            res = cycle(db, feed, now, state)
+            res = cycle(db, feed, now, state, old_lev_background=True)
             n_out = resolve_outcomes(db, feed, time.time())
             _log(f"цикл {datetime.fromtimestamp(now, tz=timezone.utc):%H:%M}Z: {res}, очікування бару {waited:.0f} с, наслідків {n_out}, запитів {feed.requests}, {time.time() - t0:.0f} с")
         except Exception as exc:  # noqa: BLE001

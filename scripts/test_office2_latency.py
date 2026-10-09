@@ -155,21 +155,28 @@ def test_feed_waits_short_binance_backoff_but_not_long():
     import office_market_data as MD
 
     feed = LV.Feed(pause=0)
-    saved = (MD._BACKOFF_UNTIL, MD.backoff_left, MD._http_get_json, time.sleep)
+    saved = (MD._BACKOFF_UNTIL, MD.hard_backoff_left, MD._http_get_json, time.sleep)
     slept = []
+    seen_priority = []
     try:
-        MD.backoff_left = lambda: 4.0
-        MD._http_get_json = lambda url, params: [["ok"]]
+        MD.hard_backoff_left = lambda: 4.0
+
+        def get(url, params):
+            seen_priority.append(bool(getattr(MD._PRIORITY, "on", False)))
+            return [["ok"]]
+
+        MD._http_get_json = get
         time.sleep = lambda s: slept.append(s)
         assert feed._default_get("u", {}) == [["ok"]] and slept and 4.0 <= slept[0] <= 5.5       # коротка пауза 429 перечекана, символи не пропущені
-        MD.backoff_left = lambda: 200.0
+        assert seen_priority == [True] and not getattr(MD._PRIORITY, "on", False)                # запит Brain іде як «життя READY» (м'яка пауза ваги його не блокує), прапорець знято після
+        MD.hard_backoff_left = lambda: 200.0
         try:
             feed._default_get("u", {})
             raise AssertionError("довгий backoff має перервати")
         except RuntimeError as e:
             assert "backoff" in str(e)
     finally:
-        MD.backoff_left, MD._http_get_json, time.sleep = saved[1], saved[2], saved[3]
+        MD.hard_backoff_left, MD._http_get_json, time.sleep = saved[1], saved[2], saved[3]
 
 
 # ---------------------------------------------------------------- доставка
@@ -289,6 +296,36 @@ def test_inflight_signals_are_not_sent_twice_and_slow_one_does_not_block():
         assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_live_signal WHERE status = 'DELIVERED'")[0] == 2 and not DL._INFLIGHT
     finally:
         B.all_levels = orig
+
+
+def test_old_lev_ingestion_runs_in_background_and_does_not_hold_the_cycle():
+    """Спостереження за рішеннями старого Лева (свічки Binance по 3–4 с на монету поза universe) не входить у критичний шлях бару → READY."""
+    td = tempfile.mkdtemp()
+    db = os.path.join(td, "o2.db")
+    OB.init_office_db(db)
+    LV.init_db(db)
+    started, finished = [], []
+
+    def slow(db_, feed_, now_, states_, mc_, state_):
+        started.append(time.time())
+        time.sleep(0.8)
+        finished.append(time.time())
+        return 3
+
+    orig = LV._ingest_old_lev
+    LV._ingest_old_lev = slow
+    try:
+        feed = LV.Feed(getter=lambda url, params: [], pause=0)
+        t0 = time.time()
+        res = LV.cycle(db, feed, 1_800_000_000.0, {"last_plan_id": 0}, ["XUSDT"], old_lev_background=True)
+        dur = time.time() - t0
+        assert dur < 0.6 and res["old_lev"] == 0 and "brain_s" in res and "slow_ms" in res, (dur, res)      # цикл повернувся, поки фон ще працює
+        time.sleep(1.2)
+        assert started and finished                                                                         # фон відпрацював
+        res2 = LV.cycle(db, feed, 1_800_000_900.0, {"last_plan_id": 0}, ["XUSDT"], old_lev_background=False)
+        assert res2["old_lev"] == 3                                                                         # синхронний режим (тести/реплей) як і раніше
+    finally:
+        LV._ingest_old_lev = orig
 
 
 def test_latency_percentiles_and_targets():

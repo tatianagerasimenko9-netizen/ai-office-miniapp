@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -239,6 +240,7 @@ _MS_DONE: set = set()   # плани, що завершені й повніст�
 _MS_LAST: Dict[Any, float] = {}   # останній огляд плану (для рідшого огляду старих планів)
 FRESH_SEC = 6 * 3600            # молодші плани дивимось по 1m свічках (≤ ~375 шт., вага запиту 2), старші — по 5m (до 1000 шт. ≈ 83 год)
 OLD_RECHECK_SEC = 600
+OLD_RECHECK_LEGACY_SEC = 1800         # старий Лев після cutover (OFFICE_OLD_READY_DELIVERY=0) — лише статистика: перегляд раз на 30 хв (раніше 10 хв давало до 725 ваги Binance за хвилину)
 OLD_RECHECK_O2_SEC = 120          # Office2: активних планів одиниці — перевіряємо частіше (TP/SL старшого плану не чекає до 10 хв)
 SILENT_LEVELS = ("ENTRY", "EXPIRED")   # лише запис у БД (життя сценарію й статистика); у Telegram не йдуть
 
@@ -290,7 +292,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             continue
         age = now - float(ct or 0)
         fresh = age < FRESH_SEC
-        if not fresh and now - _MS_LAST.get((sid, ct), 0.0) < (OLD_RECHECK_O2_SEC if is_o2 else OLD_RECHECK_SEC):
+        if not fresh and now - _MS_LAST.get((sid, ct), 0.0) < (OLD_RECHECK_O2_SEC if is_o2 else (OLD_RECHECK_LEGACY_SEC if os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0" else OLD_RECHECK_SEC)):
             continue
         _MS_LAST[(sid, ct)] = now
         # Мінімальне навантаження на Binance REST (вага запиту росте з limit): беремо рівно стільки свічок, скільки минуло від READY (+запас)
