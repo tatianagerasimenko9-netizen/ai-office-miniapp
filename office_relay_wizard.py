@@ -6929,6 +6929,14 @@ EV позитивне: {prob.get('ev_positive', '')}
                     print("[liq] " + format_radar_liq_summary(BTC_FORCE_ORDER_BOOK).replace("\n", " | "))
                 except Exception as exc_liq:
                     print(f"[liq] snapshot failed: {exc_liq}")
+                try:
+                    from office_gex import fetch_gex_btc_eth, gex_log_line
+
+                    gpack = fetch_gex_btc_eth()
+                    print(gex_log_line(gpack))
+                    log_event(db_path, "GEX_DERIBIT", gpack)
+                except Exception as exc_gex:
+                    print(f"[gex] DATA_UNAVAILABLE {type(exc_gex).__name__}")
             except Exception as exc:
                 print(f"[radar] monitor failed: {exc}")
             try:
