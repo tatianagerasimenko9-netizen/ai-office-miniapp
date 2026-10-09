@@ -8,7 +8,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_office2_brain2 as TB  # noqa: E402
-from office2.integration import from_brain, from_smc, validate_observation  # noqa: E402
+from office2.integration import (  # noqa: E402
+    SOURCE_PARTS,
+    compare_shadow,
+    from_brain,
+    from_gerchik,
+    from_smc,
+    gerchik_scenario_inventory,
+    gerchik_source_rules,
+    validate_observation,
+    validate_source_registry,
+)
 from office2.smc import engine as SE  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 
@@ -89,6 +99,184 @@ def test_smc_observation_is_prefix_invariant():
     ob = from_smc(b["models"]["LONG"]["REVERSAL"], ctx_b, now, "TESTUSDT", fixture=True)
     assert oa == ob, "майбутні бари змінили observation минулого рішення"
     assert validate_observation(oa) == []
+
+
+def test_gerchik_layer_b_is_shadow_only_and_never_entry_ready():
+    _, ctx, now = brain_ready()
+    strong = {
+        "gerchik_ops_score": 9,
+        "gerchik_ops_band": "strong",
+        "gerchik_atr_trend_veto": False,
+        "gerchik_ops_reasons": ["рівень D1 +2", "sweep/ЛП +3", "імпульс/BOS +1"],
+    }
+    before = copy.deepcopy(strong)
+    obs = from_gerchik(strong, ctx, now, "XUSDT", "LONG", fixture=True)
+    assert strong == before, "адаптер змінив Gerchik ops"
+    assert obs["method"] == "GERCHIK" and obs["state"] == "CONFIRMED"
+    assert obs["state"] != "ENTRY_READY" and obs["entry"] is None and obs["targets"] == []
+    assert obs["score"] == {"value": 9, "band": "strong", "atr_trend_veto": False}
+    assert {x["semantic_group"] for x in obs["facts_for"]} >= {"liquidity_failure", "structure_break"}
+    assert validate_observation(obs) == []
+
+    weak = from_gerchik(
+        {"gerchik_ops_score": 4, "gerchik_ops_band": "skip", "gerchik_atr_trend_veto": True,
+         "gerchik_ops_reasons": ["ATR≥80% — не по тренду"]},
+        ctx, now, "XUSDT", "SHORT", fixture=True,
+    )
+    assert weak["state"] == "INVALIDATED" and "GERCHIK-ATR-80" in weak["source_rule_ids"]
+    assert weak["facts_against"] and validate_observation(weak) == []
+
+
+def test_gerchik_unavailable_is_explicit_and_prefix_invariant():
+    _, ctx, now = brain_ready()
+    unavailable = {
+        "gerchik_ops_score": None,
+        "gerchik_ops_band": "unknown",
+        "gerchik_atr_trend_veto": False,
+        "gerchik_ops_reasons": ["даних недостатньо"],
+    }
+    full = from_gerchik(unavailable, ctx, now, "XUSDT", "LONG", fixture=True)
+    cut_ctx = copy.deepcopy(ctx)
+    for tf in ("m15",):
+        cut_ctx[tf] = {key: value[:-3] for key, value in cut_ctx[tf].items()}
+    past_now = float(cut_ctx["m15"]["t"][-1]) + 900
+    a = from_gerchik(unavailable, cut_ctx, past_now, "XUSDT", "LONG", fixture=True)
+    b = from_gerchik(unavailable, ctx, past_now, "XUSDT", "LONG", fixture=True)
+    assert a == b, "майбутні M15-бари змінили Gerchik observation"
+    assert full["state"] == "CANDIDATE" and full["missing"] == [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]
+    assert validate_observation(full) == []
+
+
+def test_three_method_shadow_comparison_preserves_provenance_without_decision():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(
+        thesis, ctx, now, "XUSDT", fixture=True,
+        evidence=[{"module": "MSS/BOS", "status": "USED", "supports": 1, "finding": "структура підтверджена"}],
+    )
+    smc = from_smc(
+        {"state": "ARMED", "stage": 5, "dir": "LONG", "model": "REVERSAL",
+         "evidence_for": ["MSS/BOS structure"], "evidence_against": []},
+        ctx, now, "XUSDT", fixture=True,
+    )
+    gerchik = from_gerchik(
+        {"gerchik_ops_score": 8, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["імпульс/BOS +1"]},
+        ctx, now, "XUSDT", "LONG", fixture=True,
+    )
+    source = [brain, smc, gerchik]
+    before = copy.deepcopy(source)
+    report = compare_shadow(source)
+    assert source == before, "shadow comparison змінив observations"
+    assert report["summary"] == {
+        "observations": 3,
+        "valid": 3,
+        "invalid": 0,
+        "groups": 1,
+        "by_alignment": {
+            "BRAIN_READY_SHADOW_SUPPORT": 1,
+            "BRAIN_READY_NO_SHADOW_SUPPORT": 0,
+            "SHADOW_ONLY": 0,
+            "OBSERVATION_ONLY": 0,
+        },
+    }
+    row = report["rows"][0]
+    assert set(row["methods"]) == {"BRAIN", "SMC", "GERCHIK"}
+    assert row["entry_ready_methods"] == ["BRAIN"] and row["decision"] is None
+    provenance = row["evidence_by_semantic_group"]["structure_break"]
+    assert {x["method"] for x in provenance} == {"BRAIN", "SMC", "GERCHIK"}
+    assert all(x["observation_id"] and x["source_rule_ids"] for x in provenance)
+
+
+def test_shadow_comparison_rejects_future_and_does_not_mix_decision_bars():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(thesis, ctx, now, "XUSDT", fixture=True)
+    invalid = copy.deepcopy(brain)
+    invalid["lineage"]["max_source_ts"] = "2999-01-01T00:00:00+00:00"
+    other_bar = copy.deepcopy(brain)
+    other_bar["method"] = "SMC"
+    other_bar["version"] = "test"
+    other_bar["decision_bar_close_utc"] = "2027-01-01T00:00:00+00:00"
+    report = compare_shadow([brain, invalid, other_bar])
+    assert report["summary"]["invalid"] == 1 and report["summary"]["groups"] == 2
+    assert all(len(row["methods"]) == 1 for row in report["rows"])
+    assert report["invalid"][0]["errors"] == ["max_source_ts is after decision_bar_close_utc"]
+
+
+def test_shadow_comparison_exposes_opposite_direction_conflict_and_unavailable():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(thesis, ctx, now, "XUSDT", fixture=True)
+    opposite = from_gerchik(
+        {"gerchik_ops_score": 8, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["рівень D1 +2"]},
+        ctx, now, "XUSDT", "SHORT", fixture=True,
+    )
+    unavailable = from_gerchik(
+        {"gerchik_ops_score": None, "gerchik_ops_band": "unknown", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["даних недостатньо"]},
+        ctx, now, "YUSDT", "LONG", fixture=True,
+    )
+    report = compare_shadow([brain, opposite, unavailable])
+    assert report["cross_direction_conflicts"] == [{
+        "symbol": "XUSDT",
+        "decision_bar_close_utc": brain["decision_bar_close_utc"],
+        "methods_by_direction": {"LONG": ["BRAIN"], "SHORT": ["GERCHIK"]},
+    }]
+    unavailable_row = next(row for row in report["rows"] if row["symbol"] == "YUSDT")
+    assert unavailable_row["support_methods"] == []
+    assert unavailable_row["unavailable"] == {"GERCHIK": [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]}
+
+
+def test_five_gerchik_scenarios_are_honestly_inventoried():
+    scenarios = gerchik_scenario_inventory()
+    assert len(scenarios) == 5 and len({x["id"] for x in scenarios}) == 5
+    assert all(x["primary_source_status"] == "PRIMARY_TEXT_VERIFIED" for x in scenarios)
+    assert all(x["source_refs"] and x["source_conditions"] for x in scenarios)
+    by_id = {x["id"]: x for x in scenarios}
+    assert by_id["GERCHIK-FALSE-BREAK-1BAR"]["implementation_status"] == "PARTIAL"
+    assert by_id["GERCHIK-FALSE-BREAK-2BAR"]["implementation_status"] == "PARTIAL"
+    assert by_id["GERCHIK-BOUNCE"]["implementation_status"] == "DOCS_ONLY"
+    assert by_id["GERCHIK-BREAKOUT"]["implementation_status"] == "DOCS_ONLY"
+    assert by_id["GERCHIK-FALSE-BREAK-COMPLEX"]["implementation_status"] == "DOCS_ONLY"
+    assert all(x["office2_ready_impact"] != "GERCHIK_GATE" for x in scenarios)
+    scenarios[0]["implementation_status"] = "MUTATED"
+    assert gerchik_scenario_inventory()[0]["implementation_status"] != "MUTATED"
+
+
+def test_primary_source_registry_is_complete_read_only_metadata():
+    rules = gerchik_source_rules()
+    assert validate_source_registry() == []
+    assert SOURCE_PARTS == tuple(f"P{part:02d}" for part in range(1, 17))
+    strategy_ids = {rule["id"] for rule in rules if rule["scope"] == "EXPLICIT_STRATEGY"}
+    assert strategy_ids == {
+        "GERCHIK-08-VIDBIY",
+        "GERCHIK-09-PROBIY",
+        "GERCHIK-06-LP-1BAR",
+        "GERCHIK-06-LP-2BAR",
+        "GERCHIK-06-LP-COMPLEX",
+    }
+    assert all("state" not in rule and "decision" not in rule for rule in rules)
+    assert max(len(rule["rule_ua"]) for rule in rules) < 500
+    rules[0]["rule_ua"] = "MUTATED"
+    assert gerchik_source_rules()[0]["rule_ua"] != "MUTATED"
+
+
+def test_primary_source_registry_rejects_bad_or_missing_refs():
+    bad_ref = [{"id": "X", "rule_ua": "коротка парафраза", "refs": ["PART17:1"]}]
+    missing_ref = [{"id": "Y", "rule_ua": "коротка парафраза", "refs": []}]
+    assert validate_source_registry(bad_ref) == ["invalid source ref X: PART17:1"]
+    assert validate_source_registry(missing_ref) == ["incomplete rule: Y"]
+
+
+def test_layer_b_remains_internal_and_cannot_emit_ready():
+    _, ctx, now = brain_ready()
+    obs = from_gerchik(
+        {"gerchik_ops_score": 10, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False},
+        ctx, now, "XUSDT", "LONG", fixture=True,
+    )
+    assert obs["source_rule_ids"] == ["GERCHIK-OPS-LAYER-B"]
+    assert obs["ambiguities"][0]["code"] == "LAYER_B_NOT_PRIMARY_SOURCE"
+    assert obs["state"] == "CONFIRMED" and obs["state"] != "ENTRY_READY"
+    assert obs["entry"] is None and obs["targets"] == []
 
 
 def test_validator_rejects_future_and_incomplete_ready():
