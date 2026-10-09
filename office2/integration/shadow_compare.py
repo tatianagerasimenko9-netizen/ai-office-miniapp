@@ -93,12 +93,24 @@ def compare_shadow(observations: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             "decision": None,
             "note": "SHADOW: порівняння не змінює production READY, risk або delivery",
         })
+    supported: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+    for row in rows:
+        if not row["support_methods"]:
+            continue
+        market_key = (row["symbol"], row["decision_bar_close_utc"])
+        supported.setdefault(market_key, {})[row["direction"]] = list(row["support_methods"])
+    conflicts = [
+        {"symbol": key[0], "decision_bar_close_utc": key[1], "methods_by_direction": directions}
+        for key, directions in sorted(supported.items())
+        if len(directions) > 1
+    ]
     return {
         "readonly": True,
         "shadow": True,
         "gerchik_scenarios": gerchik_scenario_inventory(),
         "rows": rows,
         "invalid": errors,
+        "cross_direction_conflicts": conflicts,
         "summary": {
             "observations": len(source),
             "valid": sum(len(x) for x in groups.values()),

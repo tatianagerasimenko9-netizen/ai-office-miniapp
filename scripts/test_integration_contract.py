@@ -192,6 +192,30 @@ def test_shadow_comparison_rejects_future_and_does_not_mix_decision_bars():
     assert report["invalid"][0]["errors"] == ["max_source_ts is after decision_bar_close_utc"]
 
 
+def test_shadow_comparison_exposes_opposite_direction_conflict_and_unavailable():
+    thesis, ctx, now = brain_ready()
+    brain = from_brain(thesis, ctx, now, "XUSDT", fixture=True)
+    opposite = from_gerchik(
+        {"gerchik_ops_score": 8, "gerchik_ops_band": "strong", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["рівень D1 +2"]},
+        ctx, now, "XUSDT", "SHORT", fixture=True,
+    )
+    unavailable = from_gerchik(
+        {"gerchik_ops_score": None, "gerchik_ops_band": "unknown", "gerchik_atr_trend_veto": False,
+         "gerchik_ops_reasons": ["даних недостатньо"]},
+        ctx, now, "YUSDT", "LONG", fixture=True,
+    )
+    report = compare_shadow([brain, opposite, unavailable])
+    assert report["cross_direction_conflicts"] == [{
+        "symbol": "XUSDT",
+        "decision_bar_close_utc": brain["decision_bar_close_utc"],
+        "methods_by_direction": {"LONG": ["BRAIN"], "SHORT": ["GERCHIK"]},
+    }]
+    unavailable_row = next(row for row in report["rows"] if row["symbol"] == "YUSDT")
+    assert unavailable_row["support_methods"] == []
+    assert unavailable_row["unavailable"] == {"GERCHIK": [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]}
+
+
 def test_five_gerchik_scenarios_are_honestly_inventoried():
     scenarios = gerchik_scenario_inventory()
     assert len(scenarios) == 5 and len({x["id"] for x in scenarios}) == 5
