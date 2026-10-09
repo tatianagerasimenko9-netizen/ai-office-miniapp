@@ -169,6 +169,17 @@ def test_complex_needs_three_closed_plane_bars_and_return():
     assert obs["state"] == "FORMING" and validate_observation(obs) == []
 
 
+def test_false_break_classes_are_mutually_exclusive():
+    two, k = fixture_false_2bar()
+    scenarios = {row["scenario"] for row in detect_gerchik_scenarios(two, at(two, k), "TESTUSDT")}
+    assert "FALSE_BREAK_2BAR" in scenarios and "FALSE_BREAK_1BAR" not in scenarios
+
+    complex_ctx, k = fixture_false_complex()
+    scenarios = {row["scenario"] for row in detect_gerchik_scenarios(complex_ctx, at(complex_ctx, k), "TESTUSDT")}
+    assert "FALSE_BREAK_COMPLEX" in scenarios
+    assert not scenarios.intersection({"FALSE_BREAK_1BAR", "FALSE_BREAK_2BAR"})
+
+
 def test_inventory_marks_execution_as_shadow_not_ready_gate():
     inventory = gerchik_scenario_inventory()
     assert len(inventory) == 5

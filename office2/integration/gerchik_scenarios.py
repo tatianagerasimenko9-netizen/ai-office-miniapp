@@ -355,9 +355,17 @@ def detect_gerchik_scenarios(
     out: List[Dict[str, Any]] = []
     detectors = (_bounce, _breakout, _false_break_1bar, _false_break_2bar, _false_break_complex)
     for level in levels:
+        level_rows: List[Dict[str, Any]] = []
         for detector in detectors:
             verdict = detector(bars, level, k, atr, all_levels, params)
             if verdict is not None:
                 verdict["symbol"] = str(symbol).upper()
-                out.append(verdict)
+                level_rows.append(verdict)
+        scenarios = {row["scenario"] for row in level_rows}
+        # ЛП-класи взаємовиключні: найдовша підтверджена геометрія має пріоритет.
+        if "FALSE_BREAK_COMPLEX" in scenarios:
+            level_rows = [row for row in level_rows if row["scenario"] not in {"FALSE_BREAK_1BAR", "FALSE_BREAK_2BAR"}]
+        elif "FALSE_BREAK_2BAR" in scenarios:
+            level_rows = [row for row in level_rows if row["scenario"] != "FALSE_BREAK_1BAR"]
+        out.extend(level_rows)
     return out
