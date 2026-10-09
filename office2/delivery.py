@@ -50,14 +50,18 @@ def build_caption(snap: Dict[str, Any]) -> str:
     if snap.get("why"):
         L.append(f"Чому: {snap['why']}")
     L.append("")
-    L.append(f"READY: {n(v['ready_price'])}")
+    entry, sl = float(v["ready_price"]), float(v["sl"])
+    risk = abs(entry - sl)
+    pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
+    rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"    # noqa: E731
+    L.append(f"READY: {n(entry)}")
     if v["zone"]:
         L.append(f"Зона входу: {n(v['zone'][0])}–{n(v['zone'][1])}")
-    L.append(f"SL: {n(v['sl'])} · ризик {LVL.range_txt(v['sl_pct'])}%")
+    L.append(f"SL: {n(sl)} (−{pc(sl)}%)")
     for i, t in enumerate(v["targets"][:3], 1):
-        L.append(f"TP{i}: {n(t['p'])}" + LVL.pct_txt(t["pct"], "+"))
+        L.append(f"TP{i}: {n(t['p'])} (+{pc(t['p'])}%; {rr(t['p'])}R)")
     if (th.get("sizing") or {}).get("risk_usd"):
-        L.append(f"Ризик: {float(th['sizing']['risk_usd']):.0f} $" + (" (від READY-ціни)" if v["zone"] else ""))
+        L.append(f"Ризик моделі: {float(th['sizing']['risk_usd']):.0f} $")
     L.append(f"⏳ до {rc.kyiv_stamp(snap['valid_until_ts'])}")
     return "\n".join(L)
 
@@ -130,12 +134,12 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
 
     t = time.time() if now is None else now
     rows = await run_o2(_fetchall, db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal WHERE status = 'PENDING' ORDER BY created_ts ASC LIMIT ?", (MAX_PER_PASS,))
-    sent = 0
-    for sid, sym, d, created, valid, sj in rows:
+    async def _one(row: tuple) -> int:
+        sid, sym, d, created, valid, sj = row
         if t - float(created) > STALE_PENDING_SEC or t > float(valid):
             await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", ("не доставлено вчасно", sid))
             log(f"[office2] suppressed stale {sid}")
-            continue
+            return 0
         try:
             snap = json.loads(sj)
             snap["valid_until_ts"] = float(valid)
@@ -146,7 +150,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             if why_late:   # no-chase і структурна інвалідація перевіряються ще раз у момент доставки (рішення могло застаріти за час циклу)
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why_late[:300], sid))
                 log(f"[office2] suppressed at delivery {sym} {d}: {why_late}")
-                continue
+                return 0
             cap = build_caption(snap)
             th = snap["thesis"]
             tg = th.get("targets") or []
@@ -175,7 +179,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             if not mid:
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", ("Telegram не підтвердив доставку", sid))
                 log(f"[office2] delivery not verified {sid}: лишаю для повтору")
-                continue
+                return 0
             tm["send_s"] = round(time.time() - t_a, 1)
             tm["emit_to_sent_s"] = round(time.time() - float(snap["emitted_wall_ts"]), 1) if snap.get("emitted_wall_ts") else None
             gate = build_gate(snap)
@@ -184,15 +188,19 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             await run_o2(trk.record_plan, db, scenario_id=sid, symbol=sym, direction=d, tf=tf, entry=th["entry"], sl=th["sl"], tp1=(tg[0]["p"] if tg else None),
                                     tp2=(tg[1]["p"] if len(tg) > 1 else None), tp3=(tg[2]["p"] if len(tg) > 2 else None), max_entry=None, confirmed_ts=float(created),
                                     valid_until_ts=float(valid), rejected=False, confirm_msg_id=mid, gate=gate)
-            await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'DELIVERED', msg_id = ?, delivered_ts = ?, last_error = NULL WHERE scenario_id = ?", (int(mid), t, sid))
+            await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'DELIVERED', msg_id = ?, delivered_ts = ?, last_error = NULL WHERE scenario_id = ?", (int(mid), time.time(), sid))
             await run_o2(log_event, db, "OFFICE2_READY_SENT", {"scenario_id": sid, "symbol": sym, "direction": d, "text": cap, "telegram_msg_id": mid, "image_ok": bool(img.get("ok")),
                                                                          "image_error": None if img.get("ok") else img.get("reason"), "chart_sha256": chart.get("sha256"), "timing": tm}, sid)
-            sent += 1
             log(f"[office2] READY delivered {sym} {d} id={mid} timing={tm}")
+            return 1
         except Exception as exc:  # noqa: BLE001
             log(f"[office2] delivery error {sid}: {type(exc).__name__}: {exc}")
             try:
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"{type(exc).__name__}: {exc}"[:300], sid))
             except Exception:  # noqa: BLE001
                 pass
+            return 0
+    # сигнали з одного проходу доставляються паралельно: повільна відправка одного (Telegram іноді 2–3 хв) не затримує інші
+    results = await asyncio.gather(*[_one(r) for r in rows], return_exceptions=True)
+    sent = sum(r for r in results if isinstance(r, int))
     return sent
