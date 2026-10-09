@@ -324,7 +324,7 @@ def _v2_e2e(short):
             n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: candles, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
             assert n == 1 and len(sent.calls) == 1, (n, OB._fetchall(db, "SELECT status, last_error FROM office2_live_signal"))
             text = sent.calls[0][1]
-            assert text.startswith("OFFICE2 · LIVE BETA\n" + ("🔴 SHORT" if short else "🟢 LONG") + " · X") and "Зона входу:" in text and "SL:" in text and "TP1:" in text and "Ризик: 10 $" in text, text
+            assert text.startswith("OFFICE2 · LIVE BETA\n" + ("🔴 SHORT" if short else "🟢 LONG") + " · X") and "Зона входу:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text, text
             plan = trk.plan_for(db, sent.calls[0][2]["canonical_id"])
             assert plan and ((plan["sl"] > plan["entry"] > plan["tp1"]) if short else (plan["sl"] < plan["entry"] < plan["tp1"]))
             pl = WV.payload(db, now=created + 120)
@@ -420,6 +420,92 @@ def test_legacy_short_snapshot_texts_repaired_on_display_only():
     out = WV.repair_legacy_texts(seq, "SHORT")
     assert out[0]["value"] == "high 67.76 торкнувся зони 67.5946–67.7357" and out[1]["value"].startswith("інвалідація 67.91 + люфт 0.03") and seq[1]["value"].count("−") == 1
     assert WV.repair_legacy_texts(seq, "LONG") is seq and WV.repair_legacy_texts(out, "SHORT")[1]["value"] == out[1]["value"]
+
+
+def test_telegram_caption_single_percent_and_r_from_ready_price():
+    """Telegram: один відсоток і R від ЦІНИ READY (не діапазон по краях зони); зона окремим рядком; Mini App зберігає діапазони для інших цін входу."""
+    import re
+
+    from office2 import delivery as DL
+    from office2 import levels as LVL
+
+    for direction, entry, sl, tps, zone in (("LONG", 0.5089, 0.48415, [0.5379, 0.6125, 0.6259], [0.495963, 0.5089]), ("SHORT", 67.45, 67.94, [66.07, 65.59, 61.63], [67.5946, 67.7357])):
+        th = {"entry": entry, "sl": sl, "entry_zone": zone, "targets": [{"p": p_, "kind": "X"} for p_ in tps], "sizing": {"risk_usd": 10.0}, "trigger_level": zone[0]}
+        cap = DL.build_caption({"thesis": th, "symbol": "TIAUSDT", "direction": direction, "valid_until_ts": 1791392000.0, "why": "тест"})
+        risk = abs(entry - sl)
+        m = re.search(r"SL: [\d,]+ \(−([\d,]+)%\)", cap)
+        assert m and abs(float(m.group(1).replace(",", ".")) - abs(sl - entry) / entry * 100) < 0.006, cap
+        for i, p_ in enumerate(tps, 1):
+            mm = re.search(rf"TP{i}: [\d,]+ \(\+([\d,]+)%; ([\d,]+)R\)", cap)
+            assert mm and abs(float(mm.group(1).replace(",", ".")) - abs(p_ - entry) / entry * 100) < 0.006 and abs(float(mm.group(2).replace(",", ".")) - abs(p_ - entry) / risk) < 0.006, cap
+        assert "…" not in cap and cap.count("Зона входу:") == 1 and "Ризик моделі: 10 $" in cap, cap          # діапазонів у відсотках більше немає
+    v = LVL.view_from_thesis({"entry": 0.5089, "sl": 0.48415, "entry_zone": [0.495963, 0.5089], "targets": [{"p": 0.5379}], "trigger_level": 0.495963})
+    assert v["sl_pct"][0] != v["sl_pct"][1] and v["targets"][0]["pct"][0] != v["targets"][0]["pct"][1]            # Mini App: діапазон для інших цін входу збережено
+
+
+def test_delivery_pass_is_parallel_slow_send_does_not_block_others():
+    """ONDO 09.10: відправка NEAR зайняла 158 с і затримала ONDO на 190 с (послідовний прохід). Тепер сигнали одного проходу йдуть паралельно."""
+    import asyncio
+    import datetime as dt
+    import tempfile
+    import time as _t
+
+    import office_bridge as OB
+    import office_ready_card as card
+    from office2 import delivery as DL
+    from office2 import engine as EN
+
+    c, seq = closes_long()
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: LEVELS
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "o2.db")
+            OB.init_office_db(db)
+            EN.init_db(db)
+            st = lambda b: {"price": float(b["c"][-1]), "ret_1h": 0.3, "ret_4h": 1.0, "ret_24h": 2.0, "atr15_pct": 0.3, "vol_regime_7d": 0.5, "pos_24h_range": 0.6}  # noqa: E731
+            for sym in ("XUSDT", "YUSDT"):
+                for upto in (seq["sweep"], seq["top"], seq["bear_in_zone"], seq["trigger"]):
+                    b, ctx = mk(c, upto)
+                    EN.step_symbol(db, sym, ctx, st(b), {"btc_ret_1h": 0.1, "eth_ret_1h": 0.1, "breadth_up_1h": 0.5, "n_alts": 20}, {"coin_ret_1h": 0.3, "rs_vs_btc_1h": 0.2, "rs_vs_btc_4h": 0.1}, float(b["t"][-1] + 900), None)
+            created = OB._fetchone(db, "SELECT MIN(created_ts) FROM office2_live_signal")[0]
+            assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_live_signal WHERE status = 'PENDING'")[0] == 2
+            candles = [{"ts": dt.datetime.fromtimestamp(float(b["t"][i]), tz=dt.timezone.utc).isoformat(), "open": float(b["o"][i]), "high": float(b["h"][i]), "low": float(b["l"][i]), "close": float(b["c"][i]),
+                        "volume": 100.0, "src": "binance_futures"} for i in range(len(b["t"]) - 96, len(b["t"]))]
+
+            starts = []
+
+            async def slow_send(event_type, text, **kw):
+                starts.append(_t.time())
+                await asyncio.sleep(1.5)
+                return 7001 + len(starts)
+
+            n = asyncio.run(DL.deliver_pending(db, slow_send, lambda s_, tf, lim: candles, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+            assert n == 2 and len(starts) == 2, (n, starts)
+            assert abs(starts[1] - starts[0]) < 1.2, starts                       # друга відправка стартує, не чекаючи завершення першої (1,5 с); послідовно різниця була б ≥1,5 с
+            assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_live_signal WHERE status = 'DELIVERED'")[0] == 2
+    finally:
+        B.all_levels = orig
+
+
+def test_sweep_prior_acceptance_is_recorded_not_gating():
+    """ONDO SHORT 09.10: W1H 0,4882 перед «sweep» уже тримався вище 5 закриттів M15 і вище на 2% — це повторний тест після прийняття. Записуємо в подію й показуємо як ПРОТИ; READY не блокуємо."""
+    n = 40
+    t = np.arange(n) * 900.0
+    c = np.full(n, 100.0)
+    h, l, o = c + 0.2, c - 0.2, c.copy()
+    c[24:32] = 98.5                                   # 8 закриттів за рівнем 99 (рівень-підтримка в LONG-координатах) до sweep
+    l[24:32] = 98.3
+    l[33], c[33] = 98.8, 99.4                         # sweep: low < 99, закриття назад вище
+    m15 = {"t": t, "o": o, "h": h, "l": l, "c": c, "v": np.ones(n)}
+    a15 = np.full(n, 0.3)
+    ev = B2._sweep_events(m15, a15, n - 1, [{"p": 99.0, "side": "low", "kind": "W1H", "strength": 1, "known": 0.0}], 1)
+    assert ev and ev[0]["prior"]["closes_beyond"] >= 3 and ev[0]["prior"]["max_excess_pct"] > 0.5, ev
+    c2 = np.full(n, 100.0)
+    h2, l2 = c2 + 0.2, c2 - 0.2
+    l2[33], c2[33] = 98.8, 99.4
+    ev2 = B2._sweep_events({"t": t, "o": c2.copy(), "h": h2, "l": l2, "c": c2, "v": np.ones(n)}, a15, n - 1, [{"p": 99.0, "side": "low", "kind": "W1H", "strength": 1, "known": 0.0}], 1)
+    assert ev2 and ev2[0]["prior"]["closes_beyond"] == 0                         # свіжий grab: рівень ще не приймався
 
 
 def test_zone_touch_requires_real_ohlc_contact():

@@ -216,7 +216,7 @@ def test_delivery_end_to_end_and_lifecycle():
         n = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: _candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
         assert n == 1 and len(sent.calls) == 1
         ev, text, kw = sent.calls[0]
-        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "READY:" in text and "SL:" in text and "TP1:" in text and "Ризик: 10 $" in text and "⏳ до" in text
+        assert text.startswith("OFFICE2 · LIVE BETA\n🟢 LONG · X") and "Чому:" in text and "READY:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text and "⏳ до" in text
         assert not AG.text_grants_entry(text) and not AG.text_instructs_position_change(text), text      # проходить той самий Telegram-шлюз, що й старий READY
         assert kw["intent"] == "CONFIRM" and kw["kind"] == "CONFIRM" and kw["canonical_id"].startswith("O2|")
         assert kw["photo_path"] and Path(kw["photo_path"]).exists()                                        # реальний chart

@@ -24,6 +24,8 @@ VERSION = "o2-brain-2.1"
 OTE_LO, OTE_HI, DEEP = 0.62, 0.79, 0.90        # ретрейс ноги: OTE-діапазон і межа глибокого ретрейсу
 DISP_BODY_ATR = 1.2                              # displacement: тіло ≥ 1.2 ATR(M15) і закриття в верхніх 35% діапазону
 DISP_WINDOW = 3                                  # displacement може бути на барі злому або в наступних DISP_WINDOW-1 барах (закриття лишаються над зламаним swing)
+PRIOR_BARS = 12                                  # вікно «чи рівень уже приймався до sweep» (лише для пояснення; READY не блокує)
+PRIOR_ACCEPT_MIN = 3
 MAX_EVENTS = 10                                  # скільки подій на напрям оцінюємо за цикл (раніше 4 найновіших: просунутий старий сценарій витіснявся новими sweep-ами)
 MIN_LEG_ATR = 2.0                                # нога зміщення ≥ 2 ATR(M15): менше — не структура
 MISS_R = 3.0                                     # ціна відійшла від зони на > 3 R (від верху зони до інвалідації) без ретрейсу → MISSED
@@ -93,7 +95,11 @@ def _sweep_events(m15: Dict[str, np.ndarray], a15: np.ndarray, k: int, levels: L
                     continue
                 seg = m15["l"][s:r + 1]
                 e = s + int(np.argmin(seg))
-                out.append({"src": "SWEEP", "e": e, "extreme": float(m15["l"][e]), "level": {"p": x["p"], "kind": x["kind"], "strength": int(x.get("strength", 1))}, "level_c": p, "reclaim_idx": r})
+                w0 = max(0, s - PRIOR_BARS)
+                beyond = int(np.sum(m15["c"][w0:s] < p)) if s > w0 else 0          # скільки з попередніх барів ціна ЗАКРИВАЛАСЬ за рівнем (рівень уже був прийнятий/знятий до цього «sweep»)
+                excess = float(p - np.min(m15["l"][w0:s])) / abs(p) * 100.0 if s > w0 and np.min(m15["l"][w0:s]) < p else 0.0
+                out.append({"src": "SWEEP", "e": e, "extreme": float(m15["l"][e]), "level": {"p": x["p"], "kind": x["kind"], "strength": int(x.get("strength", 1))}, "level_c": p, "reclaim_idx": r,
+                            "prior": {"bars": s - w0, "closes_beyond": beyond, "max_excess_pct": round(excess, 3)}})
                 break
     out.sort(key=lambda z: -z["e"])
     return out
@@ -173,7 +179,7 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     e = ev["e"]
     lo = ev["extreme"]
     kind = "SWEEP_SEQ" if ev["src"] == "SWEEP" else "ORIGIN_SEQ"
-    base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin")},
+    base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin"), "prior": ev.get("prior")},
                             "level": ev["level"] or {"p": sg * lo, "kind": "ORIGIN_LOW"}, "invalidation": {"price": sg * lo, "why": "екстремум події (sweep/захист origin): закриття M15 за ним — теза хибна"}}
     base["trigger_level"] = sg * lo
     sh = _shift(m15, a15, k, e, swings)
@@ -329,6 +335,11 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
     need = h1_row.get("last_swing_high") if sg > 0 else h1_row.get("last_swing_low")
     fors = [i["finding"] for i in ev_items if i["supports"] > 0 and i["status"] == "USED"] + [x["text"] for x in al if x["verdict"].startswith("ЗА")]
     agns = [i["finding"] for i in ev_items if i["supports"] < 0 and i["status"] == "USED"] + [x["text"] for x in al if x["verdict"].startswith("ПРОТИ")]
+    pr = (th.get("event") or {}).get("prior") or {}
+    retest = bool(pr and pr.get("closes_beyond", 0) >= PRIOR_ACCEPT_MIN and (th.get("event") or {}).get("level"))
+    if retest:
+        lvp = th["event"]["level"]
+        agns.append(f"рівень {lvp['kind']} {lvp['p']:.6g} ще до sweep приймався: {pr['closes_beyond']} із {pr['bars']} попередніх закриттів M15 були за ним (макс. заступ {pr['max_excess_pct']:.2f}%) — це повторний тест після прийняття, а не свіжий grab ліквідності")
     tfs_txt = ", ".join(f"{tf} {'вгору' if (v or 0) > 0 else 'вниз' if (v or 0) < 0 else 'діапазон'}" for tf, v in eff.items() if v is not None)
     if counter and loc == "LOCAL" and not proof_h1:
         cls, verdict = "COUNTER_NO_PROOF", "BLOCK"
@@ -348,7 +359,7 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
               {"name": "доказ повернення H1", "role": "GATE (умовно)", "evaluated": True, "did_affect_decision": blocked and not proof_h1, "value": bool(proof_h1)}]
     inputs += [{"name": i["module"], "role": i["role"], "evaluated": i["status"] == "USED", "did_affect_decision": False, "status": i["status"], "value": i["finding"]} for i in ev_items]
     inputs += [{"name": f"BTC/ринок: {x['factor']}", "role": "EVIDENCE", "evaluated": True, "did_affect_decision": False, "value": x["verdict"]} for x in al]
-    integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "inputs": inputs}
+    integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "level_retest_after_acceptance": retest, "inputs": inputs}
     out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
     if verdict == "BLOCK":
         out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True,
