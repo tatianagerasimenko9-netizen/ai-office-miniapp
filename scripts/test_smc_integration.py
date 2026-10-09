@@ -121,6 +121,21 @@ def test_spawn_is_nonblocking_and_skips_when_busy():
         os.environ["OFFICE2_SMC"] = "1"
 
 
+def test_shadow_stats_for_journal():
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: T.LEVELS
+    try:
+        db, ctxs, now = _run(True)
+        SH.run_cycle(db, ctxs, now, None, log=lambda m: None)
+        st = SH.shadow_stats(db, now=now + 3600)
+        assert st and st["brain_ready"] >= 1 and set(st) >= {"rows", "states", "smc_ready", "brain_ready_confirmed_by_smc", "smc_ready_only", "note", "runtime"}
+        assert "не впливає на READY" in st["note"]
+        from office2 import stats as ST
+        assert "smc" in ST.collect(db)
+    finally:
+        B.all_levels = orig
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

@@ -110,3 +110,38 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
         _STATS.update(cycles=_STATS["cycles"] + 1, symbols=len(ctxs), last_ms=round(tot, 1), max_symbol_ms=round(mx, 1), rows=_STATS["rows"] + n_rows)
     log(f"[o2smc] цикл {ts_bar}: символів {len(ctxs)}, рядків {n_rows}, стани {per_state}, {tot / 1000:.1f} с (макс. символ {mx:.0f} мс)")
     return {"rows": n_rows, "ms": tot, "states": per_state}
+
+
+def shadow_stats(db: str, days: float = 14.0, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Підсумок shadow для Журналу: скільки вердиктів, READY за SMC, збіг із READY Brain (±1 год, той самий напрямок). Нічого не вигадує: порожня таблиця → None."""
+    from office_bridge import _fetchall
+
+    now = float(now if now is not None else time.time())
+    cut = int(now - days * 86400)
+    try:
+        rows = _fetchall(db, "SELECT symbol, direction, model, state, ts_bar, ms FROM office2_smc_shadow WHERE ts_bar >= ?", (cut,))
+        brain = _fetchall(db, "SELECT symbol, direction, created_ts FROM office2_live_signal WHERE created_ts >= ?", (cut,))
+    except Exception:  # noqa: BLE001
+        return None
+    if not rows and not brain:
+        return None
+    states: Dict[str, int] = {}
+    for r in rows:
+        states[r[3]] = states.get(r[3], 0) + 1
+    smc_ready = [r for r in rows if r[3] == "READY"]
+    smc_near = [r for r in rows if r[3] in ("READY", "ARMED")]
+    seen, b_conf = set(), 0
+    for sym, d, ct in brain:
+        key = (sym, d, int(ct) // 900)
+        if key in seen:
+            continue
+        seen.add(key)
+        if any(r[0] == sym and r[1] == d and float(ct) - 3600 <= r[4] <= float(ct) + 900 for r in smc_near):
+            b_conf += 1
+    n_brain = len(seen)
+    s_both = sum(1 for r in smc_ready if any(sym == r[0] and d == r[1] and abs(float(ct) - r[4]) <= 3600 for sym, d, ct in brain))
+    ms = [float(r[5]) for r in rows if r[5] is not None]
+    return {"days": days, "rows": len(rows), "states": states, "smc_ready": len(smc_ready), "by_model": {m: sum(1 for r in smc_ready if r[2] == m) for m in ("REVERSAL", "CONTINUATION")},
+            "brain_ready": n_brain, "brain_ready_confirmed_by_smc": b_conf, "smc_ready_also_brain": s_both, "smc_ready_only": len(smc_ready) - s_both,
+            "avg_ms": round(sum(ms) / len(ms), 1) if ms else None, "max_ms": round(max(ms), 1) if ms else None, "runtime": stats(),
+            "note": "SHADOW: SMC не впливає на READY. Збіг ≠ правильність: результат SMC-сигналів окремо не оцінювався (потрібен replay/live-вибірка)"}

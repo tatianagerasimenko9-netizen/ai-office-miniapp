@@ -931,7 +931,18 @@ function o2StatsHtml(t){
     <div class="kv"><span>Вхід торкнуто</span><b>${esc(T.entered)}</b></div><div class="kv"><span>Першим TP · першим стоп</span><b>${esc(T.tp1_first)} · ${esc(T.sl_first)}</b></div>
     <div class="kv"><span>Дійшли до TP3</span><b>${esc(T.tp3)}</b></div><div class="kv"><span>Строк вийшов без входу · ще не завершені</span><b>${esc(T.expired)} · ${esc(T.unresolved)}</b></div>
     ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, вхід ${b.entered}, першим TP ${b.tp1_first} / стоп ${b.sl_first}, TP3 ${b.tp3}, не завершені ${b.unresolved}${b.median_max_r!=null?`, медіана макс. R ${o2f(b.median_max_r,1)} (потенціал, не прибуток)`:''}</div>`;}).join('')}
-    <div class="o2sub">${esc(t.note||'')}</div></div>${o2LatencyHtml(t.latency)}`;
+    <div class="o2sub">${esc(t.note||'')}</div></div>${o2LatencyHtml(t.latency)}${o2SmcStatsHtml(t.smc)}`;
+}
+function o2SmcStatsHtml(M){
+  if(!M) return '';
+  const st=Object.keys(M.states||{}).map(k=>esc(k)+' '+M.states[k]).join(' · ')||'—';
+  return `<h2>SMC · shadow (${esc(M.days)} дн.)</h2><div class="card">
+    <div class="kv"><span>Вердиктів у журналі</span><b>${esc(M.rows)}</b></div>
+    <div class="kv"><span>READY за SMC · з них Reversal / Continuation</span><b>${esc(M.smc_ready)} · ${esc((M.by_model||{}).REVERSAL||0)} / ${esc((M.by_model||{}).CONTINUATION||0)}</b></div>
+    <div class="kv"><span>READY Brain · підтверджено SMC (±1 год)</span><b>${esc(M.brain_ready)} · ${esc(M.brain_ready_confirmed_by_smc)}</b></div>
+    <div class="kv"><span>SMC READY також у Brain · лише SMC</span><b>${esc(M.smc_ready_also_brain)} · ${esc(M.smc_ready_only)}</b></div>
+    <div class="kv"><span>Час аналізу символу</span><b class="num">середній ${M.avg_ms==null?'—':Math.round(M.avg_ms)+' мс'} · макс. ${M.max_ms==null?'—':Math.round(M.max_ms)+' мс'}</b></div>
+    <div class="o2sub">Стани: ${st}. ${esc(M.note||'')}</div></div>`;
 }
 function o2LatencyHtml(L){
   if(!L||!L.delivered_n) return '';
