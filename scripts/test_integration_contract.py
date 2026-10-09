@@ -232,11 +232,7 @@ def test_five_gerchik_scenarios_are_honestly_inventoried():
     assert all(x["primary_source_status"] == "PRIMARY_TEXT_VERIFIED" for x in scenarios)
     assert all(x["source_refs"] and x["source_conditions"] for x in scenarios)
     by_id = {x["id"]: x for x in scenarios}
-    assert by_id["GERCHIK-FALSE-BREAK-1BAR"]["implementation_status"] == "PARTIAL"
-    assert by_id["GERCHIK-FALSE-BREAK-2BAR"]["implementation_status"] == "PARTIAL"
-    assert by_id["GERCHIK-BOUNCE"]["implementation_status"] == "DOCS_ONLY"
-    assert by_id["GERCHIK-BREAKOUT"]["implementation_status"] == "DOCS_ONLY"
-    assert by_id["GERCHIK-FALSE-BREAK-COMPLEX"]["implementation_status"] == "DOCS_ONLY"
+    assert all(row["implementation_status"] == "SHADOW_EXECUTABLE" for row in scenarios)
     assert all(x["office2_ready_impact"] != "GERCHIK_GATE" for x in scenarios)
     scenarios[0]["implementation_status"] = "MUTATED"
     assert gerchik_scenario_inventory()[0]["implementation_status"] != "MUTATED"

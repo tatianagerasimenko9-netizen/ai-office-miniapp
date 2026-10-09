@@ -313,3 +313,102 @@ def from_gerchik(
         "score": {"value": score, "band": band, "atr_trend_veto": veto},
     }
     return finalize(payload)
+
+
+def from_gerchik_scenario(
+    verdict: Dict[str, Any],
+    ctx: Dict[str, Any],
+    now: float,
+    symbol: str,
+    *,
+    fixture: bool = False,
+    candle_source: str = "binance_futures",
+    market: str = "binance_usdm",
+) -> Dict[str, Any]:
+    """Нормалізує source-backed сценарій у shadow contract без права READY."""
+    source = deepcopy(verdict)
+    lineage = _lineage(ctx, now, fixture=fixture, candle_source=candle_source, market=market)
+    bars = ctx["m15"]
+    decision_index = int(source.get("decision_index", -1))
+    actual_index = F.last_closed(bars, TF_SECONDS["M15"], now)
+    if decision_index != actual_index or not (0 <= decision_index < len(bars["t"])):
+        raise ValueError("verdict decision_index не відповідає останньому закритому бару")
+    expected_ts = float(bars["t"][decision_index] + TF_SECONDS["M15"])
+    if abs(float(source.get("decision_ts", -1.0)) - expected_ts) > 1e-6:
+        raise ValueError("verdict decision_ts не відповідає decision_index")
+    confirmations = deepcopy(source.get("confirmation") or [])
+    points = []
+    for item in confirmations:
+        if item.get("bar_index") is None or item.get("price") is None:
+            continue
+        index = int(item["bar_index"])
+        if index < 0 or index > decision_index:
+            raise ValueError("confirmation bar_index поза causal decision window")
+        points.append(_point(ctx, float(bars["t"][index]), float(item["price"]), float(bars["t"][index] + 900)))
+    rejected = [str(value) for value in source.get("rejection_reasons") or []]
+    state = str(source.get("state") or "CANDIDATE")
+    if state == "ENTRY_READY":
+        state = "CONFIRMED"
+    scenario = str(source.get("scenario") or "UNKNOWN")
+    level = deepcopy(source.get("level") or {})
+    entry_price = source.get("entry_reference")
+    sl = source.get("structural_sl")
+    target = source.get("potential_target")
+    payload = {
+        "method": "GERCHIK",
+        "version": f"{source.get('version') or 'gerchik-source-shadow'}/{scenario}",
+        "source_rule_ids": [str(source["source_rule_id"])],
+        "symbol": str(symbol).upper(),
+        "market": market,
+        "direction": str(source.get("direction") or "NEUTRAL").upper(),
+        "timeframe": "M15",
+        "decision_bar_close_utc": lineage["max_source_ts"],
+        "state": state,
+        "lineage": lineage,
+        "geometry": {
+            "points": points,
+            "levels": [level] if level else [],
+            "zone": None,
+            "mirror_kind": None,
+        },
+        "entry": {"price": entry_price, "zone": None, "activation": "SHADOW_REFERENCE_ONLY"} if entry_price is not None else None,
+        "invalidation": {
+            "price": sl,
+            "structural_extreme": source.get("structural_extreme"),
+            "why": "структурний екстремум source-backed Gerchik shadow-моделі",
+        } if sl is not None else None,
+        "targets": [{
+            "p": target,
+            "r": source.get("potential_rr"),
+            "kind": "SOURCE_MINIMUM_RR_MODEL",
+        }] if target is not None else [],
+        "obstacles": deepcopy(source.get("obstacles") or []),
+        "facts_for": [
+            {"finding": item, "semantic_group": _semantic_group(str(item.get("name") or "")), "status": "USED"}
+            for item in confirmations
+        ],
+        "facts_against": [
+            {"finding": reason, "semantic_group": "rejection_reason", "status": "USED"}
+            for reason in rejected
+        ],
+        "missing": [],
+        "ambiguities": [
+            {
+                "code": "SHADOW_ONLY_NO_READY",
+                "detail": "сценарій не змінює Brain READY і не є торговим рішенням",
+            },
+            {
+                "code": "OPERATIONAL_THRESHOLDS_NOT_SOURCE_QUOTES",
+                "detail": "ATR-допуски та impulse ratio є зафіксованою replay-операціоналізацією",
+            },
+        ],
+        "overlay": {
+            "scenario": scenario,
+            "source_status": source.get("source_status"),
+            "source_refs": deepcopy(source.get("source_refs") or []),
+            "implementation_status": source.get("implementation_status"),
+            "rejection_reasons": rejected,
+            "operational_parameters": deepcopy(source.get("operational_parameters") or {}),
+        },
+    }
+    return finalize(payload)
