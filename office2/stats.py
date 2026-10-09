@@ -73,6 +73,17 @@ def _pct(xs: List[float], q: float) -> Any:
 LATENCY_FIELDS = ("bar_to_sent_ms", "decision_to_sent_ms", "wake_ms", "bar_wait_ms", "fetch_ms", "brain_ms", "queue_ms", "chart_ms", "late_check_ms", "render_ms", "send_ms")
 TARGET_DECISION_TO_SENT_MS = 10_000      # ціль: рішення Brain → підтвердження Telegram
 TARGET_BAR_TO_SENT_MS = 30_000           # ціль: закриття M15 → Telegram (якщо дані доступні)
+OUTCOME_BUCKETS = ("final_tp_first", "final_sl_first", "final_no_first", "open_tp_first", "open_sl_first", "open_no_first")
+
+
+def _outcome_buckets() -> Dict[str, int]:
+    return {key: 0 for key in OUTCOME_BUCKETS}
+
+
+def _outcome_bucket(outcome: Dict[str, Any]) -> str:
+    phase = "final" if outcome["final"] else "open"
+    first = str(outcome.get("first") or "no").lower()
+    return f"{phase}_{first}_first"
 
 
 def latency(db: str, days: float = 14.0, now: Any = None) -> Dict[str, Any]:
@@ -100,7 +111,7 @@ def latency(db: str, days: float = 14.0, now: Any = None) -> Dict[str, Any]:
                 series["send_ms"].append(float(tm["send_s"]) * 1000)
             if tm.get("pickup_s") is not None:
                 series["queue_ms"].append(float(tm["pickup_s"]) * 1000)
-    out_s = {k: {"n": len(v), "p50": _pct(v, 0.5), "p95": _pct(v, 0.95), "max": (round(max(v), 1) if v else None)} for k, v in series.items() if v}
+    out_s = {k: {"n": len(v), "p50": _pct(v, 0.5), "p95": _pct(v, 0.95), "p99": _pct(v, 0.99), "max": (round(max(v), 1) if v else None)} for k, v in series.items() if v}
     d2s, b2s = series["decision_to_sent_ms"], series["bar_to_sent_ms"]
     sup = _rows(db, "SELECT last_error FROM office2_live_signal WHERE status = 'SUPPRESSED' AND created_ts >= ?", (t - days * 86400,))
     reasons: Dict[str, int] = {}
@@ -116,7 +127,8 @@ def latency(db: str, days: float = 14.0, now: Any = None) -> Dict[str, Any]:
 def collect(db: str) -> Dict[str, Any]:
     """Унікальні сценарії (за батьківським scenario id, не за повідомленнями Telegram і не за циклами), окремо за версією Brain."""
     rows = _rows(db, "SELECT scenario_id, symbol, direction, created_ts, status, snapshot_json FROM office2_live_signal ORDER BY created_ts ASC")
-    total = {"ready": 0, "delivered": 0, "not_sent": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0}
+    total = {"ready": 0, "delivered": 0, "not_sent": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0,
+             "outcome_buckets": _outcome_buckets()}
     by_brain: Dict[str, Dict[str, Any]] = {}
     items = []
     seen = set()
@@ -134,9 +146,11 @@ def collect(db: str) -> Dict[str, Any]:
         total["delivered"] += 1
         oc = scenario_outcome(snap, float(ct), _ms(db, sid))
         bv = str(snap.get("version_id") or snap.get("brain") or "unknown")   # версії Brain не змішуються
-        bb = by_brain.setdefault(bv, {"delivered": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0, "median_max_r": None})
+        bb = by_brain.setdefault(bv, {"delivered": 0, "entered": 0, "tp1_first": 0, "sl_first": 0, "tp3": 0, "expired": 0, "unresolved": 0,
+                                     "outcome_buckets": _outcome_buckets(), "median_max_r": None})
         bb["delivered"] += 1
         for tgt in (total, bb):
+            tgt["outcome_buckets"][_outcome_bucket(oc)] += 1
             if oc["entry_touched_ts"]:
                 tgt["entered"] += 1
             if oc["first"] == "TP":
@@ -161,5 +175,7 @@ def collect(db: str) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         smc_stats = None
     return {"total": total, "by_brain": by_brain, "items": items[-30:], "latency": latency(db), "smc": smc_stats,
+            "counter_semantics": {"outcome_buckets": "mutually_exclusive_sum_to_delivered",
+                                  "tp1_first_sl_first_unresolved": "overlapping_backward_compatible_metrics"},
             "note": "LIVE BETA · унікальні сценарії; правила виходу в системі не визначено, тому реалізованого PnL і суми R немає. «Макс. R» — найдальша досягнута ціль за початковим ризиком "
                     "(потенціал при утриманні, не прибуток). Результат сценарію ≠ особиста угода"}

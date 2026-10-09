@@ -12,6 +12,7 @@ import office_bridge as OB  # noqa: E402
 from office2 import brain as B  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 from office2.smc import replay as RP  # noqa: E402
+from scripts import replay_office2_public_data as PUB  # noqa: E402
 
 
 def agg(m15, width):
@@ -54,6 +55,55 @@ def test_simulate_outcomes_and_conservative_same_bar():
     assert r3["outcome"] == "OPEN" and abs(r3["r_gross"] - 0.2) < 1e-9
     s = RP.simulate(FX.bars([(100, 101, 99, 100), (100, 100.5, 96.9, 97.5)]), 0, "SHORT", 100.0, 102.0, 97.0, 1.5, 2.0)
     assert s["outcome"] == "TP1"                                                         # SHORT: дзеркальна логіка
+
+
+def test_execution_costs_delay_ttl_and_missed_entry_are_explicit():
+    b = FX.bars([
+        (100, 101, 99, 100),
+        (100, 101, 99.5, 100.5),
+        (101, 104.5, 100.5, 104),
+        (104, 104.5, 103.5, 104),
+    ])
+    no_slip = RP.simulate(b, 0, "LONG", 100, 98, 104, 2, 2, fee_rt_pct=0.1, slippage_rt_bps=0)
+    with_slip = RP.simulate(b, 0, "LONG", 100, 98, 104, 2, 2, fee_rt_pct=0.1, slippage_rt_bps=4)
+    assert no_slip["outcome"] == with_slip["outcome"] == "TP1"
+    assert round(no_slip["r_net"] - with_slip["r_net"], 6) == 0.02
+
+    delayed = RP.simulate(b, 0, "LONG", 100, 98, 104, 2, 2, entry_delay_sec=900, entry_ttl_sec=1800)
+    assert delayed["outcome"] == "TP1" and delayed["fill_entry"] == 101 and delayed["entry_delay_bars"] == 1
+    assert round(delayed["r_gross"], 6) == 1.0 and delayed["risk_pct_at_fill"] > 0
+
+    ttl = RP.simulate(b, 0, "LONG", 100, 98, 104, 2, 2, entry_delay_sec=901, entry_ttl_sec=900)
+    assert ttl["outcome"] == "MISSED_ENTRY_TTL" and ttl["r_net"] is None
+
+    touched = FX.bars([(100, 101, 99, 100), (100, 105, 99.5, 104), (104, 105, 103, 104)])
+    missed = RP.simulate(touched, 0, "LONG", 100, 98, 104, 2, 2, entry_delay_sec=900, entry_ttl_sec=1800)
+    assert missed["outcome"] == "MISSED_TP_BEFORE_ENTRY" and missed["fill_entry"] is None
+
+
+def test_public_real_data_adapter_drops_forming_and_rejects_fixture():
+    real_get = PUB._get
+    rows = [
+        {"time": 1000 + i * 900, "open": 100 + i, "high": 101 + i, "low": 99 + i, "close": 100.5 + i, "volume": 10 + i, "forming": i == 2}
+        for i in range(3)
+    ]
+    try:
+        def fake_get(url):
+            tf = next(expected for _, (query, expected) in PUB.TF.items() if f"tf={query}" in url)
+            return {"data_status": "DATA_OK", "fixture": False, "source": "binance_futures", "tf": tf, "candles": rows}
+        PUB._get = fake_get
+        arrs, provenance = PUB.fetch_arrays("https://readonly.example", "TESTUSDT")
+        assert all(len(arrs[k]["t"]) == 2 for k in PUB.TF) and len(arrs["w1"]["t"]) == 1
+        assert all(provenance[k]["source"] == "binance_futures" and provenance[k]["forming_dropped"] for k in PUB.TF)
+        assert provenance["w1"]["source"] == "derived_from_binance_futures_d1"
+        PUB._get = lambda url: {"data_status": "DATA_OK", "fixture": True, "source": "fixture", "tf": "15m", "candles": rows}
+        try:
+            PUB.fetch_arrays("https://readonly.example", "TESTUSDT")
+            raise AssertionError("fixture must not be accepted as real replay data")
+        except RuntimeError as exc:
+            assert "real DATA_OK" in str(exc)
+    finally:
+        PUB._get = real_get
 
 
 def test_replay_finds_smc_ready_exactly_when_sequence_completes_and_not_before():
@@ -145,10 +195,11 @@ def test_run_spec_multi_job_with_fake_feed_and_invariants():
         real_time = _t.time
         _t.time = lambda: float(end + 96 * 900 + 900)                      # «зараз» = через 24 год після кінця вікна
         try:
-            summ = RP.run_spec(db, Feed(), f"TESTUSDT@days=1@end={int(end)}@id=job1@throttle=0;TESTUSDT@days=1@end={int(end)}@id=job2@throttle=0", log=logs.append)
+            summ = RP.run_spec(db, Feed(), f"TESTUSDT@days=1@end={int(end)}@id=job1@throttle=0;TESTUSDT@days=1@end={int(end)}@id=job2@throttle=0@fee_rt_pct=0.08@slippage_rt_bps=6@entry_delay_sec=45@ttl_sec=3600", log=logs.append)
         finally:
             _t.time = real_time
         assert summ and summ["engines"]["SMC"]["ready"] >= 1 and "invariants_real_data" in summ and summ["invariants_real_data"]["TESTUSDT"]["n_violations"] == 0, summ and summ.get("invariants_real_data")
+        assert summ["execution_assumptions"] == {"fee_rt_pct": 0.08, "slippage_rt_bps": 6.0, "entry_delay_sec": 45.0, "entry_ttl_sec": 3600.0, "bar_resolution_sec": 900}
         ids = {r[0] for r in OB._fetchall(db, "SELECT run_id FROM office2_smc_replay_summary")}
         assert ids == {"job1", "job2"}
     finally:
