@@ -78,6 +78,8 @@ jobs:
         run: python scripts/test_office2_latency.py
       - name: Office2 delivery outbox and timing audit (read-only)
         run: python scripts/test_audit_o2_delivery.py
+      - name: Office2 exclusive outcome reporting (offline)
+        run: python scripts/test_office2_stats_reporting.py
       - name: SMC detectors, models, golden schemes, matrix, shadow integration, replay (offline)
         run: |
           python scripts/test_smc_structure.py
