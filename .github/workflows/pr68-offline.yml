@@ -76,6 +76,8 @@ jobs:
         run: python scripts/test_office2_brain2.py
       - name: Office2 latency - pool, adaptive start, parallel delivery, STALE/MISSED (offline)
         run: python scripts/test_office2_latency.py
+      - name: Office2 delivery outbox and timing audit (read-only)
+        run: python scripts/test_audit_o2_delivery.py
       - name: SMC detectors, models, golden schemes, matrix, shadow integration, replay (offline)
         run: |
           python scripts/test_smc_structure.py
