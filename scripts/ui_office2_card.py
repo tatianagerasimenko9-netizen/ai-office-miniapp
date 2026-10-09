@@ -57,6 +57,11 @@ def main():
                     r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.scenario_detail(sid)))
                 elif "/api/v2/radar" in u:
                     r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.radar_payload()))
+                elif "/api/v2/journal?kind=stats" in u:
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.journal_payload(kind="stats"), default=str))
+                elif "/api/v2/smc_row" in u:
+                    from urllib.parse import parse_qs, urlparse
+                    r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.smc_row_payload(parse_qs(urlparse(u).query).get("id", [""])[0]), default=str))
                 elif "/api/v2/scenarios" in u or "/api/v2/journal" in u:
                     r.fulfill(status=200, content_type="application/json", body=json.dumps(MV.scenarios_payload(watching=True) if "scenarios" in u else MV.journal_payload(kind="scenarios")))
                 elif "/api/v2/scanner" in u:
@@ -73,6 +78,8 @@ def main():
             txt = page.inner_text("body")
             for must in ("Чому Office вирішив увійти", "Карта ринку зверху вниз", "Послідовність до READY", "Що перевірено", "Я відкрила угоду", "Хід сценарію", "Ринок на момент сигналу"):
                 assert must.lower() in txt.lower(), (must, txt[:400])
+            assert "smc (методика sm trader)" in txt.lower() and "лише спостереження" in txt.lower(), "панель SMC має бути в картці"      # другий погляд, не вплив на READY
+            assert page.locator('#lay button[data-l="smc"]').count() == 1, "перемикач шару SMC"
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (картка)"
             th = WV.payload(db)["signals"][0]["frozen"]["thesis"]
             for i, lvl in enumerate(("ENTRY", "TP1", "TP2", "TP3")):                         # сценарій дійшов до TP3: головний статус — завершено, READY лише історична подія
@@ -83,6 +90,19 @@ def main():
             fl = ft.lower()
             assert "tp3 · завершено" in fl and "підсумок сценарію" in fl and ("не прибуток" in fl or "не pnl угоди" in fl) and "увійти можна до" not in fl, ft
             assert "після завершення сценарію" in fl or "ціна зараз" not in fl
+            from office2.smc import shadow as SH
+
+            now_ = float(OB._fetchone(db, "SELECT MAX(created_ts) FROM office2_live_signal")[0])
+            vv = {"state": "READY", "stage": 7, "model": "REVERSAL", "steps": [{"step": "RAID", "ok": True, "value": "SWING_L 99,5", "j": 3, "t": 1.0}, {"step": "MS", "ok": True, "value": "MSS вгору", "j": 6, "t": 2.0}], "reason": "повна послідовність",
+                  "entry": 100.0, "sl": 98.0, "targets": [{"p": 104.0, "kind": "M15SW", "r": 2.0}]}
+            SH._put(OB._execute, db, int(__import__("time").time()) - 5400, "YUSDT", "LONG", "REVERSAL", vv, "WAIT", 4.0, {"v": 1, "items": [{"k": "line", "p": 98.0, "label": "SL", "role": "sl"}], "events": [], "steps": []})
+            page.goto("http://o2.test/v2?tab=journal")
+            page.wait_for_selector("nav button", timeout=8000)
+            page.evaluate("S.jkind='stats'; journal()")
+            page.wait_for_selector("text=SMC · shadow", timeout=8000)
+            page.locator("[data-smc]").first.click()
+            page.wait_for_selector("text=Кроки моделі SMC", timeout=8000)
+            assert "не змінює ready" in page.inner_text("body").lower() and page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "екран SMC-рядка"
             page.goto("http://o2.test/v2?tab=radar")
             page.wait_for_selector("text=Готово", timeout=8000)
             rt = page.inner_text("body")

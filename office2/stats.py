@@ -154,6 +154,12 @@ def collect(db: str) -> Dict[str, Any]:
         items.append({"id": sid, "symbol": sym, "direction": d, "brain": bv, **oc})
     for bv, b in by_brain.items():
         b["median_max_r"] = _median(maxr.get(bv, []))
-    return {"total": total, "by_brain": by_brain, "items": items[-30:], "latency": latency(db),
+    try:
+        from office2.smc import shadow as _SMC
+
+        smc_stats = _SMC.shadow_stats(db)
+    except Exception:  # noqa: BLE001
+        smc_stats = None
+    return {"total": total, "by_brain": by_brain, "items": items[-30:], "latency": latency(db), "smc": smc_stats,
             "note": "LIVE BETA · унікальні сценарії; правила виходу в системі не визначено, тому реалізованого PnL і суми R немає. «Макс. R» — найдальша досягнута ціль за початковим ризиком "
                     "(потенціал при утриманні, не прибуток). Результат сценарію ≠ особиста угода"}

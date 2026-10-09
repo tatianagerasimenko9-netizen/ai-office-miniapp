@@ -98,7 +98,8 @@ def _sweep_events(m15: Dict[str, np.ndarray], a15: np.ndarray, k: int, levels: L
                 w0 = max(0, s - PRIOR_BARS)
                 beyond = int(np.sum(m15["c"][w0:s] < p)) if s > w0 else 0          # скільки з попередніх барів ціна ЗАКРИВАЛАСЬ за рівнем (рівень уже був прийнятий/знятий до цього «sweep»)
                 excess = float(p - np.min(m15["l"][w0:s])) / abs(p) * 100.0 if s > w0 and np.min(m15["l"][w0:s]) < p else 0.0
-                out.append({"src": "SWEEP", "e": e, "extreme": float(m15["l"][e]), "level": {"p": x["p"], "kind": x["kind"], "strength": int(x.get("strength", 1))}, "level_c": p, "reclaim_idx": r,
+                cls = "LATE_SWEEP" if beyond >= PRIOR_ACCEPT_MIN else "FRESH_RAID"      # рівень уже приймався ринком (≥3 закриття за ним у вікні) → це повторний тест, а не свіжий захват ліквідності; READY не блокується
+                out.append({"src": "SWEEP", "class": cls, "e": e, "extreme": float(m15["l"][e]), "level": {"p": x["p"], "kind": x["kind"], "strength": int(x.get("strength", 1))}, "level_c": p, "reclaim_idx": r,
                             "prior": {"bars": s - w0, "closes_beyond": beyond, "max_excess_pct": round(excess, 3)}})
                 break
     out.sort(key=lambda z: -z["e"])
@@ -123,6 +124,9 @@ def _origin_events(ctx: Dict[str, Any], direction: str, now: float, sg: int, m15
 # ------------------------------------------------------------------ зсув структури
 def _ev_txt(ev: Dict[str, Any], sg: int) -> str:
     lv = ev.get("level")
+    if lv and ev.get("class") == "LATE_SWEEP":
+        n_ = (ev.get("prior") or {}).get("closes_beyond", 0)
+        return f"повторний тест прийнятого рівня {lv['kind']} {lv['p']:.6g} (раніше {n_} закриттів M15 за ним; не свіжий sweep; екстремум {sg * ev['extreme']:.6g})"
     if lv:
         return f"sweep {lv['kind']} {lv['p']:.6g} (екстремум {sg * ev['extreme']:.6g})"
     return f"захист origin-зони (екстремум {sg * ev['extreme']:.6g})"
@@ -179,11 +183,11 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     e = ev["e"]
     lo = ev["extreme"]
     kind = "SWEEP_SEQ" if ev["src"] == "SWEEP" else "ORIGIN_SEQ"
-    base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin"), "prior": ev.get("prior")},
+    base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "class": ev.get("class"), "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin"), "prior": ev.get("prior")},
                             "level": ev["level"] or {"p": sg * lo, "kind": "ORIGIN_LOW"}, "invalidation": {"price": sg * lo, "why": "екстремум події (sweep/захист origin): закриття M15 за ним — теза хибна"}}
     base["trigger_level"] = sg * lo
     sh = _shift(m15, a15, k, e, swings)
-    seq = [{"step": "подія", "ok": True, "value": f"{ev['src']} {sg * lo:.6g}"}]
+    seq = [{"step": "подія", "ok": True, "value": (f"ПОВТОРНИЙ ТЕСТ прийнятого рівня {sg * lo:.6g} (не свіжий sweep)" if ev.get("class") == "LATE_SWEEP" else f"{ev['src']} {sg * lo:.6g}")}]
     if sh is None:
         hs = [s for s in (swings if swings is not None else F.swings(m15, 2)[0]) if s[0] > e and s[1] <= k]
         need = f"закриття M15 {'вище' if sg > 0 else 'нижче'} {sg * hs[-1][2]:.6g} з displacement (тіло ≥ {DISP_BODY_ATR:g} ATR)" if hs else f"локальний swing-{'high' if sg > 0 else 'low'} після події, потім його злам з displacement"
