@@ -453,17 +453,17 @@ def test_entry_zone_semantics_telegram_and_miniapp_agree():
     snap = _sol_snap()
     cap = DL.build_caption(snap)
     assert "READY: 120,99" in cap and "Зона входу: 120,99–121,53" in cap, cap
-    assert "Вхід:" not in cap and "SL: 122,02 · ризик 0,40–0,85%" in cap, cap
+    assert "Вхід:" not in cap and "SL: 122,02 (−0,85%)" in cap, cap          # Telegram: один відсоток від ціни READY; діапазон по краях зони — у Mini App (нижче)
     v = LVL.view_from_thesis(snap["thesis"])
     assert v["ready_price"] == 120.99 and v["zone"] == [120.99, 121.53]
     assert abs(v["sl_pct"][1] - (122.02 - 120.99) / 120.99 * 100) < 1e-9 and abs(v["sl_pct"][0] - (122.02 - 121.53) / 121.53 * 100) < 1e-9
     t1 = v["targets"][0]       # R від кожного краю: від 121,53 R більший, ніж від 120,99
     assert abs(t1["r"][0] - (120.99 - 119.0) / (122.02 - 120.99)) < 1e-9 and abs(t1["r"][1] - (121.53 - 119.0) / (122.02 - 121.53)) < 1e-9
-    assert "TP1: 119" in cap and "…+" in cap
+    assert "TP1: 119 (+1,64%; 1,93R)" in cap and "…" not in cap
     # без зони (тригер = READY-ціна): одне число, без діапазонів
     th2 = dict(snap["thesis"], trigger_level=120.99)
     cap2 = DL.build_caption(dict(snap, thesis=th2))
-    assert "Зона входу" not in cap2 and "SL: 122,02 · ризик 0,85%" in cap2 and "…" not in cap2, cap2
+    assert "Зона входу" not in cap2 and "SL: 122,02 (−0,85%)" in cap2 and "…" not in cap2, cap2
     # Mini App отримує ті самі числа з того самого модуля
     from office2 import webview as WV
     import office_bridge as OB
