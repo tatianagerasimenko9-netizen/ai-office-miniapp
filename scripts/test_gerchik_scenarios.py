@@ -223,6 +223,23 @@ def test_repeated_bounce_keeps_original_bsu_episode_id():
     assert first["start_index"] == second["start_index"] == 30
 
 
+def test_all_five_scenarios_have_low_side_mirror_symmetry():
+    for scenario, (ctx, k) in fixtures().items():
+        reflected = copy.deepcopy(ctx)
+        original_h = reflected["m15"]["h"].copy()
+        original_l = reflected["m15"]["l"].copy()
+        for key in ("o", "c"):
+            reflected["m15"][key] = 200.0 - reflected["m15"][key]
+        reflected["m15"]["h"] = 200.0 - original_l
+        reflected["m15"]["l"] = 200.0 - original_h
+        reflected["levels"][0] = dict(reflected["levels"][0], side="low", p=100.0)
+        high_side = only(ctx, k, scenario)
+        low_side = only(reflected, k, scenario)
+        assert low_side["direction"] != high_side["direction"], scenario
+        assert low_side["source_rule_id"] == high_side["source_rule_id"]
+        assert low_side["state"] == high_side["state"] == "CONFIRMED"
+
+
 def test_inventory_marks_execution_as_shadow_not_ready_gate():
     inventory = gerchik_scenario_inventory()
     assert len(inventory) == 5
