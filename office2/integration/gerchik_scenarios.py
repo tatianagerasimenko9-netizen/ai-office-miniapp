@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -39,9 +39,18 @@ class ShadowParams:
     min_rr: float = 3.0
     level_near_atr: float = 3.0
     bsu_lookback: int = 96
+    bounce_refractory_bars: int = 1
 
 
 _SOURCE = {rule["id"]: rule for rule in gerchik_source_rules()}
+
+
+def _known_value(level: Dict[str, Any]) -> Optional[float]:
+    try:
+        value = float(level["known"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
 
 
 def _plane(close: float, price: float) -> int:
@@ -71,8 +80,8 @@ def _direction_break(side: str) -> str:
 def _known_levels(ctx: Dict[str, Any], first_open: float, close: float, atr: float, p: ShadowParams) -> List[Dict[str, Any]]:
     levels: Dict[Tuple[str, int], Dict[str, Any]] = {}
     for raw in ctx.get("levels") or []:
-        known = raw.get("known")
-        if known is None or not np.isfinite(float(known)):
+        known = _known_value(raw)
+        if known is None:
             continue
         if raw.get("kind") not in DAILY_LEVEL_KINDS or float(known) > first_open:
             continue
@@ -158,16 +167,7 @@ def _verdict(
         "obstacles": [dict(obstacle)] if obstacle is not None else [],
         "rejection_reasons": rejected,
         "implementation_status": "SHADOW_EXECUTABLE",
-        "operational_parameters": {
-            "touch_atr": params.touch_atr,
-            "luft_atr": params.luft_atr,
-            "stop_buffer_atr": params.stop_buffer_atr,
-            "false_break_max_depth_atr": params.false_break_max_depth_atr,
-            "approach_bars": params.approach_bars,
-            "small_bar_ratio": params.small_bar_ratio,
-            "breakout_impulse_ratio": params.breakout_impulse_ratio,
-            "min_rr": params.min_rr,
-        },
+        "operational_parameters": asdict(params),
     }
     out.update(_source(scenario))
     return out
@@ -365,21 +365,21 @@ def detect_gerchik_scenarios(
     first_open = float(bars["t"][k])
     daily_atr: Optional[float] = None
     if ctx.get("daily_atr") is not None:
+        known_ts = ctx.get("daily_atr_known_ts")
         value = float(ctx["daily_atr"])
-        daily_atr = value if np.isfinite(value) and value > 0 else None
+        if known_ts is not None and float(known_ts) <= float(bars["t"][k]) and np.isfinite(value) and value > 0:
+            daily_atr = value
     elif ctx.get("d1") is not None:
         d1 = ctx["d1"]
-        kd = F.last_closed(d1, F.DAY, now)
+        kd = F.last_closed(d1, F.DAY, float(bars["t"][k]))
         daily_values = F.atr(d1, 14)
         if 0 <= kd < len(daily_values) and np.isfinite(daily_values[kd]) and daily_values[kd] > 0:
             daily_atr = float(daily_values[kd])
-    all_levels = [
-        dict(level)
-        for level in ctx.get("levels") or []
-        if level.get("known") is not None
-        and np.isfinite(float(level["known"]))
-        and float(level["known"]) <= float(bars["t"][k])
-    ]
+    all_levels = []
+    for level in ctx.get("levels") or []:
+        known = _known_value(level)
+        if known is not None and known <= float(bars["t"][k]):
+            all_levels.append(dict(level))
     levels = _known_levels(ctx, first_open, float(bars["c"][k]), atr, params)
     out: List[Dict[str, Any]] = []
     for level in levels:

@@ -132,13 +132,20 @@ def _gerchik_events(
     events: List[Dict[str, Any]] = []
     rejected: Counter[str] = Counter()
     seen = set()
+    last_bounce: Dict[float, int] = {}
     for index in np.flatnonzero((ends > t_from) & (ends <= t_to)):
         now = float(ends[index])
         for verdict in detect_gerchik_scenarios(ctx, now, symbol, params):
-            key = (verdict["scenario"], round(float(verdict["level"]["p"]), 8), int(verdict["start_index"]))
+            level_key = round(float(verdict["level"]["p"]), 8)
+            key = (verdict["scenario"], level_key, int(verdict["decision_index"]))
             if key in seen:
                 continue
             seen.add(key)
+            if verdict["scenario"] == "BOUNCE":
+                previous = last_bounce.get(level_key)
+                if previous is not None and int(verdict["decision_index"]) - previous <= params.bounce_refractory_bars:
+                    continue
+                last_bounce[level_key] = int(verdict["decision_index"])
             if verdict["state"] == "INVALIDATED":
                 rejected.update(verdict["rejection_reasons"])
                 continue
@@ -191,6 +198,10 @@ def replay_arrays(
         errors = validate_ohlcv(arrs[key], width)
         if errors:
             raise ValueError(f"{key}: {'; '.join(errors)}")
+    if btc is not None:
+        errors = validate_ohlcv(btc, 900)
+        if errors:
+            raise ValueError(f"btc: {'; '.join(errors)}")
     base = BASE.replay_arrays(symbol, arrs, t_from, t_to, btc=btc)
     execution = {
         "fee_rt_pct": max(0.0, float(fee_rt_pct)),
@@ -270,7 +281,7 @@ def summarize(runs: List[Dict[str, Any]], support_bars: int = 4) -> Dict[str, An
     triple = [event for event in brain_smc if any(supports(event, other) for other in gerchik)]
     joint = [event for event in brain if event in brain_smc or event in brain_gerchik]
     brain_only = [event for event in brain if event not in joint]
-    smc_only = [event for event in smc if not any(supports(event, other) for other in brain)]
+    smc_only = [event for event in smc if not any(supports(other, event) for other in brain)]
     return {
         "symbols": [run["symbol"] for run in runs],
         "decision_bars": sum(int(run["bars"]) for run in runs),

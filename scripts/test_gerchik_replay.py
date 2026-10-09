@@ -91,6 +91,19 @@ def test_future_shadow_event_is_not_hindsight_support():
     assert report["joint_shadow"]["brain_only"]["events"] == 1
 
 
+def test_prior_smc_support_is_not_also_smc_only():
+    win = {"outcome": "TP1", "r_net": 1.5}
+    report = RP.summarize([{
+        "symbol": "XUSDT",
+        "bars": 10,
+        "events": [event("SMC", 900, win), event("BRAIN", 1800, win)],
+        "gerchik_funnel": {"rejected": 0, "rejection_reasons": {}},
+        "execution_assumptions": {},
+    }])
+    assert report["joint_shadow"]["brain_with_smc_support"]["events"] == 1
+    assert report["joint_shadow"]["smc_only"]["events"] == 0
+
+
 def test_replay_input_validation_rejects_gaps_and_impossible_ohlc():
     data = bars()
     assert RP.validate_ohlcv(data, 900) == []

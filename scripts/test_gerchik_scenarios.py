@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from office2.integration import (  # noqa: E402
     SCENARIOS,
+    ShadowParams,
     detect_gerchik_scenarios,
     from_gerchik_scenario,
     gerchik_scenario_inventory,
@@ -33,6 +34,7 @@ def base_ctx(n: int = 48) -> Dict:
         "m15": bars,
         "atr15": np.ones(n),
         "daily_atr": 1.0,
+        "daily_atr_known_ts": 0.0,
         "levels": [{"p": 100.0, "side": "high", "kind": "D1SW", "known": 0.0, "strength": 2}],
     }
 
@@ -187,13 +189,21 @@ def test_levels_without_valid_known_timestamp_are_rejected():
     assert detect_gerchik_scenarios(ctx, at(ctx, k), "TESTUSDT") == []
     ctx["levels"][0]["known"] = float("nan")
     assert detect_gerchik_scenarios(ctx, at(ctx, k), "TESTUSDT") == []
+    ctx["levels"][0]["known"] = "not-a-timestamp"
+    assert detect_gerchik_scenarios(ctx, at(ctx, k), "TESTUSDT") == []
 
 
 def test_one_bar_requires_prior_closed_daily_atr():
     ctx, k = fixture_false_1bar()
     ctx.pop("daily_atr")
+    ctx.pop("daily_atr_known_ts")
     verdict = only(ctx, k, "FALSE_BREAK_1BAR")
     assert verdict["state"] == "INVALIDATED"
+    assert verdict["rejection_reasons"] == ["DAILY_ATR_UNAVAILABLE"]
+
+    ctx, k = fixture_false_1bar()
+    ctx["daily_atr_known_ts"] = float(ctx["m15"]["t"][k] + 1)
+    verdict = only(ctx, k, "FALSE_BREAK_1BAR")
     assert verdict["rejection_reasons"] == ["DAILY_ATR_UNAVAILABLE"]
 
 
@@ -238,6 +248,7 @@ def test_all_five_scenarios_have_low_side_mirror_symmetry():
         assert low_side["direction"] != high_side["direction"], scenario
         assert low_side["source_rule_id"] == high_side["source_rule_id"]
         assert low_side["state"] == high_side["state"] == "CONFIRMED"
+        assert set(low_side["operational_parameters"]) == set(vars(ShadowParams()))
 
 
 def test_inventory_marks_execution_as_shadow_not_ready_gate():
