@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
 
 from office2.integration.contract import validate_observation
+from office2.integration.gerchik_inventory import gerchik_scenario_inventory
 
 SUPPORT_STATES = {"CONFIRMED", "ENTRY_READY", "ACTIVE", "TP"}
 
@@ -95,6 +96,7 @@ def compare_shadow(observations: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "readonly": True,
         "shadow": True,
+        "gerchik_scenarios": gerchik_scenario_inventory(),
         "rows": rows,
         "invalid": errors,
         "summary": {

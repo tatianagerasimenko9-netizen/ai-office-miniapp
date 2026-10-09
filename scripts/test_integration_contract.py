@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_office2_brain2 as TB  # noqa: E402
-from office2.integration import compare_shadow, from_brain, from_gerchik, from_smc, validate_observation  # noqa: E402
+from office2.integration import compare_shadow, from_brain, from_gerchik, from_smc, gerchik_scenario_inventory, validate_observation  # noqa: E402
 from office2.smc import engine as SE  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 
@@ -190,6 +190,21 @@ def test_shadow_comparison_rejects_future_and_does_not_mix_decision_bars():
     assert report["summary"]["invalid"] == 1 and report["summary"]["groups"] == 2
     assert all(len(row["methods"]) == 1 for row in report["rows"])
     assert report["invalid"][0]["errors"] == ["max_source_ts is after decision_bar_close_utc"]
+
+
+def test_five_gerchik_scenarios_are_honestly_inventoried():
+    scenarios = gerchik_scenario_inventory()
+    assert len(scenarios) == 5 and len({x["id"] for x in scenarios}) == 5
+    assert all(x["primary_source_status"] == "SOURCE_UNAVAILABLE" for x in scenarios)
+    by_id = {x["id"]: x for x in scenarios}
+    assert by_id["GERCHIK-FALSE-BREAK-1BAR"]["implementation_status"] == "IMPLEMENTED_INTERNAL"
+    assert by_id["GERCHIK-BOUNCE"]["implementation_status"] == "PARTIAL"
+    assert by_id["GERCHIK-BREAKOUT"]["implementation_status"] == "PARTIAL"
+    assert by_id["GERCHIK-FALSE-BREAK-2BAR"]["implementation_status"] == "NOT_IMPLEMENTED"
+    assert by_id["GERCHIK-FALSE-BREAK-COMPLEX"]["implementation_status"] == "NOT_IMPLEMENTED"
+    assert all(x["office2_ready_impact"] != "GERCHIK_GATE" for x in scenarios)
+    scenarios[0]["implementation_status"] = "MUTATED"
+    assert gerchik_scenario_inventory()[0]["implementation_status"] != "MUTATED"
 
 
 def test_validator_rejects_future_and_incomplete_ready():
