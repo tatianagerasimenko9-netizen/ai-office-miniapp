@@ -111,7 +111,7 @@ def latency(db: str, days: float = 14.0, now: Any = None) -> Dict[str, Any]:
                 series["send_ms"].append(float(tm["send_s"]) * 1000)
             if tm.get("pickup_s") is not None:
                 series["queue_ms"].append(float(tm["pickup_s"]) * 1000)
-    out_s = {k: {"n": len(v), "p50": _pct(v, 0.5), "p95": _pct(v, 0.95), "max": (round(max(v), 1) if v else None)} for k, v in series.items() if v}
+    out_s = {k: {"n": len(v), "p50": _pct(v, 0.5), "p95": _pct(v, 0.95), "p99": _pct(v, 0.99), "max": (round(max(v), 1) if v else None)} for k, v in series.items() if v}
     d2s, b2s = series["decision_to_sent_ms"], series["bar_to_sent_ms"]
     sup = _rows(db, "SELECT last_error FROM office2_live_signal WHERE status = 'SUPPRESSED' AND created_ts >= ?", (t - days * 86400,))
     reasons: Dict[str, int] = {}

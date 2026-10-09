@@ -336,7 +336,7 @@ def test_latency_percentiles_and_targets():
     for i, (d2s, b2s) in enumerate(((4000, 20000), (6000, 28000), (9000, 33000), (30000, 80000))):
         OB.log_event(db, "OFFICE2_READY_SENT", {"scenario_id": f"O2|a{i}|1", "timing": {"decision_to_sent_ms": d2s, "bar_to_sent_ms": b2s, "send_ms": d2s - 1000, "queue_ms": 100}}, f"O2|a{i}|1")
     lat = ST.latency(db)
-    assert lat["stages"]["decision_to_sent_ms"]["p50"] == 7500.0 and lat["stages"]["decision_to_sent_ms"]["max"] == 30000.0
+    assert lat["stages"]["decision_to_sent_ms"]["p50"] == 7500.0 and lat["stages"]["decision_to_sent_ms"]["p99"] == 29370.0 and lat["stages"]["decision_to_sent_ms"]["max"] == 30000.0
     assert lat["within_target"] == {"decision_to_sent": (3, 4), "bar_to_sent": (2, 4)}, lat["within_target"]       # чесно: ціль досягнуто не завжди
 
 

@@ -930,7 +930,7 @@ function o2StatsHtml(t){
     <div class="kv"><span>Унікальних сценаріїв READY</span><b>${esc(T.ready)}</b></div><div class="kv"><span>Надіслано · не надіслано</span><b>${esc(T.delivered)} · ${esc(T.not_sent)}</b></div>
     <div class="kv"><span>Вхід торкнуто</span><b>${esc(T.entered)}</b></div><div class="kv"><span>Першим TP · першим стоп</span><b>${esc(T.tp1_first)} · ${esc(T.sl_first)}</b></div>
     <div class="kv"><span>Дійшли до TP3</span><b>${esc(T.tp3)}</b></div><div class="kv"><span>Строк вийшов без входу · ще не завершені</span><b>${esc(T.expired)} · ${esc(T.unresolved)}</b></div>
-    ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k];return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, вхід ${b.entered}, першим TP ${b.tp1_first} / стоп ${b.sl_first}, TP3 ${b.tp3}, не завершені ${b.unresolved}${b.median_max_r!=null?`, медіана макс. R ${o2f(b.median_max_r,1)} (потенціал, не прибуток)`:''}</div>`;}).join('')}
+    ${Object.keys(t.by_brain||{}).map(k=>{const b=t.by_brain[k],o=b.outcome_buckets||{};return `<div class="o2sub">Brain ${esc(k)} — окремо: надіслано ${b.delivered}, вхід ${b.entered}, першим TP ${b.tp1_first} / стоп ${b.sl_first}, TP3 ${b.tp3}, не завершені ${b.unresolved}${b.median_max_r!=null?`, медіана макс. R ${o2f(b.median_max_r,1)} (потенціал, не прибуток)`:''}${b.outcome_buckets?`<br>Взаємовиключно: завершені TP-first ${o.final_tp_first||0} · SL-first ${o.final_sl_first||0} · без першого результату ${o.final_no_first||0}; відкриті TP-first ${o.open_tp_first||0} · SL-first ${o.open_sl_first||0} · без результату ${o.open_no_first||0}`:''}</div>`;}).join('')}
     <div class="o2sub">${esc(t.note||'')}</div></div>${o2LatencyHtml(t.latency)}${o2SmcStatsHtml(t.smc)}`;
 }
 function o2SmcStatsHtml(M){
@@ -980,7 +980,7 @@ function o2LatencyHtml(L){
     <div class="kv"><span>Надіслано (нового формату)</span><b>${esc(L.delivered_n)} (${esc(L.new_format_n)})</b></div>
     <div class="kv"><span>Рішення → Telegram ≤ ${sec(L.targets.decision_to_sent_ms)}</span><b>${tgt('d',w.decision_to_sent)}</b></div>
     <div class="kv"><span>Закриття M15 → Telegram ≤ ${sec(L.targets.bar_to_sent_ms)}</span><b>${tgt('b',w.bar_to_sent)}</b></div>
-    ${Object.keys(NM).filter(k=>st[k]).map(k=>`<div class="kv"><span>${esc(NM[k])}</span><b class="num">p50 ${sec(st[k].p50)} · p95 ${sec(st[k].p95)} · max ${sec(st[k].max)}</b></div>`).join('')}
+    ${Object.keys(NM).filter(k=>st[k]).map(k=>`<div class="kv"><span>${esc(NM[k])}</span><b class="num">p50 ${sec(st[k].p50)} · p95 ${sec(st[k].p95)} · p99 ${sec(st[k].p99)} · max ${sec(st[k].max)}</b></div>`).join('')}
     <div class="o2sub">Не надіслано як свіжі: ${Object.keys(L.suppressed||{}).map(k=>esc(k)+' '+L.suppressed[k]).join(' · ')||'—'}. Це заміри з production; локальні тести сюди не входять.</div></div>`;
 }
 

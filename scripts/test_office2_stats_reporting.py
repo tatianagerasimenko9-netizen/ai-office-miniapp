@@ -77,6 +77,8 @@ def test_exclusive_reporting_buckets() -> None:
 
         tp_open = next(item for item in items if item["id"] == "O2|tp-open|1")
         assert tp_open["first"] == "TP" and tp_open["final"] is False
+        html = (ROOT / "office_web" / "mini_v2.html").read_text(encoding="utf-8")
+        assert "Взаємовиключно:" in html and "p99 ${sec(st[k].p99)}" in html
 
 
 if __name__ == "__main__":
