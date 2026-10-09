@@ -1,5 +1,5 @@
 """Time-frozen replay: Brain v2.1 і SMC на ОДНАКОВИХ закритих барах, без жодного майбутнього бару у вході рішення. Порівняння: READY-події, перетини, хибні READY, пропущені чисті рухи, R.
-Результат — експлоративна діагностика, а не доказ прибутковості: вибірки малі, вихід — спрощений (TP1 / SL / горизонт на M15, SL першим при одному барі), комісія з office2.sim.
+Результат — експлоративна діагностика, а не доказ прибутковості: вибірки малі, вихід — спрощений (TP1 / SL / горизонт на M15, SL першим при одному барі), витрати й затримка входу вказуються явно.
 Запуск: у worker через OFFICE2_SMC_REPLAY (дані з біржі) або офлайн на масивах (тести)."""
 from __future__ import annotations
 
@@ -24,6 +24,10 @@ DDL = ["""CREATE TABLE IF NOT EXISTS office2_smc_replay (
 HORIZON_BARS = 96            # 24 год на M15
 OPP_BARS, OPP_FAV_ATR, OPP_ADV_ATR = 48, 3.0, 1.5
 WARMUP = 200
+DEFAULT_FEE_RT_PCT = SIM.FEE_RT_DEFAULT
+DEFAULT_SLIPPAGE_RT_BPS = 4.0
+DEFAULT_ENTRY_DELAY_SEC = 30.0
+DEFAULT_ENTRY_TTL_SEC = 6 * 3600.0
 
 
 def _cut(a: Optional[Arr], width: int, now: float) -> Optional[Arr]:
@@ -41,13 +45,54 @@ def ctx_at(arrs: Dict[str, Optional[Arr]], now: float) -> Optional[Dict[str, Any
     return B.build_full_ctx(m15, h4, d1, w1, arrs.get("mn"))
 
 
-def simulate(m15: Arr, i0: int, direction: str, entry: float, sl: float, tp1: float, r_tp1: float, risk_pct: float, horizon: int = HORIZON_BARS) -> Dict[str, Any]:
-    """Результат на M15 після бару i0 (вхід за ціною рішення): TP1 / SL / OPEN. Обидва в одному барі → SL (консервативно). R net = R − комісія/ризик%."""
+def simulate(
+    m15: Arr,
+    i0: int,
+    direction: str,
+    entry: float,
+    sl: float,
+    tp1: float,
+    r_tp1: float,
+    risk_pct: float,
+    horizon: int = HORIZON_BARS,
+    *,
+    fee_rt_pct: float = DEFAULT_FEE_RT_PCT,
+    slippage_rt_bps: float = DEFAULT_SLIPPAGE_RT_BPS,
+    entry_delay_sec: float = 0.0,
+    entry_ttl_sec: float = DEFAULT_ENTRY_TTL_SEC,
+) -> Dict[str, Any]:
+    """Результат після рішення: TP1 / SL / OPEN або пропущений вхід.
+
+    На M15 затримка має роздільність одного бару: додатна затримка бере open
+    першого доступного бару, повні 15 хв додають наступний бар. До fill перевіряємо
+    SL/TP, а витрати кола віднімаємо від R. Обидва рівні в одному барі → SL.
+    """
     sg = 1.0 if direction == "LONG" else -1.0
-    risk = abs(entry - sl)
-    h, l, c = m15["h"][i0 + 1:i0 + 1 + horizon], m15["l"][i0 + 1:i0 + 1 + horizon], m15["c"][i0 + 1:i0 + 1 + horizon]
+    delay = max(0.0, float(entry_delay_sec))
+    ttl = max(0.0, float(entry_ttl_sec))
+    costs = max(0.0, float(fee_rt_pct)) + max(0.0, float(slippage_rt_bps)) / 100.0
+    if delay > ttl:
+        return {"outcome": "MISSED_ENTRY_TTL", "r_gross": None, "r_net": None, "mfe_r": None, "mae_r": None, "bars": 0,
+                "complete": True, "entry_delay_sec": delay, "entry_delay_bars": None, "fill_entry": None, "cost_rt_pct": costs}
+    delay_bars = int(delay // 900)
+    fill_i = i0 + 1 + delay_bars
+    if fill_i >= len(m15["t"]):
+        return {"outcome": "NO_DATA", "r_gross": None, "r_net": None, "mfe_r": None, "mae_r": None, "bars": 0,
+                "complete": False, "entry_delay_sec": delay, "entry_delay_bars": delay_bars, "fill_entry": None, "cost_rt_pct": costs}
+    if delay > 0:
+        pre_h, pre_l = m15["h"][i0 + 1:fill_i], m15["l"][i0 + 1:fill_i]
+        pre_sl = bool(((pre_l <= sl) if sg > 0 else (pre_h >= sl)).any())
+        pre_tp = bool(((pre_h >= tp1) if sg > 0 else (pre_l <= tp1)).any())
+        if pre_sl or pre_tp:
+            reason = "MISSED_SL_BEFORE_ENTRY" if pre_sl else "MISSED_TP_BEFORE_ENTRY"
+            return {"outcome": reason, "r_gross": None, "r_net": None, "mfe_r": None, "mae_r": None, "bars": 0,
+                    "complete": True, "entry_delay_sec": delay, "entry_delay_bars": delay_bars, "fill_entry": None, "cost_rt_pct": costs}
+    fill_entry = float(m15["o"][fill_i]) if delay > 0 else float(entry)
+    risk = abs(fill_entry - sl)
+    h, l, c = m15["h"][fill_i:fill_i + horizon], m15["l"][fill_i:fill_i + horizon], m15["c"][fill_i:fill_i + horizon]
     if len(h) == 0 or risk <= 0:
-        return {"outcome": "NO_DATA", "r_gross": None, "r_net": None, "mfe_r": None, "mae_r": None, "bars": 0}
+        return {"outcome": "NO_DATA", "r_gross": None, "r_net": None, "mfe_r": None, "mae_r": None, "bars": 0,
+                "complete": False, "entry_delay_sec": delay, "entry_delay_bars": delay_bars, "fill_entry": fill_entry, "cost_rt_pct": costs}
     hit_sl = (l <= sl) if sg > 0 else (h >= sl)
     hit_tp = (h >= tp1) if sg > 0 else (l <= tp1)
     isl = int(np.argmax(hit_sl)) if hit_sl.any() else -1
@@ -55,13 +100,17 @@ def simulate(m15: Arr, i0: int, direction: str, entry: float, sl: float, tp1: fl
     if isl >= 0 and (itp < 0 or isl <= itp):
         k, out, rg = isl, "SL", -1.0
     elif itp >= 0:
-        k, out, rg = itp, "TP1", float(r_tp1)
+        k, out = itp, "TP1"
+        rg = float(r_tp1) if delay <= 0 else abs(float(tp1) - fill_entry) / risk
     else:
         k, out = len(h) - 1, "OPEN"
-        rg = float(sg * (c[-1] - entry) / risk)
-    fav = float((h[:k + 1].max() - entry) / risk) if sg > 0 else float((entry - l[:k + 1].min()) / risk)
-    adv = float((entry - l[:k + 1].min()) / risk) if sg > 0 else float((h[:k + 1].max() - entry) / risk)
-    return {"outcome": out, "r_gross": rg, "r_net": SIM.net_r(rg, risk_pct), "mfe_r": fav, "mae_r": adv, "bars": k + 1, "complete": len(h) >= horizon or out != "OPEN"}
+        rg = float(sg * (c[-1] - fill_entry) / risk)
+    fav = float((h[:k + 1].max() - fill_entry) / risk) if sg > 0 else float((fill_entry - l[:k + 1].min()) / risk)
+    adv = float((fill_entry - l[:k + 1].min()) / risk) if sg > 0 else float((h[:k + 1].max() - fill_entry) / risk)
+    actual_risk_pct = risk / max(abs(fill_entry), 1e-9) * 100.0 if delay > 0 else float(risk_pct)
+    return {"outcome": out, "r_gross": rg, "r_net": SIM.net_r(rg, actual_risk_pct, costs), "mfe_r": fav, "mae_r": adv, "bars": k + 1,
+            "complete": len(h) >= horizon or out != "OPEN", "entry_delay_sec": delay, "entry_delay_bars": delay_bars, "fill_entry": fill_entry,
+            "risk_pct_at_fill": actual_risk_pct, "fee_rt_pct": float(fee_rt_pct), "slippage_rt_bps": float(slippage_rt_bps), "cost_rt_pct": costs}
 
 
 def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel) -> List[Dict[str, Any]]:
@@ -98,7 +147,9 @@ def _ret1h(m15: Arr, now: float) -> Optional[float]:
 
 
 def replay_arrays(sym: str, arrs: Dict[str, Optional[Arr]], t_from: float, t_to: float, mc: Optional[Dict[str, Any]] = None, rel: Optional[Dict[str, Any]] = None,
-                  with_brain: bool = True, with_smc: bool = True, log=None, btc: Optional[Arr] = None, throttle_s: float = 0.0, outcome_end: Optional[float] = None) -> Dict[str, Any]:
+                  with_brain: bool = True, with_smc: bool = True, log=None, btc: Optional[Arr] = None, throttle_s: float = 0.0, outcome_end: Optional[float] = None,
+                  fee_rt_pct: float = DEFAULT_FEE_RT_PCT, slippage_rt_bps: float = DEFAULT_SLIPPAGE_RT_BPS,
+                  entry_delay_sec: float = DEFAULT_ENTRY_DELAY_SEC, entry_ttl_sec: float = DEFAULT_ENTRY_TTL_SEC) -> Dict[str, Any]:
     """Прохід по барах M15 (закриття у (t_from, t_to]) із поступовим відкриттям даних. Повертає події READY обох рушіїв і підсумок."""
     m15 = arrs["m15"]
     ends = m15["t"] + 900
@@ -143,11 +194,15 @@ def replay_arrays(sym: str, arrs: Dict[str, Optional[Arr]], t_from: float, t_to:
             seen.add(kk)
             f.update(symbol=sym, ts_bar=int(now), i=int(i))
             if f.get("tp1") is not None and f["risk_pct"] > 0:
-                f["sim"] = simulate(m15, int(i), f["dir"], f["entry"], f["sl"], f["tp1"], f["r_tp1"], f["risk_pct"])
+                f["sim"] = simulate(m15, int(i), f["dir"], f["entry"], f["sl"], f["tp1"], f["r_tp1"], f["risk_pct"],
+                                    fee_rt_pct=fee_rt_pct, slippage_rt_bps=slippage_rt_bps,
+                                    entry_delay_sec=entry_delay_sec, entry_ttl_sec=entry_ttl_sec)
             events.append(f)
     pct = lambda a, q: round(float(np.percentile(a, q)), 1) if a else None  # noqa: E731
     return {"symbol": sym, "events": events, "bars": int(len(idx)), "elapsed_s": round(time.time() - t0, 1), "opportunities": opportunities(m15, t_from, t_to),
-            "timing": {k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "max": pct(v, 100)} for k, v in tm.items()}}
+            "execution_assumptions": {"fee_rt_pct": float(fee_rt_pct), "slippage_rt_bps": float(slippage_rt_bps),
+                                      "entry_delay_sec": float(entry_delay_sec), "entry_ttl_sec": float(entry_ttl_sec), "bar_resolution_sec": 900},
+            "timing": {k: {"n": len(v), "p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "max": pct(v, 100)} for k, v in tm.items()}}
 
 
 def opportunities(m15: Arr, t_from: float, t_to: float) -> List[Dict[str, Any]]:
@@ -183,11 +238,13 @@ def bootstrap_ci(xs: List[float], n: int = 2000, seed: int = 7) -> Optional[List
 
 def _block(es: List[Dict[str, Any]]) -> Dict[str, Any]:
     sims = [e["sim"] for e in es if e.get("sim") and e["sim"]["r_net"] is not None]
+    missed = [e["sim"] for e in es if e.get("sim") and str(e["sim"].get("outcome") or "").startswith("MISSED_")]
     rs = [x["r_net"] for x in sims]
     oc = {k: sum(1 for x in sims if x["outcome"] == k) for k in ("TP1", "SL", "OPEN")}
     res = oc["TP1"] + oc["SL"]
     sl = [x for x in sims if x["outcome"] == "SL"]
-    return {"ready": len(es), "scored": len(sims), "outcomes": oc, "win_rate_resolved": round(oc["TP1"] / res, 3) if res else None, "mean_r_net": round(float(np.mean(rs)), 3) if rs else None,
+    return {"ready": len(es), "scored": len(sims), "missed_entry": len(missed), "missed_entry_reasons": {k: sum(1 for x in missed if x["outcome"] == k) for k in sorted({x["outcome"] for x in missed})},
+            "outcomes": oc, "win_rate_resolved": round(oc["TP1"] / res, 3) if res else None, "mean_r_net": round(float(np.mean(rs)), 3) if rs else None,
             "r_net_ci95": bootstrap_ci(rs), "false_ready_rate": round(oc["SL"] / len(sims), 3) if sims else None,
             "fast_sl_share": round(sum(1 for x in sl if x["bars"] <= 4) / len(sl), 3) if sl else None, "avg_bars_to_outcome": round(float(np.mean([x["bars"] for x in sims if x["outcome"] != "OPEN"])), 1) if any(x["outcome"] != "OPEN" for x in sims) else None}
 
@@ -197,7 +254,9 @@ def summarize(runs: List[Dict[str, Any]], lead_bars: int = 16) -> Dict[str, Any]
     ev = [e for r in runs for e in r["events"] if "error" not in e]
     errs = [e for r in runs for e in r["events"] if "error" in e]
     opp = [dict(o, symbol=r["symbol"]) for r in runs for o in r["opportunities"]]
-    out: Dict[str, Any] = {"symbols": [r["symbol"] for r in runs], "bars": sum(r["bars"] for r in runs), "errors": len(errs), "error_samples": [e["error"] for e in errs[:3]], "engines": {}, "opportunities": len(opp)}
+    assumptions = [r.get("execution_assumptions") for r in runs if r.get("execution_assumptions")]
+    out: Dict[str, Any] = {"symbols": [r["symbol"] for r in runs], "bars": sum(r["bars"] for r in runs), "errors": len(errs), "error_samples": [e["error"] for e in errs[:3]], "engines": {}, "opportunities": len(opp),
+                           "execution_assumptions": assumptions[0] if assumptions and all(x == assumptions[0] for x in assumptions) else assumptions}
     near = lambda x, y, k=4: x["symbol"] == y["symbol"] and x["dir"] == y["dir"] and abs(x["ts_bar"] - y["ts_bar"]) <= k * 900  # noqa: E731
     for src in ("BRAIN", "SMC"):
         mine = [e for e in ev if e["source"] == src]
@@ -227,7 +286,8 @@ def summarize(runs: List[Dict[str, Any]], lead_bars: int = 16) -> Dict[str, Any]
     sup = [x for x in late if any(near(x, y) for y in sm)]
     out["late_sweep"] = {"brain_late": _block(late), "brain_fresh": _block(fresh), "late_with_smc_support": _block(sup), "late_without_smc_support": _block([x for x in late if x not in sup]),
                          "note": "LATE_SWEEP = рівень уже приймався (≥3 закриття за ним); READY не блокується, лише позначається. Решта «незалежної підстави» — збіг із SMC READY ±1 год"}
-    out["caveats"] = ["експлоративно, не доказ прибутковості", "вихід спрощений: TP1/SL/горизонт 24 год на M15, SL першим при одному барі", "малі вибірки: довірчі інтервали ширші за відмінності між рушіями",
+    out["caveats"] = ["експлоративно, не доказ прибутковості", "вихід спрощений: TP1/SL/горизонт 24 год на M15, SL першим при одному барі",
+                      "затримка входу на M15 апроксимується open доступного бару; fee і round-trip slippage віднімаються від R", "малі вибірки: довірчі інтервали ширші за відмінності між рушіями",
                       "SMC — shadow, пороги Brain для SL/цілей збережено (brain.targets_for)", "у replay немає живих хуків Brain (CVD/OI/funding/M5) — докази, що не блокують, відсутні в обох рушіях однаково"]
     return out
 
@@ -266,6 +326,7 @@ def load_feed_arrays(feed: Any, sym: str, end_ts: float, days: int) -> Dict[str,
 
 def run_spec(db: str, feed: Any, spec: str, log=print) -> Optional[Dict[str, Any]]:
     """Завдання розділяються «;». Завдання: 'СИМВОЛИ@days=N@end=<epoch закриття останнього бару рішення>@id=<ім'я>'; СИМВОЛИ — через кому або UNIVERSE.
+    Опції виконання: fee_rt_pct, slippage_rt_bps, entry_delay_sec, ttl_sec.
     Дані для результатів (24 год після кінця) беруться з біржі, але рішення приймаються лише на барах ≤ end (ctx_at обрізає кожен TF). За замовчуванням end — останній закритий бар мінус 24 год."""
     init_db(db)
     last = None
@@ -283,6 +344,12 @@ def run_spec(db: str, feed: Any, spec: str, log=print) -> Optional[Dict[str, Any
         fetch_end = min(float(now_bar), end + 96 * 900)
         run_id = kv.get("id") or f"smc-replay-{int(end)}-{days}d"
         throttle = float(kv.get("throttle", 0.02))
+        execution = {
+            "fee_rt_pct": max(0.0, float(kv.get("fee_rt_pct", DEFAULT_FEE_RT_PCT))),
+            "slippage_rt_bps": max(0.0, float(kv.get("slippage_rt_bps", DEFAULT_SLIPPAGE_RT_BPS))),
+            "entry_delay_sec": max(0.0, float(kv.get("entry_delay_sec", DEFAULT_ENTRY_DELAY_SEC))),
+            "entry_ttl_sec": max(0.0, float(kv.get("ttl_sec", DEFAULT_ENTRY_TTL_SEC))),
+        }
         btc = None
         try:
             btc_arrs = load_feed_arrays(feed, "BTCUSDT", fetch_end, days)
@@ -297,7 +364,7 @@ def run_spec(db: str, feed: Any, spec: str, log=print) -> Optional[Dict[str, Any
                 if not arrs.get("m15"):
                     log(f"[smc-replay] {sym}: немає даних")
                     continue
-                r = replay_arrays(sym, arrs, end - days * 86400, end, btc=btc, throttle_s=throttle)
+                r = replay_arrays(sym, arrs, end - days * 86400, end, btc=btc, throttle_s=throttle, **execution)
                 runs.append(r)
                 try:
                     from office2.smc import invariants as INV
