@@ -1,4 +1,4 @@
-"""Read-only адаптери чинних Brain v2.1 і SMC shadow до єдиного контракту."""
+"""Read-only адаптери чинних Brain v2.1, SMC і Gerchik Layer-B shadow до єдиного контракту."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -240,5 +240,76 @@ def from_smc(
         "ambiguities": ambiguities,
         "overlay": deepcopy(overlay),
         "model": model_name,
+    }
+    return finalize(payload)
+
+
+def from_gerchik(
+    ops: Dict[str, Any],
+    ctx: Dict[str, Any],
+    now: float,
+    symbol: str,
+    direction: str,
+    *,
+    fixture: bool = False,
+    candle_source: str = "binance_futures",
+    market: str = "binance_usdm",
+) -> Dict[str, Any]:
+    """Нормалізує вже обчислений Layer-B score без повторного запуску API.
+
+    Gerchik ops не має власних entry/SL/targets, тому цей адаптер принципово
+    ніколи не повертає ENTRY_READY і не може вплинути на Brain READY.
+    """
+    source = deepcopy(ops)
+    lineage = _lineage(ctx, now, fixture=fixture, candle_source=candle_source, market=market)
+    raw_score = source.get("gerchik_ops_score")
+    try:
+        score = int(raw_score) if raw_score is not None else None
+    except (TypeError, ValueError):
+        score = None
+    score = max(0, min(10, score)) if score is not None else None
+    band = str(source.get("gerchik_ops_band") or "unknown")
+    veto = bool(source.get("gerchik_atr_trend_veto"))
+    reasons = [str(x) for x in source.get("gerchik_ops_reasons") or [] if str(x).strip()]
+    if score is None:
+        state = "CANDIDATE"
+    elif score <= 4 or veto:
+        state = "INVALIDATED"
+    elif score <= 7:
+        state = "FORMING"
+    else:
+        state = "CONFIRMED"
+    findings = [
+        {"finding": reason, "semantic_group": _semantic_group(reason), "status": "USED"}
+        for reason in reasons
+    ]
+    facts_for = findings if state in {"FORMING", "CONFIRMED"} else []
+    facts_against = findings if state == "INVALIDATED" else []
+    missing = [] if score is not None else [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]
+    payload = {
+        "method": "GERCHIK",
+        "version": "gerchik-ops-layer-b-1",
+        "source_rule_ids": ["GERCHIK-OPS-LAYER-B"] + (["GERCHIK-ATR-80"] if veto else []),
+        "symbol": str(symbol).upper(),
+        "market": market,
+        "direction": str(direction).upper(),
+        "timeframe": "M15",
+        "decision_bar_close_utc": lineage["max_source_ts"],
+        "state": state,
+        "lineage": lineage,
+        "geometry": {"points": [], "levels": [], "zone": None, "mirror_kind": None},
+        "entry": None,
+        "invalidation": None,
+        "targets": [],
+        "obstacles": [],
+        "facts_for": facts_for,
+        "facts_against": facts_against,
+        "missing": missing,
+        "ambiguities": [{
+            "code": "LAYER_B_NOT_PRIMARY_SOURCE",
+            "detail": "0–10 ops score є внутрішньою AI-формалізацією, не перевіреним правилом книги",
+        }],
+        "overlay": None,
+        "score": {"value": score, "band": band, "atr_trend_veto": veto},
     }
     return finalize(payload)

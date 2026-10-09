@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_office2_brain2 as TB  # noqa: E402
-from office2.integration import from_brain, from_smc, validate_observation  # noqa: E402
+from office2.integration import from_brain, from_gerchik, from_smc, validate_observation  # noqa: E402
 from office2.smc import engine as SE  # noqa: E402
 from office2.smc import fixtures as FX  # noqa: E402
 
@@ -89,6 +89,52 @@ def test_smc_observation_is_prefix_invariant():
     ob = from_smc(b["models"]["LONG"]["REVERSAL"], ctx_b, now, "TESTUSDT", fixture=True)
     assert oa == ob, "майбутні бари змінили observation минулого рішення"
     assert validate_observation(oa) == []
+
+
+def test_gerchik_layer_b_is_shadow_only_and_never_entry_ready():
+    _, ctx, now = brain_ready()
+    strong = {
+        "gerchik_ops_score": 9,
+        "gerchik_ops_band": "strong",
+        "gerchik_atr_trend_veto": False,
+        "gerchik_ops_reasons": ["рівень D1 +2", "sweep/ЛП +3", "імпульс/BOS +1"],
+    }
+    before = copy.deepcopy(strong)
+    obs = from_gerchik(strong, ctx, now, "XUSDT", "LONG", fixture=True)
+    assert strong == before, "адаптер змінив Gerchik ops"
+    assert obs["method"] == "GERCHIK" and obs["state"] == "CONFIRMED"
+    assert obs["state"] != "ENTRY_READY" and obs["entry"] is None and obs["targets"] == []
+    assert obs["score"] == {"value": 9, "band": "strong", "atr_trend_veto": False}
+    assert {x["semantic_group"] for x in obs["facts_for"]} >= {"liquidity_failure", "structure_break"}
+    assert validate_observation(obs) == []
+
+    weak = from_gerchik(
+        {"gerchik_ops_score": 4, "gerchik_ops_band": "skip", "gerchik_atr_trend_veto": True,
+         "gerchik_ops_reasons": ["ATR≥80% — не по тренду"]},
+        ctx, now, "XUSDT", "SHORT", fixture=True,
+    )
+    assert weak["state"] == "INVALIDATED" and "GERCHIK-ATR-80" in weak["source_rule_ids"]
+    assert weak["facts_against"] and validate_observation(weak) == []
+
+
+def test_gerchik_unavailable_is_explicit_and_prefix_invariant():
+    _, ctx, now = brain_ready()
+    unavailable = {
+        "gerchik_ops_score": None,
+        "gerchik_ops_band": "unknown",
+        "gerchik_atr_trend_veto": False,
+        "gerchik_ops_reasons": ["даних недостатньо"],
+    }
+    full = from_gerchik(unavailable, ctx, now, "XUSDT", "LONG", fixture=True)
+    cut_ctx = copy.deepcopy(ctx)
+    for tf in ("m15",):
+        cut_ctx[tf] = {key: value[:-3] for key, value in cut_ctx[tf].items()}
+    past_now = float(cut_ctx["m15"]["t"][-1]) + 900
+    a = from_gerchik(unavailable, cut_ctx, past_now, "XUSDT", "LONG", fixture=True)
+    b = from_gerchik(unavailable, ctx, past_now, "XUSDT", "LONG", fixture=True)
+    assert a == b, "майбутні M15-бари змінили Gerchik observation"
+    assert full["state"] == "CANDIDATE" and full["missing"] == [{"module": "gerchik_ops_inputs", "status": "DATA_UNAVAILABLE"}]
+    assert validate_observation(full) == []
 
 
 def test_validator_rejects_future_and_incomplete_ready():
