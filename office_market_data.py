@@ -68,6 +68,11 @@ def backoff_left() -> float:
     return max(0.0, max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time())
 
 
+def hard_backoff_left() -> float:
+    """Лише справжня пауза (429/418 або вага ≥ 2200), без власної м'якої паузи ваги: для запитів «життя READY» (priority())."""
+    return max(0.0, _BACKOFF_UNTIL - time.time())
+
+
 def note_rate_limited(retry_after: Any = None) -> None:
     global _BACKOFF_UNTIL
     try:

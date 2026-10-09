@@ -95,3 +95,13 @@ Evidence-модулі не голосують: вони не блокують і
 - Хронологія в мс у події `OFFICE2_READY_SENT.timing`: `wake_ms` (закриття бару → пробудження), `bar_wait_ms`, `fetch_ms`, `brain_ms`, `queue_ms`, `chart_ms`, `late_check_ms`, `render_ms`, `send_ms`, `bar_to_sent_ms`, `decision_to_sent_ms`. Журнал → Модельна статистика → «Затримка READY · факт» показує p50/p95/max і частку в цілях (рішення → Telegram ≤10 с, закриття M15 → Telegram ≤30 с).
 
 **Обмеження:** швидкість Telegram Bot API, час відповіді Binance REST і навантаження старих моніторів Лева на спільний worker (512 МБ, один процес) залежать не від Brain; вони видно в `send_ms`, `fetch_ms`, `[loop-lag]`.
+
+### Затримка READY: пакет 2 (09.10)
+
+Після першого пакету цикл усе ще тривав 80–230 с: основний час — не Brain, а імпорт «старого Лева» (`build_ctx` на кожен символ поза universe, ≈3–4 с) і м'які паузи ваги Binance (used_weight до 1828/2400, сплески `pending_milestones`).
+
+- `Feed._default_get` працює під `MD.priority()` і чекає лише залишок жорсткого backoff (`MD.hard_backoff_left()`), тож запити Brain не стоять за вторинними.
+- Імпорт старого Лева виконується у фоновому потоці `office2-oldlev` (`old_lev_background=True`), не блокує цикл і наступний бар; лог `[o2shadow] старий Лев (фон)`.
+- Перевірка застарілих планів legacy-моніторингу — раз на 1800 с (`OLD_RECHECK_LEGACY_SEC`), O2 — 120 с.
+- У лозі циклу: `brain_s` (чистий час Brain) і `slow_ms` (3 найповільніші символи).
+- Обмеження: швидкість Telegram API та Binance REST залишаються зовнішніми; ліміт вимірюється в `ST.latency` на реальних READY.
