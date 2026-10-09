@@ -32,6 +32,7 @@ def base_ctx(n: int = 48) -> Dict:
     return {
         "m15": bars,
         "atr15": np.ones(n),
+        "daily_atr": 1.0,
         "levels": [{"p": 100.0, "side": "high", "kind": "D1SW", "known": 0.0, "strength": 2}],
     }
 
@@ -137,7 +138,7 @@ def test_negative_depth_impulse_complex_and_room_rejections():
     deep, k = fixture_false_1bar(0.50)
     one = only(deep, k, "FALSE_BREAK_1BAR")
     assert one["state"] == "INVALIDATED"
-    assert one["rejection_reasons"] == ["FALSE_BREAK_DEPTH_ABOVE_0_30_ATR"]
+    assert one["rejection_reasons"] == ["FALSE_BREAK_DEPTH_ABOVE_0_30_DAILY_ATR"]
 
     breakout, k = fixture_breakout()
     set_bar(breakout, k, 99.9, 100.15, 99.8, 100.1)
@@ -178,6 +179,48 @@ def test_false_break_classes_are_mutually_exclusive():
     scenarios = {row["scenario"] for row in detect_gerchik_scenarios(complex_ctx, at(complex_ctx, k), "TESTUSDT")}
     assert "FALSE_BREAK_COMPLEX" in scenarios
     assert not scenarios.intersection({"FALSE_BREAK_1BAR", "FALSE_BREAK_2BAR"})
+
+
+def test_levels_without_valid_known_timestamp_are_rejected():
+    ctx, k = fixture_false_1bar()
+    ctx["levels"][0].pop("known")
+    assert detect_gerchik_scenarios(ctx, at(ctx, k), "TESTUSDT") == []
+    ctx["levels"][0]["known"] = float("nan")
+    assert detect_gerchik_scenarios(ctx, at(ctx, k), "TESTUSDT") == []
+
+
+def test_one_bar_requires_prior_closed_daily_atr():
+    ctx, k = fixture_false_1bar()
+    ctx.pop("daily_atr")
+    verdict = only(ctx, k, "FALSE_BREAK_1BAR")
+    assert verdict["state"] == "INVALIDATED"
+    assert verdict["rejection_reasons"] == ["DAILY_ATR_UNAVAILABLE"]
+
+
+def test_adapter_rejects_stale_verdict_and_future_confirmation():
+    ctx, k = fixture_bounce()
+    verdict = only(ctx, k, "BOUNCE")
+    try:
+        from_gerchik_scenario(verdict, ctx, at(ctx, k + 1), "TESTUSDT", fixture=True)
+        raise AssertionError("stale verdict accepted")
+    except ValueError as exc:
+        assert "decision_index" in str(exc)
+
+    future = copy.deepcopy(verdict)
+    future["confirmation"].append({"name": "future", "bar_index": k + 1, "price": 100.0})
+    try:
+        from_gerchik_scenario(future, ctx, at(ctx, k), "TESTUSDT", fixture=True)
+        raise AssertionError("future confirmation accepted")
+    except ValueError as exc:
+        assert "causal decision window" in str(exc)
+
+
+def test_repeated_bounce_keeps_original_bsu_episode_id():
+    ctx, k = fixture_bounce()
+    first = only(ctx, k, "BOUNCE")
+    set_bar(ctx, k + 1, 99.0, 99.95, 98.7, 98.9)
+    second = only(ctx, k + 1, "BOUNCE")
+    assert first["start_index"] == second["start_index"] == 30
 
 
 def test_inventory_marks_execution_as_shadow_not_ready_gate():

@@ -329,12 +329,21 @@ def from_gerchik_scenario(
     source = deepcopy(verdict)
     lineage = _lineage(ctx, now, fixture=fixture, candle_source=candle_source, market=market)
     bars = ctx["m15"]
+    decision_index = int(source.get("decision_index", -1))
+    actual_index = F.last_closed(bars, TF_SECONDS["M15"], now)
+    if decision_index != actual_index or not (0 <= decision_index < len(bars["t"])):
+        raise ValueError("verdict decision_index не відповідає останньому закритому бару")
+    expected_ts = float(bars["t"][decision_index] + TF_SECONDS["M15"])
+    if abs(float(source.get("decision_ts", -1.0)) - expected_ts) > 1e-6:
+        raise ValueError("verdict decision_ts не відповідає decision_index")
     confirmations = deepcopy(source.get("confirmation") or [])
     points = []
     for item in confirmations:
         if item.get("bar_index") is None or item.get("price") is None:
             continue
-        index = max(0, min(int(item["bar_index"]), len(bars["t"]) - 1))
+        index = int(item["bar_index"])
+        if index < 0 or index > decision_index:
+            raise ValueError("confirmation bar_index поза causal decision window")
         points.append(_point(ctx, float(bars["t"][index]), float(item["price"]), float(bars["t"][index] + 900)))
     rejected = [str(value) for value in source.get("rejection_reasons") or []]
     state = str(source.get("state") or "CANDIDATE")

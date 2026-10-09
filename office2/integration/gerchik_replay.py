@@ -22,6 +22,26 @@ ENTRY_TTL_SEC = 6 * 3600.0
 HORIZON_BARS = BASE.HORIZON_BARS
 
 
+def validate_ohlcv(bars: F.Arr, width: int) -> List[str]:
+    """Строга якість replay-входу: без пропусків, дублів та неможливих OHLC."""
+    errors: List[str] = []
+    required = ("t", "o", "h", "l", "c", "v")
+    if any(key not in bars for key in required):
+        return ["missing OHLCV arrays"]
+    lengths = {len(bars[key]) for key in required}
+    if len(lengths) != 1 or not lengths or next(iter(lengths)) == 0:
+        return ["OHLCV arrays have unequal or zero lengths"]
+    if any(not np.isfinite(np.asarray(bars[key], dtype=float)).all() for key in required):
+        errors.append("OHLCV contains non-finite values")
+    times = np.asarray(bars["t"], dtype=float)
+    if len(times) > 1 and not np.all(np.diff(times) == float(width)):
+        errors.append("timestamps are not unique contiguous bars")
+    o, h, l, c = (np.asarray(bars[key], dtype=float) for key in ("o", "h", "l", "c"))
+    if np.any(l > h) or np.any(o < l) or np.any(o > h) or np.any(c < l) or np.any(c > h):
+        errors.append("invalid OHLC geometry")
+    return errors
+
+
 def simulate_execution(
     m15: F.Arr,
     decision_index: int,
@@ -115,7 +135,7 @@ def _gerchik_events(
     for index in np.flatnonzero((ends > t_from) & (ends <= t_to)):
         now = float(ends[index])
         for verdict in detect_gerchik_scenarios(ctx, now, symbol, params):
-            key = (verdict["scenario"], round(float(verdict["level"]["p"]), 8), int(verdict["decision_ts"]))
+            key = (verdict["scenario"], round(float(verdict["level"]["p"]), 8), int(verdict["start_index"]))
             if key in seen:
                 continue
             seen.add(key)
@@ -137,6 +157,8 @@ def _gerchik_events(
                 "tp1": float(verdict["potential_target"]),
                 "source_rule_id": verdict["source_rule_id"],
                 "source_refs": verdict["source_refs"],
+                "detector_version": verdict["version"],
+                "operational_parameters": verdict["operational_parameters"],
                 "level_kind": verdict["level"]["kind"],
                 "level_price": verdict["level"]["p"],
                 "state": "SHADOW_CONFIRMED",
@@ -162,10 +184,14 @@ def replay_arrays(
     params: ShadowParams = ShadowParams(),
 ) -> Dict[str, Any]:
     """Однакове frozen-time вікно для Brain, SMC і Gerchik shadow."""
-    base = BASE.replay_arrays(symbol, arrs, t_from, t_to, btc=btc)
     m15 = arrs["m15"]
     if m15 is None or arrs.get("h4") is None or arrs.get("d1") is None or arrs.get("w1") is None:
         raise ValueError("m15/h4/d1/w1 arrays required")
+    for key, width in (("m15", 900), ("h4", 14400), ("d1", F.DAY), ("w1", 7 * F.DAY)):
+        errors = validate_ohlcv(arrs[key], width)
+        if errors:
+            raise ValueError(f"{key}: {'; '.join(errors)}")
+    base = BASE.replay_arrays(symbol, arrs, t_from, t_to, btc=btc)
     execution = {
         "fee_rt_pct": max(0.0, float(fee_rt_pct)),
         "slippage_rt_bps": max(0.0, float(slippage_rt_bps)),
@@ -181,6 +207,7 @@ def replay_arrays(
     context = {
         "m15": m15,
         "atr15": F.atr(m15, 14),
+        "d1": arrs["d1"],
         "levels": F.build_levels(arrs["h4"], arrs["d1"], arrs["w1"]),
     }
     gerchik, funnel = _gerchik_events(symbol, context, t_from, t_to, execution, params)
@@ -190,20 +217,38 @@ def replay_arrays(
     return base
 
 
+def _cluster_ci(events: List[Dict[str, Any]], seed: int = 19, rounds: int = 1000) -> Optional[List[float]]:
+    resolved = [event for event in events if event.get("sim", {}).get("outcome") in {"TP1", "SL"} and event["sim"].get("r_net") is not None]
+    clusters: Dict[tuple[str, int], List[float]] = {}
+    for event in resolved:
+        key = (str(event["symbol"]), int(event["ts_bar"]) // F.DAY)
+        clusters.setdefault(key, []).append(float(event["sim"]["r_net"]))
+    if len(resolved) < 10 or len(clusters) < 3:
+        return None
+    keys = list(clusters)
+    random = np.random.RandomState(seed)
+    values = []
+    for _ in range(rounds):
+        sample = [value for key in (keys[i] for i in random.randint(0, len(keys), len(keys))) for value in clusters[key]]
+        values.append(float(np.mean(sample)))
+    return [round(float(np.percentile(values, 2.5)), 3), round(float(np.percentile(values, 97.5)), 3)]
+
+
 def _block(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     sims = [event["sim"] for event in events if event.get("sim")]
-    scored = [sim for sim in sims if sim.get("r_net") is not None]
+    resolved_events = [event for event in events if event.get("sim", {}).get("outcome") in {"TP1", "SL"} and event["sim"].get("r_net") is not None]
+    scored = [event["sim"] for event in resolved_events]
     missed = [sim for sim in sims if str(sim.get("outcome") or "").startswith("MISSED_")]
     values = [float(sim["r_net"]) for sim in scored]
     outcomes = {name: sum(1 for sim in scored if sim["outcome"] == name) for name in ("TP1", "SL", "OPEN")}
     return {
         "events": len(events),
-        "scored": len(scored),
+        "scored_resolved": len(scored),
         "missed_entry": len(missed),
         "missed_entry_reasons": dict(Counter(sim["outcome"] for sim in missed)),
         "outcomes": outcomes,
         "mean_r_net": round(float(np.mean(values)), 3) if values else None,
-        "r_net_ci95": BASE.bootstrap_ci(values),
+        "r_net_ci95_clustered": _cluster_ci(events),
         "sample_warning": "N_LT_10_NO_INFERENCE" if len(scored) < 10 else None,
     }
 
@@ -212,20 +257,20 @@ def summarize(runs: List[Dict[str, Any]], support_bars: int = 4) -> Dict[str, An
     events = [event for run in runs for event in run["events"] if "error" not in event]
     by_source = {source: [event for event in events if event["source"] == source] for source in ("BRAIN", "SMC", "GERCHIK_SHADOW")}
 
-    def near(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    def supports(decision: Dict[str, Any], evidence: Dict[str, Any]) -> bool:
         return (
-            left["symbol"] == right["symbol"]
-            and left["dir"] == right["dir"]
-            and abs(int(left["ts_bar"]) - int(right["ts_bar"])) <= support_bars * 900
+            decision["symbol"] == evidence["symbol"]
+            and decision["dir"] == evidence["dir"]
+            and 0 <= int(decision["ts_bar"]) - int(evidence["ts_bar"]) <= support_bars * 900
         )
 
     brain, smc, gerchik = by_source["BRAIN"], by_source["SMC"], by_source["GERCHIK_SHADOW"]
-    brain_smc = [event for event in brain if any(near(event, other) for other in smc)]
-    brain_gerchik = [event for event in brain if any(near(event, other) for other in gerchik)]
-    triple = [event for event in brain_smc if any(near(event, other) for other in gerchik)]
+    brain_smc = [event for event in brain if any(supports(event, other) for other in smc)]
+    brain_gerchik = [event for event in brain if any(supports(event, other) for other in gerchik)]
+    triple = [event for event in brain_smc if any(supports(event, other) for other in gerchik)]
     joint = [event for event in brain if event in brain_smc or event in brain_gerchik]
     brain_only = [event for event in brain if event not in joint]
-    smc_only = [event for event in smc if not any(near(event, other) for other in brain)]
+    smc_only = [event for event in smc if not any(supports(event, other) for other in brain)]
     return {
         "symbols": [run["symbol"] for run in runs],
         "decision_bars": sum(int(run["bars"]) for run in runs),
@@ -245,6 +290,10 @@ def summarize(runs: List[Dict[str, Any]], support_bars: int = 4) -> Dict[str, An
         "gerchik_by_scenario": {
             scenario: _block([event for event in gerchik if event["model"] == scenario])
             for scenario in sorted({event["model"] for event in gerchik})
+        },
+        "gerchik_detector": {
+            "version": next((event.get("detector_version") for event in gerchik), None),
+            "operational_parameters": next((event.get("operational_parameters") for event in gerchik), None),
         },
         "gerchik_rejections": {
             "total": sum(run["gerchik_funnel"]["rejected"] for run in runs),

@@ -49,7 +49,7 @@ _SCENARIOS: List[Dict[str, Any]] = [
         "source_conditions": ["прокол і повернення одним баром", "entry до закриття", "stop за хвіст або рівень", "глибина близько 1/3 ATR", "TP ≥3R"],
         "code": ["office2.integration.gerchik_scenarios:_false_break_1bar"],
         "tests": ["scripts/test_gerchik_scenarios.py", "scripts/test_levels.py"],
-        "gap": "pre-close order недоступний на закритих OHLCV; depth cap 0.30 ATR перевіряється, але реакція інструмента на минулі пробої не має окремого feed",
+        "gap": "pre-close order недоступний на закритих OHLCV; depth cap 0.30 від попереднього закритого D1 ATR перевіряється, але реакція інструмента на минулі пробої не має окремого feed",
         "office2_ready_impact": "NONE",
         "legacy_impact": "LTF_CONFIRM_AND_LAYER_B_SCORE",
     },

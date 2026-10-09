@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -109,6 +110,11 @@ def main() -> int:
         runs.append(run)
         print(f"{symbol}: bars={run['bars']} events={len(run['events'])} gerchik={run['gerchik_funnel']['detected']}", flush=True)
     report = RP.summarize(runs)
+    try:
+        code_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    except (OSError, subprocess.SubprocessError):
+        code_revision = None
+    report["code_revision"] = code_revision
     report["provenance"] = {"endpoint": args.base_url, "readonly": True, "symbols": provenance}
     report["window"] = {
         "days": args.days,

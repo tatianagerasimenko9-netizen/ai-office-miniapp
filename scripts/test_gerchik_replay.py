@@ -42,6 +42,7 @@ def test_execution_marks_ttl_and_gap_missed_entries():
     assert ttl["outcome"] == "MISSED_ENTRY_TTL" and ttl["r_net"] is None
 
     data["o"][1] = 103.2
+    data["h"][1] = 103.3
     gap = RP.simulate_execution(data, 0, "LONG", 100.0, 99.0, 103.0)
     assert gap["outcome"] == "MISSED_TP_BEFORE_ENTRY" and gap["fill_entry"] is None
 
@@ -75,6 +76,43 @@ def test_summary_separates_brain_smc_and_joint_shadow_without_decision():
     assert report["joint_shadow"]["brain_smc_gerchik_triple"]["events"] == 1
     assert report["joint_shadow"]["decision_changed"] is False
     assert report["gerchik_rejections"]["reasons"] == {"NO_BREAKOUT_IMPULSE": 2}
+
+
+def test_future_shadow_event_is_not_hindsight_support():
+    win = {"outcome": "TP1", "r_net": 1.5}
+    report = RP.summarize([{
+        "symbol": "XUSDT",
+        "bars": 10,
+        "events": [event("BRAIN", 900, win), event("GERCHIK_SHADOW", 1800, win, "BOUNCE")],
+        "gerchik_funnel": {"rejected": 0, "rejection_reasons": {}},
+        "execution_assumptions": {},
+    }])
+    assert report["joint_shadow"]["brain_with_gerchik_support"]["events"] == 0
+    assert report["joint_shadow"]["brain_only"]["events"] == 1
+
+
+def test_replay_input_validation_rejects_gaps_and_impossible_ohlc():
+    data = bars()
+    assert RP.validate_ohlcv(data, 900) == []
+    data["t"][3] += 60
+    assert "timestamps are not unique contiguous bars" in RP.validate_ohlcv(data, 900)
+    data = bars()
+    data["o"][2] = data["h"][2] + 1
+    assert "invalid OHLC geometry" in RP.validate_ohlcv(data, 900)
+
+
+def test_open_outcomes_are_descriptive_not_inferential():
+    opened = {"outcome": "OPEN", "r_net": 9.0}
+    report = RP.summarize([{
+        "symbol": "XUSDT",
+        "bars": 10,
+        "events": [event("BRAIN", 900, opened)],
+        "gerchik_funnel": {"rejected": 0, "rejection_reasons": {}},
+        "execution_assumptions": {},
+    }])
+    block = report["engines"]["BRAIN"]
+    assert block["events"] == 1 and block["scored_resolved"] == 0
+    assert block["mean_r_net"] is None and block["r_net_ci95_clustered"] is None
 
 
 def main() -> int:

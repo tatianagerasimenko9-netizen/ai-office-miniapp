@@ -71,7 +71,10 @@ def _direction_break(side: str) -> str:
 def _known_levels(ctx: Dict[str, Any], first_open: float, close: float, atr: float, p: ShadowParams) -> List[Dict[str, Any]]:
     levels: Dict[Tuple[str, int], Dict[str, Any]] = {}
     for raw in ctx.get("levels") or []:
-        if raw.get("kind") not in DAILY_LEVEL_KINDS or float(raw.get("known") or 0.0) > first_open:
+        known = raw.get("known")
+        if known is None or not np.isfinite(float(known)):
+            continue
+        if raw.get("kind") not in DAILY_LEVEL_KINDS or float(known) > first_open:
             continue
         price = float(raw["p"])
         if price <= 0 or abs(price - close) > p.level_near_atr * atr:
@@ -186,7 +189,7 @@ def _bounce(
     if not no_break or abs(ext1 - price) > p.touch_atr * atr or abs(ext2 - price) > p.luft_atr * atr:
         return None
     bsu = None
-    for i in range(bpu1 - 1, max(-1, bpu1 - p.bsu_lookback), -1):
+    for i in range(max(0, bpu1 - p.bsu_lookback), bpu1):
         ext = float(bars["h"][i] if float(bars["c"][i]) <= price else bars["l"][i])
         if abs(ext - ext1) <= p.touch_atr * atr:
             bsu = i
@@ -254,7 +257,13 @@ def _breakout(
 
 
 def _false_break_1bar(
-    bars: F.Arr, level: Dict[str, Any], k: int, atr: float, all_levels: List[Dict[str, Any]], p: ShadowParams
+    bars: F.Arr,
+    level: Dict[str, Any],
+    k: int,
+    atr: float,
+    daily_atr: Optional[float],
+    all_levels: List[Dict[str, Any]],
+    p: ShadowParams,
 ) -> Optional[Dict[str, Any]]:
     price, side = float(level["p"]), str(level["side"])
     if float(level.get("known") or 0.0) > float(bars["t"][k]):
@@ -263,11 +272,15 @@ def _false_break_1bar(
     if not pierced or not _initial(float(bars["c"][k]), price, side):
         return None
     ext = _extreme(bars, k, side)
-    depth = abs(ext - price) / atr
-    rejected = ["FALSE_BREAK_DEPTH_ABOVE_0_30_ATR"] if depth > p.false_break_max_depth_atr else []
+    depth = abs(ext - price) / daily_atr if daily_atr is not None and daily_atr > 0 else None
+    rejected = []
+    if depth is None:
+        rejected.append("DAILY_ATR_UNAVAILABLE")
+    elif depth > p.false_break_max_depth_atr:
+        rejected.append("FALSE_BREAK_DEPTH_ABOVE_0_30_DAILY_ATR")
     return _verdict(
         "FALSE_BREAK_1BAR", bars, level, k, k, _direction_fade(side), ext, atr,
-        [{"name": "pierce_and_close_back", "bar_index": k, "depth_atr": depth}],
+        [{"name": "pierce_and_close_back", "bar_index": k, "depth_daily_atr": depth}],
         all_levels, p, rejection_reasons=rejected,
     )
 
@@ -350,17 +363,36 @@ def detect_gerchik_scenarios(
     if not np.isfinite(atr) or atr <= 0:
         return []
     first_open = float(bars["t"][k])
-    all_levels = [dict(level) for level in ctx.get("levels") or [] if float(level.get("known") or 0.0) <= float(bars["t"][k])]
+    daily_atr: Optional[float] = None
+    if ctx.get("daily_atr") is not None:
+        value = float(ctx["daily_atr"])
+        daily_atr = value if np.isfinite(value) and value > 0 else None
+    elif ctx.get("d1") is not None:
+        d1 = ctx["d1"]
+        kd = F.last_closed(d1, F.DAY, now)
+        daily_values = F.atr(d1, 14)
+        if 0 <= kd < len(daily_values) and np.isfinite(daily_values[kd]) and daily_values[kd] > 0:
+            daily_atr = float(daily_values[kd])
+    all_levels = [
+        dict(level)
+        for level in ctx.get("levels") or []
+        if level.get("known") is not None
+        and np.isfinite(float(level["known"]))
+        and float(level["known"]) <= float(bars["t"][k])
+    ]
     levels = _known_levels(ctx, first_open, float(bars["c"][k]), atr, params)
     out: List[Dict[str, Any]] = []
-    detectors = (_bounce, _breakout, _false_break_1bar, _false_break_2bar, _false_break_complex)
     for level in levels:
         level_rows: List[Dict[str, Any]] = []
-        for detector in detectors:
+        for detector in (_bounce, _breakout, _false_break_2bar, _false_break_complex):
             verdict = detector(bars, level, k, atr, all_levels, params)
             if verdict is not None:
                 verdict["symbol"] = str(symbol).upper()
                 level_rows.append(verdict)
+        one_bar = _false_break_1bar(bars, level, k, atr, daily_atr, all_levels, params)
+        if one_bar is not None:
+            one_bar["symbol"] = str(symbol).upper()
+            level_rows.append(one_bar)
         scenarios = {row["scenario"] for row in level_rows}
         # ЛП-класи взаємовиключні: найдовша підтверджена геометрія має пріоритет.
         if "FALSE_BREAK_COMPLEX" in scenarios:
