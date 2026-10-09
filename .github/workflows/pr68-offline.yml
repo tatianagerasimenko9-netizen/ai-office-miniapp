@@ -89,6 +89,7 @@ jobs:
           python scripts/test_smc_integration.py
           python scripts/test_smc_replay.py
           python scripts/test_smc_invariants.py
+          python scripts/test_integration_contract.py
       - name: Evidence-backed market thesis contract (offline, no orders)
         run: python scripts/test_market_thesis.py
       - name: Market feed freshness and provenance veto (offline)
