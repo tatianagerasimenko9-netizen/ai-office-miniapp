@@ -139,6 +139,11 @@ def _rows_to_arr(rows: list, drop_open_at: Optional[float] = None) -> Optional[D
     return {"t": a[:, 0], "o": a[:, 1], "h": a[:, 2], "l": a[:, 3], "c": a[:, 4], "v": a[:, 5], "tbv": a[:, 6]}
 
 
+BACKOFF_WAIT_SEC = float(os.getenv("OFFICE2_BACKOFF_WAIT_SEC", "45") or 45)
+BAR_PROBE_START_SEC = float(os.getenv("OFFICE2_BAR_PROBE_START_SEC", "2") or 2)     # перший запит до біржі після закриття бару (було фіксовані +20 с)
+BAR_PROBE_MAX_SEC = float(os.getenv("OFFICE2_BAR_PROBE_MAX_SEC", "25") or 25)
+
+
 class Feed:
     """Завантаження klines із паузами між запитами; HTF кешуються довше. Спільний ліміт/пауза Binance береться з office_market_data."""
 
@@ -152,8 +157,12 @@ class Feed:
     def _default_get(url: str, params: Dict[str, Any]) -> Any:
         import office_market_data as MD
 
-        if MD.backoff_left() > 0:
-            raise RuntimeError(f"backoff {MD.backoff_left():.0f}s")
+        left = MD.backoff_left()
+        if left > 0:
+            if left <= BACKOFF_WAIT_SEC:      # коротка загальна пауза Binance (429): чекаємо її кінець, а не кидаємо цикл і не пропускаємо монети
+                time.sleep(left + 0.5)
+            else:
+                raise RuntimeError(f"backoff {left:.0f}s")
         return MD._http_get_json(url, params)
 
     def klines(self, sym: str, tf: str, now: float, limit: Optional[int] = None, start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> Optional[Dict[str, np.ndarray]]:
@@ -386,6 +395,10 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             if ctx is not None and st:
                 ctxs[sym], states[sym] = ctx, st
     t_fetch = time.time() - t_cycle
+    if engine_enabled():
+        from office2 import engine as _EN
+
+        _EN.CYCLE_TIMES.update(cycle_start=t_cycle, fetch_done=time.time())
     mc = market_context(states)
     res = {"states": 0, "events": 0, "old_lev": 0}
     ts_bar = int(now)
@@ -513,6 +526,24 @@ def resolve_outcomes(db: str, feed: Feed, now: float, limit: int = 6) -> int:
 
 
 # ---------------------------------------------------------------- фон
+def wait_bar_closed(feed: "Feed", bar_close: float, sleep=time.sleep, clock=time.time) -> float:
+    """Чекає, поки біржа віддасть щойно закритий M15-бар (є рядок з open = bar_close−900 і вже відкритий наступний), опитуючи BTC раз на секунду.
+    Повертає час очікування (с). Не довше BAR_PROBE_MAX_SEC: далі цикл стартує як раніше (бар у цьому випадку вважається доступним)."""
+    t0 = clock()
+    want_open = int((bar_close - CYCLE_SEC) * 1000)
+    next_open = int(bar_close * 1000)
+    while clock() - t0 < BAR_PROBE_MAX_SEC:
+        try:
+            rows = feed._get(KL_URL, {"symbol": "BTCUSDT", "interval": "15m", "limit": 3})
+            opens = {int(r[0]) for r in rows or []}
+            if want_open in opens and next_open in opens:
+                break
+        except Exception:  # noqa: BLE001
+            pass
+        sleep(1.0)
+    return clock() - t0
+
+
 def _next_bar_close(now: float) -> float:
     return (int(now) // CYCLE_SEC + 1) * CYCLE_SEC
 
@@ -531,12 +562,19 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
     while True:
         try:
             nxt = _next_bar_close(time.time())
-            time.sleep(max(1.0, nxt - time.time() + 20))     # +20 с: бар точно закрито й віддається біржею
+            time.sleep(max(1.0, nxt - time.time() + BAR_PROBE_START_SEC))
             now = float(nxt)
+            t_wake = time.time()
+            waited = wait_bar_closed(feed, now)               # адаптивно замість фіксованих +20 с: стартуємо, щойно біржа віддала закритий бар
             t0 = time.time()
+            if engine_enabled():
+                from office2 import engine as EN
+
+                EN.CYCLE_TIMES.clear()
+                EN.CYCLE_TIMES.update(bar_close=now, wake=t_wake, bar_ready=t0)
             res = cycle(db, feed, now, state)
             n_out = resolve_outcomes(db, feed, time.time())
-            _log(f"цикл {datetime.fromtimestamp(now, tz=timezone.utc):%H:%M}Z: {res}, наслідків {n_out}, запитів {feed.requests}, {time.time() - t0:.0f} с")
+            _log(f"цикл {datetime.fromtimestamp(now, tz=timezone.utc):%H:%M}Z: {res}, очікування бару {waited:.0f} с, наслідків {n_out}, запитів {feed.requests}, {time.time() - t0:.0f} с")
         except Exception as exc:  # noqa: BLE001
             _bump("errors")
             with _LOCK:

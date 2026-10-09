@@ -7682,10 +7682,16 @@ EV позитивне: {prob.get('ev_positive', '')}
         while True:
             try:
                 if _o2d.delivery_enabled():
-                    await _o2d.deliver_pending(db_path, send_proactive, _o2_fetch, _o2card.render, EVENT_TRADE_UPDATE)
+                    _t_o2 = asyncio.ensure_future(_o2d.deliver_pending(db_path, send_proactive, _o2_fetch, _o2card.render, EVENT_TRADE_UPDATE))   # не чекаємо кінця: повільна відправка не блокує наступний READY
+
+                    def _o2_done(f: "asyncio.Future") -> None:
+                        if not f.cancelled() and f.exception() is not None:
+                            print(f"[office2][WARN] delivery pass failed: {type(f.exception()).__name__}: {f.exception()}")
+
+                    _t_o2.add_done_callback(_o2_done)
             except Exception as exc_o2d:
                 print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(2)   # outbox читається кожні 2 с (було 10): запит дешевий, а черга не додає до 10 с затримки
 
     asyncio.create_task(monitor_office2_delivery())
 

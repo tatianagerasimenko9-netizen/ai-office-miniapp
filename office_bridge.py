@@ -374,15 +374,92 @@ def office_db_identity(db_path: str) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------- пул з'єднань PostgreSQL
+# Раніше КОЖЕН запит відкривав нове з'єднання (TLS + автентифікація, під навантаженням до 3 с): цикл Brain із десятками запитів на символ займав 75–300 с,
+# а синхронні запити старого Лева блокували event loop worker і затримували Telegram-відправку на 100+ с. Тепер з'єднання перевикористовуються.
+import threading as _threading
+import time as _time
+
+_PG_POOL: Dict[str, List[Tuple[Any, float]]] = {}
+_PG_LOCK = _threading.Lock()
+_PG_MAX_IDLE = max(1, int(os.getenv("OFFICE_PG_POOL_IDLE", "8") or 8))
+_PG_STALE_SEC = float(os.getenv("OFFICE_PG_POOL_STALE_SEC", "20") or 20)     # з'єднання, що простоювало довше, перевіряємо SELECT 1 перед використанням
+_PG_STATS: Dict[str, int] = {"connects": 0, "reuses": 0, "discarded": 0, "retries": 0}
+
+
+def pg_pool_stats() -> Dict[str, int]:
+    with _PG_LOCK:
+        return dict(_PG_STATS, idle=sum(len(v) for v in _PG_POOL.values()))
+
+
+def _pg_acquire(dsn: str) -> Any:
+    if psycopg is None:
+        raise RuntimeError("psycopg is required for PostgreSQL mode")
+    while True:
+        with _PG_LOCK:
+            lst = _PG_POOL.get(dsn) or []
+            item = lst.pop() if lst else None
+        if item is None:
+            break
+        conn, last = item
+        try:
+            if getattr(conn, "closed", False):
+                raise RuntimeError("closed")
+            if _time.monotonic() - last > _PG_STALE_SEC:
+                conn.execute("SELECT 1")                       # autocommit: транзакція не лишається відкритою
+            with _PG_LOCK:
+                _PG_STATS["reuses"] += 1
+            return conn
+        except Exception:  # noqa: BLE001
+            with _PG_LOCK:
+                _PG_STATS["discarded"] += 1
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+    with _PG_LOCK:
+        _PG_STATS["connects"] += 1
+    return psycopg.connect(dsn, autocommit=True, connect_timeout=10)  # type: ignore[arg-type]
+
+
+def _pg_release(dsn: str, conn: Any, ok: bool = True) -> None:
+    if ok and not getattr(conn, "closed", False):
+        with _PG_LOCK:
+            lst = _PG_POOL.setdefault(dsn, [])
+            if len(lst) < _PG_MAX_IDLE:
+                lst.append((conn, _time.monotonic()))
+                return
+    try:
+        conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _pg_run(dsn: str, qry: str, params: tuple, mode: str) -> Any:
+    """mode: 'exec' | 'one' | 'all'. Читання повторюється раз на свіжому з'єднанні, якщо пулове виявилось мертвим; запис — ні (щоб не задвоїти)."""
+    for attempt in (0, 1):
+        conn = _pg_acquire(dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(qry, params)
+                res = None if mode == "exec" else (cur.fetchone() if mode == "one" else cur.fetchall())
+        except Exception as exc:  # noqa: BLE001
+            broken = psycopg is not None and isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+            _pg_release(dsn, conn, ok=not broken)
+            if broken and mode != "exec" and attempt == 0:
+                with _PG_LOCK:
+                    _PG_STATS["retries"] += 1
+                continue
+            raise
+        _pg_release(dsn, conn)
+        return res
+    raise RuntimeError("unreachable")
+
+
 def _execute(db_path: str, sql: str, params: tuple = ()) -> None:
     qry = _adapt_sql(sql, db_path)
     if _is_pg(db_path):
-        if psycopg is None:
-            raise RuntimeError("psycopg is required for PostgreSQL mode")
-        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
-            with conn.cursor() as cur:
-                cur.execute(qry, params)
-            conn.commit()
+        _pg_run(db_path, qry, params, "exec")
         return
     with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
         conn.execute(qry, params)
@@ -392,12 +469,7 @@ def _execute(db_path: str, sql: str, params: tuple = ()) -> None:
 def _fetchone(db_path: str, sql: str, params: tuple = ()) -> Optional[tuple]:
     qry = _adapt_sql(sql, db_path)
     if _is_pg(db_path):
-        if psycopg is None:
-            raise RuntimeError("psycopg is required for PostgreSQL mode")
-        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
-            with conn.cursor() as cur:
-                cur.execute(qry, params)
-                row = cur.fetchone()
+        row = _pg_run(db_path, qry, params, "one")
         return tuple(row) if row else None
     with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
         row = conn.execute(qry, params).fetchone()
@@ -407,12 +479,7 @@ def _fetchone(db_path: str, sql: str, params: tuple = ()) -> Optional[tuple]:
 def _fetchall(db_path: str, sql: str, params: tuple = ()) -> List[tuple]:
     qry = _adapt_sql(sql, db_path)
     if _is_pg(db_path):
-        if psycopg is None:
-            raise RuntimeError("psycopg is required for PostgreSQL mode")
-        with psycopg.connect(db_path) as conn:  # type: ignore[arg-type]
-            with conn.cursor() as cur:
-                cur.execute(qry, params)
-                rows = cur.fetchall()
+        rows = _pg_run(db_path, qry, params, "all")
         return [tuple(r) for r in rows]
     with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
         rows = conn.execute(qry, params).fetchall()
