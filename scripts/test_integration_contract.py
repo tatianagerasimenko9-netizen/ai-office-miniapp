@@ -185,8 +185,7 @@ def test_shadow_comparison_rejects_future_and_does_not_mix_decision_bars():
     other_bar = copy.deepcopy(brain)
     other_bar["method"] = "SMC"
     other_bar["version"] = "test"
-    other_bar["decision_bar_close_utc"] = "2020-01-01T00:00:00+00:00"
-    other_bar["lineage"]["max_source_ts"] = "2020-01-01T00:00:00+00:00"
+    other_bar["decision_bar_close_utc"] = "2027-01-01T00:00:00+00:00"
     report = compare_shadow([brain, invalid, other_bar])
     assert report["summary"]["invalid"] == 1 and report["summary"]["groups"] == 2
     assert all(len(row["methods"]) == 1 for row in report["rows"])
