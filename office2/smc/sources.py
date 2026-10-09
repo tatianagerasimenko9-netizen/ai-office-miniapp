@@ -64,7 +64,8 @@ DISCREPANCIES: List[Dict[str, str]] = [
     {"id": "D-05", "where": "S09.2 vs існуючий Brain v2.1", "what": "Методичка: swing = 3 свічки (центральна вища за обидві сусідні). Brain v2.1 (office2.features.swings, n=2) використовує 5-свічкові фрактали.",
      "decision": "SMC-детектори використовують n=1 за методичкою; Brain v2.1 не змінюється (різниця фіксується в shadow-порівнянні)."},
     {"id": "D-06", "where": "S10.4 / схема 07", "what": "Range позначається сіткою 0; 0,5; 1 (EQ = 0,5), OTE-сітка — 0; 0,5; 0,62; 0,705; 0,79; 1. Для FVG/OB — 0,25/0,5/0,75.", "decision": "Усі набори рівнів реалізовано окремо за призначенням."},
-    {"id": "D-07", "where": "Запит vs документ", "what": "Запит: «41 схема». У Masterplan і docx — 40 зображень (Схема 01…40).", "decision": "Доступні й прочитані 40; 41-ї немає — зафіксовано, не вважається прочитаною."},
+    {"id": "D-07", "where": "Запит vs документ", "what": "Запит: «41 схема», зокрема окрема схема «Reversal vs Continuation». У Masterplan і docx — 40 зображень (Схема 01…40); схема 40 «Reversal vs Continuation» містить 4 піддіаграми (Reversal LONG/SHORT, Continuation LONG/SHORT). Серед 12 PNG, доданих у розмову раніше, SMC-схем немає (скриншоти Mini App, пошти, Telegram і схема H&S/Flag).",
+     "decision": "Прочитано й покрито 40; усі 4 піддіаграми схеми 40 мають тести (Reversal/Continuation × LONG/SHORT). Окремого 41-го файлу в середовищі немає — не вважається прочитаним; після надсилання файлу додається як fixture без зміни коду."},
     {"id": "D-08", "where": "Strong Candle PDF", "what": "PDF описує індикатор/стратегію TradingView (Volume Delta, Supertrend, Fibonacci-сітка); внутрішні алгоритми «сильної свічки» автор не розкриває.", "decision": "Strong Candle лишається EVIDENCE (office2.strongcandle), не READY-ґейтом; формул із PDF не вигадуємо."},
 ]
 

@@ -505,6 +505,19 @@ def o2_scenario_detail(sid: str) -> Dict[str, Any]:
             "has_position": pos, "hypothetical": not pos}
 
 
+def smc_row_payload(rid: str) -> Dict[str, Any]:
+    """SHADOW-вердикт SMC (кроки, зона, overlay на свічках) для відкриття на графіку. Нічого не змінює."""
+    try:
+        from office2.smc import shadow as SH
+
+        d = SH.row_detail(_db(), str(rid or ""))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": [f"SMC shadow: {type(exc).__name__}"]}
+    if not d:
+        return {"ok": False, "data_status": DATA_UNAVAILABLE, "missing": ["рядок SMC shadow (старший за 30 діб або не збережений)"]}
+    return {"ok": True, "readonly": True, "data_status": "DATA_OK", "smc": d}
+
+
 def radar_payload() -> Dict[str, Any]:
     """Єдиний Radar Brain v2.1: усі етапи в одному списку (WATCH · WAIT 1/3 · 2/3 · ARMED 3/3 · READY · NO_TRADE · MISSED · INVALIDATED)."""
     try:

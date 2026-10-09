@@ -139,6 +139,16 @@ def test_fuzz_degenerate_series_never_raise():
     assert EN.analyze({"m15": short, "h1": short, "h4": short, "d1": short, "w1": short, "mn": None}, float(short["t"][-1]) + 900, "S").get("error")   # замало барів → чесна відмова, не винятки
 
 
+def test_continuation_short_is_mirror_of_long():
+    b = FX.reflect(FX.continuation_long(), 300.0)
+    lv = [dict(x, p=300.0 - x["p"], side="low") for x in FX.CONT_LEVELS]
+    r = run(b, htf=FX.reflect(FX.htf_up(), 300.0), levels=lv)
+    m = r["models"]["SHORT"]["CONTINUATION"]
+    assert m["state"] == "READY" and m["dir_real"] == "SHORT", (m["state"], m.get("reason"))
+    ml = run(FX.continuation_long(), levels=FX.CONT_LEVELS)["models"]["LONG"]["CONTINUATION"]
+    assert [s["step"] for s in m["steps"] if s["ok"]] == [s["step"] for s in ml["steps"] if s["ok"]] and abs(m["risk"] - ml["risk"]) < 1e-6
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

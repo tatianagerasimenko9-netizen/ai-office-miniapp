@@ -38,16 +38,11 @@
 - Continuation-модель у цій вибірці гірша за Reversal (n=9) — перевірити на більшій вибірці, правила під цю вибірку **не змінювались**.
 - Рішення для живих READY: **не пропонується**. SMC лишається shadow; пороги, ризик і цілі Brain без змін.
 
-## 4. Replay на даних біржі в worker (потребує погодження deploy)
+## 4. Replay на даних біржі в worker
 
-Після погодження merge/deploy задати змінну середовища worker (одноразово; нічого не шле, lifecycle не чіпає; результат — таблиці `office2_smc_replay`, `office2_smc_replay_summary`):
+Запуск — змінною середовища worker `OFFICE2_SMC_REPLAY` (нічого не шле, lifecycle не чіпає, `OFFICE2_SMC=0` вимикає). Завдання розділяються «;», формат: `СИМВОЛИ@days=N@end=<epoch закриття останнього бару РІШЕННЯ>@id=<ім'я>`, `СИМВОЛИ` — через кому або `UNIVERSE`. Рішення приймаються лише на барах ≤ end (кожен TF обрізається до закритих барів), результати (TP1/SL) беруться з наступних 24 год. BTC-контекст (ret 1г, відносна сила) обчислюється на тих самих закритих барах. Результати — `office2_smc_replay` (події) і `office2_smc_replay_summary` (підсумок JSON: по рушіях, перетин, LATE_SWEEP, час обчислення, інваріанти на даних біржі).
 
-```
-OFFICE2_SMC_REPLAY="ONDOUSDT@days=2@end=1791555300@id=ondo-short-0910,LTCUSDT@days=2@end=1791456300@id=ltc-short-0710,ETHUSDT@days=2@end=1791448200@id=eth-long-0710,BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT@days=7@id=major-7d"
-```
-
-(формат елемента: `СИМВОЛИ@days=N@end=<epoch закриття останнього бару>@id=<ім'я>`; для кейсів — вікно від −2 діб до +24 год після READY (ONDO — до +12 год, бо кейс свіжий): ONDO SHORT 09.10 (READY 05:15 Київ), LTC SHORT 07.10 (13:45), ETH LONG 07.10 (11:30).) Читання: `SELECT summary_json FROM office2_smc_replay_summary WHERE run_id=...`.
-Для окремих кейсів порівнюється також Brain-рішення на момент READY (`replay_at`) і SMC-вердикт на тому ж барі.
+Кейси користувача: ONDO SHORT 09.10 (READY 05:15 Київ, `1791512100`), LTC SHORT 07.10 (13:45, `1791369900`), ETH LONG 07.10 (11:30, `1791361800`).
 
 ## 5. Вимір затримки SMC
 

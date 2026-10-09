@@ -13,6 +13,28 @@ BR = "Brain v2.1 без змін"
 T_ST, T_LQ, T_IM, T_BL, T_SS, T_MD, T_GD, T_IN, T_RP = ("scripts/test_smc_structure.py", "scripts/test_smc_liquidity.py", "scripts/test_smc_imbalance.py", "scripts/test_smc_blocks.py",
                                                       "scripts/test_smc_sessions_pd_flow.py", "scripts/test_smc_models.py", "scripts/test_smc_golden.py", "scripts/test_smc_integration.py", "scripts/test_smc_replay.py")
 
+# Правила, ЯКІ перевірено інваріантами на реальних біржових свічках (scripts/test_smc_invariants.py, office2/smc/invariants.py): кожен знайдений об'єкт відповідає визначенню,
+# майбутнє не впливає, дзеркало симетричне. Це корекція за визначенням, а НЕ доказ корисності для рішень (корисність не доведена ні для якого правила — див. SMC_REPLAY.md).
+REAL_INVARIANTS = {"R-STR-01", "R-STR-03", "R-STR-04", "R-STR-05", "R-LIQ-06", "R-LIQ-07", "R-LIQ-08", "R-IMB-01", "R-BLK-01", "R-MDL-03", "R-INT-01"}
+
+LEVELS = {"REAL": "ПІДТВЕРДЖЕНО НА РЕАЛЬНИХ ДАНИХ (інваріанти) + синтетика", "SYNTH": "ПІДТВЕРДЖЕНО ЛИШЕ НА СИНТЕТИЦІ (схеми, властивості)", "PARTIAL": "ЧАСТКОВО РЕАЛІЗОВАНО", "UNCONFIRMED": "НЕ ПІДТВЕРДЖЕНО / НЕ АЛГОРИТМІЗОВАНО"}
+
+
+def level_of(r: Dict[str, Any]) -> str:
+    if r["status"] == NOALGO:
+        return "UNCONFIRMED"
+    if r["status"] == PART:
+        return "PARTIAL"
+    return "REAL" if r["id"] in REAL_INVARIANTS else "SYNTH"
+
+
+def counts() -> Dict[str, int]:
+    out = {k: 0 for k in LEVELS}
+    for r in ROWS:
+        out[level_of(r)] += 1
+    return out
+
+
 ROWS: List[Dict[str, Any]] = [
     {"id": "R-STR-01", "section": "S09.2/S10.1", "rule": "Swing = 3 свічки: центр вищий/нижчий за обидві сусідні; підтвердження закриттям правої; 2 свічки без центру — не swing", "code": "office2.smc.structure.swings", "test": f"{T_ST}::test_swing_three_candles_and_negative", "images": [4], "status": SYN, "impact": SH, "brain": "частково (n=2, 5 свічок — D-05)"},
     {"id": "R-STR-02", "section": "S10.2/S10.3", "rule": "HH/HL/LH/LL/EQH/EQL за порівнянням з попереднім swing того ж типу", "code": "office2.smc.structure.label_swings", "test": f"{T_ST}::test_uptrend_bms_chain_and_labels", "images": [5, 6], "status": SYN, "impact": SH, "brain": "частково"},
@@ -71,10 +93,13 @@ def render_md() -> str:
              "Пункт методички SM Trader → правило → код → тест → схема → статус → вплив на рішення. **Усі детектори зараз у режимі SHADOW: живі READY не змінено.** "
              "Статус «СИНТЕТИКА» означає: правило реалізовано й перевірено на якісних фікстурах за схемами та на властивостях (без lookahead, дзеркальна симетрія LONG/SHORT, випадкові ряди), "
              "але на реальних OHLCV ще не перевірено (потрібен replay у worker з доступом до біржі). Жодних тверджень про прибутковість.", "",
-             "| Правило | Розділ | Що саме | Код | Тест | Схеми | Статус | Вплив на рішення | Brain v2.1 |", "|---|---|---|---|---|---|---|---|---|"]
+             "| Правило | Розділ | Що саме | Код | Тест | Схеми | Рівень підтвердження | Вплив на рішення | Brain v2.1 |", "|---|---|---|---|---|---|---|---|---|"]
     for r in ROWS:
         imgs = ", ".join(str(i) for i in r["images"]) or "—"
-        lines.append(f"| {r['id']} | {r['section']} | {r['rule']} | `{r['code']}` | `{r['test']}` | {imgs} | {r['status']} | {r['impact']} | {r['brain']} |")
+        lines.append(f"| {r['id']} | {r['section']} | {r['rule']} | `{r['code']}` | `{r['test']}` | {imgs} | {LEVELS[level_of(r)]} | {r['impact']} | {r['brain']} |")
+    c = counts()
+    lines += ["", "## Підсумок рівнів підтвердження", "", f"Усього правил: **{len(ROWS)}**. " + "; ".join(f"{LEVELS[k]} — **{v}**" for k, v in c.items()) + ".",
+              "Жодне правило не має доведеної корисності для рішень: replay Brain vs SMC (SMC_REPLAY.md) не показав статистично значущої різниці, обидва рушії на тих даних дали від'ємний середній R.", ""]
     lines += ["", "## Схеми (40 із «41»)", "", "| № | Схема | Розділ | Фікстура | Примітка |", "|---|---|---|---|---|"]
     for i in SRC.IMAGES:
         lines.append(f"| {i['n']} | {i['title']} | {i['section']} | {i.get('fixture') or '—'} | {i.get('note', '')} |")

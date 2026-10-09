@@ -136,6 +136,81 @@ def test_shadow_stats_for_journal():
         B.all_levels = orig
 
 
+def test_kill_switch_disables_everything():
+    os.environ["OFFICE2_SMC"] = "0"
+    try:
+        td = tempfile.mkdtemp()
+        db = os.path.join(td, "o2.db")
+        OB.init_office_db(db)
+        EN.init_db(db)
+        assert OB._fetchone(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='office2_smc_shadow'") is None      # таблицю навіть не створено
+        assert SH.snapshot_for("X", {}, 0.0, "LONG") is None and SH.shadow_stats(db) is None
+        calls = []
+        orig = SH.run_cycle
+        SH.run_cycle = lambda *a, **k: calls.append(1)
+        try:
+            LV._spawn_smc(db, {"X": {}}, 1.0, {})
+            time.sleep(0.15)
+        finally:
+            SH.run_cycle = orig
+        assert not calls and not [t for t in threading.enumerate() if t.name == "office2-smc"]
+        logs = []
+        LV._log = (lambda orig_log: (lambda m: (logs.append(m), orig_log(m))))(LV._log)
+        os.environ["OFFICE2_SMC_REPLAY"] = "BTCUSDT"
+        LV._smc_replay_job(db, None)
+        assert any("вимкнено" in m for m in logs)
+    finally:
+        os.environ["OFFICE2_SMC"] = "1"
+        os.environ.pop("OFFICE2_SMC_REPLAY", None)
+
+
+def test_brain_labels_late_sweep_without_blocking():
+    from office2 import brain2 as B2
+    from office2 import features as F
+    from office2.smc import fixtures as FX
+    import numpy as np
+    base = [(105, 105.5, 104.5, 105.2)] * 40
+    acc = [(101, 101.2, 97.5, 98.0)] * 4                                  # ≥3 закриття ЗА рівнем 100: рівень уже прийнято
+    back = [(98, 102, 97.9, 101.5), (101.5, 102.5, 101, 102)] + [(102, 102.6, 101.6, 102.2)] * 4
+    dip = [(102, 102.1, 99.2, 101.2)]                                     # новий «sweep» того ж рівня
+    lv = [{"p": 100.0, "side": "low", "kind": "PDL", "strength": 1, "known": 0.0, "taken_ts": None}]
+    for rows, want in ((base + acc + back + dip, "LATE_SWEEP"), (base + [(105, 105.5, 104.5, 105.2)] * 8 + dip[:0] + [(105, 105.2, 99.2, 101.2)], "FRESH_RAID")):
+        b = FX.bars(rows)
+        a = F.atr(b, 14)
+        ev = B2._sweep_events(b, a, len(rows) - 1, lv, 1)
+        assert ev and ev[0]["class"] == want, (want, ev and ev[0].get("class"), ev and ev[0].get("prior"))
+    assert "повторний тест прийнятого рівня" in B2._ev_txt(ev_late := B2._sweep_events(FX.bars(base + acc + back + dip), F.atr(FX.bars(base + acc + back + dip), 14), len(base + acc + back + dip) - 1, lv, 1)[0], 1)
+
+
+def test_divergence_feed_and_row_detail_with_overlay():
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: T.LEVELS
+    try:
+        db, ctxs, now = _run(True)
+        SH.run_cycle(db, ctxs, now, {("XUSDT", "LONG"): "READY"}, log=lambda m: None)
+        f = SH.feed(db, now=now + 600)
+        br = [i for i in f["items"] if i["relation"] == "BRAIN_ONLY"]
+        assert br and "Brain READY, а SMC на тому барі" in br[0]["why"] and br[0]["symbol"] == "XUSDT"
+        # додаємо SMC READY без Brain → SMC_ONLY і детальний рядок з overlay
+        v = {"state": "READY", "stage": 7, "model": "REVERSAL", "steps": [{"step": "RAID", "ok": True, "value": "x", "j": 3, "t": 1.0}], "reason": "тест"}
+        ov = {"v": 1, "items": [{"k": "line", "p": 1.0, "label": "SL", "role": "sl"}], "events": [], "steps": []}
+        SH._put(OB._execute, db, int(now) - 7200, "YUSDT", "SHORT", "REVERSAL", v, "WAIT", 5.0, ov)
+        f2 = SH.feed(db, now=now + 600)
+        so = [i for i in f2["items"] if i["relation"] == "SMC_ONLY" and i["symbol"] == "YUSDT"]
+        assert so and "Brain на цей момент: WAIT" in so[0]["why"]
+        d = SH.row_detail(db, so[0]["id"])
+        assert d and d["overlay"]["items"][0]["label"] == "SL" and d["role"].startswith("SHADOW")
+        import office_mini_v2 as MV
+        os.environ["OFFICE_DB_PATH"] = db
+        os.environ.pop("DATABASE_URL", None)
+        p = MV.smc_row_payload(so[0]["id"])
+        assert p["ok"] and p["smc"]["state"] == "READY" and not MV.smc_row_payload("0|X|LONG|NOPE")["ok"]
+        st = SH.shadow_stats(db, now=now + 600)
+        assert "recent" in st and st["smc_ready"] >= 1
+    finally:
+        B.all_levels = orig
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

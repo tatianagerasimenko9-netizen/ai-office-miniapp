@@ -53,6 +53,16 @@ def test_doc_is_up_to_date():
     assert doc == MX.render_md(), "docs/office2/SMC_MATRIX.md застарів: python3 -c \"from office2.smc import matrix as m; open('docs/office2/SMC_MATRIX.md','w').write(m.render_md())\""
 
 
+def test_levels_are_exclusive_and_real_claims_have_invariant_coverage():
+    c = MX.counts()
+    assert sum(c.values()) == len(MX.ROWS) and c["REAL"] == len(MX.REAL_INVARIANTS) and len(MX.ROWS) >= 47
+    ids = {r["id"] for r in MX.ROWS}
+    assert MX.REAL_INVARIANTS <= ids
+    assert all(MX.level_of(r) == "UNCONFIRMED" for r in MX.ROWS if r["status"] == MX.NOALGO)
+    # «реально підтверджені» правила мають тест-інваріант, що запускає детектор на реальних даних, коли їх задано
+    assert "test_real_data_if_available" in (ROOT / "scripts/test_smc_invariants.py").read_text(encoding="utf8")
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

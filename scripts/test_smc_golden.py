@@ -82,7 +82,7 @@ GOLDEN = {
 
 def test_registry_has_40_images_with_hashes_and_discrepancy_noted():
     reg = json.loads((ROOT / "fixtures/smc/sm_trader/registry.json").read_text(encoding="utf8"))
-    assert reg["count"] == reg["available"] == 40 and reg["requested"] == 41 and "41-ша відсутня" in reg["note"]
+    assert reg["count"] == reg["available"] == 40 and reg["requested"] == 41 and "41-ша відсутня" in reg["note"] and "4 піддіаграми" in reg["note"]
     assert [i["n"] for i in reg["images"]] == list(range(1, 41))
     for i in reg["images"]:
         f = ROOT / "fixtures/smc/sm_trader" / i["file"]

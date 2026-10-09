@@ -942,7 +942,33 @@ function o2SmcStatsHtml(M){
     <div class="kv"><span>READY Brain · підтверджено SMC (±1 год)</span><b>${esc(M.brain_ready)} · ${esc(M.brain_ready_confirmed_by_smc)}</b></div>
     <div class="kv"><span>SMC READY також у Brain · лише SMC</span><b>${esc(M.smc_ready_also_brain)} · ${esc(M.smc_ready_only)}</b></div>
     <div class="kv"><span>Час аналізу символу</span><b class="num">середній ${M.avg_ms==null?'—':Math.round(M.avg_ms)+' мс'} · макс. ${M.max_ms==null?'—':Math.round(M.max_ms)+' мс'}</b></div>
-    <div class="o2sub">Стани: ${st}. ${esc(M.note||'')}</div></div>`;
+    <div class="o2sub">Стани: ${st}. ${esc(M.note||'')}</div>
+    ${(M.recent||[]).length?`<div class="o2sub" style="margin-top:8px">Останні збіги і розбіжності з Brain (натисніть — графік зі свічками, рівнями й причинами):</div>`+(M.recent||[]).map(r=>`<button class="o2row ${r.relation==='BOTH'?'o2g':r.relation==='SMC_ONLY'?'o2m':'o2r'}" style="text-align:left;width:100%;border:0;background:none;color:inherit" data-smc="${esc(r.id)}">${r.relation==='BOTH'?'✓ збіг':r.relation==='SMC_ONLY'?'◦ лише SMC':'⚠ лише Brain'} · <b>${esc(String(r.symbol).replace(/USDT$/,''))}</b> ${esc(r.dir)} · ${o2kt(r.ts)}<br><span class="mut">${esc(r.why||'')}</span></button>`).join(''):''}</div>`;
+}
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-smc]'); if(b){e.preventDefault(); openSmc(b.dataset.smc);}});
+async function openSmc(id){
+  const T0=++RT; killPoll();
+  app.innerHTML='<div class="sk"></div><div class="sk"></div>';
+  let d; try{d=await j('/api/v2/smc_row?id='+encodeURIComponent(id||''));}catch(e){return fail(e,'SMC');}
+  if(!d.ok){ app.innerHTML='<button class="back" id="back">← Журнал</button><div class="empty">Рядок SMC недоступний (старший за 30 діб або не збережений)</div>'; $('back').onclick=()=>go('journal'); return; }
+  const m=d.smc, pl=m.payload||{}, long_=m.dir==='LONG', ov=m.overlay||null;
+  const s={symbol:m.symbol,direction:m.dir,zone_lo:pl.zone?pl.zone[0]:null,zone_hi:pl.zone?pl.zone[1]:null,sl:null,tp1:null,tp2:null,tp3:null,entry_px:null,__objs:null,__ready_ts:m.ts,__smc:ov};
+  S.tf='M15';
+  const steps=(pl.steps||[]).map(x=>`<div class="o2row ${x.ok?'o2g':x.ok===false?'o2r':'o2m'}">${x.ok?'✓ ':x.ok===false?'✗ ':'· '}<b>${esc(x.step)}</b> ${esc(x.value||'')}</div>`).join('');
+  const tg=(pl.targets||[]).map((t,i)=>`TP${i+1} ${o2px(t.p)} (${o2f(t.r,1)} R)`).join(' · ');
+  app.innerHTML=`<button class="back" id="back" aria-label="Назад до журналу">← Журнал</button>
+    <div class="rh ${long_?'L':'S'}"><div class="rt1"><b>${long_?'🟢':'🔴'} ${esc(String(m.symbol).replace(/USDT$/,''))}</b><span class="${long_?'L':'S'}">${long_?'LONG':'SHORT'}</span><span class="o2tag">SMC · shadow</span></div>
+      <div class="rst">${esc(m.state)}${m.model&&m.model!=='BEST'?' · '+esc(m.model==='REVERSAL'?'Reversal':'Continuation'):''}</div>
+      <div class="rnm">${o2kt(m.ts)} · Brain на той момент: ${esc(m.brain_state||'сценарію не було')}</div>
+      ${pl.entry!=null?`<div class="mut" style="margin-top:4px">SMC-вхід ${o2px(pl.entry)} · SL ${o2px(pl.sl)} · ${esc(tg)}</div>`:''}</div>
+    <div id="chart" class="chart"></div><div class="mut" id="asof" style="margin:6px 0"></div>
+    <div class="chips" id="lay"><button data-l="smc" class="${S.layers.smc?'on':''}" aria-pressed="${S.layers.smc}">SMC</button><button id="fs">⤢ Повний екран</button></div>
+    <div class="sec"><h3>Кроки моделі SMC</h3>${steps||'<div class="mut">Кроків немає.</div>'}<div class="o2sub">${esc(pl.reason||'')}</div></div>
+    <div class="mut">Це лише спостереження за методикою SM Trader: воно не змінює READY, ризик і цілі Brain v2.1. Свічки на графіку — поточні (до 180 останніх M15); для старших рядків частина прив'язок може бути поза вікном.</div>`;
+  $('back').onclick=()=>go('journal');
+  const el=$('chart'); await paintChart(el,s);
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='smc') lsSet('ao_smc',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers.smc); b.setAttribute('aria-pressed',String(S.layers.smc)); await paintChart(el,s);});
+  $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
 }
 function o2LatencyHtml(L){
   if(!L||!L.delivered_n) return '';

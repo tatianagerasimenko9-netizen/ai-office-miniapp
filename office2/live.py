@@ -672,7 +672,11 @@ def _replay_job(db: str, feed: "Feed") -> None:
 def _smc_replay_job(db: str, feed: "Feed") -> None:
     try:
         from office2.smc import replay as RP
+        from office2.smc import shadow as _SH
 
+        if not _SH.enabled():
+            _log("[smc-replay] OFFICE2_SMC=0: модуль вимкнено, replay не запускається")
+            return
         RP.run_spec(db, feed, os.getenv("OFFICE2_SMC_REPLAY", ""), log=_log)
     except Exception as exc:  # noqa: BLE001
         _log(f"[smc-replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")

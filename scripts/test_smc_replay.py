@@ -82,7 +82,7 @@ def test_summary_overlap_recall_and_caveats():
              "opportunities": [{"dir": "LONG", "ts_bar": 1000 + 900 * 3, "i": 3}, {"dir": "SHORT", "ts_bar": 500000, "i": 99}]}]
     s = RP.summarize(runs)
     assert s["engines"]["BRAIN"]["ready"] == 1 and s["engines"]["SMC"]["ready"] == 2
-    assert s["overlap"] == {"both": 1, "only_brain": 0, "only_smc": 1}
+    assert {k: s["overlap"][k] for k in ("both", "only_brain", "only_smc")} == {"both": 1, "only_brain": 0, "only_smc": 1} and s["overlap"]["smc_minus_brain_bars"]["median"] == 1.0
     assert s["engines"]["SMC"]["outcomes"] == {"TP1": 1, "SL": 1, "OPEN": 0} and s["engines"]["SMC"]["r_net_ci95"] is None    # n<10 → без довірчого інтервалу
     assert s["engines"]["BRAIN"]["opportunities_caught"] == 1 and s["opportunities"] == 2
     assert any("не доказ прибутковості" in c for c in s["caveats"])
@@ -105,6 +105,52 @@ def test_store_and_reload():
         assert k >= 1 and OB._fetchone(db, "SELECT COUNT(*) FROM office2_smc_replay WHERE run_id='t1'")[0] == k
         assert OB._fetchone(db, "SELECT summary_json FROM office2_smc_replay_summary WHERE run_id='t1'")[0].count("caveats") == 1
         assert RP.store(db, "t1", runs, summ) == k and OB._fetchone(db, "SELECT COUNT(*) FROM office2_smc_replay WHERE run_id='t1'")[0] == k   # ідемпотентно
+    finally:
+        B.all_levels = orig
+
+
+def test_late_sweep_split_with_independent_support_and_compute_timing():
+    mk = lambda src, d, t, out, r, late=False: {"source": src, "dir": d, "ts_bar": t, "symbol": "X", "model": "M", "key": f"{src}{t}", "entry": 1.0, "sl": 0.9, "tp1": 1.2, "late": late, "ctx_class": "WITH_TREND",  # noqa: E731
+                                                "sim": {"outcome": out, "r_net": r, "bars": 3, "r_gross": r}}
+    runs = [{"symbol": "X", "bars": 10, "elapsed_s": 1, "opportunities": [], "timing": {"brain_ms": {"n": 5, "p50": 20.0, "p95": 40.0, "max": 55.0}, "smc_ms": {"n": 5, "p50": 100.0, "p95": 150.0, "max": 210.0}},
+             "events": [mk("BRAIN", "LONG", 1000, "SL", -1.1, True), mk("SMC", "LONG", 1000, "SL", -1.1), mk("BRAIN", "SHORT", 90000, "TP1", 1.4, True), mk("BRAIN", "LONG", 200000, "TP1", 1.2)]}]
+    s = RP.summarize(runs)
+    ls = s["late_sweep"]
+    assert ls["brain_late"]["ready"] == 2 and ls["brain_fresh"]["ready"] == 1 and ls["late_with_smc_support"]["ready"] == 1 and ls["late_without_smc_support"]["ready"] == 1
+    assert s["engines"]["SMC"]["compute_ms_per_bar"]["max"] == 210.0 and s["engines"]["BRAIN"]["fast_sl_share"] == 1.0
+    assert "не блокується" in ls["note"] or "не блокує" in ls["note"] or "READY не блокується" in ls["note"]
+
+
+def test_run_spec_multi_job_with_fake_feed_and_invariants():
+    m15, end, n = series()
+    arrs = arrays(m15)
+
+    class Feed:
+        def klines(self, sym, tf, now, limit=None, start_ms=None, end_ms=None):
+            key = {"15m": "m15", "4h": "h4", "1d": "d1", "1w": "w1", "1M": "mn"}[tf]
+            a = arrs.get(key)
+            if a is None:
+                return None
+            k = int(np.searchsorted(a["t"] * 1000.0 + {"m15": 900, "h4": 14400, "d1": 86400, "w1": 604800}[key] * 1000.0, end_ms + 1, side="right")) if end_ms else len(a["t"])
+            return {kk: vv[max(0, k - (limit or k)):k] for kk, vv in a.items()}
+
+    orig = B.all_levels
+    B.all_levels = lambda ctx, now: FX.REAL_LEVELS_LONG
+    td = tempfile.mkdtemp()
+    db = os.path.join(td, "o2.db")
+    OB.init_office_db(db)
+    try:
+        logs = []
+        import time as _t
+        real_time = _t.time
+        _t.time = lambda: float(end + 96 * 900 + 900)                      # «зараз» = через 24 год після кінця вікна
+        try:
+            summ = RP.run_spec(db, Feed(), f"TESTUSDT@days=1@end={int(end)}@id=job1@throttle=0;TESTUSDT@days=1@end={int(end)}@id=job2@throttle=0", log=logs.append)
+        finally:
+            _t.time = real_time
+        assert summ and summ["engines"]["SMC"]["ready"] >= 1 and "invariants_real_data" in summ and summ["invariants_real_data"]["TESTUSDT"]["n_violations"] == 0, summ and summ.get("invariants_real_data")
+        ids = {r[0] for r in OB._fetchall(db, "SELECT run_id FROM office2_smc_replay_summary")}
+        assert ids == {"job1", "job2"}
     finally:
         B.all_levels = orig
 

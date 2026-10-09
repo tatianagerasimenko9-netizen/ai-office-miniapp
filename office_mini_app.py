@@ -1460,6 +1460,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = scenarios_payload(watching=_q("watching") in ("1", "true"))
             elif u.path == "/api/v2/scenario":
                 data = scenario_detail(_q("id"))
+            elif u.path == "/api/v2/smc_row":
+                from office_mini_v2 import smc_row_payload
+
+                data = smc_row_payload(_q("id"))
             elif u.path == "/api/v2/candles":
                 try:
                     lim = int(_q("limit") or "180")

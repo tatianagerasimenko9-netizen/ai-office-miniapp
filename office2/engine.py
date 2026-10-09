@@ -81,7 +81,8 @@ def init_db(db: str) -> None:
     try:
         from office2.smc import shadow as _SMC
 
-        _SMC.init_db(db)
+        if _SMC.enabled():
+            _SMC.init_db(db)
     except Exception:  # noqa: BLE001
         pass
 
@@ -221,7 +222,9 @@ def why_text(th: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], symbol
         lv = th.get("level") or {}
         ev = th.get("event") or {}
         br = th.get("break") or {}
-        head = (f"Sweep {lv.get('kind', '')} {px(lv['p'])} (екстремум {px(ev['extreme'])})" if th["kind"] == "SWEEP_SEQ" and lv.get("p") and ev.get("extreme") else "Захист origin-зони")
+        late = ev.get("class") == "LATE_SWEEP"
+        head = ((f"Повторний тест прийнятого рівня {lv.get('kind', '')} {px(lv['p'])} (раніше {(ev.get('prior') or {}).get('closes_beyond', 0)} закриттів M15 за ним; не свіжий sweep; екстремум {px(ev['extreme'])})" if late
+                 else f"Sweep {lv.get('kind', '')} {px(lv['p'])} (екстремум {px(ev['extreme'])})") if th["kind"] == "SWEEP_SEQ" and lv.get("p") and ev.get("extreme") else "Захист origin-зони")
         mid = f" → зсув: закриття {'вище' if th['dir'] == 'LONG' else 'нижче'} {px(br['level'])} (тіло {n(br['body_atr'], 1)} ATR)" if br.get("level") else ""
         parts.append(f"{head}{mid} → ретрейс у зону {px(ez[0])}–{px(ez[1])} → тригер M15.")
     elif th["kind"] == "PULLBACK_BREAK":
