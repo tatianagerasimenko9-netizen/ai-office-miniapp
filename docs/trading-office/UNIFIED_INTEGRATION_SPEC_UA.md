@@ -19,6 +19,7 @@
 | Production-дані | Публічний read-only Web/API; прямого Render/Postgres доступу немає | Web SHA і read-only стан перевіряються; Worker SHA, deploy ID та restart-логи без Render-доступу не припускаються |
 
 Шлях користувачки `C:\Users\Admin\Desktop\AI_Office_Cursor_Gerchik_SMC_Sources` не змонтований у Cloud VM. До появи архіву твердження «повні першоджерела Герчика прочитані» має статус `SOURCE_UNAVAILABLE`.
+Оригінальний файл SM Trader (Masterplan/DOCX) також не збережений у Git: доступні лише похідний реєстр, формалізація, 40 webp-схем і зафіксовані хеші. Тому джерельна атрибуція SMC відтворюється з репозиторію, але повна повторна звірка тексту з оригіналом зараз неможлива.
 
 ### 1.2. Заборонені підміни
 
@@ -149,6 +150,30 @@ real OHLCV + verified auxiliary feeds
 - futures проти spot;
 - наявність OHLCV і, де потрібно, taker volume;
 - provenance та fixture flag.
+
+### 3.2. Канонічні API повторного використання
+
+Новий інтеграційний façade має бути read-only відносно Brain і використовувати наявні обчислення замість паралельних реалізацій:
+
+| Потреба | Канонічний API | Умова використання |
+|---|---|---|
+| Остання завершена свічка | `office2.features.last_closed` | єдине правило відсікання незавершених/future bars |
+| Frozen multi-TF context | `office2.brain.build_full_ctx` | той самий snapshot для Brain, SMC і Gerchik |
+| Рівні та їхні timestamps | `office2.brain.all_levels` | не будувати незалежний production-набір рівнів |
+| Інструментний люфт | `office2.brain2.level_luft` | зберігати формулу й provenance; не підміняти фіксованим відсотком |
+| Структурні цілі | `office2.brain.targets_for` | source-specific 3R зберігати окремим варіантом |
+| Evidence/readiness даних | `office2.evidence.collect` | `UNAVAILABLE` не стає нейтральним фактом |
+| Portfolio authority | `office2.engine.portfolio_gate` | викликається лише чинним Brain READY-контуром |
+
+Façade може нормалізувати результати у contract з §2.2, але не викликає `brain2.assess`, `portfolio_gate`, outbox або Telegram від імені shadow-модуля.
+
+### 3.3. Поточні ризики дублювання та semantic drift
+
+1. `office2/smc/*` є канонічним traceable shadow-стеком; legacy `office_smc.py` досі використовується в `office_ready_evidence.py`, `office_confluence.py`, `office_scan_funnel.py` та частині UI. Їхні назви не гарантують однакових порогів або lifecycle. Legacy не можна непомітно підмінити новим SMC.
+2. «Дзеркало» має щонайменше три несумісні значення: зона, яка була і support, і resistance (`office_levels.py`); штучне віддзеркалення LONG/SHORT геометрії у тестах/replay; role flip після підтвердженого пробою у методиці Герчика. У contract це окремі типи `mixed_touch_zone`, `symmetry_transform`, `role_flip_retest`.
+3. Sweep/false-break і рівні будують кілька модулів (`office_smc.py`, `office2/smc`, Brain levels, market-data helpers). До уніфікації результати зіставляються через provenance та semantic group, а не взаємозамінюються.
+4. Legacy Lev/Telegram і Office2 мають різні ключі dedup та різні lifecycle. Єдиний Office означає поступову adapter-міграцію з regression fixtures, а не запис shadow-подій у будь-який із бойових ledger.
+5. Kill Zone/session gates не охоплюють усі legacy Lev/radar маршрути. До консолідації UI має показувати, який саме route і version сформував факт.
 
 ## 4. Єдина модель доказів
 
@@ -296,20 +321,30 @@ Source-варіант `day_used >=75–80%` і operational `>=80%` не зміш
 
 Wedges і частина chart patterns уже належать модулю Bulkowski. Cup and Handle згадується лише у похідному розділі сумісності. До надходження архіву вони мають статус `SOURCE_UNAVAILABLE` для Gerchik і не реалізуються під його ім'ям.
 
+### 6.8. Фактичний стан реалізації Герчика
+
+- `office_gerchik_kernel.py` уже обчислює operational score 0–10 та `gerchik_atr_trend_veto` на 80%. Це похідний AI-шар, а не повний book detector.
+- ATR-вето 80% реально використовується в частині legacy Lev/radar маршрутів; окремий T0 lifecycle використовує 90%. Тому формулювання «Gerchik лише display-only» було б неправильним. Ці пороги не змінюються цією специфікацією.
+- Office2 має level luft/mirror-related evidence, але це не реалізація книжкового role-flip setup.
+- Машини станів БСУ→БПУ1→БПУ2, book mirror, трьох варіантів false breakout і причинно правильного Gerchik replay немає.
+- Наявні три значення «mirror» з §3.3 мають бути розведені типами до написання detector, інакше тести можуть формально пройти для іншої семантики.
+
 ## 7. Existing Office capabilities
 
 | Інструмент | Фактична роль | Заборона на завищену назву |
 |---|---|---|
 | HTF/LTF, BTC/ETH, relative strength | Context/Evidence | не gate без доведеного edge |
 | ATR/RSI | ATR активно; RSI context | індикатор не замінює сценарій |
-| Volume/taker delta/CVD | M15 evidence | CVD-проксі з klines, не повний order flow |
-| OI/funding/L:S/liquidations | Research | недоступність не маскується |
-| DOM | legacy/обмежено, не Office2 canonical | не називати працюючим Office2 DOM |
+| Volume/taker delta/CVD | Office2 M15 evidence з `tbv`; окремі legacy/archive контури | Це taker-volume-derived CVD. Live Lev не має універсального CVD feed; не називати повним order flow |
+| OI/funding/L:S/liquidations | Research | `fetch_liquidations_proxy` моделює зони з 24h high/low; це не provider heatmap. Реальні force orders є окремим обмеженим потоком |
+| DOM | rate-limited legacy short-list через depth endpoint; не Office2 canonical | не називати загальносистемним або історично replayable DOM |
 | Wyckoff | H1 Evidence | фаза не є позицією великого гравця |
 | Bulkowski | підтверджені формалізовані patterns | назва «схоже на», доки геометрія не пройшла validation |
 | Strong Candle | `sc-ours-1` Evidence | не авторська закрита формула |
 | Sessions | кілька legacy реалізацій; Office2 canonical треба уніфікувати | не використовувати fixed UTC+3 як Kyiv |
 | Calendar | legacy, Office2 `NOT_CONNECTED` | не стверджувати macro gate |
+| Volume Profile | реалізації та canonical feed немає | звичайний candle volume не є профілем обсягу за ціною |
+| GEX/options | `NOT_CONNECTED` | не виводити proxy як біржовий GEX |
 
 ## 8. Replay і критерії права на вплив
 
