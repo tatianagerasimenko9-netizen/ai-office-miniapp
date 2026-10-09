@@ -1,0 +1,569 @@
+{
+ "source": "SM Trader — Strategy Smart Money Trading (20.03.2026), навчальні схеми з AI_Office_SMC_Implementation_Masterplan.docx, Додаток C",
+ "count": 40,
+ "available": 40,
+ "requested": 41,
+ "note": "Запит містив «41 схему»; у документі й наданих файлах — 40 (Схема 01…40). 41-ша відсутня. Файли тут — зменшені webp-копії для перегляду; оригінальні PNG (sha256 вказано) лишаються у Masterplan.",
+ "images": [
+  {
+   "n": 1,
+   "file": "scheme_01.webp",
+   "sha256_original_png": "5a3dbaf0fc49e65b09edf3b09d185702e3b315bc41a8bfb2003eb02cb2918761",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 527028,
+   "title": "Теханализ и Smart-Money",
+   "section": "S04",
+   "fixture": null,
+   "note": "ілюстрація: класичний ТА як наживка; не алгоритмізується"
+  },
+  {
+   "n": 2,
+   "file": "scheme_02.webp",
+   "sha256_original_png": "1ffbd7711d20872f7c73c88023ff2032422cd7a7f3ff3e721e5291a553ec5c8d",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 527131,
+   "title": "Фазы рынка",
+   "section": "S06",
+   "fixture": null,
+   "note": "падіння → накопичення → ріст → розподіл → падіння; гіпотеза Wyckoff, не детектор READY"
+  },
+  {
+   "n": 3,
+   "file": "scheme_03.webp",
+   "sha256_original_png": "adcaa5cc38ae816d389579e10407b0e065eb3554eaece2b10f1c5a9c6883e2ab",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 499165,
+   "title": "Рыночный цикл",
+   "section": "S06",
+   "fixture": null,
+   "note": "реальний графік із фазами; якісний приклад"
+  },
+  {
+   "n": 4,
+   "file": "scheme_04.webp",
+   "sha256_original_png": "7c9a62800490fdc24a8eedab92ba689737dd22fe3c8f1299025055c24f556b84",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 435325,
+   "title": "Swing",
+   "section": "S10.1",
+   "fixture": "swing_3candle",
+   "note": "3 позитивні + 1 негативний приклад для Swing High/Low"
+  },
+  {
+   "n": 5,
+   "file": "scheme_05.webp",
+   "sha256_original_png": "504d51d46fe27a6dbd20fa616286e4a053c358836d65b33c434fec99244a9f2a",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 464284,
+   "title": "Восходящая структура",
+   "section": "S10.2",
+   "fixture": "uptrend_structure",
+   "note": ""
+  },
+  {
+   "n": 6,
+   "file": "scheme_06.webp",
+   "sha256_original_png": "48516c2432e206fbaba93717cf3a10ee3b774322fdcfa94d221daa4ed0aba0a0",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 461104,
+   "title": "Нисходящая структура",
+   "section": "S10.3",
+   "fixture": "downtrend_structure",
+   "note": ""
+  },
+  {
+   "n": 7,
+   "file": "scheme_07.webp",
+   "sha256_original_png": "a0d15190bcd840a68c421890f62ef1482267bda22a292e2397a783cad78a61b6",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 446695,
+   "title": "Консолидация — Range (0 / 0,5 / 1, девиация)",
+   "section": "S10.4",
+   "fixture": "range_deviation",
+   "note": ""
+  },
+  {
+   "n": 8,
+   "file": "scheme_08.webp",
+   "sha256_original_png": "3d9be08e50e2753e807073cc16dde722b3bf3381867f5816fc32b6882d2f9637",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 459643,
+   "title": "BMS",
+   "section": "S09.3",
+   "fixture": "bms_chain",
+   "note": ""
+  },
+  {
+   "n": 9,
+   "file": "scheme_09.webp",
+   "sha256_original_png": "f0ccb90bd15f17d0c0b413afd2d87af49c1191e2a035b768acdedd39a922e07d",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 464119,
+   "title": "MSS + Confirm",
+   "section": "S12",
+   "fixture": "mss_confirm",
+   "note": ""
+  },
+  {
+   "n": 10,
+   "file": "scheme_10.webp",
+   "sha256_original_png": "bbef956985c080887a2d5c13214b139b172bd4bbf6eb61c170985eb5a2396df2",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 477748,
+   "title": "MSS: валідний vs «нет обновления максимума»",
+   "section": "S12",
+   "fixture": "mss_valid_vs_invalid",
+   "note": ""
+  },
+  {
+   "n": 11,
+   "file": "scheme_11.webp",
+   "sha256_original_png": "6104c287d531604166c0793580343b0bc642c48fe08eb9ae6540b96f1e703b4b",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 480415,
+   "title": "Не MSS (корекція в межах розширення)",
+   "section": "S12",
+   "fixture": "not_mss_correction",
+   "note": ""
+  },
+  {
+   "n": 12,
+   "file": "scheme_12.webp",
+   "sha256_original_png": "857a2712afb14378fd36a89aa1b0b87b20e2ad47093cf120fcbc378fb290990e",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 448654,
+   "title": "OTE вместе с Ордер Блоком",
+   "section": "S13.1",
+   "fixture": "ote_with_ob",
+   "note": ""
+  },
+  {
+   "n": 13,
+   "file": "scheme_13.webp",
+   "sha256_original_png": "75845d9a4d3337c79682686ca9c1b596518a990d187ce95deeb001e39cfd8a20",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 443589,
+   "title": "Применение объёмов с FVG",
+   "section": "S14",
+   "fixture": "fvg_basic",
+   "note": "профіль обсягів на схемі — OHLC-only FVG не доводить дисбаланс біржового bid/ask"
+  },
+  {
+   "n": 14,
+   "file": "scheme_14.webp",
+   "sha256_original_png": "56a4bb503faad788b4564cffe05b055073d62f4c4f55a50766204a232df70c7c",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 442365,
+   "title": "Имбаланс: эффективное vs неэффективное ценообразование",
+   "section": "S14",
+   "fixture": "fvg_basic",
+   "note": ""
+  },
+  {
+   "n": 15,
+   "file": "scheme_15.webp",
+   "sha256_original_png": "436ac0622e259616f1dd06515f1611f4ede9589aef4e8f707f65ba9f5ea0d24b",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 518931,
+   "title": "Типы ликвидности (EQH/EQL, Swing, Range, Trendline)",
+   "section": "S15",
+   "fixture": "liquidity_types",
+   "note": ""
+  },
+  {
+   "n": 16,
+   "file": "scheme_16.webp",
+   "sha256_original_png": "32ef8e5826441b948b85bd3cebc350a010a332fd23a8491898f37db3018697e5",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 488740,
+   "title": "ORDER FLOW (висхідний/низхідний + FVG)",
+   "section": "S16",
+   "fixture": "order_flow",
+   "note": ""
+  },
+  {
+   "n": 17,
+   "file": "scheme_17.webp",
+   "sha256_original_png": "9975b8552b877a30c6b9f623c4a44ade373af67d16f186445af487c1b608cf9c",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 512561,
+   "title": "Медвежий Order Flow после смены тренда (POI старшого ТФ: OB+FVG)",
+   "section": "S16",
+   "fixture": "order_flow",
+   "note": ""
+  },
+  {
+   "n": 18,
+   "file": "scheme_18.webp",
+   "sha256_original_png": "991ba3aa668eb54d2121537cc4ecc2ae0aecb5281480d621e1ffd35ba40a5d71",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 496027,
+   "title": "HRLR и LRLR",
+   "section": "S17",
+   "fixture": "hrlr_lrlr",
+   "note": ""
+  },
+  {
+   "n": 19,
+   "file": "scheme_19.webp",
+   "sha256_original_png": "c268ad7bc8413af6ad0712fc642f1a57a410184112cea74b02520c1193c321fd",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 438556,
+   "title": "Бычий ордер блок (FVG, біля ключового рівня)",
+   "section": "S18",
+   "fixture": "bull_ob",
+   "note": ""
+  },
+  {
+   "n": 20,
+   "file": "scheme_20.webp",
+   "sha256_original_png": "a944af66b0d65da260f8b166e2baf34a9122902561ea9d69645b439b1b4ac8c0",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 440874,
+   "title": "Медвежий ордер блок",
+   "section": "S18",
+   "fixture": "bear_ob",
+   "note": ""
+  },
+  {
+   "n": 21,
+   "file": "scheme_21.webp",
+   "sha256_original_png": "8217bc0e0287142d20ca8727c779c05fd778cbc52b4ad97e771c5ed156d87888",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 454163,
+   "title": "Структура блока. Mean Threshold",
+   "section": "S18.1",
+   "fixture": "ob_levels",
+   "note": ""
+  },
+  {
+   "n": 22,
+   "file": "scheme_22.webp",
+   "sha256_original_png": "c403faf2453761669f62ec56d9abf4642f4cffb251403b2424fc722aceba9c9c",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 458331,
+   "title": "Пример использования Ордер Блока (BSL, 2 OB)",
+   "section": "S18.2",
+   "fixture": "ob_usage",
+   "note": ""
+  },
+  {
+   "n": 23,
+   "file": "scheme_23.webp",
+   "sha256_original_png": "553cd978b28ea679bf6b083f10bbe5cff24cfa0e3e438136ebe21097adf5fa6f",
+   "original_px": [
+    1024,
+    500
+   ],
+   "original_bytes": 84966,
+   "title": "Приклад угоди: захват ліквідності → OB → вхід/SL/TP",
+   "section": "S18.2",
+   "fixture": "ob_usage",
+   "note": ""
+  },
+  {
+   "n": 24,
+   "file": "scheme_24.webp",
+   "sha256_original_png": "ecac585b85548f8c409441cacf85320df75dbb533c77787e2f43f7fabac76412",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 458819,
+   "title": "Breaker Block (висхідна й низхідна структура)",
+   "section": "S19",
+   "fixture": "breaker_block",
+   "note": ""
+  },
+  {
+   "n": 25,
+   "file": "scheme_25.webp",
+   "sha256_original_png": "d8644d1199904857b79e4ff0257cddae3b3d324ff3c61bd32cd4ce1eadd39cab",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 451160,
+   "title": "Mitigation Block",
+   "section": "S20",
+   "fixture": "mitigation_block",
+   "note": ""
+  },
+  {
+   "n": 26,
+   "file": "scheme_26.webp",
+   "sha256_original_png": "e4ced16ffe3a802e4c4ca292ca913823b2313e00148a4f5df9a5573840ef7679",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 461457,
+   "title": "Отличие MB от BB (обновили / не обновили максимум)",
+   "section": "S20",
+   "fixture": "mb_vs_bb",
+   "note": ""
+  },
+  {
+   "n": 27,
+   "file": "scheme_27.webp",
+   "sha256_original_png": "79108a328cafe3c8f21d7e79d12e81408582fc12c5601e1f3810e8b31b918a18",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 466076,
+   "title": "MB в сочетании с BB",
+   "section": "S20",
+   "fixture": "mb_vs_bb",
+   "note": ""
+  },
+  {
+   "n": 28,
+   "file": "scheme_28.webp",
+   "sha256_original_png": "f6ec4837037374b9a8da385f02a8fac04d160a05f52a1d6e6cc96cec6b89bddb",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 442178,
+   "title": "Пример Rejection Block (BSL, FVG, MSS, BMS)",
+   "section": "S21",
+   "fixture": "rejection_block",
+   "note": ""
+  },
+  {
+   "n": 29,
+   "file": "scheme_29.webp",
+   "sha256_original_png": "39a84231dadb6e0ac0fe72970272cebb3606f7ca8be4665dd5e4a0ce9fdc63af",
+   "original_px": [
+    1024,
+    536
+   ],
+   "original_bytes": 91998,
+   "title": "Скріншот TradingView: RJB+ (long, R:R 9,65)",
+   "section": "S21",
+   "fixture": null,
+   "note": "реальний приклад ціни; без OHLC в документі"
+  },
+  {
+   "n": 30,
+   "file": "scheme_30.webp",
+   "sha256_original_png": "d4936b5bb6c3789812b613f6d23767b280e6e126dedc22c9c469c304bb32ff84",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 427983,
+   "title": "Rejection Block / Wick (бичачий, EQL, SSL, 0,5)",
+   "section": "S21",
+   "fixture": "rejection_block",
+   "note": ""
+  },
+  {
+   "n": 31,
+   "file": "scheme_31.webp",
+   "sha256_original_png": "3481edaea75143a0df517d1a9a9a71284abe15b0b948859d9647dd7d5a8a3970",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 421015,
+   "title": "Rejection Block / Wick (ведмежий, EQH, BSL, 0,5)",
+   "section": "S21",
+   "fixture": "rejection_block",
+   "note": ""
+  },
+  {
+   "n": 32,
+   "file": "scheme_32.webp",
+   "sha256_original_png": "f33d5dbe4cecc69490e6878ffeab695a82092f120c0a0765f8ce18dec8ea3045",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 542123,
+   "title": "Захват ликвидности (Stop Hunt / Raid), рух проти тренду",
+   "section": "S22",
+   "fixture": "raid_sweep",
+   "note": ""
+  },
+  {
+   "n": 33,
+   "file": "scheme_33.webp",
+   "sha256_original_png": "d11ecb970e5f74de7e81e17aa4a8736ed73354da1334b2a3afe3f277c7b843ba",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 441203,
+   "title": "SFP (Swing Failure Pattern), long і short",
+   "section": "S23",
+   "fixture": "sfp",
+   "note": ""
+  },
+  {
+   "n": 34,
+   "file": "scheme_34.webp",
+   "sha256_original_png": "99cd781d753cf631f6a3570a5123919c3dbfe55acdddac168f6bc9c868067b97",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 480825,
+   "title": "Зоны StB и BtS",
+   "section": "S24",
+   "fixture": "stb_bts",
+   "note": ""
+  },
+  {
+   "n": 35,
+   "file": "scheme_35.webp",
+   "sha256_original_png": "270d6cb4a8a82ceab5f1b11e95c9a78d22eeded833c11f90a63f58529a222f46",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 452919,
+   "title": "Пример Sell to Buy (Breaker + SSL)",
+   "section": "S24",
+   "fixture": "stb_bts",
+   "note": ""
+  },
+  {
+   "n": 36,
+   "file": "scheme_36.webp",
+   "sha256_original_png": "5635b49c5850b38639dc0dc2203a7e0f2f5e551c1595911de53ce9fcde230d24",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 457652,
+   "title": "Пример Sell to Buy (2 OB, MSS, 0,5)",
+   "section": "S24",
+   "fixture": "stb_bts",
+   "note": ""
+  },
+  {
+   "n": 37,
+   "file": "scheme_37.webp",
+   "sha256_original_png": "c5a3d021d59761b642f5e1988997749b94c76550262f2130f1fd1625ebb29b83",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 458497,
+   "title": "Пример Buy to Sell (BSL, MSS, OB)",
+   "section": "S24",
+   "fixture": "stb_bts",
+   "note": ""
+  },
+  {
+   "n": 38,
+   "file": "scheme_38.webp",
+   "sha256_original_png": "42ce678107c78c9addc73032447533b793519feb711247e15cb73e54dd71d72c",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 461413,
+   "title": "Спонсированная цена / Institutional Sponsorship (FVG, SSL, OB, RJB)",
+   "section": "S25",
+   "fixture": "sponsored_candle",
+   "note": ""
+  },
+  {
+   "n": 39,
+   "file": "scheme_39.webp",
+   "sha256_original_png": "f0295ebd35260b97c6d586704721629c2c048c3a9b37c2a067802de09f8ee89f",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 489879,
+   "title": "REVERSAL TYPE 1 (контекст HTF POI/RAID BSL; без контексту — не шукати вхід)",
+   "section": "S26",
+   "fixture": "reversal_type1",
+   "note": ""
+  },
+  {
+   "n": 40,
+   "file": "scheme_40.webp",
+   "sha256_original_png": "8c38c0cdae01bbfb4d52d4a96e06af36e815066ad10080cbe59c4529176b4672",
+   "original_px": [
+    1024,
+    576
+   ],
+   "original_bytes": 494624,
+   "title": "Reversal vs Continuation (4 схеми: напрям, RAID, MS, вхід)",
+   "section": "S26",
+   "fixture": "rev_vs_cont",
+   "note": ""
+  }
+ ]
+}

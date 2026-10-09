@@ -221,3 +221,9 @@ def stb_bull(b: Arr, a: np.ndarray, ssl_sweeps: List[Dict[str, Any]], struct_eve
         out.append({"kind": "STB", "dir": "LONG", "i": int(s["j"]), "conf": int(e["j"]), "zone": zone, "mt": mt, "state": st, "sweep_j": int(s["reclaim_j"]), "mss_j": int(e["j"]),
                     "poi": [{"kind": p["kind"], "zone": p["zone"], "i": p["i"]} for p in poi[:2]], "level": s["level"]["p"], "times": [float(b["t"][s["j"]]), float(b["t"][e["j"]])]})
     return out
+
+
+def ob_fractal(m15: Arr, htf_open: float, htf_width: int) -> List[int]:
+    """Фрактальність OB (S18.1): блок старшого ТФ (одна свічка H4/H1) складається на M15 із серії свічок; повертає індекси M15-барів у часовому вікні цієї HTF-свічки."""
+    t = m15["t"]
+    return [int(i) for i in np.flatnonzero((t >= htf_open) & (t < htf_open + htf_width))]

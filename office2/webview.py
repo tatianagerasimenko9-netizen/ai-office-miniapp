@@ -171,7 +171,7 @@ def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
             snap["alignment"] = AL.alignment(d, ms.get("market") or {}, ms.get("relative") or {}, ((snap.get("context") or {}).get("htf")))
             snap["alignment_derived"] = True
         miles = _milestones(db, sid)
-        item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map")}
+        item["frozen"] = {k: snap.get(k) for k in ("label", "evidence_status", "decided_utc", "why", "thesis", "market_at_signal", "trace", "context", "old_lev", "alignment", "alignment_derived", "sequence", "evidence", "evidence_counts", "version_id", "integral", "market_map", "smc")}
         item["frozen"]["sequence"] = repair_legacy_texts(item["frozen"]["sequence"], d)
         from office2 import levels as LVL
 

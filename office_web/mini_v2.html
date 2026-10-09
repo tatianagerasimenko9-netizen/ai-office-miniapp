@@ -139,7 +139,7 @@ const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 const S={tf:lsGet('ao_tf','H1'), sf:'all', rf:'all', jkind:'trades',prefill:null, lastBar:0,
-  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch2','1')==='1', ctx:lsGet('ao_ctx','1')==='1'}};
+  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch2','1')==='1', ctx:lsGet('ao_ctx','1')==='1', smc:lsGet('ao_smc','1')==='1'}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
 let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
@@ -643,6 +643,7 @@ async function paintChart(el, s){
     /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
        OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
     const shown=['зона','SL','TP'];
+    const mkAll=[];
     let cx=null;
     if(S.layers.ch||S.layers.ctx){
       try{
@@ -669,7 +670,7 @@ async function paintChart(el, s){
       }
       if(cx.strong_candle&&(!s.__objs||s.__objs.includes('candle'))){
         const sc=cx.strong_candle, long_=String(s.direction||'').toUpperCase()!=='SHORT';
-        series.setMarkers([{time:sc.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'}]);
+        mkAll.push({time:sc.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'});
         seg(sc.time,sc.ote_hi,lastT,sc.ote_hi,{color:'#4DB8F3',lineStyle:2,title:'відкат 62–79%',lastValueVisible:true});
         seg(sc.time,sc.ote_lo,lastT,sc.ote_lo,{color:'#4DB8F3',lineStyle:2});
         shown.push('сильна свічка');
@@ -681,7 +682,19 @@ async function paintChart(el, s){
       if(rc){ const long_=String(s.direction||'').toUpperCase()!=='SHORT';
         const mk=[{time:rc.time,position:long_?'belowBar':'aboveBar',color:'#E8EDF4',shape:long_?'arrowUp':'arrowDown',text:'План підтверджено'}];
         if(cx&&cx.strong_candle&&(!s.__objs||s.__objs.includes('candle'))) mk.unshift({time:cx.strong_candle.time,position:long_?'belowBar':'aboveBar',color:'#4DB8F3',shape:long_?'arrowUp':'arrowDown',text:'Сильна свічка'});
-        series.setMarkers(mk.sort((a,b)=>a.time-b.time)); shown.push('момент плану'); } }
+        mk.forEach(m=>mkAll.push(m)); shown.push('момент плану'); } }
+    if(S.layers.smc&&s.__smc&&s.__smc.items){   /* SMC (shadow): що саме побачив аналіз; кожен елемент прив'язаний до часу відкриття свічки */
+      const ov=s.__smc, nearest=t=>{const c=candles.filter(x=>x.time<=t).slice(-1)[0]; return c?c.time:null;};
+      ov.items.forEach(it=>{
+        if(it.k==='level'&&it.p!=null){ const t0=nearest(it.t0)||candles[0].time; seg(t0,it.p,lastT,it.p,{color:'#FFB347',lineStyle:2,title:'SMC '+it.label,lastValueVisible:false}); }
+        else if(it.k==='zone'){ const t0=(it.t0!=null&&nearest(it.t0))||candles[Math.max(0,candles.length-40)].time; const col=it.role==='poi'?'#FF8FD0':'#FFB347';
+          seg(t0,it.hi,lastT,it.hi,{color:col,lineStyle:0,title:'SMC '+it.label,lastValueVisible:false}); seg(t0,it.lo,lastT,it.lo,{color:col,lineStyle:0,lastValueVisible:false}); }
+        else if(it.k==='line'&&it.p!=null){ const col=it.role==='sl'?'#F36B78':it.role==='tp'?'#27C99A':'#E8EDF4'; seg(candles[Math.max(0,candles.length-30)].time,it.p,lastT,it.p,{color:col,lineStyle:3,title:'SMC '+it.label,lastValueVisible:false}); }
+        else if(it.k==='marker'){ const t=nearest(it.t); if(t) mkAll.push({time:t,position:it.up?'belowBar':'aboveBar',color:'#FFB347',shape:it.up?'arrowUp':'arrowDown',text:'SMC '+it.label}); }
+      });
+      shown.push('SMC (shadow)');
+    }
+    if(mkAll.length){ const seen=new Set(); series.setMarkers(mkAll.sort((a,b)=>a.time-b.time).filter(m=>{const k=m.time+m.text; if(seen.has(k)) return false; seen.add(k); return true;})); }
     window.__chartLayers=shown; S.cx=cx;
     chart.timeScale().fitContent();
   } else { usingLW=false; let cx=null; if(S.layers.ch){ try{ const q=new URLSearchParams({symbol,tf}); cx=await j('/api/v2/chart_context?'+q.toString()); }catch(e){ if(e&&e.stale) return null; } } drawFallback(el,candles,lv,cx); window.__chartLayers=['зона','SL','TP'].concat(cx&&cx.channel?['канал']:[]); }
@@ -778,6 +791,15 @@ function o2MapHtml(MM){
   return `<div class="sec"><h3>Карта ринку зверху вниз (MN → M15)</h3>${rows}
     <div class="o2sub">Живі пули ліквідності над входом</div>${pool(MM.pools_above,'+')}<div class="o2sub">Під входом</div>${pool(MM.pools_below,'−')}</div>`;
 }
+function o2SmcHtml(m){
+  if(!m) return '';
+  const ov=m.overlay||{}, steps=(ov.steps||[]).map(x=>`<div class="o2row ${x.ok?'o2g':x.ok===false?'o2r':'o2m'}">${x.ok?'✓ ':x.ok===false?'✗ ':'· '}<b>${esc(x.step)}</b> ${esc(x.value||'')}</div>`).join('');
+  const st=m.state==='READY'?'READY за SMC':m.state==='UNVERIFIED'?'не перевірено':m.state==='NONE'?'SMC не бачить моделі':esc(m.state);
+  return `<div class="sec"><h3>SMC (методика SM Trader) · лише спостереження</h3>
+    <div class="o2row ${m.agrees_ready?'o2g':'o2m'}"><b>${st}</b>${m.model?` · ${esc(m.model==='REVERSAL'?'Reversal':'Continuation')}`:''} · ${m.agrees_ready?'збігається з Brain':'не підтверджує Brain'}</div>
+    <div class="o2sub">${esc(m.reason||'')}</div>${steps}
+    <div class="mut" style="margin-top:6px">Це другий погляд за методикою SMC: він не змінює READY, ризик і цілі Brain v2.1. Статистику SMC зібрано лише в shadow-режимі — не доказ прибутковості.</div></div>`;
+}
 function o2EvidenceHtml(ev){
   if(!(ev&&ev.length)) return '';
   return `<div class="sec"><h3>Що перевірено · ЗА / ПРОТИ / недоступно</h3>${ev.map(m=>{
@@ -790,7 +812,7 @@ function o2EvidenceHtml(ev){
 async function openO2(d, T0){
   const s=d.scenario||{}, o=d.o2||{}, fr=o.frozen||{}, th=fr.thesis||{}, lv=o.levels||{}, ch=o.changed||{}, I=fr.integral;
   const long_=String(s.direction||'').toUpperCase()!=='SHORT', sd=long_?'L':'S', st=s.status||{};
-  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts;
+  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts; s.__smc=(fr.smc&&fr.smc.overlay)||null;
   const mn=(o.market_now||{}), m0=((fr.market_at_signal||{}).market)||{}, m1=mn.market||{};
   const cells=[`<div class="en"><span>Вхід (ціна READY)</span><b>${o2px(lv.ready_price)}</b>${lv.zone?`<small>зона ${o2px(lv.zone[0])}–${o2px(lv.zone[1])}</small>`:''}</div>`,
     `<div class="sl"><span>SL</span><b>${o2px(lv.sl)}</b><small>−${o2rg(lv.sl_pct,'').replace(/^/,'')}%</small></div>`]
@@ -827,6 +849,7 @@ async function openO2(d, T0){
       <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
       <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
       <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
+      ${s.__smc?`<button data-l="smc" class="${S.layers.smc?'on':''}" aria-pressed="${S.layers.smc}">SMC</button>`:''}
       <button id="fs" aria-label="Графік на весь екран">⤢ Повний екран</button></div>
     <div class="mut">Рівні на графіку — заморожені на момент сигналу, свічки — живі.</div>`;
   const iopen='<div class="acts" style="margin:8px 0 10px"><button class="btn" id="iopen">Я відкрила угоду за цим сценарієм</button></div>';
@@ -857,7 +880,7 @@ async function openO2(d, T0){
       <div class="sec"><h3>Журнал подій</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає.</div>'}</div>
       <div class="mut">ID ${esc(s.scenario_id)} · Telegram повідомлення ${esc(o.telegram_msg_id||'—')} · ${esc(o.status_ua||'')}</div></details>`;
   if(T0!==RT) return;
-  app.innerHTML=`${top}${chartBlock}${iopen}${why}${seq}${o2MapHtml(fr.market_map)}${o2EvidenceHtml(fr.evidence)}${quality}${market}${course}${tech}`;
+  app.innerHTML=`${top}${chartBlock}${iopen}${why}${seq}${o2MapHtml(fr.market_map)}${o2SmcHtml(fr.smc)}${o2EvidenceHtml(fr.evidence)}${quality}${market}${course}${tech}`;
   $('back').onclick=()=>{killPoll(); go('scenarios');};
   $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
     sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};
@@ -867,7 +890,7 @@ async function openO2(d, T0){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); if(b.dataset.l==='smc') lsSet('ao_smc',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;

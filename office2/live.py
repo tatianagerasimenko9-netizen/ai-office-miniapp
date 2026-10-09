@@ -382,6 +382,40 @@ def _ingest_old_lev(db: str, feed: "Feed", now: float, states: Dict[str, Dict[st
     return n
 
 
+_SMC_LOCK = threading.Lock()
+
+
+def _spawn_smc(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, states: Dict[str, Dict[str, Any]]) -> None:
+    """SMC shadow у фоні: не блокує цикл Brain і доставку. Попередній прохід ще йде → цей бар пропускається (без черги)."""
+    try:
+        from office2.smc import shadow as SMC
+    except Exception:  # noqa: BLE001
+        return
+    if not SMC.enabled() or not ctxs:
+        return
+
+    def _bg() -> None:
+        if not _SMC_LOCK.acquire(blocking=False):
+            return
+        try:
+            bs: Dict[Any, str] = {}
+            try:
+                from office_bridge import _fetchall
+
+                for r in _fetchall(db, "SELECT symbol, direction, state FROM office2_live_scenario WHERE state IN ('WATCH','WAIT','READY')"):
+                    bs[(r[0], r[1])] = r[2]
+            except Exception:  # noqa: BLE001
+                pass
+            SMC.run_cycle(db, dict(ctxs), now, bs, log=_log)
+        except Exception as exc_:  # noqa: BLE001
+            _bump("errors")
+            _log(f"[o2smc] помилка: {type(exc_).__name__}: {str(exc_)[:120]}")
+        finally:
+            _SMC_LOCK.release()
+
+    threading.Thread(target=_bg, name="office2-smc", daemon=True).start()
+
+
 def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None, old_lev_background: bool = False) -> Dict[str, int]:
     """Один цикл. now — момент закриття щойно завершеного M15-бару. state: пам'ять між циклами {'last_plan_id': int}."""
     syms = syms or universe()
@@ -475,6 +509,8 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             store_event(db, eid, now, sym, "O2_CANDIDATE", c["dir"], c["entry"], c["sl"], c["tp"], snap)
             res["events"] += 1
     t_brain = time.time()
+    if old_lev_background:
+        _spawn_smc(db, ctxs, now, states)      # лише у production-режимі; тести і replay (sync) не запускають фонових потоків
     if _prev:
         durs.append((t_brain - _prev[1], _prev[0]))
     res["slow_ms"] = {sym_: int(d_ * 1000) for d_, sym_ in sorted(durs, reverse=True)[:3]}     # найповільніші символи в циклі Brain
@@ -596,6 +632,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
         EN.init_db(db)
     if os.getenv("OFFICE2_REPLAY_AT", "").strip():   # разовий реплей рішення Brain на момент часу (діагностика; без lifecycle/доставки)
         threading.Thread(target=_replay_job, args=(db, feed), name="office2-replay", daemon=True).start()
+    if os.getenv("OFFICE2_SMC_REPLAY", "").strip():   # разовий time-frozen replay Brain vs SMC на даних біржі (діагностика; нічого не шле, lifecycle не чіпає)
+        threading.Thread(target=_smc_replay_job, args=(db, feed), name="office2-smc-replay", daemon=True).start()
     state: Dict[str, Any] = {"last_plan_id": last_event_id(db)}   # лише нові рішення Лева, без вичитування історії
     _log(f"старт {VERSION}: символів {len(universe())}, db ok; Telegram не використовується")
     while True:
@@ -629,6 +667,15 @@ def _replay_job(db: str, feed: "Feed") -> None:
         RA.run_jobs(db, feed, os.getenv("OFFICE2_REPLAY_AT", ""))
     except Exception as exc:  # noqa: BLE001
         _log(f"[replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")
+
+
+def _smc_replay_job(db: str, feed: "Feed") -> None:
+    try:
+        from office2.smc import replay as RP
+
+        RP.run_spec(db, feed, os.getenv("OFFICE2_SMC_REPLAY", ""), log=_log)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[smc-replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")
 
 
 def start_background(db: str) -> bool:

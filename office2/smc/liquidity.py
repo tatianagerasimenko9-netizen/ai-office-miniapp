@@ -193,3 +193,10 @@ def sweeps_of(led: List[Dict[str, Any]], classes: Tuple[str, ...] = ("FRESH_RAID
             out.append({"level": {k: lv[k] for k in ("kind", "side", "p", "strength", "tf")}, "dir": "SHORT" if lv["side"] == "high" else "LONG", **s})
     out.sort(key=lambda x: -x["reclaim_j"])
     return out
+
+
+def ie_class(level_p: float, rg: Optional[Dict[str, Any]], tol_atr_px: float = 0.0) -> str:
+    """External vs Internal (S15): external — на/поза межами поточного range (або range немає — вважаємо зовнішнім), internal — всередині коридору."""
+    if not rg:
+        return "EXTERNAL"
+    return "INTERNAL" if rg["low"] + tol_atr_px < level_p < rg["high"] - tol_atr_px else "EXTERNAL"

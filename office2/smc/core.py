@@ -47,11 +47,17 @@ def atr_arr(b: Arr, n: int = 14) -> np.ndarray:
 
 
 def atr_at(a: np.ndarray, i: int) -> float:
-    """Остання скінченна ATR до індексу i включно (щоб не падати на NaN у перших барах)."""
+    """Остання скінченна ATR до індексу i включно (щоб не падати на NaN у перших барах). Швидкий шлях: значення на i скінченне."""
     j = min(i, len(a) - 1)
-    while j >= 0 and not np.isfinite(a[j]):
+    v = a[j]
+    if v == v:                        # не NaN
+        return float(v)
+    while j >= 0:
+        v = a[j]
+        if v == v:
+            return float(v)
         j -= 1
-    return float(a[j]) if j >= 0 else 0.0
+    return 0.0
 
 
 def body(b: Arr, i: int) -> float:

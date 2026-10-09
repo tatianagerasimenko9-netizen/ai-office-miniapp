@@ -73,6 +73,8 @@ def main():
             txt = page.inner_text("body")
             for must in ("Чому Office вирішив увійти", "Карта ринку зверху вниз", "Послідовність до READY", "Що перевірено", "Я відкрила угоду", "Хід сценарію", "Ринок на момент сигналу"):
                 assert must.lower() in txt.lower(), (must, txt[:400])
+            assert "smc (методика sm trader)" in txt.lower() and "лише спостереження" in txt.lower(), "панель SMC має бути в картці"      # другий погляд, не вплив на READY
+            assert page.locator('#lay button[data-l="smc"]').count() == 1, "перемикач шару SMC"
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (картка)"
             th = WV.payload(db)["signals"][0]["frozen"]["thesis"]
             for i, lvl in enumerate(("ENTRY", "TP1", "TP2", "TP3")):                         # сценарій дійшов до TP3: головний статус — завершено, READY лише історична подія

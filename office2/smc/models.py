@@ -165,6 +165,7 @@ def evaluate(v: Dict[str, Any], b: Arr, htf: Dict[str, Dict[str, Any]], k: int, 
         steps.append(_step("POI", False, "між raid і MS не сформовано OB/FVG/BB у знижці ноги"))
         return dict(base, state="WAIT", stage=5, need={"text": "POI (OB/FVG/BB) у знижці ноги; лише OTE без POI — не вхід"}, reason="WAIT · немає POI у зоні знижки (OTE без POI ≠ вхід)")
     base["zone"], base["pois"] = zone, pois
+    base["aggressive_entry"] = {"px": float(zone[1]), "note": "агресивний вхід від POI без підтвердження M15: кращий R, але вищий шанс стопу (S18.2); це НЕ READY"}
     steps.append(_step("POI", True, "+".join(sorted({p['kind'] for p in pois})) + f" {P(zone[0]):.6g}–{P(zone[1]):.6g}", max(p["conf"] for p in pois), float(b["t"][max(p["conf"] for p in pois)]), ordered=False))   # POI формується в нозі між raid і ретрейсом: не в строгому ряду
     base["anchors"] += [{"type": p["kind"], "zone": p["zone"], "conf": p["conf"]} for p in pois]
     # --- 4. ретрейс

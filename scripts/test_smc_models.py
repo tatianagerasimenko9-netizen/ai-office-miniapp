@@ -112,6 +112,33 @@ def test_speed_budget():
     assert r["timing_ms"] < 2000, r["timing_ms"]
 
 
+def test_aggressive_entry_is_shown_but_never_ready():
+    r = run(FX.reversal_long(upto=10))
+    m = r["models"]["LONG"]["REVERSAL"]
+    assert m["state"] == "ARMED" and m["aggressive_entry"]["px"] == m["zone"][1] and "НЕ READY" in m["aggressive_entry"]["note"]
+
+def test_fuzz_degenerate_series_never_raise():
+    rs = np.random.RandomState(99)
+    cases = []
+    n = 220
+    cases.append(FX.bars([(100, 100, 100, 100)] * n))                                              # плоский ряд, нульовий діапазон
+    cases.append(FX.bars([(100 + (i % 2), 101 + (i % 2), 99 + (i % 2), 100.5 + (i % 2)) for i in range(n)]))   # пилка
+    c = 100 * np.exp(np.cumsum(rs.randn(n) * 0.08))                                                # дуже волатильний
+    o = np.r_[c[0], c[:-1]]
+    cases.append(FX.bars(list(zip(o, np.maximum(o, c) * 1.01, np.minimum(o, c) * 0.99, c))))
+    g = np.where(np.arange(n) % 40 == 0, 1.3, 1.0) * (100 + np.cumsum(rs.randn(n) * 0.3))         # гепи
+    og = np.r_[g[0], g[:-1]]
+    cases.append(FX.bars(list(zip(og, np.maximum(og, g) + 0.2, np.minimum(og, g) - 0.2, g))))
+    cases.append(FX.bars([(100, 101, 99, 100.2)] * 61))                                            # мінімум барів
+    for b in cases:
+        for h in (b, FX.htf_up()):
+            ctx = {"m15": b, "h1": h, "h4": h, "d1": h, "w1": h, "mn": None}
+            r = EN.analyze(ctx, float(b["t"][-1]) + 900, "FUZZ", real_levels=[])
+            assert "models" in r or r.get("error")
+    short = FX.bars([(100, 101, 99, 100)] * 20)
+    assert EN.analyze({"m15": short, "h1": short, "h4": short, "d1": short, "w1": short, "mn": None}, float(short["t"][-1]) + 900, "S").get("error")   # замало барів → чесна відмова, не винятки
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

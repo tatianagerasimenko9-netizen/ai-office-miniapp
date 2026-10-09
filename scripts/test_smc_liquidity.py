@@ -106,6 +106,10 @@ def test_ledger_no_lookahead():
     assert part["sweep"] is None or part["sweep"]["j"] == full["sweep"]["j"]
 
 
+def test_internal_vs_external_liquidity():
+    rg = {"low": 100.0, "high": 110.0}
+    assert LQ.ie_class(105.0, rg) == "INTERNAL" and LQ.ie_class(110.0, rg) == "EXTERNAL" and LQ.ie_class(112.0, rg) == "EXTERNAL" and LQ.ie_class(105.0, None) == "EXTERNAL"
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):

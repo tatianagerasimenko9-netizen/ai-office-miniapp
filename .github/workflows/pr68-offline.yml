@@ -76,6 +76,18 @@ jobs:
         run: python scripts/test_office2_brain2.py
       - name: Office2 latency - pool, adaptive start, parallel delivery, STALE/MISSED (offline)
         run: python scripts/test_office2_latency.py
+      - name: SMC detectors, models, golden schemes, matrix, shadow integration, replay (offline)
+        run: |
+          python scripts/test_smc_structure.py
+          python scripts/test_smc_liquidity.py
+          python scripts/test_smc_imbalance.py
+          python scripts/test_smc_blocks.py
+          python scripts/test_smc_sessions_pd_flow.py
+          python scripts/test_smc_models.py
+          python scripts/test_smc_golden.py
+          python scripts/test_smc_matrix.py
+          python scripts/test_smc_integration.py
+          python scripts/test_smc_replay.py
       - name: Evidence-backed market thesis contract (offline, no orders)
         run: python scripts/test_market_thesis.py
       - name: Market feed freshness and provenance veto (offline)

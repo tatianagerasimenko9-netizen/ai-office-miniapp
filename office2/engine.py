@@ -78,6 +78,12 @@ def init_db(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
+    try:
+        from office2.smc import shadow as _SMC
+
+        _SMC.init_db(db)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _j(o: Any) -> str:
@@ -380,7 +386,13 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         except Exception as exc:  # noqa: BLE001
             evid = [{"module": "evidence", "role": "EVIDENCE", "status": "UNAVAILABLE", "finding": f"{type(exc).__name__}: {str(exc)[:80]}", "supports": 0, "data": None}]
     evid = evid or []
-    snap = {"version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
+    try:
+        from office2.smc import shadow as _SMC
+
+        smc_block = _SMC.snapshot_for(sym, ctx, now, th["dir"])      # display-only; рішення Brain не залежить від нього
+    except Exception:  # noqa: BLE001
+        smc_block = None
+    snap = {"smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
             "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [

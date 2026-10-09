@@ -126,6 +126,13 @@ def test_view_pipeline_mirror_symmetry_on_random_walk():
         assert len(v["sweeps"]) == len(vm["sweeps"])
 
 
+def test_ob_fractality_htf_candle_is_series_on_m15():
+    b = FX.bars([(100, 101, 99, 100)] * 16, t0=1_800_000_000.0)
+    h4_open = float(b["t"][4])                        # одна H4-свічка = 16 свічок M15, у даних їх 12 після відкриття
+    idx = BL.ob_fractal(b, h4_open, 14400)
+    assert idx == list(range(4, 16))
+    assert BL.ob_fractal(b, h4_open, 3600) == [4, 5, 6, 7]       # H1-свічка = 4 свічки M15
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):
