@@ -140,7 +140,7 @@ def test_negative_depth_impulse_complex_and_room_rejections():
     assert one["rejection_reasons"] == ["FALSE_BREAK_DEPTH_ABOVE_0_30_ATR"]
 
     breakout, k = fixture_breakout()
-    set_bar(breakout, k, 99.6, 100.2, 99.4, 100.1)
+    set_bar(breakout, k, 99.9, 100.15, 99.8, 100.1)
     weak = only(breakout, k, "BREAKOUT")
     assert weak["state"] == "INVALIDATED" and "NO_BREAKOUT_IMPULSE" in weak["rejection_reasons"]
 
