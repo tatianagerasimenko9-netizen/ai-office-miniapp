@@ -105,3 +105,8 @@ Evidence-модулі не голосують: вони не блокують і
 - Перевірка застарілих планів legacy-моніторингу — раз на 1800 с (`OLD_RECHECK_LEGACY_SEC`), O2 — 120 с.
 - У лозі циклу: `brain_s` (чистий час Brain) і `slow_ms` (3 найповільніші символи).
 - Обмеження: швидкість Telegram API та Binance REST залишаються зовнішніми; ліміт вимірюється в `ST.latency` на реальних READY.
+
+
+## SMC (SM Trader) — shadow-пакет (09.10)
+
+Другий погляд на ринок за методикою Smart Money Concept: `office2/smc/*`. **Не змінює READY, ризик, цілі й Telegram Brain.** Документи: `SMC_AUDIT.md` (звірка з Brain v2.1), `SMC_RULES.md` (формальні правила), `SMC_MATRIX.md` (матриця «пункт → правило → код → тест → схема → статус → вплив»), `SMC_REPLAY.md` (time-frozen replay і чесні результати). Вимкнення: `OFFICE2_SMC=0`.
