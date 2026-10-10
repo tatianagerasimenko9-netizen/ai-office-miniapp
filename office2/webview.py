@@ -265,7 +265,10 @@ def radar(db: str, now: Optional[float] = None) -> Dict[str, Any]:
         if not groups or groups[-1]["group"] != it["group"]:
             groups.append({"group": it["group"], "title": it["group_ua"], "items": []})
         groups[-1]["items"].append(it)
-    return {"ok": True, "now": t, "groups": groups, "n": len(items), "funnel": _funnel(db, t)}
+    freshness = _rows(db, "SELECT MAX(ts_epoch), COUNT(DISTINCT symbol) FROM office2_shadow_state WHERE ts_epoch > ?", (int(t - 3600),))
+    latest_ts, symbols_last_hour = freshness[0] if freshness else (None, 0)
+    return {"ok": True, "now": t, "groups": groups, "n": len(items), "funnel": _funnel(db, t),
+            "last_cycle_ts": latest_ts, "symbols_last_hour": symbols_last_hour or 0}
 
 
 def delivered(db: str, limit: int = 60) -> List[Dict[str, Any]]:

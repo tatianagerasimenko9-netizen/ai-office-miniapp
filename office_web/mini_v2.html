@@ -323,11 +323,15 @@ async function radar(){
   const shortlist=`<div class="mut" style="margin-bottom:8px">Shortlist сканера — кандидати на аналіз, не сигнали.</div>
     ${rows.length?body:`<div class="empty">${esc(d.empty_reason||'Немає збережених фактів скану')}</div>`}`;
   const wl=watch.map(scCard).join('')||'<div class="empty">Лев зараз ні за чим не спостерігає</div>';
-  app.innerHTML=`${chips([['all','Усе'],['brain','Brain v2.1'],['short','Shortlist і Лев']],f,'rf')}
+  app.innerHTML=`<div class="mut" role="status">Радар: автоматичне оновлення кожні 30 с · дані станом на ${o2&&o2.last_cycle_ts?new Date(o2.last_cycle_ts*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжого скану'} · ${o2&&o2.symbols_last_hour!=null?o2.symbols_last_hour+' монет за годину':'немає підтвердження свіжості'}</div>
+    ${chips([['all','Усе'],['brain','Brain v2.1'],['short','Shortlist і Лев']],f,'rf')}
     ${f!=='short'?o2RadarHtml(o2):''}
     ${f!=='brain'?`<h2>Shortlist сканера</h2>${shortlist}<h2>Додаткові спостереження Лева</h2>${wl}`:''}`;
   app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
   bindCards();
+  // Radar is a live monitor, not a static snapshot. Reuse the route-owned
+  // timer and stop refreshing immediately when the user navigates away.
+  if(!poll && cur==='radar') poll=setInterval(()=>{if(cur==='radar') radar();},30000);
 }
 
 /* ---------- Сценарії ---------- */
