@@ -321,7 +321,12 @@ def _v2_e2e(short):
             candles = [{"ts": dt.datetime.fromtimestamp(float(b["t"][i]), tz=dt.timezone.utc).isoformat(), "open": float(b["o"][i]), "high": float(b["h"][i]), "low": float(b["l"][i]), "close": float(b["c"][i]),
                         "volume": 100.0, "src": "binance_futures"} for i in range(len(b["t"]) - 96, len(b["t"]))]
             sent = Sent()
-            n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: candles, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+            import json
+            snap = json.loads(OB._fetchone(db, 'SELECT snapshot_json FROM office2_live_signal')[0])
+            px = float(snap['thesis']['entry'])
+            recent = [{'ts': dt.datetime.fromtimestamp(float(snap['decided_ts']) + 5, tz=dt.timezone.utc).isoformat(),
+                       'open': px, 'high': px, 'low': px, 'close': px}]
+            n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: recent if tf == '1m' else candles, card.render, 'TRADE_UPDATE', now=created + 60, log=lambda m: None))
             assert n == 1 and len(sent.calls) == 1, (n, OB._fetchall(db, "SELECT status, last_error FROM office2_live_signal"))
             text = sent.calls[0][1]
             assert text.startswith("OFFICE2 · LIVE BETA\n" + ("🔴 SHORT" if short else "🟢 LONG") + " · X") and "Зона входу:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text, text
