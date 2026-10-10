@@ -632,6 +632,9 @@ def test_integral_counter_trend_needs_proof_or_htf_location():
         assert "закриття H1 вище" in th["reason"]
         th = run(c, seq["trigger"])                                   # те саме, але подія на PDL (HTF-локація)
         assert th["state"] == "READY" and th["integral"]["classification"] == "HTF_LOCATION"
+        assert th["integral"]["htf_countertrend_override"] is True
+        assert th["integral"]["level_provenance"]["htf_location"] is True
+        assert th["integral"]["level_provenance"]["kind"] == "PDL"
         B.htf_context = lambda ctx, now: _fake_htf(h4=-1, d1=0, h1=1, broken_h4="down")
         th = run(c, seq["trigger"], levels=local)                     # локальна подія, але H1 уже в напрямі = доказ повернення
         assert th["state"] == "READY" and th["integral"]["classification"] == "COUNTER_WITH_PROOF"

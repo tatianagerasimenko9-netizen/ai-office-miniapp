@@ -363,7 +363,13 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
               {"name": "доказ повернення H1", "role": "GATE (умовно)", "evaluated": True, "did_affect_decision": blocked and not proof_h1, "value": bool(proof_h1)}]
     inputs += [{"name": i["module"], "role": i["role"], "evaluated": i["status"] == "USED", "did_affect_decision": False, "status": i["status"], "value": i["finding"]} for i in ev_items]
     inputs += [{"name": f"BTC/ринок: {x['factor']}", "role": "EVIDENCE", "evaluated": True, "did_affect_decision": False, "value": x["verdict"]} for x in al]
-    integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "level_retest_after_acceptance": retest, "inputs": inputs}
+    # Audit-only provenance: a nominal HTF location may be weak or may override
+    # a contrary H4/D1 structure. Record the exception without changing READY gates.
+    level_ref = th.get("level") or {}
+    htf_override = bool(counter and loc == "HTF" and verdict == "ALLOW")
+    integral = {"classification": cls, "verdict": verdict, "why": why, "for": fors, "against": agns, "location": {"class": loc, "text": loc_txt}, "counter_trend": counter, "proof_h1": proof_h1, "level_retest_after_acceptance": retest,
+                "level_provenance": {"kind": level_ref.get("kind"), "price": level_ref.get("p"), "strength": level_ref.get("strength"), "htf_location": loc == "HTF"},
+                "htf_countertrend_override": htf_override, "htf_override_weak_level": bool(htf_override and int(level_ref.get("strength") or 1) <= 2), "inputs": inputs}
     out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
     if verdict == "BLOCK":
         out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True,
