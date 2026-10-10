@@ -19,6 +19,8 @@ def r_gross_a(t: Dict[str, Any]) -> Optional[float]:
 
 
 def r_gross_b(t: Dict[str, Any]) -> Optional[float]:
+    if t.get("engine") == "old_lev":
+        return None                                  # старий Лев не має milestone TP2/беззбиток → модель B неможлива (інакше лишились би самі збитки)
     f = t["first"]
     if f == "SL":
         return -1.0
