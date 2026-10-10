@@ -306,12 +306,20 @@ function sessionHtml(b){
 }
 
 /* ---------- Радар ---------- */
+function dynWatchHtml(d){
+  if(!d||d.mode==='off'||!d.stats) return '';
+  const st=d.stats, u=(d.universe||{}).active||{};
+  const rows=(d.items||[]).slice(0,12).map(x=>`<div class="mut" style="margin-top:6px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.state||'')}${x.ready_ts?' · умовний READY'+(x.outcome?' → '+esc(x.outcome)+(x.r_net!=null?' ('+Number(x.r_net).toFixed(2)+'R)':''):' · відкрито'):''} · ${esc(x.reason||'')}</div>`).join('');
+  return `<h2>DYNAMIC · WATCH_ONLY</h2><div class="card"><div class="mut">Спостереження, не сигнали: у Telegram і LIVE READY не потрапляють. Монет зараз: ${Object.keys(u).length}.
+    Кандидатів ${st.candidates} · умовний READY ${st.would_be_ready} (закрито ${st.resolved}: TP ${st.tp}, SL ${st.sl}, відкрито ${st.open}) · модель ${st.model_pnl_usd>=0?'+':''}${st.model_pnl_usd}$ (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Кандидатів поки немає</div>'}</div>`;
+}
 async function radar(){
   const T0=++RT;
   app.innerHTML='<div class="sk"></div>';
   let d,sc,o2=null;
   try{[d,sc]=await Promise.all([j('/api/v2/scanner'), j('/api/v2/scenarios?watching=1')]);}catch(e){return fail(e,'радар');}
   try{o2=await j('/api/v2/radar');}catch(e){if(e.stale) return; o2=null;}
+  let dw=null; try{dw=await j('/api/v2/dynamic_watch');}catch(e){if(e.stale) return; dw=null;}
   if(T0!==RT) return;
   const rows=d.candidates||[];
   const watch=(sc.scenarios||[]).filter(s=>(s.status||{}).group==='watch');
@@ -326,6 +334,7 @@ async function radar(){
   app.innerHTML=`<div class="mut" role="status">Радар: автоматичне оновлення кожні 30 с · дані станом на ${o2&&o2.last_cycle_ts?new Date(o2.last_cycle_ts*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжого скану'} · ${o2&&o2.symbols_last_hour!=null?o2.symbols_last_hour+' монет за годину':'немає підтвердження свіжості'}</div>
     ${chips([['all','Усе'],['brain','Brain v2.1'],['short','Shortlist і Лев']],f,'rf')}
     ${f!=='short'?o2RadarHtml(o2):''}
+    ${f!=='short'?dynWatchHtml(dw):''}
     ${f!=='brain'?`<h2>Shortlist сканера</h2>${shortlist}<h2>Додаткові спостереження Лева</h2>${wl}`:''}`;
   app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
   bindCards();
