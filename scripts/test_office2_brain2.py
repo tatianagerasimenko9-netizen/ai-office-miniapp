@@ -480,7 +480,15 @@ def test_delivery_pass_is_parallel_slow_send_does_not_block_others():
                 await asyncio.sleep(1.5)
                 return 7001 + len(starts)
 
-            n = asyncio.run(DL.deliver_pending(db, slow_send, lambda s_, tf, lim: candles, card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
+            def live_fetch(symbol, tf, limit):
+                if tf != '1m':
+                    return candles
+                row = OB._fetchone(db, 'SELECT snapshot_json FROM office2_live_signal WHERE symbol = ?', (symbol,))
+                snap = json.loads(row[0])
+                entry = float(snap['thesis']['entry'])
+                return [{'ts': dt.datetime.fromtimestamp(float(snap['decided_ts']) + 5, tz=dt.timezone.utc).isoformat(),
+                         'open': entry, 'high': entry, 'low': entry, 'close': entry}]
+            n = asyncio.run(DL.deliver_pending(db, slow_send, live_fetch, card.render, 'TRADE_UPDATE', now=created + 60, log=lambda m: None))
             assert n == 2 and len(starts) == 2, (n, starts)
             assert abs(starts[1] - starts[0]) < 1.2, starts                       # друга відправка стартує, не чекаючи завершення першої (1,5 с); послідовно різниця була б ≥1,5 с
             assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_live_signal WHERE status = 'DELIVERED'")[0] == 2
