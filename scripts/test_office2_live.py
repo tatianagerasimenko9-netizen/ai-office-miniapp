@@ -343,6 +343,33 @@ def test_live_cycle_integration_engine_on():
         os.environ.pop("OFFICE2_LIVE", None)
 
 
+def test_opposite_lifecycle_conflict_beyond_entry_window():
+    """Issue #182: LTC SHORT мав вікно входу 6 год, але жив до SL; LONG після закінчення вікна не мав бачити конфлікт. Тепер вікно входу не є межею життя тези."""
+    import office_bridge as OB
+
+    now = 1_790_100_000.0
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+
+        def put(sid, sym, d, age, status="DELIVERED"):
+            OB._execute(db, "INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?)",
+                        (sid, sym, d, now - age, now - age + 6 * 3600, status, json.dumps({"thesis": {"sl": 64.21}}), "t"))
+
+        put("O2|ltc|s", "LTCUSDT", "SHORT", 8 * 3600)                       # вікно входу минуло 2 год тому, SL/TP3 не було
+        cf = EN.opposite_lifecycle(db, "LTCUSDT", "LONG", now)
+        assert len(cf) == 1 and cf[0]["direction"] == "SHORT" and not cf[0]["entered"]
+        assert EN.opposite_lifecycle(db, "LTCUSDT", "SHORT", now) == []      # той самий напрям — не конфлікт
+        assert EN.opposite_lifecycle(db, "ETHUSDT", "LONG", now) == []       # інша монета
+        OB.log_event(db, "SCENARIO_MILESTONE", {"level": "ENTRY", "sent_ts": now - 7 * 3600}, "O2|ltc|s")
+        assert EN.opposite_lifecycle(db, "LTCUSDT", "LONG", now)[0]["entered"]
+        OB.log_event(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": now - 100}, "O2|ltc|s")
+        assert EN.opposite_lifecycle(db, "LTCUSDT", "LONG", now) == []      # SL закрив тезу — конфлікту нема
+        put("O2|old|s", "XRPUSDT", "SHORT", 50 * 3600)
+        assert EN.opposite_lifecycle(db, "XRPUSDT", "LONG", now) == []      # старше 48 год — ні
+        put("O2|sup|s", "SOLUSDT", "SHORT", 3600, status="SUPPRESSED")
+        assert EN.opposite_lifecycle(db, "SOLUSDT", "LONG", now) == []      # не надіслано — не «чинний» план
+
+
 def test_capacity_counts_only_really_active_scenarios():
     """Регресія: недоставлені PENDING-«призраки» (доставка лежала) займали ємність і давали «кластер ALT 40$ > 30$»; завершені (SL/EXPIRED) і SUPPRESSED — теж ні."""
     import office_bridge as OB
