@@ -184,7 +184,7 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
     lo = ev["extreme"]
     kind = "SWEEP_SEQ" if ev["src"] == "SWEEP" else "ORIGIN_SEQ"
     base: Dict[str, Any] = {"id": _sid(direction, kind, float(m15r["t"][e])), "kind": kind, "dir": direction, "brain": VERSION, "event": {"src": ev["src"], "class": ev.get("class"), "ts": float(m15r["t"][e]), "extreme": sg * lo, "level": ev["level"], "origin": ev.get("origin"), "prior": ev.get("prior")},
-                            "level": ev["level"] or {"p": sg * lo, "kind": "ORIGIN_LOW"}, "invalidation": {"price": sg * lo, "why": "екстремум події (sweep/захист origin): закриття M15 за ним — теза хибна"}}
+                            "level": ev["level"] or {"p": sg * lo, "kind": "ORIGIN_LOW"}, "invalidation": {"price": sg * lo, "why": "екстремум події (sweep/захист origin); SL із люфтом спрацьовує за торканням ціни, без очікування закриття M15"}}
     base["trigger_level"] = sg * lo
     sh = _shift(m15, a15, k, e, swings)
     seq = [{"step": "подія", "ok": True, "value": (f"ПОВТОРНИЙ ТЕСТ прийнятого рівня {sg * lo:.6g} (не свіжий sweep)" if ev.get("class") == "LATE_SWEEP" else f"{ev['src']} {sg * lo:.6g}")}]
