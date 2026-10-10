@@ -642,6 +642,13 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
         threading.Thread(target=_replay_job, args=(db, feed), name="office2-replay", daemon=True).start()
     if os.getenv("OFFICE2_SMC_REPLAY", "").strip():   # разовий time-frozen replay Brain vs SMC на даних біржі (діагностика; нічого не шле, lifecycle не чіпає)
         threading.Thread(target=_smc_replay_job, args=(db, feed), name="office2-smc-replay", daemon=True).start()
+    try:
+        from office2.learning import job as _LJ
+
+        if _LJ.enabled():
+            threading.Thread(target=_learning_loop, args=(db,), name="office2-learning", daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[o2learn] не запущено: {type(exc).__name__}: {str(exc)[:100]}")
     state: Dict[str, Any] = {"last_plan_id": last_event_id(db)}   # лише нові рішення Лева, без вичитування історії
     _log(f"старт {VERSION}: символів {len(universe())}, db ok; Telegram не використовується")
     while True:
@@ -688,6 +695,19 @@ def _smc_replay_job(db: str, feed: "Feed") -> None:
         RP.run_spec(db, feed, os.getenv("OFFICE2_SMC_REPLAY", ""), log=_log)
     except Exception as exc:  # noqa: BLE001
         _log(f"[smc-replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")
+
+
+def _learning_loop(db: str) -> None:
+    """Накопичення досвіду: раз на LEARNING_EVERY_SEC читає історію й пише аналітичний звіт. Не торкається торгової логіки; збій не зупиняє офіс."""
+    from office2.learning import job as LJ
+
+    time.sleep(180)                                  # не заважати старту й першому циклу
+    while True:
+        try:
+            LJ.run_once(db, log=_log)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[o2learn] помилка: {type(exc).__name__}: {str(exc)[:160]}")
+        time.sleep(LJ.EVERY_SEC)
 
 
 def start_background(db: str) -> bool:
