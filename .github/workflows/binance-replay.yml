@@ -1,0 +1,79 @@
+name: Binance replay (isolated, read-only)
+
+# Ручний запуск. Ізольований replay Brain v2.1 vs SMC + контрфактуальні правила на історичних свічках Binance Futures (data.binance.vision).
+# Нічого не пише в production-БД, не чіпає Render і Telegram.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Символи через кому'
+        default: 'BTCUSDT,ETHUSDT,LTCUSDT,ONDOUSDT'
+      end_date:
+        description: 'Кінець вікна рішень, YYYY-MM-DD (00:00 UTC)'
+        required: true
+      days:
+        description: 'Днів рішень (1–30)'
+        default: '14'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          s = [x.strip().upper() for x in os.environ["SYMS"].split(",") if x.strip()]
+          print("matrix=" + json.dumps({"symbol": s}))
+          PY
+        env:
+          SYMS: ${{ inputs.symbols }}
+  replay:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay ${{ matrix.symbol }}
+        run: python scripts/learning_binance_replay.py "${{ matrix.symbol }}" "${{ inputs.end_date }}" "${{ inputs.days }}" "out_${{ matrix.symbol }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-${{ matrix.symbol }}
+          path: out_${{ matrix.symbol }}.json
+  aggregate:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Aggregate
+        run: |
+          python scripts/learning_aggregate.py parts aggregate.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aggregate
+          path: aggregate.json

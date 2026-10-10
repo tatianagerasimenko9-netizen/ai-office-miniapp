@@ -117,6 +117,27 @@ def test_confirmed_requires_both_periods_same_sign():
     assert c["verdict"] == "SUPPORTED_HARMFUL"
 
 
+def _m15(rows):
+    import numpy as np
+    a = np.array(rows, dtype=float)
+    n = len(a)
+    return {"t": 1_790_000_000.0 + 900 * np.arange(n), "o": a[:, 0], "h": a[:, 1], "l": a[:, 2], "c": a[:, 3], "v": np.ones(n), "tbv": np.ones(n)}
+
+
+def test_counterfactual_limit_and_delay_rules():
+    from office2.learning import counterfactual as CF
+    flat = [(100, 100.2, 99.8, 100)] * 30
+    # рішення на барі 29; далі ціна одразу йде до TP без ретесту → лімітний вхід пропущено, поточне правило «заробило» (вхід за планом)
+    up = _m15(flat + [(100.3, 103.0, 100.3, 102.8)] + [(102.8, 103.0, 102.5, 102.9)] * 10)
+    ev = {"dir": "LONG", "entry": 100.0, "sl": 99.0, "tp1": 102.0, "r_tp1": 2.0, "risk_pct": 1.0, "source": "BRAIN", "ts_bar": int(up["t"][29] + 900), "i": 29, "symbol": "X"}
+    r = CF.per_event([ev], up)[0]["variants"]
+    assert r["V0_current"]["outcome"] == "TP1"
+    assert r["V6_limit_retest"]["outcome"] == "MISSED_TP_BEFORE_ENTRY"          # ціна не повернулась до входу — виграш за лімітним правилом втрачено
+    assert r["V1_delay_15m"]["outcome"].startswith("MISSED") or r["V1_delay_15m"]["outcome"] in ("TP1", "SL")
+    agg = CF.aggregate([dict(per_event_row=0, symbol="X", source="BRAIN", dir="LONG", ts_bar=1, session="ASIA", variants=r)])
+    assert agg["by_source"]["BRAIN"]["V6_limit_retest"]["missed"] == 1 and agg["by_source"]["BRAIN"]["V0_current"]["scored"] == 1
+
+
 def test_sessions_dst_aware():
     # 2026-07-01 07:30Z = 08:30 Лондон (літо) → LONDON; 2026-01-15 07:30Z = 07:30 Лондон (зима) → PRE_LONDON
     import datetime as dt
