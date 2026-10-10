@@ -18,14 +18,31 @@ import concurrent.futures as _cf
 import functools as _ft
 
 O2_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="o2-live")
+# Вибірка outbox і службові записи доставки йдуть окремим малим пулом: довгі мережеві задачі (late-check, графік, milestone-трекер) не можуть заблокувати пошук нового READY.
+O2_PICK_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=2, thread_name_prefix="o2-pick")
+# Трекер milestone (Binance REST з паузами pace) — окремий пул, щоб не займати потоки доставки.
+O2_TRACK_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=2, thread_name_prefix="o2-track")
 
 
 async def run_o2(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
     import asyncio
 
     return await asyncio.get_running_loop().run_in_executor(O2_EXECUTOR, _ft.partial(fn, *args, **kw))
+
+
+async def run_o2_pick(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(O2_PICK_EXECUTOR, _ft.partial(fn, *args, **kw))
+
+
+async def run_o2_track(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(O2_TRACK_EXECUTOR, _ft.partial(fn, *args, **kw))
 STALE_PENDING_SEC = 25 * 60       # READY, не доставлений за 25 хв, уже неактуальний: не шлемо із запізненням
 MAX_PER_PASS = 6
+_LAST_PASS: list = [None]          # час попереднього проходу доставки: розрив > 6 с = цикл подій був заблокований
 _INFLIGHT: set = set()             # сигнали, що вже відправляються: наступні проходи (кожні 2 с) їх не чіпають і не чекають на них
 LATE_NOTE_SEC = 150               # доставка пізніше за 2,5 хв від закриття бару — у підписі є позначка про запізнення
 
@@ -156,7 +173,12 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
     from office_bridge import _execute, _fetchall, log_event
 
     clk = (lambda: float(now)) if now is not None else time.time     # у тестах «зараз» фіксоване
-    rows = await run_o2(_fetchall, db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal WHERE status = 'PENDING' ORDER BY created_ts ASC LIMIT ?", (MAX_PER_PASS,))
+    t_pass = time.time()
+    pass_gap = round(t_pass - _LAST_PASS[0], 1) if _LAST_PASS[0] else 0.0
+    _LAST_PASS[0] = t_pass
+    if pass_gap > 6.0:
+        log(f"[office2][loop-stall] розрив між проходами доставки {pass_gap} с (норма ≈2 с): потік подій був зайнятий")
+    rows = await run_o2_pick(_fetchall, db, "SELECT scenario_id, symbol, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal WHERE status = 'PENDING' ORDER BY created_ts ASC LIMIT ?", (MAX_PER_PASS,))
     rows = [r for r in rows if r[0] not in _INFLIGHT]
     _INFLIGHT.update(r[0] for r in rows)
 
@@ -171,8 +193,8 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
         t_pick = clk()
         if t_pick - float(created) > STALE_PENDING_SEC or t_pick > float(valid):
             why = f"STALE: не доставлено за {int(t_pick - float(created))} с (ліміт {STALE_PENDING_SEC} с) або строк дії вийшов"
-            await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why[:300], sid))
-            await run_o2(_close_scenario, db, sid, "MISSED", why, t_pick)
+            await run_o2_pick(_execute, db, "UPDATE office2_live_signal SET status = 'SUPPRESSED', last_error = ? WHERE scenario_id = ?", (why[:300], sid))
+            await run_o2_pick(_close_scenario, db, sid, "MISSED", why, t_pick)
             log(f"[office2] suppressed stale {sid}")
             return 0
         try:
@@ -180,7 +202,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             snap["valid_until_ts"] = float(valid)
             lat = snap.get("latency") or {}
             emitted = float(snap.get("emitted_wall_ts") or 0.0) or None
-            tm: Dict[str, Any] = {"pickup_s": round(t_pick - emitted, 1) if emitted else None}
+            tm: Dict[str, Any] = {"pickup_s": round(t_pick - emitted, 1) if emitted else None, "pass_gap_s": pass_gap, "select_ms": int((t_pick - t_pass) * 1000)}
             # 1) свічки для знімка графіка: беремо з рішення (ctx циклу); REST лише для старих знімків без chart_candles
             t_a = time.time()
             candles = snap.get("chart_candles")

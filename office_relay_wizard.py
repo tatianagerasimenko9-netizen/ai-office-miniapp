@@ -7644,7 +7644,7 @@ EV позитивне: {prob.get('ev_positive', '')}
         await asyncio.sleep(first)
         while True:
             try:
-                from office2.delivery import run_o2 as _run_o2
+                from office2.delivery import run_o2_track as _run_o2
 
                 _th = _run_o2 if scope == "o2" else asyncio.to_thread   # Office2 — власний пул потоків (не чекає на чужі довгі запити)
                 _legacy_quiet = scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0"   # старий Лев вимкнено для користувача: його плани доводимо до кінця лише для статистики, без Telegram

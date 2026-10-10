@@ -435,14 +435,63 @@ def _pg_release(dsn: str, conn: Any, ok: bool = True) -> None:
         pass
 
 
+# Короткий кеш важких читань таблиці office_signals (4–5 тис. «живих» рядків, ~1,4 МБ за виклик): їх викликає старий Лев десятки разів на хвилину
+# синхронно з потоку подій, чим блокував event loop на 3–12 с і затримував доставку Office2 (див. docs/office2/LATENCY_ROOT_CAUSE.md).
+# Будь-який запис у office_signals через _execute скидає кеш; TTL — страховка для записів з інших процесів.
+_SIG_CACHE_TTL = float(os.getenv("OFFICE_SIG_CACHE_SEC", "5") or 0)
+_SIG_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+_SIG_CACHE_LOCK = _threading.Lock()
+_SIG_CACHE_STATS = {"hits": 0, "misses": 0, "invalidations": 0}
+_SLOW_DB_SEC = float(os.getenv("OFFICE_DB_SLOW_SEC", "1.0") or 1.0)
+_SLOW_DB_LAST: Dict[str, float] = {}
+
+
+def _sig_cache_get(kind: str, db_path: str) -> Optional[List[Dict[str, Any]]]:
+    if _SIG_CACHE_TTL <= 0:
+        return None
+    with _SIG_CACHE_LOCK:
+        item = _SIG_CACHE.get((kind, db_path))
+        if item and _time.monotonic() - item[0] <= _SIG_CACHE_TTL:
+            _SIG_CACHE_STATS["hits"] += 1
+            return [dict(r) for r in item[1]]
+        _SIG_CACHE_STATS["misses"] += 1
+    return None
+
+
+def _sig_cache_put(kind: str, db_path: str, rows: List[Dict[str, Any]]) -> None:
+    if _SIG_CACHE_TTL > 0:
+        with _SIG_CACHE_LOCK:
+            _SIG_CACHE[(kind, db_path)] = (_time.monotonic(), [dict(r) for r in rows])
+
+
+def _sig_cache_clear() -> None:
+    with _SIG_CACHE_LOCK:
+        if _SIG_CACHE:
+            _SIG_CACHE.clear()
+            _SIG_CACHE_STATS["invalidations"] += 1
+
+
+def _log_slow_db(qry: str, mode: str, elapsed: float) -> None:
+    key = " ".join(qry.split())[:70]
+    now = _time.monotonic()
+    if now - _SLOW_DB_LAST.get(key, -1e9) < 30.0:
+        return
+    _SLOW_DB_LAST[key] = now
+    th = _threading.current_thread().name
+    print(f"[db-slow] {elapsed:.2f} с ({mode}, потік {th}{' = ПОТІК ПОДІЙ' if th == 'MainThread' else ''}): {key}", flush=True)
+
+
 def _pg_run(dsn: str, qry: str, params: tuple, mode: str) -> Any:
     """mode: 'exec' | 'one' | 'all'. Читання повторюється раз на свіжому з'єднанні, якщо пулове виявилось мертвим; запис — ні (щоб не задвоїти)."""
     for attempt in (0, 1):
+        t_q = _time.monotonic()
         conn = _pg_acquire(dsn)
         try:
             with conn.cursor() as cur:
                 cur.execute(qry, params)
                 res = None if mode == "exec" else (cur.fetchone() if mode == "one" else cur.fetchall())
+            if _time.monotonic() - t_q >= _SLOW_DB_SEC:
+                _log_slow_db(qry, mode, _time.monotonic() - t_q)
         except Exception as exc:  # noqa: BLE001
             broken = psycopg is not None and isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
             _pg_release(dsn, conn, ok=not broken)
@@ -458,12 +507,19 @@ def _pg_run(dsn: str, qry: str, params: tuple, mode: str) -> Any:
 
 def _execute(db_path: str, sql: str, params: tuple = ()) -> None:
     qry = _adapt_sql(sql, db_path)
-    if _is_pg(db_path):
-        _pg_run(db_path, qry, params, "exec")
-        return
-    with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
-        conn.execute(qry, params)
-        conn.commit()
+    touches_signals = "office_signals" in qry
+    if touches_signals:
+        _sig_cache_clear()
+    try:
+        if _is_pg(db_path):
+            _pg_run(db_path, qry, params, "exec")
+            return
+        with sqlite3.connect(_sqlite_path_from_url(db_path)) as conn:
+            conn.execute(qry, params)
+            conn.commit()
+    finally:
+        if touches_signals:
+            _sig_cache_clear()
 
 
 def _fetchone(db_path: str, sql: str, params: tuple = ()) -> Optional[tuple]:
@@ -2066,6 +2122,9 @@ def signal_upsert(
 
 
 def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
+    cached = _sig_cache_get("active", db_path)
+    if cached is not None:
+        return cached
     rows = _fetchall(
         db_path,
         """
@@ -2097,11 +2156,15 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
                 "analysis_note": r[13],
             }
         )
+    _sig_cache_put("active", db_path, out)
     return out
 
 
 def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
     """Усі стани канонічних сценаріїв для hydrate/dedup, включно з terminal."""
+    cached = _sig_cache_get("scenarios", db_path)
+    if cached is not None:
+        return cached
     rows = _fetchall(
         db_path,
         """
@@ -2113,7 +2176,7 @@ def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
         """,
         (),
     )
-    return [
+    out = [
         {
             "signal_id": r[0],
             "symbol": r[1],
@@ -2132,6 +2195,8 @@ def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
+    _sig_cache_put("scenarios", db_path, out)
+    return out
 
 
 def signal_refresh_scenario(

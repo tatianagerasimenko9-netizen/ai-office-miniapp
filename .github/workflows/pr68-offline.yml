@@ -72,6 +72,8 @@ jobs:
         run: python scripts/test_dynamic_universe.py
       - name: Learning-контур (облік R/$, класифікація, контрфактуальні фільтри, walk-forward)
         run: python scripts/test_office2_learning.py
+      - name: Кеш читань office_signals і окремі пули доставки (затримки Telegram)
+        run: python scripts/test_sig_cache.py
       - name: Office2 LIVE BETA (мозок, стани, доставка, lifecycle, без lookahead)
         run: python scripts/test_office2_live.py
       - name: Summary cache (health-check не чекає на БД)
