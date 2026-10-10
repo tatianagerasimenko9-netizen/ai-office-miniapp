@@ -253,6 +253,44 @@ def test_delivery_uses_decision_candles_not_rest_and_records_ms_timeline():
         B.all_levels = orig
 
 
+def test_slow_chart_does_not_block_ready_text():
+    """Slow optional chart must fall back to text and retain Telegram ledger evidence."""
+    orig_levels, orig_wait = B.all_levels, DL.asyncio.wait_for if hasattr(DL, "asyncio") else asyncio.wait_for
+    B.all_levels = lambda ctx, now: T.LEVELS
+    try:
+        db, b, created = _make_pending()
+        snap = json.loads(OB._fetchone(db, "SELECT snapshot_json FROM office2_live_signal")[0])
+        px = float(snap["thesis"]["entry"])
+
+        def fetch(sym, tf, lim):
+            if tf == "15m":
+                return _candles(b)
+            return [{"ts": dt.datetime.fromtimestamp(float(snap["decided_ts"]) + 5, tz=dt.timezone.utc).isoformat(),
+                     "open": px, "high": px, "low": px, "close": px}]
+
+        def slow_render(**kwargs):
+            time.sleep(0.15)
+            return {"ok": True, "path": "/tmp/late-chart.png"}
+
+        async def fast_wait(awaitable, timeout):
+            assert timeout == 8.0
+            return await orig_wait(awaitable, 0.01)
+
+        sent = Sent()
+        asyncio.wait_for = fast_wait
+        try:
+            n = asyncio.run(DL.deliver_pending(db, sent, fetch, slow_render, "TRADE_UPDATE", now=created + 25, log=lambda m: None))
+        finally:
+            asyncio.wait_for = orig_wait
+        assert n == 1 and len(sent.calls) == 1, (n, sent.calls)
+        assert not sent.calls[0][2].get("photo_path"), sent.calls
+        event = json.loads(OB._fetchone(db, "SELECT payload_json FROM office_events WHERE event_type='OFFICE2_READY_SENT'")[0])
+        assert event["image_error"] == "chart_render_timeout_8s" and event["timing"]["render_timeout"] is True, event
+        assert OB._fetchone(db, "SELECT status FROM office2_live_signal")[0] == "DELIVERED"
+    finally:
+        B.all_levels = orig_levels
+
+
 def test_late_delivery_is_marked_and_stale_or_missed_closes_scenario():
     orig = B.all_levels
     B.all_levels = lambda ctx, now: T.LEVELS
