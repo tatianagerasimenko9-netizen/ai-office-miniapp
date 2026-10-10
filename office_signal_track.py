@@ -66,6 +66,24 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
         return {**out, "status": "INVALID"}
     filled = False
     mfe = mae = 0.0
+    # A truncated/gapped feed cannot prove that an entry was never touched.
+    # Never label a scenario NOT_FILLED when the observed candles do not cover
+    # the complete validity window; retry after fresh futures data arrives.
+    observed_start = None
+    observed_end = None
+    coverage_gap = False
+    for bar in candles if isinstance(candles, list) else []:
+        ts = _ts((bar or {}).get("ts")) if isinstance(bar, dict) else None
+        if ts is None or ts + tf_sec <= t_conf or ts >= t_valid:
+            continue
+        if observed_end is not None and ts > observed_end + tf_sec * 1.5:
+            coverage_gap = True
+        if observed_start is None:
+            observed_start = ts
+        observed_end = ts
+    full_entry_coverage = (observed_start is not None and observed_start <= t_conf + tf_sec
+                           and observed_end is not None and observed_end + tf_sec >= t_valid
+                           and not coverage_gap)
     for c in candles if isinstance(candles, list) else []:
         t0 = _ts((c or {}).get("ts"))
         hi, lo = _f(c.get("high")), _f(c.get("low"))
@@ -75,7 +93,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
             continue   # до підтвердження або свічка ще не закрита
         if not filled:
             if t0 >= t_valid:
-                return {**out, "status": "NOT_FILLED", "result_at": t_valid}
+                return {**out, "status": "NOT_FILLED", "result_at": t_valid} if full_entry_coverage else out
             if lo <= e <= hi:
                 filled = True
                 out["filled_at"] = t0
@@ -103,7 +121,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
         if now - float(out["filled_at"]) > MAX_TRACK_SEC:
             return {**out, "status": out["reached"][-1] if out["reached"] else "OPEN_TIMEOUT", "result_at": now,
                     "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
-    if not filled and now > t_valid + tf_sec:
+    if not filled and now > t_valid + tf_sec and full_entry_coverage:
         return {**out, "status": "NOT_FILLED", "result_at": t_valid}
     out.update(mfe_pct=round(mfe, 3) if filled else None, mae_pct=round(mae, 3) if filled else None)
     return out
