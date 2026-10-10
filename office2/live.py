@@ -418,13 +418,20 @@ def _spawn_smc(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, states: Dic
 
 def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None, old_lev_background: bool = False) -> Dict[str, int]:
     """Один цикл. now — момент закриття щойно завершеного M15-бару. state: пам'ять між циклами {'last_plan_id': int}."""
+    watch_syms: List[str] = []
     if not syms:
         syms = universe()
         try:
             from office2 import dynamic_universe as DYN
 
             if DYN.enabled():
-                syms = syms + [x for x in DYN.refresh(db, syms, now, log=_log) if x not in syms]
+                from office2 import dynamic_watch as _DW
+
+                _dyn = [x for x in DYN.refresh(db, syms, now, log=_log) if x not in syms]
+                if _DW.mode() == "live":
+                    syms = syms + _dyn          # лише явне OFFICE2_DYNAMIC_UNIVERSE=live
+                else:
+                    watch_syms = _dyn           # WATCH_ONLY: рахуємо окремо, без READY/Telegram
         except Exception as exc_:  # noqa: BLE001
             _log(f"[o2dyn] пропущено: {type(exc_).__name__}: {str(exc_)[:100]}")
     t_cycle = time.time()
@@ -439,7 +446,7 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
         except Exception:  # noqa: BLE001
             prio = set()
     # спершу BTC/ETH (контекст), потім монети з живими WATCH/WAIT (вони можуть стати READY), решта — після
-    order = sorted(syms, key=lambda x: (0 if x in ("BTCUSDT", "ETHUSDT") else 1 if x in prio else 2))
+    order = sorted(syms, key=lambda x: (0 if x in ("BTCUSDT", "ETHUSDT") else 1 if x in prio else 2)) + [w for w in watch_syms if w not in syms]
     abort = {"on": False}
 
     def _one(sym: str):
@@ -465,6 +472,7 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
         for sym, ctx, st in ex.map(_one, order):
             if ctx is not None and st:
                 ctxs[sym], states[sym] = ctx, st
+    wctx = {w: (ctxs.pop(w), states.pop(w)) for w in watch_syms if w in ctxs}    # DYNAMIC не потрапляє в ринковий контекст і в основний цикл
     t_fetch = time.time() - t_cycle
     if engine_enabled():
         from office2 import engine as _EN
@@ -516,6 +524,17 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
             eid = _eid("O2", sym, c["dir"], c["trigger"], int(c["t_entry"]), round(c["lvl_p"], 8))
             store_event(db, eid, now, sym, "O2_CANDIDATE", c["dir"], c["entry"], c["sl"], c["tp"], snap)
             res["events"] += 1
+    if watch_syms:
+        try:
+            from office2 import dynamic_watch as DW
+
+            for w, (wc, ws) in wctx.items():
+                DW.observe(db, w, wc, mc, relative_strength(ws, mc), now, meta={"session": session_bucket(now)})
+            DW.resolve(db, feed, now)
+            res["dyn_watch"] = len(wctx)
+        except Exception as exc_:  # noqa: BLE001
+            _bump("errors")
+            _log(f"[o2dyn] watch-only помилка: {type(exc_).__name__}: {str(exc_)[:120]}")
     t_brain = time.time()
     if old_lev_background:
         _spawn_smc(db, ctxs, now, states)      # лише у production-режимі; тести і replay (sync) не запускають фонових потоків

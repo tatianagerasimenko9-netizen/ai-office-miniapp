@@ -1479,6 +1479,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = levels_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
             elif u.path == "/api/v2/liqmap":
                 data = liqmap_payload(_q("symbol") or "BTCUSDT")
+            elif u.path == "/api/v2/dynamic_watch":
+                from office2 import dynamic_watch as _DW
+
+                data = _DW.summary(DB_PATH)
             elif u.path == "/api/v2/overview":
                 data = overview_payload()
             elif u.path == "/api/v2/scanner":

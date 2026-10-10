@@ -1,4 +1,4 @@
-"""DYNAMIC universe: ліквідні USDT-M perpetual-лідери руху поверх стабільного CORE (за замовчуванням вимкнено: OFFICE2_DYNAMIC_UNIVERSE=1).
+"""DYNAMIC universe: ліквідні USDT-M perpetual-лідери руху поверх стабільного CORE (за замовчуванням вимкнено; OFFICE2_DYNAMIC_UNIVERSE=watch|1 — лише WATCH_ONLY без READY/Telegram; =live — явний перехід в основний цикл).
 
 Рейтинг 24h — лише ВХІД ДЛЯ СПОСТЕРЕЖЕННЯ. Він не дає напрямку й не створює READY: монета проходить той самий рушій (структура, рівні, підтвердження, ризик), що й CORE.
 Журнал причин додавання/виключення — таблиця office2_dynamic_log. Навантаження: один exchangeInfo (кеш), один 24hr, один bookTicker за оновлення; ліміт кандидатів.
@@ -28,7 +28,9 @@ _STATE: Dict[str, Any] = {"active": {}, "at": 0.0, "info": None, "info_at": 0.0,
 
 
 def enabled() -> bool:
-    return os.getenv("OFFICE2_DYNAMIC_UNIVERSE", "").strip().lower() in ("1", "true", "yes", "on")
+    from office2 import dynamic_watch as DW
+
+    return DW.mode() != "off"
 
 
 def _num(v) -> Optional[float]:
