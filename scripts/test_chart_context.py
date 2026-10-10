@@ -134,7 +134,7 @@ import re  # noqa: E402
 html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "office_web", "mini_v2.html"), encoding="utf-8").read()
 check("інтерфейс не малює шар «рівнів Лева» (зони, дзеркальні) і ліквідації на графіку", "/api/v2/levels" not in html and "дзеркальний " not in html and "ліквід. " not in html)
 check("інтерфейс запитує chart_context і має кнопку «Канал»", "/api/v2/chart_context" in html and 'data-l="ch"' in html)
-check("канал за замовчуванням увімкнено", "ch:lsGet('ao_ch2','1')==='1'" in html)
+check("канал за замовчуванням приховано, але доступний вручну", "ch:lsGet('ao_ch3','0')==='1'" in html)
 
 print("\nFAILED: " + ", ".join(FAILS) if FAILS else "\nВСЕ ОК")
 sys.exit(1 if FAILS else 0)

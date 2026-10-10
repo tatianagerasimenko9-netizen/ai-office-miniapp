@@ -195,8 +195,10 @@ async def _run(base: str, chromium: str | None, shots: Path | None, lwc: str = "
                 layers = await page.evaluate("window.__chartLayers")
             except Exception:  # noqa: BLE001
                 layers = None
-            if not layers or "канал" not in layers:
-                problems.append(f"{name}: регресійний канал не намальовано на графіку сценарію (шари: {layers})")
+            if not layers or not {"зона", "SL", "TP"}.issubset(set(layers)):
+                problems.append(f"{name}: основні торгові рівні відсутні (шари: {layers})")
+            if layers and any(x in ("канал", "SMC", "FVG", "сильна свічка") for x in layers):
+                problems.append(f"{name}: дослідницькі шари мають бути вимкнені за замовчуванням (шари: {layers})")
             if layers and any(x in ("OB", "дзеркальний") or str(x).startswith("рівень") for x in layers):
                 problems.append(f"{name}: на графіку є внутрішні рівні Лева: {layers}")
             if lwc and await page.locator("#chart canvas").count() == 0:
