@@ -226,7 +226,14 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                 await run_o2(_close_scenario, db, sid, state, why_late, clk())
                 log(f"[office2] suppressed at delivery {sym} {d}: {why_late}")
                 return 0
-            img = await img_task
+            # A slow chart renderer must not turn an actionable READY into a late signal.
+            # asyncio.wait_for cancels the await, not a running executor thread; the
+            # renderer writes to its unique temporary path and never sends messages.
+            try:
+                img = await asyncio.wait_for(img_task, timeout=8.0)
+            except asyncio.TimeoutError:
+                img = {"ok": False, "reason": "chart_render_timeout_8s"}
+                tm["render_timeout"] = True
             cap = build_caption(snap, now=clk())
             t_a = time.time()
             mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
