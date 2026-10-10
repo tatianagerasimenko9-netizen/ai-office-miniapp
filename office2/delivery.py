@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -110,9 +111,11 @@ def _late_reason(snap: Dict[str, Any], fetch: Callable[[str, str, int], Any], sy
     if not since:
         return "DATA_UNAVAILABLE: no candles since decision"
     try:
-        px = float(rows[-1]["close"])
+        px = float(since[-1]["close"])
         hi = max(float(r["high"]) for r in since)
         lo = min(float(r["low"]) for r in since)
+        if not all(math.isfinite(v) and v > 0 for v in (px, hi, lo)):
+            return "DATA_UNAVAILABLE: nonfinite or nonpositive prices"
     except (KeyError, TypeError, ValueError):
         return "DATA_UNAVAILABLE: malformed 1m candles"
     sl, entry = float(th["sl"]), float(th["entry"])
