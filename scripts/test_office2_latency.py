@@ -211,6 +211,12 @@ def _make_pending(syms=("XUSDT",), long=True):
     return db, b, created
 
 
+def _live_price_candle(db, ts_offset=5):
+    snap = json.loads(OB._fetchone(db, 'SELECT snapshot_json FROM office2_live_signal LIMIT 1')[0])
+    px = float(snap['thesis']['entry'])
+    return [{'ts': dt.datetime.fromtimestamp(float(snap['decided_ts']) + ts_offset, tz=dt.timezone.utc).isoformat(), 'open': px, 'high': px, 'low': px, 'close': px}]
+
+
 def _candles(b):
     return [{"ts": dt.datetime.fromtimestamp(float(b["t"][i]), tz=dt.timezone.utc).isoformat(), "open": float(b["o"][i]), "high": float(b["h"][i]), "low": float(b["l"][i]), "close": float(b["c"][i]),
              "volume": 100.0, "src": "binance_futures"} for i in range(len(b["t"]) - 96, len(b["t"]))]
@@ -253,7 +259,7 @@ def test_late_delivery_is_marked_and_stale_or_missed_closes_scenario():
     try:
         db, b, created = _make_pending()
         sent = Sent()
-        n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: _candles(b)[-int(lim):], card.render, "TRADE_UPDATE", now=created + 300, log=lambda m: None))
+        n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: _live_price_candle(db) if tf == '1m' else _candles(b), card.render, "TRADE_UPDATE", now=created + 300, log=lambda m: None))
         assert n == 1 and "⏱ Рішення було о" in sent.calls[0][1] and "доставлено через 5 хв" in sent.calls[0][1], sent.calls[0][1]      # запізнення не приховується
         # STALE: доставка пізніше за ліміт → не шлемо, сценарій закрито з причиною
         db2, b2, created2 = _make_pending()
@@ -288,7 +294,7 @@ def test_inflight_signals_are_not_sent_twice_and_slow_one_does_not_block():
         sent = Sent(delay=1.2)
 
         async def two_overlapping_passes():
-            f = lambda s_, tf, lim: _candles(b)[-int(lim):]                       # noqa: E731
+            f = lambda s_, tf, lim: _live_price_candle(db) if tf == '1m' else _candles(b)  # noqa: E731
             p1 = asyncio.ensure_future(DL.deliver_pending(db, sent, f, card.render, "TRADE_UPDATE", now=created + 20, log=lambda m: None))
             await asyncio.sleep(0.4)
             p2 = asyncio.ensure_future(DL.deliver_pending(db, sent, f, card.render, "TRADE_UPDATE", now=created + 21, log=lambda m: None))   # наступний прохід, поки перші ще відправляються
