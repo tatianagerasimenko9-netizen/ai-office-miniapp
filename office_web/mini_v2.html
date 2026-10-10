@@ -762,7 +762,7 @@ function readyBottom(hm){
   const r=hm.ready, why=(r.setup&&r.setup.why)||[];
   const src=((hm.context&&hm.context.sources)||[]).map(x=>`<span class="pill ${x.state==='on'?'ok':'watch'}">${esc(x.name)} ${x.state==='on'?'●':'○'}</span>`).join('');
   return `${why.length?`<div class="sec"><h3>Чому Лев дав сигнал</h3><ul class="why">${why.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${r.confirm_ua?`<div class="mut" style="margin-top:6px">Підтвердження: ${esc(r.confirm_ua)}</div>`:''}</div>`:''}
-    ${r.market?`<div class="sec"><h3>Ринок на момент сигналу</h3>${[].concat(r.market.lines||[],r.market.calendar||[]).map(x=>`<div class="mut">${esc(x)}</div>`).join('')}</div>`:''}
+    ${(r.market||r.phase_line)?`<div class="sec"><h3>Ринок на момент сигналу</h3>${[].concat(r.market?r.market.lines||[]:[],r.market?r.market.calendar||[]:[],r.phase_line?[r.phase_line]:[]).map(x=>`<div class="mut">${esc(x)}</div>`).join('')}</div>`:''}
     ${hm.cancel?`<div class="sec"><h3>Що скасує план</h3><p>${esc(hm.cancel)}</p></div>`:''}
     ${src?`<div class="sec"><h3>Джерела</h3><div class="srcs">${src}</div><div class="mut" style="margin-top:6px">Деталі по кожному — у «Технічних деталях» нижче.</div></div>`:''}
     ${hm.news?`<div class="sec"><h3>Новини</h3>${newsHtml(hm.news)}</div>`:''}`;

@@ -7695,6 +7695,34 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_office2_delivery())
 
+    async def monitor_market_brain() -> None:
+        """Market Brain у РЕЖИМІ СПОСТЕРЕЖЕННЯ: живий цикл станів ринку пише журнал (MARKET_BRAIN_*). У Telegram нічого не шле й сигнали не змінює —
+        доки дослідження на історії без look-ahead не покаже, які ознаки справді передують рухам. Вимкнути: OFFICE_BRAIN_SHADOW=0."""
+        import os as _os
+
+        if _os.getenv("OFFICE_BRAIN_SHADOW", "1").strip() == "0":
+            return
+        import office_brain_live as bl
+        import office_ready_core as _rc2
+
+        await asyncio.sleep(240)
+        mem = await asyncio.to_thread(bl.load_memory, db_path)
+        last_snap = 0.0
+        while True:
+            try:
+                now = time.time()
+                plans = [p for p in await asyncio.to_thread(_rc2.unfinished_ready, db_path) if not _rc2.is_expired(p.get("valid_until_ts"))]
+                plans = [{"symbol": p.get("symbol"), "direction": p.get("direction"), "entered": None, "rel_btc_pp": None} for p in plans]
+                out = await asyncio.wait_for(asyncio.to_thread(bl.tick, db_path, mem, now, last_snap, plans=plans), timeout=50.0)
+                mem, last_snap = out["mem"], out["snap_at"]
+                if out["tr"]:
+                    print(f"[brain] {out['tr']['from']['state']}->{out['tr']['to']['state']} {out['tr']['to']['side']} (лише журнал): {out['tr']['reasons'][:2]}")
+            except Exception as exc_br:
+                print(f"[brain][WARN] tick failed: {type(exc_br).__name__}: {exc_br}")
+            await asyncio.sleep(60)
+
+    asyncio.create_task(monitor_market_brain())
+
     async def monitor_manual_trades() -> None:
         """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.
         Проходить через send_proactive (шлюз: POSITION_MANAGE + відкрита позиція; додатково OFFICE_TG_POSITION_SUPPORT)."""
