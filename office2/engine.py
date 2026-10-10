@@ -447,7 +447,13 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         smc_block = _SMC.snapshot_for(sym, ctx, now, th["dir"])      # display-only; рішення Brain не залежить від нього
     except Exception:  # noqa: BLE001
         smc_block = None
-    snap = {"conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
+    try:
+        from office2.learning.sessions import session_of as _sess
+
+        sess_tag = _sess(float(now))                 # лише мітка для аналітики; READY від неї не залежить
+    except Exception:  # noqa: BLE001
+        sess_tag = None
+    snap = {"session_tag": sess_tag, "conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
             "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
