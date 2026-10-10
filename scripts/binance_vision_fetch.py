@@ -22,10 +22,10 @@ BASE = "https://data.binance.vision/data/futures/um"
 WIDTH = {"15m": 900, "1d": 86400}
 
 
-def _get(url: str, tries: int = 4):
+def _get(url: str, tries: int = 3):
     for k in range(tries):
         try:
-            with urlopen(Request(url, headers={"User-Agent": "ai-office-replay/1.0"}), timeout=40) as r:
+            with urlopen(Request(url, headers={"User-Agent": "ai-office-replay/1.0"}), timeout=20) as r:
                 return r.read()
         except HTTPError as e:
             if e.code == 404:
@@ -70,8 +70,11 @@ def fetch(sym: str, interval: str, d0: date, d1: date, today: date = None) -> di
             a, b = max(first, d0), min(last, d1)
             for k in range((b - a).days + 1):
                 jobs.append(f"{BASE}/daily/klines/{sym}/{interval}/{sym}-{interval}-{(a + timedelta(days=k)).isoformat()}.zip")
+    print(f"[fetch] {sym} {interval}: {len(jobs)} файлів", flush=True)
+    t0 = time.time()
     with ThreadPoolExecutor(8) as ex:
         parts = list(ex.map(_get, jobs))
+    print(f"[fetch] {sym} {interval}: готово за {time.time() - t0:.1f} с, знайдено {sum(1 for p in parts if p)}", flush=True)
     rows = [r for p in parts if p for r in _parse(p)]
     if not rows:
         return {}

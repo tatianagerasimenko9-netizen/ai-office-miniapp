@@ -30,19 +30,27 @@ DEFAULT_ENTRY_DELAY_SEC = 30.0
 DEFAULT_ENTRY_TTL_SEC = 6 * 3600.0
 
 
-def _cut(a: Optional[Arr], width: int, now: float) -> Optional[Arr]:
+LIVE_LIMITS = {"m15": 500, "h4": 300, "d1": 120, "w1": 40, "mn": 8}   # як TF_LIMIT у живому конвеєрі: рушій у production бачить рівно стільки барів
+
+
+def _cut(a: Optional[Arr], width: int, now: float, limit: int = 0) -> Optional[Arr]:
     if a is None:
         return None
     n = int(np.searchsorted(a["t"] + width, now, side="right"))
-    return {k: v[:n] for k, v in a.items()} if n > 0 else None
+    if n <= 0:
+        return None
+    lo = max(0, n - limit) if limit else 0
+    return {k: v[lo:n] for k, v in a.items()}
 
 
 def ctx_at(arrs: Dict[str, Optional[Arr]], now: float) -> Optional[Dict[str, Any]]:
     """Контекст на момент now ЛИШЕ з барів, закритих до now (кожен TF обрізається окремо)."""
-    m15, h4, d1, w1 = _cut(arrs.get("m15"), 900, now), _cut(arrs.get("h4"), 14400, now), _cut(arrs.get("d1"), 86400, now), _cut(arrs.get("w1"), 604800, now)
+    L = LIVE_LIMITS
+    m15, h4, d1, w1 = _cut(arrs.get("m15"), 900, now, L["m15"]), _cut(arrs.get("h4"), 14400, now, L["h4"]), _cut(arrs.get("d1"), 86400, now, L["d1"]), _cut(arrs.get("w1"), 604800, now, L["w1"])
     if not (m15 and h4 and d1 and w1) or len(m15["t"]) < 120:
         return None
-    return B.build_full_ctx(m15, h4, d1, w1, arrs.get("mn"))
+    mn = _cut(arrs.get("mn"), 31 * 86400, now, L["mn"]) if arrs.get("mn") is not None else None
+    return B.build_full_ctx(m15, h4, d1, w1, mn)
 
 
 def simulate(

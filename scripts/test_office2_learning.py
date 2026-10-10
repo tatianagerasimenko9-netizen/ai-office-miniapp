@@ -138,6 +138,22 @@ def test_counterfactual_limit_and_delay_rules():
     assert agg["by_source"]["BRAIN"]["V6_limit_retest"]["missed"] == 1 and agg["by_source"]["BRAIN"]["V0_current"]["scored"] == 1
 
 
+def test_paired_marks_stable_only_with_consistent_halves():
+    from office2.learning import counterfactual as CF
+    rows = []
+    for i in range(60):
+        base = {"outcome": "SL", "r_net": -1.0, "bars": 3}
+        better = {"outcome": "TP1", "r_net": 0.8, "bars": 5} if i % 3 == 0 else {"outcome": "SL", "r_net": -1.0, "bars": 3}
+        v = {k: dict(base) for k in CF.VARIANTS}
+        v["V5_sl_plus_1.0atr"] = better
+        v["V3_delay_60m"] = {"outcome": "MISSED_SL_BEFORE_ENTRY", "r_net": None, "bars": 0}
+        rows.append({"source": "BRAIN", "ts_bar": 1000 + i, "symbol": "X", "dir": "LONG", "variants": v})
+    p = CF.paired(rows, "BRAIN")
+    assert p["V5_sl_plus_1.0atr"]["status"] == "STABLE" and p["V5_sl_plus_1.0atr"]["mean_delta_r"] > 0
+    assert p["V3_delay_60m"]["mean_delta_r"] == 1.0                       # пропуск збиткових входів = 0R замість −1R
+    assert CF.paired(rows[:10], "BRAIN")["V5_sl_plus_1.0atr"]["status"] == "INSUFFICIENT"
+
+
 def test_sessions_dst_aware():
     # 2026-07-01 07:30Z = 08:30 Лондон (літо) → LONDON; 2026-01-15 07:30Z = 07:30 Лондон (зима) → PRE_LONDON
     import datetime as dt

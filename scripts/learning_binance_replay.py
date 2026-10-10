@@ -26,6 +26,7 @@ def main(sym, end, days, out):
         return
     btc = arrs["m15"] if sym == "BTCUSDT" else BV.fetch("BTCUSDT", "15m", end_day.fromordinal(end_day.toordinal() - days - 55), end_day.fromordinal(end_day.toordinal() + 2))
     q = arrs.pop("quality")
+    print("[replay] старт", sym, q, flush=True)
     t0 = time.time()
     run = RP.replay_arrays(sym, arrs, t_from, t_to, btc=btc, outcome_end=None)
     rows = CF.per_event(run["events"], arrs["m15"])
