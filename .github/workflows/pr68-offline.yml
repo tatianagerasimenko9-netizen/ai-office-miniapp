@@ -68,6 +68,8 @@ jobs:
         run: python scripts/test_risk_officer.py
       - name: Binance Futures movers discovery (offline, no orders)
         run: python scripts/test_futures_movers.py
+      - name: Dynamic universe (offline, off by default)
+        run: python scripts/test_dynamic_universe.py
       - name: Office2 LIVE BETA (мозок, стани, доставка, lifecycle, без lookahead)
         run: python scripts/test_office2_live.py
       - name: Summary cache (health-check не чекає на БД)
