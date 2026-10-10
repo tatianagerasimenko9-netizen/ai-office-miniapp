@@ -108,10 +108,12 @@ def _btc_ret4h(btc: Optional[Dict[str, Any]], open_r: float) -> Optional[float]:
     if not btc:
         return None
     m = btc["m15"]
+    # open_r is the opening timestamp of the decision M15 bar.
+    # At that instant bar j is NOT closed: using c[j] leaks future data.
     j = int(np.searchsorted(m["t"], open_r, side="left"))
-    if j >= len(m["t"]) or abs(m["t"][j] - open_r) > 1 or j < 16:
+    if j >= len(m["t"]) or abs(m["t"][j] - open_r) > 1 or j < 17:
         return None
-    return float((m["c"][j] / m["c"][j - 16] - 1.0) * 100.0)
+    return float((m["c"][j - 1] / m["c"][j - 17] - 1.0) * 100.0)
 
 
 def candidates(symbol: str, ctx: Dict[str, Any], btc: Optional[Dict[str, Any]] = None, p: Params = Params(), stats: Optional[Dict[str, int]] = None) -> List[dict]:
