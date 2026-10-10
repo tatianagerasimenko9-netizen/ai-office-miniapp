@@ -154,6 +154,17 @@ def test_paired_marks_stable_only_with_consistent_halves():
     assert CF.paired(rows[:10], "BRAIN")["V5_sl_plus_1.0atr"]["status"] == "INSUFFICIENT"
 
 
+def test_old_lev_model_b_not_applicable_and_filter_table():
+    from office2.learning import counterfactual as CF
+    plan = {"scenario_id": "S", "symbol": "A", "direction": "LONG", "tf": "H1", "entry": 100.0, "sl": 99.0, "tp1": 103.0, "confirmed_ts": 1_790_000_000.0}
+    t = T.from_old_lev(plan, {"outcome": "TP2", "filled": True, "rejected": False})
+    assert P.net(t, "B") is None and P.net(t, "A") is not None
+    mk = lambda i, oc, rp: {"source": "BRAIN", "ts_bar": i, "dir": "LONG", "risk_pct": rp, "session": "ASIA", "variants": {"V0_current": {"outcome": oc, "r_net": 1.0 if oc == "TP1" else -1.0}}}   # noqa: E731
+    rows = [mk(i, "SL", 0.3) for i in range(6)] + [mk(10 + i, "TP1", 2.0) for i in range(4)]
+    ft = CF.filter_table(rows, "BRAIN")["COST_HEAVY"]["all"]
+    assert ft["skipped"] == 6 and ft["sl_avoided"] == 6 and ft["tp1_lost"] == 0 and abs(ft["delta_r"] - 6.0) < 1e-9 and abs(ft["delta_usd_at_10"] - 60.0) < 1e-9
+
+
 def test_sessions_dst_aware():
     # 2026-07-01 07:30Z = 08:30 Лондон (літо) → LONDON; 2026-01-15 07:30Z = 07:30 Лондон (зима) → PRE_LONDON
     import datetime as dt

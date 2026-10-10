@@ -110,3 +110,29 @@ def paired(rows: List[Dict[str, Any]], source: str, base: str = "V0_current") ->
         out[v] = {"mean_delta_r": round(float(np.mean(d)), 3), "ci95": ci, "train_delta": round(float(np.mean(a)), 3) if a else None, "test_delta": round(float(np.mean(b)), 3) if b else None,
                   "total_delta_usd_at_10": round(float(np.sum(d)) * 10.0, 1), "status": "INSUFFICIENT" if len(rs) < 30 else ("STABLE" if stable else "NOT_STABLE")}
     return out
+
+
+REPLAY_COST_PCT = FEE_RT_PCT + SLIP_BPS / 100.0
+FILTERS = {
+    "COST_HEAVY": lambda r: REPLAY_COST_PCT / max(r["risk_pct"], 1e-9) >= 0.25,           # витрати кола ≥ чверті ризику (стоп < 0,56% ціни)
+    "OFF_HOURS": lambda r: r.get("session") == "OFF_HOURS",
+    "PRE_SESSION": lambda r: r.get("session") in ("PRE_LONDON", "PRE_NEW_YORK"),
+    "LATE_SWEEP": lambda r: bool(r.get("late")),
+    "SHORT": lambda r: r["dir"] == "SHORT",
+    "LONG": lambda r: r["dir"] == "LONG",
+}
+
+
+def filter_table(rows: List[Dict[str, Any]], source: str) -> Dict[str, Any]:
+    """Що буде, якщо ПРОПУСКАТИ події з ознакою (база V0): уникнуті SL, втрачені TP1, ΔR/$ при ризику $10, окремо перші 60% і останні 40% хронологічно."""
+    rs = sorted([r for r in rows if r["source"] == source], key=lambda r: r["ts_bar"])
+    k = int(len(rs) * 0.6)
+
+    def eff(sub, pred):
+        sk = [r for r in sub if pred(r)]
+        sc = [r for r in sk if r["variants"]["V0_current"]["r_net"] is not None]
+        d = -sum(r["variants"]["V0_current"]["r_net"] for r in sc)
+        return {"skipped": len(sk), "sl_avoided": sum(1 for r in sc if r["variants"]["V0_current"]["outcome"] == "SL"),
+                "tp1_lost": sum(1 for r in sc if r["variants"]["V0_current"]["outcome"] == "TP1"), "delta_r": round(d, 2), "delta_usd_at_10": round(d * 10.0, 1),
+                "mean_r_of_skipped": round(-d / len(sc), 3) if sc else None}
+    return {name: {"all": eff(rs, p), "first60": eff(rs[:k], p), "last40": eff(rs[k:], p)} for name, p in FILTERS.items()}

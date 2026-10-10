@@ -7,7 +7,7 @@ from office2.learning import classify as CL
 from office2.learning import compare as CP
 from office2.learning import pnl as P
 
-CODES = ["DELIVERY_LAG", "STALE_AT_DELIVERY", "COST_HEAVY", "LOW_RR", "HTF_CONFLICT", "WEAK_LEVEL", "PRE_SESSION", "OPPOSITE_EXPOSURE", "DUPLICATE_THESIS"]
+CODES = ["DELIVERY_LAG", "STALE_AT_DELIVERY", "COST_HEAVY", "LOW_RR", "HTF_CONFLICT", "WEAK_LEVEL", "PRE_SESSION", "OFF_HOURS", "OPPOSITE_EXPOSURE", "DUPLICATE_THESIS"]
 
 
 def build(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
