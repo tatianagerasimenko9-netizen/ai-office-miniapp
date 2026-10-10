@@ -188,6 +188,11 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
             continue
         if not isinstance(candles, list) or not candles:
             continue
+        # A spot/alternate-venue fallback has a different price basis. Never
+        # finalize a futures plan from it, even when its candles look complete.
+        sources = {str(c.get("src") or "binance_futures") for c in candles if isinstance(c, dict)}
+        if sources != {"binance_futures"}:
+            continue
         res = simulate(p, candles, now)
         if res["status"] in ("PENDING", "INVALID"):
             _remember_bar("tick", key, candles, now)
