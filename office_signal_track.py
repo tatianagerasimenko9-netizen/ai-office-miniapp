@@ -327,9 +327,13 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             continue
         if not isinstance(candles, list) or not candles:
             continue
-        src = str((candles[-1] or {}).get("src") or "binance_futures") if isinstance(candles[-1], dict) else "binance_futures"
-        if src != "binance_futures":   # резервний ринок (спот/Bybit) має базис: TP/SL за ним не фіксуємо, чекаємо свічки ф'ючерсів Binance
+        # Reject the whole series if any candle is from a different venue.
+        # Checking only the final candle can silently mix spot and futures
+        # and fabricate an ENTRY/TP/SL milestone on a different price basis.
+        sources = {str(c.get("src") or "binance_futures") for c in candles if isinstance(c, dict)}
+        if sources != {"binance_futures"}:
             continue
+        src = "binance_futures"
         res = simulate(p, candles, now, tf_sec=tfs, live_tail=True)
         levels = _levels_of(res)
         terminal = res["status"] not in ("PENDING", "INVALID")
