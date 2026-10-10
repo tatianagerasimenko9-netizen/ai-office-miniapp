@@ -480,6 +480,8 @@ def test_delivery_pass_is_parallel_slow_send_does_not_block_others():
                 await asyncio.sleep(1.5)
                 return 7001 + len(starts)
 
+            import json
+
             def live_fetch(symbol, tf, limit):
                 if tf != '1m':
                     return candles
