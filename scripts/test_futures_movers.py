@@ -7,8 +7,10 @@ from office2.movers import rank_movers
 
 
 def symbol(name, **changes):
-    return dict(symbol=name, contractType="PERPETUAL", status="TRADING",
-                quoteAsset="USDT", marginAsset="USDT", **changes)
+    item = dict(symbol=name, contractType="PERPETUAL", status="TRADING",
+                quoteAsset="USDT", marginAsset="USDT")
+    item.update(changes)
+    return item
 
 
 def ticker(name, pct, vol="15000000", price="1"):
