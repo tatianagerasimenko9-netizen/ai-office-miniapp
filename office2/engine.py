@@ -159,6 +159,43 @@ def open_signals(db: str, now: float) -> List[Dict[str, Any]]:
     return out
 
 
+CONFLICT_LIFECYCLE_SEC = 48 * 3600     # як довго відкрита теза може вважатись чинною без термінальної події (збігається з горизонтом наслідків)
+
+
+def conflict_mode() -> str:
+    """OFFICE2_CONFLICT_GATE: off | annotate (за замовчуванням: READY лишається, але несе позначку й рядок у картці) | block (протилежний READY → NO_TRADE)."""
+    v = os.getenv("OFFICE2_CONFLICT_GATE", "annotate").strip().lower()
+    return v if v in ("off", "annotate", "block") else "annotate"
+
+
+def opposite_lifecycle(db: str, sym: str, direction: str, now: float) -> List[Dict[str, Any]]:
+    """Протилежні сценарії по цій монеті, ЩО ЩЕ В РОБОТІ: доставлені, без SL/TP3/EXPIRED, не старші за 48 год.
+    Вікно входу (valid_until) тут НЕ межа: LTC SHORT 10.10 мав вікно до 08:30Z, але позиція жила до SL 14:35Z — протилежний LONG о 09:00Z виник при відкритому циклі."""
+    from office_bridge import _fetchall
+
+    rows = _fetchall(db, "SELECT scenario_id, direction, created_ts, valid_until_ts, snapshot_json FROM office2_live_signal "
+                         "WHERE symbol = ? AND direction <> ? AND status = 'DELIVERED' AND created_ts > ?", (sym, direction, now - CONFLICT_LIFECYCLE_SEC))
+    out = []
+    for sid, d, ct, vu, sj in rows:
+        try:
+            done = _fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id = ?", (sid,))
+        except Exception:  # noqa: BLE001
+            done = []
+        lv = set()
+        for (pj,) in done:
+            try:
+                lv.add(json.loads(pj or "{}").get("level"))
+            except Exception:  # noqa: BLE001
+                pass
+        if lv & {"SL", "TP3", "EXPIRED"}:
+            continue
+        sn = json.loads(sj or "{}")
+        th = sn.get("thesis") or {}
+        out.append({"scenario_id": sid, "direction": d, "created_ts": ct, "valid_until_ts": vu, "entered": "ENTRY" in lv, "milestones": sorted(x for x in lv if x),
+                    "sl": (th.get("sl") or {}).get("price") if isinstance(th.get("sl"), dict) else th.get("sl")})
+    return out
+
+
 def day_stops(db: str, now: float) -> int:
     from office_bridge import _fetchall
 
@@ -347,6 +384,18 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
                 res["no_trade"] += 1
                 continue
+            if conflict_mode() != "off":
+                try:
+                    cf = opposite_lifecycle(db, sym, th["dir"], now)
+                except Exception:  # noqa: BLE001
+                    cf = []
+                if cf:
+                    if conflict_mode() == "block":
+                        th = dict(th, state="NO_TRADE", reason="протилежний сценарій ще в роботі (не закрито SL/TP3/EXPIRED)")
+                        save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
+                        res["no_trade"] += 1
+                        continue
+                    th = dict(th, conflict=cf)
             emit_ready(db, sym, th, ctx, st, mc, rel, now, old_lev, flow_fetch, m5_fetch)
             save_scenario(db, sym, th, "READY", now, prev["created_ts"], prev["state"], th.get("reason", ""))
             res["ready"] += 1
@@ -377,6 +426,9 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         except Exception:  # noqa: BLE001
             old_lev = None
     why = why_text(th, mc, rel, sym)
+    if th.get("conflict"):
+        c0 = th["conflict"][0]
+        why += f" ⚠ Увага: протилежний сценарій {c0['direction']} по {sym.replace('USDT', '')} ще в роботі (SL/TP3 не було). Не відкривай обидва."
     from office2 import align as AL
 
     aligned = AL.alignment(th["dir"], mc, rel, pack.get("htf"))
@@ -395,7 +447,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         smc_block = _SMC.snapshot_for(sym, ctx, now, th["dir"])      # display-only; рішення Brain не залежить від нього
     except Exception:  # noqa: BLE001
         smc_block = None
-    snap = {"smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
+    snap = {"conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
             "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [

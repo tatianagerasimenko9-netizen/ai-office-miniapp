@@ -418,7 +418,15 @@ def _spawn_smc(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, states: Dic
 
 def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional[List[str]] = None, old_lev_background: bool = False) -> Dict[str, int]:
     """Один цикл. now — момент закриття щойно завершеного M15-бару. state: пам'ять між циклами {'last_plan_id': int}."""
-    syms = syms or universe()
+    if not syms:
+        syms = universe()
+        try:
+            from office2 import dynamic_universe as DYN
+
+            if DYN.enabled():
+                syms = syms + [x for x in DYN.refresh(db, syms, now, log=_log) if x not in syms]
+        except Exception as exc_:  # noqa: BLE001
+            _log(f"[o2dyn] пропущено: {type(exc_).__name__}: {str(exc_)[:100]}")
     t_cycle = time.time()
     ctxs: Dict[str, Dict[str, Any]] = {}
     states: Dict[str, Dict[str, Any]] = {}
