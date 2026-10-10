@@ -47,6 +47,8 @@ def flags(t: Dict[str, Any], all_trades: List[Dict[str, Any]] = ()) -> List[str]
         pass
     if t.get("session") in ("PRE_LONDON", "PRE_NEW_YORK"):
         out.append("PRE_SESSION")
+    if t.get("session") == "OFF_HOURS":
+        out.append("OFF_HOURS")
     c = t.get("created_ts")
     if c:
         for o in all_trades:
