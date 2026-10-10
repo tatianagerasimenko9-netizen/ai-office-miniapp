@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -105,14 +106,18 @@ def _late_reason(snap: Dict[str, Any], fetch: Callable[[str, str, int], Any], sy
     except Exception:  # noqa: BLE001
         rows = None
     if not isinstance(rows, list) or not rows:
-        return None   # немає свіжої ціни: рішення за закритим баром лишається в силі (стале за часом відсікається окремо)
-    since = [r for r in rows if isinstance(r, dict) and (not decided or (_ts(r.get("ts")) is not None and float(_ts(r["ts"])) >= decided - 1))] or rows[-1:]
+        return "DATA_UNAVAILABLE: missing 1m candles"
+    since = [r for r in rows if isinstance(r, dict) and (not decided or (_ts(r.get("ts")) is not None and float(_ts(r["ts"])) >= decided - 1))]
+    if not since:
+        return "DATA_UNAVAILABLE: no candles since decision"
     try:
-        px = float(rows[-1]["close"])
+        px = float(since[-1]["close"])
         hi = max(float(r["high"]) for r in since)
         lo = min(float(r["low"]) for r in since)
+        if not all(math.isfinite(v) and v > 0 for v in (px, hi, lo)):
+            return "DATA_UNAVAILABLE: nonfinite or nonpositive prices"
     except (KeyError, TypeError, ValueError):
-        return None
+        return "DATA_UNAVAILABLE: malformed 1m candles"
     sl, entry = float(th["sl"]), float(th["entry"])
     risk = abs(entry - sl)
     long_ = direction == "LONG"
@@ -209,6 +214,11 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             img_task = asyncio.ensure_future(_render())
             why_late = await run_o2(_late_reason, snap, fetch, sym, d, clk())
             tm["late_check_ms"] = int((time.time() - t_a) * 1000)
+            if why_late and why_late.startswith("DATA_UNAVAILABLE:"):
+                img_task.cancel()
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (why_late[:300], sid))
+                log(f"[office2] retry pending {sid}: {why_late}")
+                return 0
             if why_late:   # no-chase і структурна інвалідація перевіряються ще раз у момент доставки (рішення могло застаріти за час циклу)
                 img_task.cancel()
                 state = "INVALIDATED" if "(INVALIDATED)" in why_late else "MISSED"
