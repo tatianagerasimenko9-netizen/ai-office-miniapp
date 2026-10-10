@@ -2474,6 +2474,12 @@ async def run() -> None:
         # Хмара: жодних input(), навіть якщо RELAY_INTERACTIVE=1.
         interactive = False
         print("[relay] cloud mode: prompts disabled (TG_BOT_TOKEN set)")
+        try:
+            from office_command_catalog import catalog_log_line
+
+            print(catalog_log_line())
+        except Exception as exc_cmd:
+            print(f"[commands] DATA_UNAVAILABLE {type(exc_cmd).__name__}")
     has_saved = bool(cfg.get("tg_api_id") and cfg.get("tg_api_hash") and cfg.get("main_chat_id") and cfg.get("office_chat_id"))
     if has_saved and not force_setup and interactive:
         ans = _prompt("Знайдено збережені налаштування. Використати їх? (Y/n): ").lower()
