@@ -108,5 +108,5 @@ def paired(rows: List[Dict[str, Any]], source: str, base: str = "V0_current") ->
         ci = RP.bootstrap_ci(d)
         stable = bool(ci and (ci[0] > 0 or ci[1] < 0) and a and b and np.mean(a) * np.mean(b) > 0)
         out[v] = {"mean_delta_r": round(float(np.mean(d)), 3), "ci95": ci, "train_delta": round(float(np.mean(a)), 3) if a else None, "test_delta": round(float(np.mean(b)), 3) if b else None,
-                  "total_delta_usd_at_10": round(float(np.sum(d)) * 10.0, 1), "status": "STABLE" if stable else ("INSUFFICIENT" if len(rs) < 30 else "NOT_STABLE")}
+                  "total_delta_usd_at_10": round(float(np.sum(d)) * 10.0, 1), "status": "INSUFFICIENT" if len(rs) < 30 else ("STABLE" if stable else "NOT_STABLE")}
     return out
