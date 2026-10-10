@@ -139,7 +139,7 @@ const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 const S={tf:lsGet('ao_tf','H1'), sf:'all', rf:'all', jkind:'trades',prefill:null, lastBar:0,
-  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch2','1')==='1', ctx:lsGet('ao_ctx','1')==='1', smc:lsGet('ao_smc','1')==='1'}};
+  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch3','0')==='1', ctx:lsGet('ao_ctx3','0')==='1', smc:lsGet('ao_smc3','0')==='1'}};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
 let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
@@ -560,9 +560,9 @@ async function risk(){
       <div class="mut" style="margin-top:6px">Мова: українська · пояс Europe/Kyiv · сповіщення: ${s.notifications_wired?'підключені':'не підключені'}</div>
     </div>`;
   $('chov').checked=S.layers.ch;
-  $('chov').onchange=e=>{S.layers.ch=e.target.checked; lsSet('ao_ch2', S.layers.ch?'1':'0');};
+  $('chov').onchange=e=>{S.layers.ch=e.target.checked; lsSet('ao_ch3', S.layers.ch?'1':'0');};
   $('ctxov').checked=S.layers.ctx;
-  $('ctxov').onchange=e=>{S.layers.ctx=e.target.checked; lsSet('ao_ctx', S.layers.ctx?'1':'0');};
+  $('ctxov').onchange=e=>{S.layers.ctx=e.target.checked; lsSet('ao_ctx3', S.layers.ctx?'1':'0');};
   app.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{S.tf=b.dataset.tf; lsSet('ao_tf', S.tf); risk();});
   bindCards();
 }
@@ -890,7 +890,7 @@ async function openO2(d, T0){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); if(b.dataset.l==='smc') lsSet('ao_smc',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); if(b.dataset.l==='smc') lsSet('ao_smc3',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
@@ -967,7 +967,7 @@ async function openSmc(id){
     <div class="mut">Це лише спостереження за методикою SM Trader: воно не змінює READY, ризик і цілі Brain v2.1. Свічки на графіку — поточні (до 180 останніх M15); для старших рядків частина прив'язок може бути поза вікном.</div>`;
   $('back').onclick=()=>go('journal');
   const el=$('chart'); await paintChart(el,s);
-  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='smc') lsSet('ao_smc',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers.smc); b.setAttribute('aria-pressed',String(S.layers.smc)); await paintChart(el,s);});
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='smc') lsSet('ao_smc3',S.layers.smc?'1':'0'); b.classList.toggle('on',S.layers.smc); b.setAttribute('aria-pressed',String(S.layers.smc)); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
 }
 function o2LatencyHtml(L){
@@ -1077,7 +1077,7 @@ async function openSc(id){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch2',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
