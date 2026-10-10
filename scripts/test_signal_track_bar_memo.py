@@ -93,6 +93,18 @@ now = T0 + 900 * 20 + 60
 stale = lambda sym, tf, n=300: candles_upto(int(sym[1]), now - 1800)  # noqa: E731
 trk.tick(db, fetch=stale, now_ts=now)
 check(not trk._BAR_MEMO, "застарілі дані не блокують наступний прохід")
+# Futures plan outcomes must never be finalized from a spot or mixed feed.
+for source_mode in ("spot", "mixed"):
+    trk._BAR_MEMO.clear()
+    db_source = make_db()
+    now_source = T0 + 900 * 100
+    def source_fetch(sym, tf, n=300):
+        bars = candles_upto(int(sym[1]), now_source)
+        if source_mode == "spot":
+            return [dict(b, src="binance_spot") for b in bars]
+        return [dict(b, src="binance_spot" if i == 0 else "binance_futures") for i, b in enumerate(bars)]
+    check(not trk.tick(db_source, fetch=source_fetch, now_ts=now_source), f"{source_mode}: no finalized futures results from fallback candles")
+
 print(f"запитів: база {n_base} → з пропуском {n_opt} ({(1 - n_opt / n_base) * 100:.0f}% менше); записів результатів: {len(base)}")
 print("OK" if not FAIL else f"{len(FAIL)} FAIL")
 sys.exit(1 if FAIL else 0)
