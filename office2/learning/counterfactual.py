@@ -86,3 +86,27 @@ def aggregate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         out["sessions"][src] = {s: _stats([r["variants"]["V0_current"] for r in rs if r.get("session") == s], sum(1 for r in rs if r.get("session") == s)) for s in sorted({r.get("session") for r in rs})}
         out["sessions"][src]["_direction"] = {d: _stats([r["variants"]["V0_current"] for r in rs if r["dir"] == d], sum(1 for r in rs if r["dir"] == d)) for d in ("LONG", "SHORT")}
     return out
+
+
+def paired(rows: List[Dict[str, Any]], source: str, base: str = "V0_current") -> Dict[str, Any]:
+    """Парне порівняння варіантів з базою на ТИХ САМИХ подіях: різниця R, bootstrap-інтервал, і стабільність знака на хронологічних 60%/40%.
+    Пропущений вхід (MISSED) у варіанті = 0R для цієї події; база може мати результат, тож втрата виграшу видна в різниці.
+    Стійким вважається ефект, якщо інтервал на всіх подіях не містить 0 І знак однаковий на навчальній і тестовій частинах."""
+    rs = sorted([r for r in rows if r["source"] == source], key=lambda r: r["ts_bar"])
+    k = int(len(rs) * 0.6)
+
+    def val(r, v):
+        x = r["variants"][v]["r_net"]
+        return 0.0 if x is None else x
+
+    out: Dict[str, Any] = {"events": len(rs)}
+    for v in VARIANTS:
+        if v == base or not rs:
+            continue
+        d = [val(r, v) - val(r, base) for r in rs]
+        a, b = d[:k], d[k:]
+        ci = RP.bootstrap_ci(d)
+        stable = bool(ci and (ci[0] > 0 or ci[1] < 0) and a and b and np.mean(a) * np.mean(b) > 0)
+        out[v] = {"mean_delta_r": round(float(np.mean(d)), 3), "ci95": ci, "train_delta": round(float(np.mean(a)), 3) if a else None, "test_delta": round(float(np.mean(b)), 3) if b else None,
+                  "total_delta_usd_at_10": round(float(np.sum(d)) * 10.0, 1), "status": "STABLE" if stable else ("INSUFFICIENT" if len(rs) < 30 else "NOT_STABLE")}
+    return out
