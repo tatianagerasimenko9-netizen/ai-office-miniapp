@@ -227,7 +227,11 @@ def test_delivery_uses_decision_candles_not_rest_and_records_ms_timeline():
 
         def fetch(sym, tf, lim):
             seen.append((tf, lim))
-            return _candles(b) if tf == "15m" else _candles(b)[-int(lim):]
+            if tf == '15m':
+                return _candles(b)
+            px = float(snap['thesis']['entry'])
+            return [{'ts': dt.datetime.fromtimestamp(float(snap['decided_ts']) + 5, tz=dt.timezone.utc).isoformat(),
+                     'open': px, 'high': px, 'low': px, 'close': px}]
 
         sent = Sent()
         n = asyncio.run(DL.deliver_pending(db, sent, fetch, card.render, "TRADE_UPDATE", now=created + 25, log=lambda m: None))
