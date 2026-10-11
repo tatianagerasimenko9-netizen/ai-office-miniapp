@@ -243,5 +243,24 @@ check("ліміт: 5 стопів за добу, locked, блок почався
 check("ліміт: стоп після TP1 позначено, кінець блоку — наступна доба 00:00 UTC", any(x["after_tp1"] for x in g["stops"]) and g["lock_ends_ts"] % 86400 == 0)
 check("ліміт: shadow_today та лічильники відсічених", "shadow_today" in g and "candidates_blocked_today" in g)
 
+# --- 9. shadow-позначки (не блокують, ефект рахується окремо)
+from datetime import datetime, timezone
+from office2.learning import learned_flags as LF
+SAT = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc).timestamp()
+WED = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc).timestamp()
+thf = {"dir": "LONG", "sizing": {"stop_pct": 0.5}}
+fs, fw = LF.flags_for(thf, SAT), LF.flags_for(thf, WED)
+check("позначки: субота + малий стоп → WEEKEND і COST_HEAVY", "WEEKEND" in fs and "COST_HEAVY" in fs, str(fs))
+check("позначки: середа не WEEKEND", "WEEKEND" not in fw, str(fw))
+rows_f = [{"scope": "LIVE", "pnl_a": -10.0, "_flags": ["WEEKEND"]}, {"scope": "LIVE", "pnl_a": 8.0, "_flags": ["WEEKEND"]}, {"scope": "LIVE", "pnl_a": 8.0, "_flags": []}]
+ev = LF.evaluate(rows_f)["rules"]["WEEKEND"]["by_scope"]["LIVE"]
+check("ефект позначки: SL уникнуто 1, TP втрачено 1, чистий ефект +2$, n<30 → INSUFFICIENT",
+      ev["flagged"] == 2 and ev["sl_avoided"] == 1 and ev["tp_lost"] == 1 and ev["effect_usd"] == 2.0 and ev["verdict"].startswith("INSUFFICIENT"), str(ev))
+_execute(db, "UPDATE office2_paper_position SET learned_flags = NULL WHERE scenario_id = 'CTL|O2|ctl|2'")      # як позиція, створена до появи колонки
+nfl = P.flags_pass(db, log=log.append)
+check("flags_pass доносить позначки для старих позицій", nfl >= 1 and _fetchall(db, "SELECT COUNT(*) FROM office2_paper_position WHERE learned_flags IS NULL AND scope != 'BACKFILL_INVALID'")[0][0] == 0)
+sm2 = P.summary(db)
+check("summary містить learned_flags і позначки в позиціях; результат/гейти не змінено", "WEEKEND" in sm2["learned_flags"]["rules"] and all("flags" in x for x in sm2["items"]) and sm2["stats"]["total"] == live_before)
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
