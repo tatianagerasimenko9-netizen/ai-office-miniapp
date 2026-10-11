@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 RISK_USD = 10.0
 MAX_CHASE_R = 0.5
 MAX_HOLD_SEC = 48 * 3600
+# paper-облік веде лише сигнали, доставлені після запуску контуру: історичні (до 11.10 09:20Z) не мають 1m-даних про момент доставки й дали б хибні MISSED
+PAPER_SINCE_TS = 1791710400.0
 MODELS = {"A": ((1.0,), False), "B": ((0.5, 0.5), True), "C": ((0.3, 0.4, 0.3), True)}
 
 DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
@@ -28,10 +30,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
     miss_reason TEXT, qty DOUBLE PRECISION, notional DOUBLE PRECISION, cost_usd DOUBLE PRECISION,
     tp1_ts DOUBLE PRECISION, tp2_ts DOUBLE PRECISION, tp3_ts DOUBLE PRECISION, sl_ts DOUBLE PRECISION, close_ts DOUBLE PRECISION, close_reason TEXT,
     r_a DOUBLE PRECISION, r_b DOUBLE PRECISION, r_c DOUBLE PRECISION, pnl_a DOUBLE PRECISION, pnl_b DOUBLE PRECISION, pnl_c DOUBLE PRECISION,
-    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION)""",)
+    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT, scope TEXT, postmortem_json TEXT)""",)
 _COLS = ("scenario_id", "symbol", "direction", "status", "generated_ts", "delivered_ts", "plan_entry", "sl", "tp1", "tp2", "tp3", "fill_ts", "fill_price", "miss_reason", "qty",
          "notional", "cost_usd", "tp1_ts", "tp2_ts", "tp3_ts", "sl_ts", "close_ts", "close_reason", "r_a", "r_b", "r_c", "pnl_a", "pnl_b", "pnl_c", "mfe_r", "mae_r", "coarse",
-         "session", "btc", "updated_ts")
+         "session", "btc", "updated_ts", "kind", "scope", "postmortem_json")
 _READY = {"done": False}
 
 
@@ -42,6 +44,14 @@ def _ensure(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
+    for col in ("kind TEXT", "scope TEXT", "postmortem_json TEXT"):
+        try:
+            _execute(db, f"ALTER TABLE office2_paper_position ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
+        except Exception:  # noqa: BLE001
+            pass
+    # розмежування даних: LIVE = доставлено після запуску контуру; BACKFILL = до запуску (лише перевірка правил); BACKFILL_INVALID = до запуску й без 1m-даних (непридатні для будь-якої статистики)
+    _execute(db, "UPDATE office2_paper_position SET scope = CASE WHEN COALESCE(delivered_ts, generated_ts) >= ? THEN 'LIVE' WHEN miss_reason LIKE 'NO_DATA%' THEN 'BACKFILL_INVALID' ELSE 'BACKFILL' END WHERE scope IS NULL",
+             (since_ts(),))
     _READY["done"] = True
 
 
@@ -183,7 +193,7 @@ def _from_signal(row: tuple) -> Dict[str, Any]:
     btc = (snap.get("market_at_signal") or {}).get("btc") or (snap.get("market_at_signal") or {})
     return {"scenario_id": sid, "symbol": sym, "direction": d, "generated_ts": float(created), "delivered_ts": float(delivered) if delivered else None,
             "plan_entry": float(th["entry"]) if th.get("entry") else None, "sl": float(th["sl"]) if th.get("sl") else None, "tp1": tp(0), "tp2": tp(1), "tp3": tp(2),
-            "session": ((snap.get("session_tag") or {}).get("session")), "btc": json.dumps(btc, ensure_ascii=False, default=str)[:600], "coarse": 0,
+            "kind": th.get("kind"), "scope": "LIVE", "session": ((snap.get("session_tag") or {}).get("session")), "btc": json.dumps(btc, ensure_ascii=False, default=str)[:600], "coarse": 0,
             "_status": status, "_err": last_error}
 
 
@@ -221,6 +231,43 @@ def open_position(p: Dict[str, Any], bars1: List[Tuple[float, ...]]) -> None:
     p["fill_ts"], p["fill_price"], p["status"] = d["fill_ts"], d["fill_price"], "OPEN"
 
 
+def postmortem_pass(db: str, fetch: Callable[[str, str, int], Any], now: float, log: Callable[[str], None] = print, limit: int = 6) -> int:
+    """Авто-розбір закритих позицій (office2.postmortem): перший раз — одразу, далі — поки after_sl не FINAL (24 год спостереження або TP1 після SL)."""
+    from office2 import postmortem as PM
+    from office_bridge import _execute, _fetchall
+
+    n = 0
+    rows = _fetchall(db, "SELECT scenario_id, postmortem_json FROM office2_paper_position WHERE status = 'CLOSED' AND COALESCE(scope,'') <> 'BACKFILL_INVALID' ORDER BY close_ts DESC LIMIT 60")
+    for sid, pj in rows:
+        if n >= limit:
+            break
+        try:
+            if pj:
+                a = (json.loads(pj).get("events") or {}).get("after_sl")
+                if not (isinstance(a, dict) and a.get("status") == "PENDING"):
+                    continue
+            vals = _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position WHERE scenario_id = ?", (sid,))
+            p = _rowdict(vals[0])
+            sj = _fetchall(db, "SELECT snapshot_json FROM office2_live_signal WHERE scenario_id = ?", (sid,))
+            snap = json.loads(sj[0][0]) if sj else {}
+            bars = bars_of(fetch(p["symbol"], "15m", 200))
+            pm = PM.analyze(snap, p, bars or None, now)
+            _execute(db, "UPDATE office2_paper_position SET postmortem_json = ? WHERE scenario_id = ?", (json.dumps(pm, ensure_ascii=False, default=str), sid))
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            log(f"[paper] розбір {sid}: {type(exc).__name__}: {str(exc)[:120]}")
+    return n
+
+
+def since_ts() -> float:
+    import os
+
+    try:
+        return float(os.getenv("OFFICE2_PAPER_SINCE", "") or PAPER_SINCE_TS)
+    except ValueError:
+        return PAPER_SINCE_TS
+
+
 def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, lookback_days: int = 7) -> Dict[str, int]:
     """Один прохід: нові доставлені → вхід/MISSED; відкриті → перерахунок за свічками. Ідемпотентний."""
     from office_bridge import _fetchall
@@ -230,7 +277,7 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
     out = {"new": 0, "missed": 0, "updated": 0, "closed": 0, "errors": 0}
     known = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_paper_position")}
     rows = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, delivered_ts, status, last_error, snapshot_json FROM office2_live_signal "
-                         "WHERE status IN ('DELIVERED','SUPPRESSED') AND created_ts > ? ORDER BY created_ts", (now - lookback_days * 86400,))
+                         "WHERE status IN ('DELIVERED','SUPPRESSED') AND created_ts > ? ORDER BY created_ts", (max(now - lookback_days * 86400, since_ts()),))
     for row in rows:
         if row[0] in known:
             continue
@@ -275,27 +322,70 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
     return out
 
 
-def summary(db: str, limit: int = 30, since_ts: Optional[float] = None) -> Dict[str, Any]:
+def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from office2.learning.models import model_of
+
+    cl = [x for x in rows if x["status"] == "CLOSED"]
+    st: Dict[str, Any] = {"total": len(rows), "open": sum(1 for x in rows if x["status"] == "OPEN"), "closed": len(cl), "missed": sum(1 for x in rows if x["status"] == "MISSED"),
+                          "fees_usd": round(sum(x["cost_usd"] or 0 for x in cl), 2), "note": "n<30 — лише спостереження"}
+    for k in ("a", "b", "c"):
+        v = [x[f"pnl_{k}"] for x in cl if x[f"pnl_{k}"] is not None]
+        st[f"pnl_{k}_usd"] = round(sum(v), 2)
+        st[f"wins_{k}"] = sum(1 for x in v if x > 0)
+    st["by_model"] = {}
+    for m_ in sorted({model_of(x["kind"]) for x in cl}):
+        sub = [x for x in cl if model_of(x["kind"]) == m_]
+        st["by_model"][m_] = {"closed": len(sub), "pnl_a_usd": round(sum(x["pnl_a"] or 0 for x in sub), 2), "pnl_b_usd": round(sum(x["pnl_b"] or 0 for x in sub), 2)}
+    st["sl"] = sum(1 for x in cl if x["close_reason"] == "SL")
+    st["tp"] = sum(1 for x in cl if str(x["close_reason"]).startswith("TP"))
+    return st
+
+
+def summary(db: str, limit: int = 30) -> Dict[str, Any]:
+    """LIVE-статистика — лише scope='LIVE'. BACKFILL (доставлено до запуску) показується окремо як перевірка правил, BACKFILL_INVALID — лише лічильник."""
     from office_bridge import _fetchall
 
-    out: Dict[str, Any] = {"meaning": "PAPER: модель, не реальні гроші й не ордери; ризик $10 на позицію від фактичного входу після доставки; комісія+slippage 0.15% кола", "items": [], "stats": {}}
+    out: Dict[str, Any] = {"meaning": "PAPER: модель, не реальні гроші й не ордери; ризик $10 на позицію від фактичного входу після доставки; комісія+slippage 0.15% кола (припущення, див. COST_MODEL.md)", "items": [], "stats": {}, "backfill": {}}
     try:
         _ensure(db)
-        w = " WHERE COALESCE(delivered_ts, generated_ts) >= ?" if since_ts else ""
-        par = (since_ts,) if since_ts else ()
-        rows = _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position{w} ORDER BY COALESCE(delivered_ts, generated_ts) DESC LIMIT ?", par + (limit,))
-        out["items"] = [_rowdict(r) for r in rows]
-        allr = [_rowdict(r) for r in _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position{w}", par)]
-        cl = [x for x in allr if x["status"] == "CLOSED"]
-        st: Dict[str, Any] = {"total": len(allr), "open": sum(1 for x in allr if x["status"] == "OPEN"), "closed": len(cl), "missed": sum(1 for x in allr if x["status"] == "MISSED"),
-                              "fees_usd": round(sum(x["cost_usd"] or 0 for x in cl), 2), "note": "n<30 — лише спостереження"}
-        for k in ("a", "b", "c"):
-            v = [x[f"pnl_{k}"] for x in cl if x[f"pnl_{k}"] is not None]
-            st[f"pnl_{k}_usd"] = round(sum(v), 2)
-            st[f"wins_{k}"] = sum(1 for x in v if x > 0)
-        st["sl"] = sum(1 for x in cl if x["close_reason"] == "SL")
-        st["tp"] = sum(1 for x in cl if str(x["close_reason"]).startswith("TP"))
-        out["stats"] = st
+        cols = ",".join(_COLS)
+        rows = [_rowdict(r) for r in _fetchall(db, f"SELECT {cols} FROM office2_paper_position")]
+        live = sorted([x for x in rows if x["scope"] == "LIVE"], key=lambda x: -(x["delivered_ts"] or x["generated_ts"] or 0))
+        out["items"] = live[:limit]
+        out["stats"] = _stats(live)
+        bf = [x for x in rows if x["scope"] == "BACKFILL" and x["status"] in ("CLOSED", "OPEN")]
+        out["backfill"] = {"note": "сигнали, доставлені ДО запуску paper-контуру (валідація правил, не результат запуску)", "stats": _stats(bf), "items": sorted(bf, key=lambda x: x["delivered_ts"] or 0),
+                           "invalid_no_data": sum(1 for x in rows if x["scope"] == "BACKFILL_INVALID"), "not_delivered_before_launch": sum(1 for x in rows if x["scope"] == "BACKFILL" and x["status"] == "MISSED")}
     except Exception as exc:  # noqa: BLE001
         out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
     return out
+
+
+def learning_report(db: str) -> Optional[Dict[str, Any]]:
+    """Зведення LIVE paper-угод для learning: розрізи за моделлю/напрямом/сесією/прапорами розбору. Лише scope='LIVE'; BACKFILL і невалідні сюди не потрапляють."""
+    from office_bridge import _fetchall
+
+    _ensure(db)
+    rows = [_rowdict(r) for r in _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position WHERE scope = 'LIVE'")]
+    cl = [x for x in rows if x["status"] == "CLOSED"]
+    if not rows:
+        return None
+    rep: Dict[str, Any] = {"scope": "LIVE", "overall": _stats(rows), "by_direction": {}, "by_session": {}, "flag_counts": {}, "missed_reasons": {}}
+    for d in ("LONG", "SHORT"):
+        rep["by_direction"][d] = _stats([x for x in rows if x["direction"] == d])
+    for ss in sorted({x["session"] or "NO_DATA" for x in rows}):
+        rep["by_session"][ss] = _stats([x for x in rows if (x["session"] or "NO_DATA") == ss])
+    for x in cl:
+        try:
+            for f in (json.loads(x["postmortem_json"] or "{}").get("flags") or []):
+                c = rep["flag_counts"].setdefault(f, {"n": 0, "sl": 0, "tp": 0})
+                c["n"] += 1
+                c["sl" if x["close_reason"] == "SL" else "tp"] += 1
+        except ValueError:
+            continue
+    for x in rows:
+        if x["status"] == "MISSED":
+            k = str(x["miss_reason"] or "?").split(":")[0][:40]
+            rep["missed_reasons"][k] = rep["missed_reasons"].get(k, 0) + 1
+    rep["note"] = "прапори — ознаки, не причини; висновок лише з n≥30 та незалежного replay"
+    return rep

@@ -21,7 +21,7 @@ def B(t, o, h, l, c):
     return (float(t), float(o), float(h), float(l), float(c))
 
 
-T0 = 1_800_000_000.0
+T0 = 1_800_000_000.0   # після PAPER_SINCE_TS
 # LONG: план 100, SL 99 (risk 1), TP1 102, TP2 104, TP3 106
 D = T0 + 30      # доставка посеред хвилини
 # --- 1. вхід
@@ -122,6 +122,25 @@ check("витрати 0.15% ноціоналу відняті: A", abs(p1["pnl_a
 check("summary: комісії і сума PnL", s["stats"]["closed"] == 1 and s["stats"]["open"] == 0 and s["stats"]["missed"] == 2 and abs(s["stats"]["fees_usd"] - round(cost, 2)) < 0.011)
 check("B і C відрізняються від A (часткові виходи)", p1["pnl_b"] != p1["pnl_a"] and p1["pnl_c"] != p1["pnl_b"])
 
+# історичні сигнали (до запуску контуру) не створюють paper-рядків
+_execute(db, "INSERT INTO office2_live_signal(scenario_id,symbol,direction,created_ts,valid_until_ts,status,snapshot_json,version,delivered_ts,msg_id,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+         ("OLD", "OLDUSDT", "LONG", P.PAPER_SINCE_TS - 3600, P.PAPER_SINCE_TS + 9999, "DELIVERED", snap(100, 99, [102]), "v", P.PAPER_SINCE_TS - 3500, 9, None))
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)
+_execute(db, "INSERT INTO office2_paper_position(scenario_id,symbol,direction,status,generated_ts,delivered_ts,miss_reason) VALUES (?,?,?,?,?,?,?)", ("BOGUS", "BOGUSUSDT", "LONG", "MISSED", P.PAPER_SINCE_TS - 100, P.PAPER_SINCE_TS - 90, "NO_DATA"))
+check("історичний сигнал до запуску не обліковується", "OLD" not in {x["scenario_id"] for x in P.summary(db)["items"]})
+
+from office2.learning.models import model_of
+check("моделі PA за видом тези", model_of("SWEEP_SEQ") == "REJECTION" and model_of("PULLBACK_BREAK") == "BREAKOUT_RETEST" and model_of("X") == "UNKNOWN" and model_of(None) == "UNKNOWN")
+check("summary: розріз за моделями", "by_model" in P.summary(db)["stats"])
+
+# --- міграція scope: рядок без scope до запуску й NO_DATA → BACKFILL_INVALID; сучасний → LIVE
+P._READY["done"] = False
+P._ensure(db)
+sc = {r[0]: r[1] for r in _fetchall(db, "SELECT scenario_id, scope FROM office2_paper_position")}
+check("міграція scope: BOGUS(NO_DATA, до запуску)=BACKFILL_INVALID, нові=LIVE", sc.get("BOGUS") == "BACKFILL_INVALID" and sc.get("S1") == "LIVE")
+sm = P.summary(db)
+check("summary: невалідні не входять у LIVE, лічаться окремо", all(x["scope"] == "LIVE" for x in sm["items"]) and sm["backfill"]["invalid_no_data"] >= 1)
+
 # --- 4. збій Telegram → технічне попередження в БД (раз на сигнал)
 from office2 import delivery as DL
 from office_bridge import init_office_db as _init
@@ -133,6 +152,28 @@ DL._tg_alert(db, "S9", "ZZZUSDT", "LONG", "Telegram не підтвердив д
 DL._tg_alert(db, "S9", "ZZZUSDT", "LONG", "Telegram не підтвердив доставку")
 n = _fetchall(db, "SELECT COUNT(*) FROM office_events WHERE event_type='OFFICE2_TELEGRAM_FAILURE' AND signal_id='S9'")[0][0]
 check("збій Telegram записано в БД один раз", n == 1, str(n))
+
+lr = P.learning_report(db)
+check("learning-звіт paper: лише LIVE, розрізи", lr and lr["scope"] == "LIVE" and "by_model" in lr["overall"] and "LONG" in lr["by_direction"])
+
+# --- 5. авто-розбір (структура реального знімка LINK LONG 11.10, скорочено)
+from office2 import postmortem as PM
+snap_link = {"thesis": {"kind": "SWEEP_SEQ", "reason": "повна послідовність", "level": {"kind": "NEW_YORK_L", "p": 12.95, "strength": 1},
+                        "sequence": [{"ok": True, "step": "подія", "value": "ПОВТОРНИЙ ТЕСТ прийнятого рівня 12.936 (не свіжий sweep)"}, {"ok": True, "step": "зсув структури (MSS/BOS)", "value": "закриття вище 13.093"},
+                                     {"ok": True, "step": "ретрейс у зону", "value": "low 13.003 торкнувся зони"}],
+                        "invalidation": {"price": 12.936, "buffer": 0.014, "buffer_basis": "медіана 9 проколів", "why": "екстремум події"}, "quality": {"risk_atr15": 3.73}, "sizing": {"stop_pct": 0.76}},
+             "session_tag": {"session": "ASIA", "weekend": True}, "alignment_summary": {"against": 2, "for": 1, "neutral": 2},
+             "smc": {"agrees_ready": False, "state": "NONE", "structure": {"h4": {"trend": "DOWN"}, "h1": {"trend": "TRANSITION"}}}, "market_at_signal": {"market": {"btc_regd": -1, "btc_ret_4h": -0.03}}}
+posx = {"direction": "LONG", "plan_entry": 13.021, "fill_price": 13.02, "sl": 12.922, "tp1": 13.14, "sl_ts": T0 + 600, "close_ts": T0 + 600, "cost_usd": 1.99, "pnl_a": -11.99, "mfe_r": 0.3, "mae_r": 1.0}
+bars15 = [(T0, 13.02, 13.03, 12.91, 12.95), (T0 + 900, 12.95, 13.2, 12.94, 13.15)]
+pm = PM.analyze(snap_link, posx, bars15, T0 + 900 * 4)
+fl = set(pm["flags"])
+check("розбір: прапори WEEKEND, HTF_CONFLICT_H4, BTC_DAILY_REGIME_CONFLICT, SMC_DISAGREES, RETEST_NOT_FRESH", {"WEEKEND", "HTF_CONFLICT_H4", "BTC_DAILY_REGIME_CONFLICT", "SMC_SHADOW_DISAGREES", "EVENT_IS_RETEST_NOT_FRESH_SWEEP"} <= fl, str(fl))
+check("розбір: після SL ціна дійшла до TP1", pm["events"]["after_sl"]["reached_tp1_after_sl"] is True and "TP1_REACHED_AFTER_SL" in fl)
+check("розбір: M15-свічка SL закрилась вище SL → прокол (wick)", pm["events"]["sl_candle"]["closed_beyond_sl"] is False and "SL_WICK_ONLY_M15_CLOSED_INSIDE" in fl)
+pm2 = PM.analyze({"thesis": {}}, dict(posx, sl_ts=None), None, T0)
+check("розбір без даних: NO_DATA, а не вигадані причини", pm2["events"]["level"] == "NO_DATA" and pm2["events"]["after_sl"] == "NO_DATA" and not pm2["flags"] and "level" in pm2["missing"])
+check("частка витрат у збитку", abs(pm["events"]["cost"]["share_of_loss_pct"] - 16.6) < 0.2, str(pm["events"]["cost"]))
 
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

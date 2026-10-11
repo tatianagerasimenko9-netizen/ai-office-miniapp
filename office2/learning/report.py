@@ -22,6 +22,10 @@ def build(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         rep["by_group"]["direction=" + d] = P.summarize([t for t in trades if t["direction"] == d], "A")
     for s in sorted({t.get("session") for t in trades if t.get("session")}):
         rep["by_group"]["session=" + s] = P.summarize([t for t in trades if t.get("session") == s], "A")
+    from office2.learning.models import model_of
+
+    for m_ in sorted({model_of(t.get("kind")) for t in trades if t.get("kind")}):
+        rep["by_group"]["model=" + m_] = P.summarize([t for t in trades if t.get("kind") and model_of(t.get("kind")) == m_], "A")
     for k in sorted({t.get("kind") for t in trades if t.get("kind")}):
         rep["by_group"]["kind=" + k] = P.summarize([t for t in trades if t.get("kind") == k], "A")
     for c in CODES:
