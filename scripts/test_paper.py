@@ -126,6 +126,7 @@ check("B і C відрізняються від A (часткові виходи
 _execute(db, "INSERT INTO office2_live_signal(scenario_id,symbol,direction,created_ts,valid_until_ts,status,snapshot_json,version,delivered_ts,msg_id,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
          ("OLD", "OLDUSDT", "LONG", P.PAPER_SINCE_TS - 3600, P.PAPER_SINCE_TS + 9999, "DELIVERED", snap(100, 99, [102]), "v", P.PAPER_SINCE_TS - 3500, 9, None))
 P.tick(db, mk_fetch(), T0 + 400, log=log.append)
+_execute(db, "INSERT INTO office2_paper_position(scenario_id,symbol,direction,status,generated_ts,delivered_ts,miss_reason) VALUES (?,?,?,?,?,?,?)", ("BOGUS", "BOGUSUSDT", "LONG", "MISSED", P.PAPER_SINCE_TS - 100, P.PAPER_SINCE_TS - 90, "NO_DATA"))
 check("історичний сигнал до запуску не обліковується", "OLD" not in {x["scenario_id"] for x in P.summary(db)["items"]})
 
 # --- 4. збій Telegram → технічне попередження в БД (раз на сигнал)

@@ -286,14 +286,14 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
     return out
 
 
-def summary(db: str, limit: int = 30, since_ts: Optional[float] = None) -> Dict[str, Any]:
+def summary(db: str, limit: int = 30, since_ts_: Optional[float] = None) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
     out: Dict[str, Any] = {"meaning": "PAPER: модель, не реальні гроші й не ордери; ризик $10 на позицію від фактичного входу після доставки; комісія+slippage 0.15% кола", "items": [], "stats": {}}
     try:
         _ensure(db)
-        w = " WHERE COALESCE(delivered_ts, generated_ts) >= ?" if since_ts else ""
-        par = (since_ts,) if since_ts else ()
+        w = " WHERE COALESCE(delivered_ts, generated_ts) >= ?"      # рядки, створені до запуску контуру (хибні NO_DATA), у звіт не входять
+        par = (since_ts_ if since_ts_ is not None else since_ts(),)
         rows = _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position{w} ORDER BY COALESCE(delivered_ts, generated_ts) DESC LIMIT ?", par + (limit,))
         out["items"] = [_rowdict(r) for r in rows]
         allr = [_rowdict(r) for r in _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position{w}", par)]
