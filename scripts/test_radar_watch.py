@@ -88,9 +88,9 @@ check("BLOCKED бере повний READY-рівень відсіченого �
 RW.sync(db, NOW + 90)
 check("повторний sync без дублів", OB._fetchall(db, "SELECT COUNT(*) FROM office2_radar_card")[0][0] == 4)
 
-# --- 3. вибір для Telegram: ARMED+BLOCKED, plan_ok, антиспам
+# --- 3. вибір для Telegram: RETRACE+ARMED+BLOCKED, plan_ok, антиспам
 pk = RW.pick_for_tg(db, NOW + 100)
-check("у Telegram лише ARMED/BLOCKED із планом (RETRACE і plan_ok=0 — ні), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1"], str([x["card_id"] for x in pk]))
+check("у Telegram усі планово готові RETRACE/ARMED/BLOCKED (але не plan_ok=0), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1", "W|O2|a2"], str([x["card_id"] for x in pk]))
 txt = RW.format_card(pk[1])
 check("текст «Спостерігаємо»: людською мовою, що робити, зона, стоп, цілі, строк, лінк", all(s in txt for s in ("Спостерігаємо", "Очікуємо зростання", "Що робити: Не входити", "Зона входу", "Стоп (якщо ідея не спрацювала)", "Ціль 1", "Ціль 2", "Ціль 3", "Діє до", "tab=radar&card=")), txt)
 JARGON = ("READY", "WATCH", "PAPER", "LONG", "SHORT", "SL:", "TP1", "M15", "paper", "ЗАБЛОКОВАНО")
@@ -100,11 +100,12 @@ check("навчальний сигнал: без слова «заблокова
       "ЗАБЛОКОВАНО" not in txtb and "без реальних грошей" in txtb and "для реальної торгівлі сьогодні вичерпано денний ліміт ризику" in txtb and "Що робити: Нічого не робити" in txtb and "Очікуємо падіння" in txtb, txtb)
 RW.mark_sent(db, "W|O2|a1", 111, NOW + 100)
 RW.mark_sent(db, "B|O2|b1", 112, NOW + 101)
+RW.mark_sent(db, "W|O2|a2", 113, NOW + 102)
 check("після відправки картка не вибирається повторно", RW.pick_for_tg(db, NOW + 200) == [])
 for i in range(RW.TG_PER_HOUR + 4):
     put_scenario(db, f"O2|n{i}", f"N{i}USDT", "LONG", "WAIT", "WAIT 3/3 · ARMED", thesis_wait(), upd=NOW + 300)
 RW.sync(db, NOW + 310)
-check("антиспам: не більше TG_PER_HOUR карток за годину (вже 2 відправлено)", len(RW.pick_for_tg(db, NOW + 320)) == RW.TG_PER_HOUR - 2)
+check("антиспам: не більше TG_PER_HOUR карток за годину (вже 3 відправлено)", len(RW.pick_for_tg(db, NOW + 320)) == RW.TG_PER_HOUR - 3)
 os.environ["OFFICE2_RADAR_TG"] = "0"
 check("OFFICE2_RADAR_TG=0 повністю вимикає Telegram-потік", RW.pick_for_tg(db, NOW + 320) == [])
 os.environ.pop("OFFICE2_RADAR_TG")
