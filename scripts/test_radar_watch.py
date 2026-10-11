@@ -3,6 +3,7 @@
 розмежування з READY, чесні порожні стани."""
 import asyncio
 import json
+import re
 import os
 import sys
 import tempfile
@@ -92,14 +93,14 @@ check("повторний sync без дублів", OB._fetchall(db, "SELECT CO
 pk = RW.pick_for_tg(db, NOW + 100)
 check("у Telegram усі планово готові RETRACE/ARMED/BLOCKED (але не plan_ok=0), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1", "W|O2|a2"], str([x["card_id"] for x in pk]))
 txt = RW.format_card(pk[1])
-check("картка починається з висновку (напрям + «НЕ ВХОДИТИ» + чому/чекаємо), далі план, зона, прямий лінк, <1024 символів",
-      txt.splitlines()[0].count("НЕ ВХОДИТИ") == 1 and "очікуємо зростання" in txt.splitlines()[0] and txt.splitlines()[1].startswith("Входити? НІ") and "Що бачимо:" in txt and "Чекаємо:" in txt
-      and "стоп" in txt and "ціль 1" in txt and "Зона входу:" in txt and "tab=radar&card=" in txt and len(txt) <= 1024, txt)
+check("картка: монета · напрям · статус → ПЛАН І ПРИЧИНИ → чекаємо → вхід/стоп/цілі → висновок → лінк, <1024 символів",
+      txt.splitlines()[0].endswith("· спостереження") and "очікуємо зростання" in txt.splitlines()[0] and txt.splitlines()[1] == "ПЛАН І ПРИЧИНИ:" and "Чекаємо:" in txt and "Вхід (після підтвердження):" in txt
+      and "Стоп" in txt and "Цілі:" in txt and "Висновок: СПОСТЕРІГАЄМО" in txt and "tab=radar&card=" in txt and len(txt) <= 1024, txt)
 JARGON = ("READY", "WATCH", "PAPER", "LONG", "SHORT", "SL:", "TP1", "M15", "paper", "ЗАБЛОКОВАНО")
 check("у тексті немає жаргону і технічних кодів", not any(j in txt for j in JARGON), txt)
 txtb = RW.format_card(pk[0])
-check("навчальна картка коротка, без технічного коду та з конкретним deep link",
-      "ЗАБЛОКОВАНО" not in txtb and "навчальна угода" in txtb.splitlines()[0] and "очікуємо падіння" in txtb.splitlines()[0] and "Входити за реальні гроші? НІ" in txtb and "tab=radar&card=" in txtb and len(txtb) <= 1024, txtb)
+check("навчальна картка: висновок «реальний вхід не дозволений», без технічного коду, з конкретним deep link",
+      "ЗАБЛОКОВАНО" not in txtb and txtb.splitlines()[0].endswith("· навчальна угода") and "очікуємо падіння" in txtb.splitlines()[0] and "реальний вхід не дозволений" in txtb and "tab=radar&card=" in txtb and len(txtb) <= 1024, txtb)
 RW.mark_sent(db, "W|O2|a1", 111, NOW + 100)
 RW.mark_sent(db, "B|O2|b1", 112, NOW + 101)
 RW.mark_sent(db, "W|O2|a2", 113, NOW + 102)
@@ -235,6 +236,35 @@ check("без посилання на картку кнопка не підмі�
 
 sdb = RW.summary(db, NOW + 400)
 check("summary показує джерело даних (backend + відбиток) для звірки Mini App ↔ воркер", (sdb.get("db") or {}).get("backend") == "sqlite" and len((sdb["db"].get("fingerprint") or "")) == 16, str(sdb.get("db")))
+
+# --- ПЛАН І ПРИЧИНИ: лише підтверджені факти, спільні для Telegram і Mini App (формує сервер)
+TH = {"event": {"src": "SWEEP", "class": "LATE_SWEEP", "ts": 1791717300.0, "extreme": 1.2262, "level": {"p": 1.2279, "kind": "NEW_YORK_L"}, "prior": {"bars": 12, "closes_beyond": 3}},
+      "level": {"p": 1.2279, "kind": "NEW_YORK_L"}, "invalidation": {"price": 1.2262}, "break": {"ts": 1791728100.0, "level": 1.2386, "body_atr": 2.23, "bars_held": 17},
+      "entry_zone": [1.2314, 1.2455], "leg": {"from": 1.2262, "to": 1.27, "atr": 5.2}, "zone_parts": ["OTE 62–79%", "FVG"], "sequence": [{"step": "ретрейс", "ok": False, "value": "очікуємо"}],
+      "need": {"text": "ретрейс у зону 1.2314–1.2455"}, "preview": {"targets": [{"p": 1.2561, "kind": "M15SW", "r": 1.28}, {"p": 1.27, "kind": "NEW_YORK_H", "r": 2.29}]}}
+RS = RT.reasons_from_thesis(TH, "LONG", "DOTUSDT")
+kinds = [r["kind"] for r in RS["reasons"]]
+check("причини будуються з фактів: рівень, зсув структури, зона, запас ходу; неоплачений відкат не вважається причиною", kinds == ["event", "structure", "zone", "room"] and RS["wait"] and RS["cancel"], str(RS))
+check("кожна причина має конкретику (ціна/час/число)", all(re.search(r"\d", r["text"]) for r in RS["reasons"]))
+check("без події, зсуву і зони — порожній список, а не вигадані причини", RT.reasons_from_thesis({"sequence": []}, "LONG", "X")["reasons"] == [])
+TH2 = dict(TH, evidence=[{"module": "OB/FVG", "supports": 0, "finding": "нейтрально"}, {"module": "Mirror", "supports": 1, "finding": "був опором, ретестів 1"}, {"module": "premium", "supports": -1, "finding": "зона в premium: ПРОТИ LONG"}],
+           alignment=[{"verdict": "ПРОТИ LONG", "text": "BTC −0,29% / 1г: ПРОТИ LONG"}])
+RS2 = RT.reasons_from_thesis(TH2, "LONG", "DOTUSDT")
+check("докази модулів: лише ті, що підтримують; суперечності окремо", any("Mirror" in r["text"] for r in RS2["reasons"]) and not any("нейтрально" in r["text"] for r in RS2["reasons"]) and len(RS2["against"]) == 2, str(RS2))
+rowx = dict(row, reasons_json=json.dumps(RS2, ensure_ascii=False))
+vx = RT.reasons_view(rowx, limit=5)
+check("представлення: нумерація 1..N, максимум 5, решта лише лічильником", [i["n"] for i in vx["items"]] == list(range(1, len(vx["items"]) + 1)) and len(vx["items"]) <= 5, str(vx))
+cardx = dict(row, kind="WATCH", reasons_json=json.dumps(RS2, ensure_ascii=False))
+tg = RT.card_text(cardx)
+check("Telegram: пронумеровані причини, 'Проти', 'Скасування', лінк збережений у ≤1024", "1. Рівень:" in tg and "Проти:" in tg and "Скасування:" in tg and "tab=radar&card=" in tg and len(tg) <= 1024, tg)
+check("порожні причини: чесний рядок, а не вигадка", "Підтверджених причин у даних поки немає" in RT.card_text(dict(row, reasons_json=None)))
+db9 = new_db()
+put_scenario(db9, "O2|dddddddddddd", "DOTUSDT", "LONG", "WAIT", "WAIT 2/3 · ретрейс: ціна", dict(TH, dir="LONG", state="WAIT"))
+RW.sync(db9, NOW + 5)
+rj9 = OB._fetchall(db9, "SELECT reasons_json FROM office2_radar_card WHERE symbol='DOTUSDT'")[0][0]
+check("sync зберігає причини в картці (спільне для Telegram і Mini App)", rj9 and json.loads(rj9)["reasons"], str(rj9)[:120])
+OB._execute(db9, "UPDATE office2_radar_card SET reasons_json = NULL")
+check("backfill причин для старих карток", RW.backfill_reasons(db9, NOW + 10) == 1 and json.loads(OB._fetchall(db9, "SELECT reasons_json FROM office2_radar_card")[0][0])["reasons"])
 
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))

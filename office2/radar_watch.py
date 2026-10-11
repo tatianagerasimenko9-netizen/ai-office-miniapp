@@ -34,10 +34,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -56,7 +56,7 @@ def _ensure(db: str) -> None:
             _execute(db, d)
     except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
         print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
-    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT"):
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -148,6 +148,12 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
         except ValueError:
             continue
         pl = plan_of(th)
+        try:
+            from office2 import radar_text as _RT
+
+            reasons_json = json.dumps(_RT.reasons_from_thesis(th, d, sym), ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            reasons_json = None
         lvl = th.get("level") or {}
         need = (th.get("need") or {}).get("text")
         k = "BLOCKED" if st == "BLOCKED" else "WATCH"
@@ -160,7 +166,7 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
                 continue         # одна активна ідея на монету й напрям: нова теза з'явиться після завершення попередньої
             vals = {"card_id": cid, "kind": k, "scenario_id": sid, "symbol": sym, "direction": d, "stage": st, "created_ts": float(upd), "updated_ts": float(upd), "expires_ts": float(upd) + TTL_SEC,
                     **pl, "level_kind": lvl.get("kind"), "level_price": _f(lvl.get("p")), "need_text": need, "reason": str(reason or "")[:400], "scen_state": state,
-                    "tg_status": "NEW", "tg_tries": 0, "gate_reason": str(reason or "")[:160] if k == "BLOCKED" else None, "version": VERSION}
+                    "tg_status": "NEW", "tg_tries": 0, "gate_reason": str(reason or "")[:160] if k == "BLOCKED" else None, "version": VERSION, "reasons_json": reasons_json}
             _execute(db, f"INSERT INTO office2_radar_card({','.join(_COLS)}) VALUES ({','.join('?' for _ in _COLS)}) ON CONFLICT (card_id) DO NOTHING", tuple(vals.get(c) for c in _COLS))
             out["new"] += 1
             if k == "BLOCKED":
@@ -168,9 +174,9 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
             continue
         tg_status, paper = ex[0]
         if tg_status == "NEW" and not paper:      # план ще не опублікований і не в paper — оновлюємо до найточнішого (ARMED точніший за RETRACE)
-            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=?, far_targets=?, entry_note=?, stops_json=? WHERE card_id=?",
+            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=?, far_targets=?, entry_note=?, stops_json=?, reasons_json=? WHERE card_id=?",
                      (st, float(upd), pl["zone_lo"], pl["zone_hi"], pl["entry"], pl["sl"], pl["tp1"], pl["tp2"], pl["tp3"], pl["risk_pct"], pl["plan_ok"], pl["reject"], need, str(reason or "")[:400], state,
-                      pl["far_targets"], pl["entry_note"], pl["stops_json"], cid))
+                      pl["far_targets"], pl["entry_note"], pl["stops_json"], reasons_json, cid))
         else:
             _execute(db, "UPDATE office2_radar_card SET updated_ts=?, scen_state=?, need_text=?, reason=?, stage=? WHERE card_id=?", (float(upd), state, need, str(reason or "")[:400], st, cid))
         out["updated"] += 1
@@ -346,6 +352,24 @@ def postmortem_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: fl
             "summary": line, "note": "Прапори — ознаки для статистики, а не доказ помилки; один збиток нічого не доводить.", "final": final, "ts": now}
 
 
+def backfill_reasons(db: str, now: Optional[float] = None) -> int:
+    """Причини для карток, створених до появи reasons_json: з поточного стану сценарію Brain (рівень, подія, зсув структури, зона — це факти минулого, не залежать від часу)."""
+    from office_bridge import _execute, _fetchall
+    from office2 import radar_text as RT
+
+    t = time.time() if now is None else now
+    n = 0
+    for cid, d, sym, tj in _fetchall(db, "SELECT c.card_id, c.direction, c.symbol, s.thesis_json FROM office2_radar_card c JOIN office2_live_scenario s ON s.scenario_id = c.scenario_id "
+                                         "WHERE c.reasons_json IS NULL AND c.created_ts > ?", (t - TRACK_MAX_AGE_SEC,)):
+        try:
+            rj = json.dumps(RT.reasons_from_thesis(json.loads(tj or "{}"), d, sym), ensure_ascii=False)
+            _execute(db, "UPDATE office2_radar_card SET reasons_json = ? WHERE card_id = ? AND reasons_json IS NULL", (rj, cid))
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[radar] backfill причин {cid}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
+    return n
+
+
 def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
@@ -353,6 +377,7 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
     _ensure(db)
     try:
         backfill_stops(db, t)
+        backfill_reasons(db, t)
     except Exception as exc:  # noqa: BLE001
         log(f"[radar] backfill стопів: {type(exc).__name__}: {str(exc)[:100]}")
     cols = ",".join(_COLS)

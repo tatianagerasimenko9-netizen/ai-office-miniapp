@@ -237,7 +237,7 @@ def radar_card_button(text: str, base_url: str = "") -> Optional[Dict[str, Any]]
     m = _re.search(r"/v2\?tab=radar&card=([A-Za-z0-9_-]+)", str(text or ""))
     if not base or not m:
         return None
-    return {"inline_keyboard": [[{"text": "📊 Відкрити цю картку", "url": f"{base}/v2?tab=radar&card={m.group(1)}"}]]}
+    return {"inline_keyboard": [[{"text": "📊 Відкрити графік", "url": f"{base}/v2?tab=radar&card={m.group(1)}"}]]}
 
 
 def mini_app_button(
