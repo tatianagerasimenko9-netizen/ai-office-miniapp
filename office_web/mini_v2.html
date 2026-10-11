@@ -311,7 +311,7 @@ function paperHtml(d){
   const st=d.stats, m=v=>(v==null?'—':(v>=0?'+':'')+v+'$');
   const ts=t=>t?new Date(t*1000).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
   const pmf=x=>{try{const f=(JSON.parse(x.postmortem_json||'{}').flags)||[];return f.length?' · ознаки: '+f.map(esc).join(', '):'';}catch(e){return '';}};
-  const row=x=>`<div class="mut" style="margin-top:6px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.kind||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.status==='CLOSED'?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}${pmf(x)}</div>`;
+  const row=x=>`<div class="mut" style="margin-top:6px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.kind||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.pnl_a!=null?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}${pmf(x)}</div>`;
   const rows=(d.items||[]).slice(0,10).map(row).join('');
   const bf=d.backfill||{}, bs=bf.stats||{};
   const bfh=(bs.total?`<div class="mut" style="margin-top:10px"><b>Перевірка правил на раніше доставлених сигналах</b> (до запуску контуру, у результат запуску НЕ входить): закрито ${bs.closed} (SL ${bs.sl}, TP ${bs.tp}) · відкрито ${bs.open} · A ${m(bs.pnl_a_usd)}. Невалідних записів без даних: ${bf.invalid_no_data||0} (виключені зі статистики).</div>${(bf.items||[]).map(row).join('')}`:'');

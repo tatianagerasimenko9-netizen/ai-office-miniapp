@@ -203,5 +203,25 @@ check("альтернативи V0..V8 на одній угоді + NO_TRADE + �
 alt2 = PM.alternatives({"thesis": {}}, {"direction": "LONG", "symbol": "X"}, bb)
 check("альтернативи без даних → NO_DATA", alt2["status"] == "NO_DATA")
 
+# --- 6b. інтеграція: tick сам запускає авто-розбір закритих угод (S1 закрита за TP1 у секції 3)
+row = _fetchall(db, "SELECT postmortem_json FROM office2_paper_position WHERE scenario_id = 'S1'")[0][0]
+check("tick сам записує postmortem_json для закритої угоди", bool(row) and json.loads(row).get("version") == PM.VERSION, str(row)[:120])
+
+# --- 7. контрольний потік: would-be READY, відсічений лімітом, не потрапляє в LIVE
+_execute(db, """CREATE TABLE IF NOT EXISTS office2_live_scenario (scenario_id TEXT PRIMARY KEY, symbol TEXT, direction TEXT, kind TEXT, state TEXT, created_ts DOUBLE PRECISION,
+    updated_ts DOUBLE PRECISION, expires_ts DOUBLE PRECISION, reason TEXT, thesis_json TEXT, version TEXT)""")
+_execute(db, "INSERT INTO office2_live_scenario VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("O2|ctl|1", "DDDUSDT", "LONG", "SWEEP_SEQ", "NO_TRADE", T0, T0, None,
+         "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC", json.dumps({"entry": 100, "sl": 99, "targets": [{"p": 102}, {"p": 104}]}), "t"))
+DATA["DDDUSDT"] = [B(T0 + 60, 100.1, 100.4, 100.0, 100.3), B(T0 + 120, 100.3, 102.3, 100.2, 102.0)]
+live_before = P.summary(db)["stats"]["total"]
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)           # повтор: без дублів
+sm = P.summary(db)
+ct = sm["control"]["stats"]
+check("контроль: 1 позиція, розв'язана за TP1 (A), без дубля; B/C ще ведуть залишок", ct["total"] == 1 and ct["closed"] == 1 and ct["tp"] == 1 and ct["b_c_still_open"] == 1, str(ct))
+check("контроль не змішується з LIVE", sm["stats"]["total"] == live_before and all(x["scope"] == "LIVE" for x in sm["items"]))
+check("контроль згруповано за причиною ліміту", any("стопи" in k for k in sm["control"]["by_gate"]), str(sm["control"]["by_gate"]))
+check("learning-звіт paper не містить CONTROL", P.learning_report(db)["overall"]["total"] == live_before)
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 ND = "NO_DATA"
+VERSION = "pm-2"
 AFTER_SL_HOURS = 24
 
 
@@ -269,7 +270,7 @@ def analyze(snap: Dict[str, Any], pos: Dict[str, Any], bars: Optional[List[Tuple
     ev["evidence"] = evidence_digest(snap)
     if any("Wyckoff" in str(e.get("module")) and "не визначена" in str(e.get("finding", "")) for e in (snap.get("evidence") or [])):
         ev["wyckoff"] = "UNKNOWN (фаза не визначена модулем office_wyckoff)"
-    pm = {"version": "pm-2", "analyzed_at": now, "closed_utc": _kyiv(pos.get("close_ts")), "events": ev, "flags": flags, "missing": missing,
+    pm = {"version": VERSION, "analyzed_at": now, "closed_utc": _kyiv(pos.get("close_ts")), "events": ev, "flags": flags, "missing": missing,
           "note": "Прапори — ознаки для накопичення статистики, не доказ помилки і не правило. Висновки — лише з ≥30 угод та незалежного replay."}
     pm["error_classes"] = classify(snap, pos, pm)
     pm["alternatives"] = alternatives(snap, pos, bars) if bars else {"status": ND, "note": "немає свічок"}
