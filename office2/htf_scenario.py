@@ -18,6 +18,7 @@ SWING_N = 2                                                 # ГІПОТЕЗА: 
 RECENT_BARS = {"1d": 10, "4h": 30}                          # ГІПОТЕЗА: скільки останніх барів ТФ вважаємо «свіжою» сильною свічкою
 MAX_AGE_BARS = {"1d": 15, "4h": 45}                         # ГІПОТЕЗА: максимальний вік сценарію
 TF_SEC = {"1d": 86400, "4h": 14400, "15m": 900, "5m": 300}
+TRIGGER_FRESH_BARS = 12                                     # ГІПОТЕЗА: тригер M5 не старший за 1 годину (вимога «не входити після запізнілого руху» без числа в описі)
 TRIGGER_BARS = 3                                            # ГІПОТЕЗА: збігається з наявним мікро-підтвердженням Brain (закриття за екстремумом 3 попередніх M5)
 
 
@@ -163,17 +164,26 @@ def evaluate(symbol: str, tf: str, htf: List[Dict[str, Any]], m15: List[Dict[str
                     t0 = touched[0]["ts"]
                     # 5) молодший тригер (M5): після дотику зони
                     c5a = [b for b in c5 if b["ts"] >= t0]
-                    trig = None
+                    trig, why_not = None, "після входу в область закриття M5 за екстремумом 3 попередніх барів ще немає"
                     for k in range(TRIGGER_BARS, len(c5a)):
                         win = c5a[k - TRIGGER_BARS:k]
-                        if (c5a[k]["close"] > max(x["high"] for x in win)) if long_ else (c5a[k]["close"] < min(x["low"] for x in win)):
+                        brk = (c5a[k]["close"] > max(x["high"] for x in win)) if long_ else (c5a[k]["close"] < min(x["low"] for x in win))
+                        if not brk:
+                            continue
+                        in_area = (c5a[k]["close"] <= body_hi) if long_ else (c5a[k]["close"] >= body_lo)      # реакція в старшій області, а не погоня за рухом
+                        fresh = len(c5a) - 1 - k <= TRIGGER_FRESH_BARS                                          # не входити після запізнілого руху
+                        if in_area and fresh:
                             trig = c5a[k]
+                        elif not in_area:
+                            why_not = "M5-пробій був, але закриття вже поза старшою областю — запізно, не погоня за рухом"
+                        elif not fresh:
+                            why_not = f"M5-пробій був понад {TRIGGER_FRESH_BARS} барів M5 тому — застарів"
                     if trig:
                         state = "TRIGGERED"
                         plan = _plan(symbol, long_, trig, t0, c15, c5, hs, ls, h, b_pt)
                         ev.append(_ev("точка входу на M5", True, f"M5 {_dt(trig['ts'])}: закриття {trig['close']:g} {'вище максимуму' if long_ else 'нижче мінімуму'} {TRIGGER_BARS} попередніх барів після входу в область", S_HYP + " (мікро-підтвердження як у Brain)", ts=trig["ts"]))
                     else:
-                        ev.append(_ev("точка входу на M5", None, "після входу в область закриття M5 за екстремумом 3 попередніх барів ще немає", S_HYP))
+                        ev.append(_ev("точка входу на M5", None, why_not, S_HYP))
         out.append({"v": VERSION, "scenario_id": sid, "symbol": symbol, "direction": sc["direction"], "tf": tf, "strong_ts": sc["ts"], "state": state, "as_of": as_of,
                     "zone": zone, "fib": fib, "impulse": imp, "evidence": ev, "plan": plan, "src_note": "shadow; один сценарій на сильну свічку; параметри з позначкою ГІПОТЕЗА не є правилами авторки"})
     return out

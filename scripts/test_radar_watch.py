@@ -278,6 +278,21 @@ txt3 = " ".join(r["text"] for r in RS3["reasons"])
 check("назви модулів українською, без англійського жаргону", "Дзеркальний рівень (Герчик)" in txt3 and "Обсяг і дельта" in txt3 and "Gerchik" not in txt3 and "taker" not in txt3, txt3)
 check("запас ходу без кратності (кратність лише в рядку «Цілі», щоб числа не розходились)", not any("× стопа" in r["text"] for r in RS3["reasons"]))
 
+# --- реальні картки production 11.10 (RUNE/FIL): висновок один раз, найважливіші причини не вирізаються, ≤1024
+FILR = {"v": 3, "reasons": [{"kind": "event", "text": "Рівень: мінімум лондонської сесії 1,1158 — повторний тест рівня 11.10 18:30 (екстремум 1,1153); перед цим за 12 барів — закриттів за рівнем: 11."}, {"kind": "structure", "text": "Зсув структури: закриття вище 1,1437 11.10 20:30, тіло свічки 1,8 ATR."},
+        {"kind": "zone", "text": "Імпульс 1,1153→1,1547 (3,7 ATR); зона інтересу 1,1236–1,1324: відкат 62–79% імпульсу + незаповнений розрив (FVG)."}, {"kind": "retrace", "text": "Відкат у зону: мінімум 1,1314 торкнувся зони 1,12357–1,1324; закриття 1,1532."},
+        {"kind": "room", "text": "Запас ходу: ціль 1 1,2103 (пік/впадина 4 год); ціль 2 1,231."}, {"kind": "trigger", "text": "Підтвердження на 15 хв: закриття 1,1532 ≥ середини зони 1,12799."}] + [{"kind": "evidence", "text": "Старші таймфрейми: за напрямом: H4,H1; проти: —; H1 зламано вгору."}] * 4,
+        "against": ["Положення зони в діапазоні: зона в premium діапазону H4 (63%): проти зростання"], "wait": None, "cancel": "ціна закріпиться за 1,1153 (екстремум події)"}
+filc = {"card_id": "B|O2|dbcd04afd7a2", "kind": "BLOCKED", "stage": "BLOCKED", "symbol": "FILUSDT", "direction": "LONG", "entry": 1.1324, "sl": 1.1142, "tp1": 1.2103, "zone_lo": 1.123574, "zone_hi": 1.1324, "risk_pct": 1.6, "expires_ts": 1791755100, "created_ts": 1, "plan_ok": 1, "scen_state": "NO_TRADE",
+        "gate_reason": "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC", "reasons_json": json.dumps(FILR, ensure_ascii=False)}
+tf = RT.card_text(filc)
+check("FIL: ≤1024, 5 найважливіших причин (з відкатом і запасом ходу), решта — лічильником", len(tf) <= 1024 and "Відкат у зону" in tf and "Запас ходу" in tf and "+ ще підтверджень:" in tf and "tab=radar&card=B-dbcd04afd7a2" in tf, tf)
+check("навчальна картка: короткий висновок про ліміт без вкладених дужок", "(денний ліміт 3 стопи)" in tf and tf.count("(") < tf.count(")") + 12, tf)
+runec = dict(filc, card_id="W|O2|d76e683c1cc7", kind="WATCH", stage="RETRACE", symbol="RUNEUSDT", gate_reason=None, need_text="ретрейс у зону", reasons_json=json.dumps({"v": 2, "reasons": FILR["reasons"][:3], "against": [], "wait": "ретрейс у зону 0.688069–0.693", "cancel": "ціна закріпиться за 0,6841"}, ensure_ascii=False),
+             stops_json=json.dumps({"extreme": 1, "atr": 1, "recommended": None, **{k: {"sl": 1.0, "risk_pct": 1.0, "justified": False, "liq": "x", "name": k, "risk_atr": 2.0, "noise_ok": True, "range_ok": True, "beyond_extreme": True, "side_ok": True} for k in ("v1", "v2", "v3")}}))
+tr = RT.card_text(runec)
+check("RUNE: без обґрунтованого стопа — чесне «Безпечний стоп не підтверджений. Вхід не дозволений.» у висновку, без дубля", "Висновок: СПОСТЕРІГАЄМО — вхід ще не підтверджений. Безпечний стоп не підтверджений. Вхід не дозволений." in tr and tr.count("Вхід не дозволений") == 1, tr)
+
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
 

@@ -71,6 +71,16 @@ r2 = H.evaluate("TESTUSDT", "4h", h, m15, m5_no, as_of)[0]
 st2 = {e["step"]: e for e in r2["evidence"]}
 check("без підтвердження на M5: IN_ZONE і текст «НЕ ПІДТВЕРДЖЕНО», не сигнал", r2["state"] == "IN_ZONE" and st2["точка входу на M5"]["ok"] is None and st2["точка входу на M5"]["text"].startswith("НЕ ПІДТВЕРДЖЕНО"), r2["state"])
 
+# --- тригер M5 має бути в старшій області й свіжим (регресія: у production 13 з 49 сценаріїв одразу ставали TRIGGERED)
+m15_early = ltf(h[-1]["ts"], [107.5] * 8, 900)                                          # ціна в області вже від початку вікна
+m5_left = ltf(h[-1]["ts"], [106.0] * 14 + [110.5, 110.6, 110.7, 110.8, 110.9, 111.0], 300)   # єдиний пробій відбувся вже поза старшою областю (тіло до 108)
+r7 = H.evaluate("TESTUSDT", "4h", h, m15_early, m5_left, as_of)[0]
+st7 = {e["step"]: e for e in r7["evidence"]}
+check("пробій M5 поза старшою областю → не TRIGGERED, пояснення «запізно»", r7["state"] != "TRIGGERED" and "запізно" in st7["точка входу на M5"]["text"], r7["state"] + " " + st7["точка входу на M5"]["text"])
+m5_old = ltf(h[-1]["ts"], [106.0] * 4 + [106.6] + [106.0] * 20, 300)                     # пробій 20 барів тому
+r8 = H.evaluate("TESTUSDT", "4h", h, m15_early, m5_old, as_of)[0]
+check("застарілий M5-пробій → не TRIGGERED", r8["state"] != "TRIGGERED" and "застарів" in {e["step"]: e for e in r8["evidence"]}["точка входу на M5"]["text"])
+
 # ціна ще не повернулась → WAIT_PULLBACK
 h_wait = htf_series(with_pullback=False)
 as_of_w = h_wait[-1]["ts"] + W
