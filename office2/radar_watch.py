@@ -360,10 +360,10 @@ def backfill_reasons(db: str, now: Optional[float] = None) -> int:
     t = time.time() if now is None else now
     n = 0
     for cid, d, sym, tj in _fetchall(db, "SELECT c.card_id, c.direction, c.symbol, s.thesis_json FROM office2_radar_card c JOIN office2_live_scenario s ON s.scenario_id = c.scenario_id "
-                                         "WHERE c.reasons_json IS NULL AND c.created_ts > ?", (t - TRACK_MAX_AGE_SEC,)):
+                                         "WHERE (c.reasons_json IS NULL OR c.reasons_json NOT LIKE ?) AND c.created_ts > ?", ('%"v": ' + str(RT.REASONS_VERSION) + '%', t - TRACK_MAX_AGE_SEC)):
         try:
             rj = json.dumps(RT.reasons_from_thesis(json.loads(tj or "{}"), d, sym), ensure_ascii=False)
-            _execute(db, "UPDATE office2_radar_card SET reasons_json = ? WHERE card_id = ? AND reasons_json IS NULL", (rj, cid))
+            _execute(db, "UPDATE office2_radar_card SET reasons_json = ? WHERE card_id = ?", (rj, cid))
             n += 1
         except Exception as exc:  # noqa: BLE001
             print(f"[radar] backfill причин {cid}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
