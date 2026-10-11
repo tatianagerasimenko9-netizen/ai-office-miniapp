@@ -1483,6 +1483,10 @@ class Handler(BaseHTTPRequestHandler):
                 from office2 import paper as _PP
 
                 data = _PP.summary(DB_PATH)
+            elif u.path == "/api/v2/live_radar":
+                from office2 import radar_watch as _RW
+
+                data = _RW.summary(DB_PATH, card_id=_q("card") or None)
             elif u.path == "/api/v2/dynamic_watch":
                 from office2 import dynamic_watch as _DW
 

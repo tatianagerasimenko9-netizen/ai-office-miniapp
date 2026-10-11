@@ -666,6 +666,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
 
         if os.getenv("OFFICE2_PAPER", "1").strip() != "0":
             threading.Thread(target=_paper_loop, args=(db,), name="office2-paper", daemon=True).start()
+        if os.getenv("OFFICE2_RADAR", "1").strip() != "0":
+            threading.Thread(target=_radar_loop, args=(db,), name="office2-radar", daemon=True).start()
         if _LJ.enabled():
             threading.Thread(target=_learning_loop, args=(db,), name="office2-learning", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
@@ -731,6 +733,23 @@ def _paper_loop(db: str) -> None:
                 _log(f"[paper] {r}")
         except Exception as exc:  # noqa: BLE001
             _log(f"[paper] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
+        time.sleep(60)
+
+
+def _radar_loop(db: str) -> None:
+    """WATCH/PAPER-радар (office2.radar_watch): картки з поточних сценаріїв (сканування), paper-супровід за свічками. Telegram-відправку робить worker-релей. Ордерів немає."""
+    from office2 import radar_watch as RW
+    from office_market_data import fetch_candles
+
+    time.sleep(75)
+    while True:
+        try:
+            a = RW.sync(db)
+            n = RW.track(db, fetch_candles, log=_log)
+            if a["new"] or n:
+                _log(f"[radar] нові картки {a['new']}, оновлено paper {n}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[radar] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
         time.sleep(60)
 
 

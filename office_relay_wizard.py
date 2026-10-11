@@ -7695,6 +7695,32 @@ EV позитивне: {prob.get('ev_positive', '')}
 
     asyncio.create_task(monitor_office2_delivery())
 
+    async def monitor_office2_radar() -> None:
+        """WATCH/PAPER-радар Office2: короткі картки «не вхід» (ARMED 3/3 і BLOCKED лімітом) з графіком + follow-up за віхами paper. Окремо від READY, антиспам у radar_watch.
+        Вимкнути: OFFICE2_RADAR_TG=0. Ордерів немає; LIVE-гейти не змінюються."""
+        from office2 import radar_watch as _rw
+        import office_ready_card as _rcard
+        from office_market_data import fetch_candles as _rw_fetch
+
+        async def _rw_photo(path: str, text: str, symbol: str = "", direction: str = "") -> Optional[int]:
+            return await send_office_photo(path, text, intent="WATCH_RADAR", event_type=EVENT_TRADE_UPDATE, symbol=symbol, direction=direction, skip_gate=True)
+
+        async def _rw_text(text: str, reply_to: Optional[int] = None, symbol: str = "", direction: str = "") -> Optional[int]:
+            return await send_office(text, reply_to_message_id=reply_to, intent="WATCH_RADAR", event_type=EVENT_TRADE_UPDATE, symbol=symbol, direction=direction, skip_gate=True)
+
+        await asyncio.sleep(90)
+        while True:
+            try:
+                if _rw.tg_enabled():
+                    r = await _rw.send_pass(db_path, _rw_photo, _rw_text, _rw_fetch, _rcard.render)
+                    if r.get("sent") or r.get("followups") or r.get("failed"):
+                        print(f"[radar] pass {r}")
+            except Exception as exc_rw:
+                print(f"[radar][WARN] pass failed: {type(exc_rw).__name__}: {exc_rw}")
+            await asyncio.sleep(30)
+
+    asyncio.create_task(monitor_office2_radar())
+
     async def monitor_manual_trades() -> None:
         """Ведення угод, які власниця позначила відкритими: TP1/TP2/TP3/стоп — короткий рядок з дією, один раз, відповіддю на сигнал.
         Проходить через send_proactive (шлюз: POSITION_MANAGE + відкрита позиція; додатково OFFICE_TG_POSITION_SUPPORT)."""

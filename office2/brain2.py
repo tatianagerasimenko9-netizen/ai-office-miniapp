@@ -180,6 +180,24 @@ def _entry_zone(m15: Dict[str, np.ndarray], e: int, j: int, k: int, lo: float, h
 # ------------------------------------------------------------------ оцінка однієї події
 def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: float, sg: int, m15: Dict[str, np.ndarray], m15r: Dict[str, np.ndarray],
               a15: np.ndarray, k: int, levels: List[Dict[str, Any]], risk_usd: float, swings: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+    """Те саме рішення, що й раніше (_evaluate_core); для WAIT 2/3 і 3/3 додатково — `preview`: ОРІЄНТИР плану (вхід = середина зони) за тими самими
+    геометричними фільтрами, що й READY. Стан, причина й переходи не змінюються; preview — лише для WATCH-карток, не торговий сигнал."""
+    r = _evaluate_core(ctx, ev, direction, now, sg, m15, m15r, a15, k, levels, risk_usd, swings)
+    try:
+        if r and r.get("state") == "WAIT" and r.get("entry_zone"):
+            z = r["entry_zone"]
+            mid_m = sg * (float(z[0]) + float(z[1])) / 2.0
+            fin = _finalize(ctx, dict(r), m15, a15, k, now, ev["extreme"], mid_m, levels, risk_usd, sg, ev, [])
+            ok = fin.get("state") == "READY"
+            r["preview"] = {"ok": ok, "entry": fin.get("entry") if ok else None, "sl": fin.get("sl"), "risk_pct": fin.get("risk_pct"), "targets": fin.get("targets") if ok else None,
+                            "reject": None if ok else fin.get("reason"), "basis": "орієнтир: вхід = середина зони; не сигнал, пройшов лише геометричні фільтри READY (ризик %, шум ATR, простір до цілі)"}
+    except Exception:  # noqa: BLE001
+        pass
+    return r
+
+
+def _evaluate_core(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: float, sg: int, m15: Dict[str, np.ndarray], m15r: Dict[str, np.ndarray],
+                   a15: np.ndarray, k: int, levels: List[Dict[str, Any]], risk_usd: float, swings: Optional[Any] = None) -> Optional[Dict[str, Any]]:
     e = ev["e"]
     lo = ev["extreme"]
     kind = "SWEEP_SEQ" if ev["src"] == "SWEEP" else "ORIGIN_SEQ"
