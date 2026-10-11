@@ -387,6 +387,53 @@ def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return st
 
 
+def gate_status(db: str, now: Optional[float] = None) -> Dict[str, Any]:
+    """Статус денного ліміту «3 стопи/добу UTC» (office2.engine.day_stops): які стопи його активували, коли блок почався/закінчується, скільки кандидатів знайдено/відсічено і shadow-результат відсічених.
+    Лише читання; ліміт не змінює."""
+    from office_bridge import _fetchall
+
+    now = time.time() if now is None else now
+    t0 = now - (now % 86400)
+    out: Dict[str, Any] = {"limit": 3, "day_start_ts": t0, "lock_ends_ts": t0 + 86400, "stops": [], "locked": False, "locked_since_ts": None,
+                           "note": "лічильник = SL-milestone доставлених сигналів Office2 за добу UTC; рахується і стоп ПІСЛЯ TP1/TP2 (after_tp1); paper/backfill/модельні результати не рахуються"}
+    try:
+        ms = {}
+        for sid, pj in _fetchall(db, "SELECT signal_id, payload_json FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' ORDER BY id DESC LIMIT 400"):
+            try:
+                j = json.loads(pj or "{}")
+            except ValueError:
+                continue
+            if j.get("level") and j.get("sent_ts") is not None:
+                ms.setdefault(sid, []).append((j["level"], float(j["sent_ts"])))
+        sym = {r[0]: r[1] for r in _fetchall(db, "SELECT scenario_id, symbol FROM office2_live_signal WHERE created_ts > ?", (now - 4 * 86400,))}
+        stops = []
+        for sid, lst in ms.items():
+            for lvl, ts in lst:
+                if lvl == "SL" and ts >= t0:
+                    after = any(l2 == "TP1" and t2 < ts for l2, t2 in lst)
+                    stops.append({"signal": sid, "symbol": sym.get(sid), "sent_ts": ts, "after_tp1": after})
+        stops.sort(key=lambda x: x["sent_ts"])
+        out["stops"] = stops
+        out["locked"] = len(stops) >= 3
+        out["locked_since_ts"] = stops[2]["sent_ts"] if len(stops) >= 3 else None
+        rows = _fetchall(db, "SELECT symbol, reason FROM office2_live_scenario WHERE state = 'NO_TRADE' AND updated_ts >= ?", (t0,))
+        by_reason: Dict[str, int] = {}
+        for _s, r in rows:
+            k = str(r or "?").split(":")[-1].strip()[:60] if "ємність" in str(r) else str(r or "?")[:60]
+            by_reason[k] = by_reason.get(k, 0) + 1
+        gate_rows = [x for x in rows if "стопи за добу" in str(x[1])]
+        out["candidates_blocked_today"] = len(gate_rows)
+        out["blocked_symbols_today"] = len({x[0] for x in gate_rows})
+        out["no_trade_by_reason_today"] = dict(sorted(by_reason.items(), key=lambda kv: -kv[1])[:8])
+        ready_today = _fetchall(db, "SELECT COUNT(*) FROM office2_live_signal WHERE created_ts >= ? AND status <> 'SUPPRESSED'", (t0,))
+        out["ready_delivered_today"] = int(ready_today[0][0]) if ready_today else 0
+        ctl = [_rowdict(r) for r in _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position WHERE scope = 'CONTROL' AND generated_ts >= ?", (t0,))]
+        out["shadow_today"] = _stats(ctl)
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+    return out
+
+
 def summary(db: str, limit: int = 30) -> Dict[str, Any]:
     """LIVE-статистика — лише scope='LIVE'. BACKFILL (доставлено до запуску) показується окремо як перевірка правил, BACKFILL_INVALID — лише лічильник."""
     from office_bridge import _fetchall
@@ -406,6 +453,7 @@ def summary(db: str, limit: int = 30) -> Dict[str, Any]:
         by: Dict[str, Any] = {}
         for g in sorted({(x["gate_reason"] or "?").split(":")[-1].strip()[:60] for x in ctl}):
             by[g] = _stats([x for x in ctl if (x["gate_reason"] or "?").split(":")[-1].strip()[:60] == g])
+        out["gate"] = gate_status(db)
         out["control"] = {"note": "would-be READY, відсічені лімітами ємності/стопів: умовний результат «якби не ліміт» (вхід через ~1 хв після рішення — припущення). Ліміти не змінюються; це дані для рішення власниці.",
                           "stats": _stats(ctl), "by_gate": by}
     except Exception as exc:  # noqa: BLE001
