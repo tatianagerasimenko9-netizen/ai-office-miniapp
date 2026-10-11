@@ -1,0 +1,40 @@
+name: Source shadow replay (isolated, read-only)
+
+# Ручний запуск. Реальні D1 Binance USDT-M (data.binance.vision) → walk-forward без lookahead: паранормальний бар (Герчик/Дарія) і база після нього (D-POST-IMPULSE-BASE).
+# Нічого не пише в БД/Render/Telegram. Висновок про edge — лише за правилом n≥30 і CI в обох періодах; інакше EDGE_NOT_PROVEN.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Символи через кому (порожньо = 20 ліквідних)'
+        default: ''
+      start:
+        description: 'Початок YYYY-MM'
+        default: '2021-01'
+      end:
+        description: 'Кінець YYYY-MM'
+        default: '2026-09'
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay
+        run: |
+          SYMS="${{ inputs.symbols }}"
+          if [ -n "$SYMS" ]; then python -u scripts/source_shadow_replay.py --symbols "$SYMS" --start "${{ inputs.start }}" --end "${{ inputs.end }}" | tee "$GITHUB_STEP_SUMMARY"; else python -u scripts/source_shadow_replay.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" | tee "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-shadow-replay
+          path: source_shadow_replay.json
