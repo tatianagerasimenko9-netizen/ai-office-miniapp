@@ -24,6 +24,11 @@
 - **Знання:** `KNOWLEDGE_AUDIT.md`, `GERCHIK_AUDIT.md`, `COST_MODEL.md`. Прогалини: окрема модель BREAKOUT+RETEST у v2.1 відсутня; DOM/GEX/календар не підключені; книги Вайкоффа немає.
 - **Актуальний контекст:** артефакти Actions не завантажуються з sandbox (host заблоковано) — читати aggregate через `get_job_logs(return_content=true)` + розбір JSON; `gh api` працює лише для api.github.com.
 
+## 11.10 ~10:40Z — ліміт «3 стопи/добу»
+- `GATE_STUDY.md`: на 82 відсічених would-be READY — результат ≈ 0 (A +$19,7, CI [−0,31; +0,40] R), жодне альтернативне правило не підтверджене; лічильник `day_stops` рахує й стопи після TP1/TP2. Ліміт НЕ змінено.
+- Повторити `gate-study.yml` (ref=main) після 00:30 UTC 12.10 (архів 11.10) і коли в CONTROL буде ≥30 розв'язаних. Скрипт тепер виводить `actual_delivered` та розрізняє «немає даних після кінця архіву».
+- Mini App: Радар → PAPER → картка «Денний ліміт» (стопи, початок/кінець блоку, відсічені, shadow).
+
 ## Інструменти (без участі Render)
 - Replay на реальних свічках Binance: GitHub Actions → `binance-replay.yml` (workflow_dispatch; inputs symbols/end_date/days; публічний архів data.binance.vision; жодних секретів). Результат — у логу job `aggregate` + артефакт `aggregate.json`. Запуск через `actions_run_trigger` з `ref=<гілка>`.
 - Звіти: `docs/office2/LEARNING.md`, `BINANCE_REPLAY_2026-10.md`, `SL_AUDIT_2026-10.md`.
