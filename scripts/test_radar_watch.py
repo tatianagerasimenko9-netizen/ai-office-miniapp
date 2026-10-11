@@ -92,12 +92,12 @@ check("повторний sync без дублів", OB._fetchall(db, "SELECT CO
 pk = RW.pick_for_tg(db, NOW + 100)
 check("у Telegram усі планово готові RETRACE/ARMED/BLOCKED (але не plan_ok=0), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1", "W|O2|a2"], str([x["card_id"] for x in pk]))
 txt = RW.format_card(pk[1])
-check("текст «Спостерігаємо»: людською мовою, що робити, зона, стоп, цілі, строк, лінк", all(s in txt for s in ("Спостерігаємо", "Очікуємо зростання", "Що робити: Не входити", "Зона входу", "Стоп (якщо ідея не спрацювала)", "Ціль 1", "Ціль 2", "Ціль 3", "Діє до", "tab=radar&card=")), txt)
+check("коротка картка: є напрям, зона, стоп, цілі, прямий лінк і <1024 символів", all(piece in txt for piece in ("СПОСТЕРІГАЄМО", "Очікуємо зростання", "НЕ ВХОДИТИ", "Зона:", "Стоп:", "Цілі:", "tab=radar&card=")) and len(txt) <= 1024, txt)
 JARGON = ("READY", "WATCH", "PAPER", "LONG", "SHORT", "SL:", "TP1", "M15", "paper", "ЗАБЛОКОВАНО")
 check("у головному тексті немає жаргону (технічний код лише в останньому рядку «Технічно»)", not any(j in txt.split("Технічно:")[0] for j in JARGON), txt)
 txtb = RW.format_card(pk[0])
-check("навчальний сигнал: без слова «заблоковано», є «без реальних грошей», пояснення про ліміт для реальної торгівлі і що робити",
-      "ЗАБЛОКОВАНО" not in txtb and "без реальних грошей" in txtb and "для реальної торгівлі сьогодні вичерпано денний ліміт ризику" in txtb and "Що робити: Нічого не робити" in txtb and "Очікуємо падіння" in txtb, txtb)
+check("навчальна картка коротка, без технічного коду та з конкретним deep link",
+      "ЗАБЛОКОВАНО" not in txtb and "НАВЧАЛЬНА УГОДА" in txtb and "Очікуємо падіння" in txtb and "tab=radar&card=" in txtb and len(txtb) <= 1024, txtb)
 RW.mark_sent(db, "W|O2|a1", 111, NOW + 100)
 RW.mark_sent(db, "B|O2|b1", 112, NOW + 101)
 RW.mark_sent(db, "W|O2|a2", 113, NOW + 102)
