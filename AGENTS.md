@@ -31,3 +31,7 @@ Only `python3` is on PATH in this environment. Docs/RUNBOOK use `python` — sub
 ### Tests / lint
 - No formal test runner. The "tests" are manual scripts: `python3 scripts/test_parse_signal_levels.py` (offline, returns exit 1 on failure) and `python3 scripts/test_llm_daryna.py` (offline heuristic). `python3 scripts/test_market_data.py` needs Binance access (empty output here).
 - No configured linter; `python3 -m compileall <files>` is a quick syntax check.
+
+
+## Незмінне правило про джерела торгових методик (власниця, 11.10.2026)
+Повний текст: `docs/strategies/SOURCE_RULES.md`. Коротко: методики — лише з наданих матеріалів (книги, скриншоти, відео, методички); жодних вигаданих порогів/відсотків/фільтрів; кожне правило має джерело; немає підтвердження — `НЕ ПІДТВЕРДЖЕНО`; авторська логіка й наша автоматизація окремо (технічні припущення = `ГІПОТЕЗА`); нова логіка спочатку shadow/paper; LIVE-гейти, ризик і ордери без окремої згоди не змінювати. Порядок: першоджерело → правило → код → перевірка відповідності → тест на ринку.

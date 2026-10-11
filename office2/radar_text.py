@@ -181,6 +181,30 @@ def _a(x: Any) -> str:
         return ""
 
 
+REASONS_VERSION = 2
+MODULE_UA = {"HTF MN/W1/4D/3D/D1/H4/H1": "Старші таймфрейми", "OB / FVG / OTE (premium-discount)": "Положення зони в діапазоні", "Gerchik mirror level + люфт": "Дзеркальний рівень (Герчик)",
+             "Wyckoff (spring/upthrust, тест)": "Вайкофф", "Bulkowski (формалізовані фігури)": "Фігури (Булковскі)", "regression channel": "Регресійний канал",
+             "volume / taker-delta / CVD": "Обсяг і дельта", "Strong Candle (наша реалізація sc-ours-1)": "Сильна свічка", "M5/M1 тригер": "Мікро-підтвердження M5"}
+
+
+def plural_bars(n: Any) -> str:
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return str(n)
+    return f"{n} " + ("бар" if n % 10 == 1 and n % 100 != 11 else "бари" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "барів")
+
+
+def plain_fact(t: str, long_: bool) -> str:
+    """Факти Brain простою мовою: без LONG/SHORT-жаргону, наукової нотації і крапки як десяткового роздільника."""
+    t = re.sub(r"\s*[+-]?\d+(?:\.\d+)?e[+-]?\d+\s*", " ", str(t))
+    up, dn = ("зростання", "падіння") if long_ else ("падіння", "зростання")
+    t = t.replace("ПРОТИ LONG", "проти зростання").replace("ПРОТИ SHORT", "проти падіння").replace("ЗА LONG", "за зростання").replace("ЗА SHORT", "за падіння")
+    t = t.replace("low ", "мінімум ").replace("high ", "максимум ")
+    t = re.sub(r"(\d)\.(\d)", r"\1,\2", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
 def reasons_from_thesis(th: Dict[str, Any], direction: str, sym: str) -> Dict[str, Any]:
     """Пронумеровані ПРИЧИНИ з фактів сценарію Brain (рівень, подія, зсув структури, нога й зона, відкат, тригер, запас ходу, докази модулів). Кожна причина — лише те, що є в даних:
     немає факту — немає пункту. Суперечності (alignment/докази проти) — окремо. Спільне для Telegram і Mini App (формується на сервері один раз)."""
@@ -218,7 +242,7 @@ def reasons_from_thesis(th: Dict[str, Any], direction: str, sym: str) -> Dict[st
     # 2) зсув структури
     if br.get("level"):
         add("structure", f"Зсув структури: закриття {'вище' if long_ else 'нижче'} {num(br['level'], sym)}" + (f" {_dt(br['ts'])}" if br.get("ts") else "")
-            + (f", тіло свічки {_a(br['body_atr'])} ATR" if br.get("body_atr") else "") + (f", утримується {br['bars_held']} барів" if br.get("bars_held") else "") + ".")
+            + (f", тіло свічки {_a(br['body_atr'])} ATR" if br.get("body_atr") else "") + (f", утримується {plural_bars(br['bars_held'])}" if br.get("bars_held") else "") + ".")
     # 3) нога й зона
     zn = th.get("entry_zone") or th.get("zone")
     if leg.get("from") and leg.get("to") and zn:
@@ -230,24 +254,24 @@ def reasons_from_thesis(th: Dict[str, Any], direction: str, sym: str) -> Dict[st
         if not st.get("ok") or not val:
             continue
         if step.startswith("ретрейс"):
-            add("retrace", "Відкат у зону: " + str(val).replace("low", "мінімум").replace("high", "максимум") + ".")
+            add("retrace", "Відкат у зону: " + plain_fact(val, long_) + ".")
         elif step.startswith("тригер"):
-            add("trigger", "Підтвердження на 15 хв: " + str(val) + ".")
+            add("trigger", "Підтвердження на 15 хв: " + plain_fact(val, long_) + ".")
     # 5) запас ходу
     tg = th.get("targets") or (th.get("preview") or {}).get("targets") or []
     if tg:
         bits = []
         for i, x in enumerate(tg[:2], 1):
-            bits.append(f"ціль {i} {num(x.get('p'), sym)}" + (f" ({level_ua(x['kind'])})" if i == 1 and x.get("kind") else "") + (f" ≈{_a(x['r'])}× стопа" if x.get("r") else ""))
+            bits.append(f"ціль {i} {num(x.get('p'), sym)}" + (f" ({level_ua(x['kind'])})" if i == 1 and x.get("kind") else ""))
         add("room", "Запас ходу: " + "; ".join(bits) + ".")
     # 6) докази модулів (лише ті, що підтримують), далі суперечності
     for m in th.get("evidence") or []:
         if isinstance(m, dict) and (m.get("supports") or 0) > 0 and m.get("finding") and "—" != str(m.get("finding")).strip():
-            add("evidence", f"{m.get('module')}: {m['finding']}.")
-    against = [str(m.get("text")) for m in (th.get("alignment") or []) if isinstance(m, dict) and "ПРОТИ" in str(m.get("verdict", "")) and m.get("text")]
-    against += [f"{m.get('module')}: {m['finding']}" for m in (th.get("evidence") or []) if isinstance(m, dict) and (m.get("supports") or 0) < 0 and m.get("finding")]
+            add("evidence", f"{MODULE_UA.get(m.get('module'), m.get('module'))}: {plain_fact(m['finding'], long_)}.")
+    against = [plain_fact(m.get("text"), long_) for m in (th.get("alignment") or []) if isinstance(m, dict) and "ПРОТИ" in str(m.get("verdict", "")) and m.get("text")]
+    against += [f"{MODULE_UA.get(m.get('module'), m.get('module'))}: {plain_fact(m['finding'], long_)}" for m in (th.get("evidence") or []) if isinstance(m, dict) and (m.get("supports") or 0) < 0 and m.get("finding")]
     inv = th.get("invalidation") or {}
-    return {"reasons": R, "against": against[:2], "wait": plain_need((th.get("need") or {}).get("text")),
+    return {"v": REASONS_VERSION, "reasons": R, "against": against[:2], "wait": plain_need((th.get("need") or {}).get("text")),
             "cancel": (f"ціна закріпиться за {num(inv['price'], sym)} (екстремум події)" if inv.get("price") else None)}
 
 
@@ -261,7 +285,7 @@ def reasons_view(c: Dict[str, Any], limit: int = 5) -> Optional[Dict[str, Any]]:
     if not d:
         return None
     rs = d.get("reasons") or []
-    order = {"event": 0, "structure": 1, "zone": 2, "retrace": 3, "trigger": 4, "room": 5, "evidence": 6}
+    order = {"event": 0, "structure": 1, "zone": 2, "retrace": 3, "room": 4, "trigger": 5, "evidence": 6}
     top = sorted(rs, key=lambda r: order.get(r["kind"], 9))[:limit]
     return {"items": [{"n": i + 1, **r} for i, r in enumerate(top)], "extra": max(0, len(rs) - len(top)), "against": d.get("against") or [], "wait": d.get("wait"), "cancel": d.get("cancel")}
 
@@ -344,7 +368,7 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
     if plan.get("against"):
         tail.append("Проти: " + plan["against"][0] + ".")
     if learning:
-        concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f" ({p['limit_note']})" if p.get("limit_note") else "") + "."
+        concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f": {p['limit_note']}" if p.get("limit_note") else "") + "."
     else:
         concl = "СПОСТЕРІГАЄМО — вхід ще не підтверджений."
     if stop_ok is False:
@@ -356,6 +380,8 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
         head = [f"{coin_short} · {p['dir'].lower()} · {status}", "ПЛАН І ПРИЧИНИ:"]
         if rs:
             head += [f"{i + 1}. " + (r["text"] if len(r["text"]) <= cut else r["text"][:cut - 1].rstrip() + "…") for i, r in enumerate(rs)]
+            if plan.get("extra"):
+                head.append(f"+ ще підтверджень: {plan['extra']} — у картці.")
         else:
             head.append("Підтверджених причин у даних поки немає — не вигадуємо.")
         return "\n".join(head + tail + tail_end)

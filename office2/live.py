@@ -668,6 +668,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
             threading.Thread(target=_paper_loop, args=(db,), name="office2-paper", daemon=True).start()
         if os.getenv("OFFICE2_RADAR", "1").strip() != "0":
             threading.Thread(target=_radar_loop, args=(db,), name="office2-radar", daemon=True).start()
+        if os.getenv("OFFICE2_HTF_SHADOW", "1").strip() != "0":
+            threading.Thread(target=_htf_loop, args=(db,), name="office2-htf", daemon=True).start()
         if _LJ.enabled():
             threading.Thread(target=_learning_loop, args=(db,), name="office2-learning", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
@@ -751,6 +753,22 @@ def _radar_loop(db: str) -> None:
         except Exception as exc:  # noqa: BLE001
             _log(f"[radar] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
         time.sleep(60)
+
+
+def _htf_loop(db: str) -> None:
+    """HTF_STRONG_CANDLE_PULLBACK (shadow, office2.htf_scenario): раз на 15 хв по universe. Лише спостереження в таблиці office2_htf_shadow; Telegram, ордерів і впливу на READY немає."""
+    from office2 import htf_scenario as HS
+    from office_market_data import fetch_candles
+
+    time.sleep(240)
+    while True:
+        try:
+            r = HS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
+            if r["new"] or r["changed"] or r["errors"]:
+                _log(f"[htf] shadow: символів {r['symbols']}, нових {r['new']}, змін стану {r['changed']}, помилок {r['errors']}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[htf] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
+        time.sleep(900)
 
 
 def _learning_loop(db: str) -> None:

@@ -265,6 +265,18 @@ rj9 = OB._fetchall(db9, "SELECT reasons_json FROM office2_radar_card WHERE symbo
 check("sync зберігає причини в картці (спільне для Telegram і Mini App)", rj9 and json.loads(rj9)["reasons"], str(rj9)[:120])
 OB._execute(db9, "UPDATE office2_radar_card SET reasons_json = NULL")
 check("backfill причин для старих карток", RW.backfill_reasons(db9, NOW + 10) == 1 and json.loads(OB._fetchall(db9, "SELECT reasons_json FROM office2_radar_card")[0][0])["reasons"])
+OB._execute(db9, "UPDATE office2_radar_card SET reasons_json = ?", (json.dumps({"reasons": [{"kind": "event", "text": "стара версія"}]}),))
+check("причини старої версії перераховуються", RW.backfill_reasons(db9, NOW + 20) == 1 and "стара версія" not in OB._fetchall(db9, "SELECT reasons_json FROM office2_radar_card")[0][0] and RW.backfill_reasons(db9, NOW + 30) == 0)
+
+# --- проста мова у причинах (регресія за реальними картками production 11.10)
+pf = RT.plain_fact("CVD з моменту події +1.652e+07 (+24% обсягу): ЗА LONG; low 1.4085", True)
+check("факти без наукової нотації, англійських ЗА/ПРОТИ LONG і з комою в десяткових", "e+07" not in pf and "LONG" not in pf and "за зростання" in pf and "1,4085" in pf and "мінімум" in pf, pf)
+check("множина «бар»", [RT.plural_bars(n) for n in (1, 2, 5, 11, 21)] == ["1 бар", "2 бари", "5 барів", "11 барів", "21 бар"])
+TH3 = dict(TH, evidence=[{"module": "Gerchik mirror level + люфт", "supports": 1, "finding": "mirror D1L 1.1133: був опором, ретестів 2"}, {"module": "volume / taker-delta / CVD", "supports": 1, "finding": "CVD +1.2e+07 (+24% обсягу): ЗА LONG"}])
+RS3 = RT.reasons_from_thesis(TH3, "LONG", "DOTUSDT")
+txt3 = " ".join(r["text"] for r in RS3["reasons"])
+check("назви модулів українською, без англійського жаргону", "Дзеркальний рівень (Герчик)" in txt3 and "Обсяг і дельта" in txt3 and "Gerchik" not in txt3 and "taker" not in txt3, txt3)
+check("запас ходу без кратності (кратність лише в рядку «Цілі», щоб числа не розходились)", not any("× стопа" in r["text"] for r in RS3["reasons"]))
 
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
