@@ -1487,6 +1487,10 @@ class Handler(BaseHTTPRequestHandler):
                 from office2 import radar_watch as _RW
 
                 data = _RW.summary(_db_target_for_identity(), card_id=_q("card") or None)
+            elif u.path == "/api/v2/htf_shadow":
+                from office2 import htf_scenario as _HS
+
+                data = _HS.summary(_db_target_for_identity())
             elif u.path in ("/api/v2/trainer", "/api/v2/trainer_reveal"):
                 import re as _re
 
