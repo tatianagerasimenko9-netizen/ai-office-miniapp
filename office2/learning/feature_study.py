@@ -38,12 +38,13 @@ def _ci(xs: List[float], q: float = 0.025, n: int = 1500, seed: int = 11) -> Opt
     return float(ms[int(q * n)]), float(ms[int((1 - q) * n) - 1])
 
 
-def cell_table(rs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def cell_table(rs: List[Dict[str, Any]], features=None) -> List[Dict[str, Any]]:
+    features = features or FEATURES
     k = int(len(rs) * TRAIN_FRAC)
     tr, te = rs[:k], rs[k:]
     cells: Dict[Tuple[str, str], List[int]] = {}
     for i, e in enumerate(rs):
-        for ft in FEATURES:
+        for ft in features:
             cells.setdefault((ft, str(e["f"].get(ft))), []).append(i)
     tested = [(key, ix) for key, ix in cells.items() if len(ix) >= MIN_N and len(ix) < len(rs) * 0.97]
     m = max(1, len(tested))
@@ -65,14 +66,15 @@ def cell_table(rs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def train_test_filter(rs: List[Dict[str, Any]], neg_cut: float = -0.15, min_n: int = 40) -> Dict[str, Any]:
+def train_test_filter(rs: List[Dict[str, Any]], neg_cut: float = -0.15, min_n: int = 40, features=None) -> Dict[str, Any]:
+    features = features or FEATURES
     """Виключення клітинок, що були погані НА НАВЧАННІ, перевіряється на тесті. Повертає базу й відфільтроване на тесті."""
     k = int(len(rs) * TRAIN_FRAC)
     tr, te = rs[:k], rs[k:]
     bad = []
     cells: Dict[Tuple[str, str], List[float]] = {}
     for e in tr:
-        for ft in FEATURES:
+        for ft in features:
             cells.setdefault((ft, str(e["f"].get(ft))), []).append(e["r"])
     for key, xs in cells.items():
         if len(xs) >= min_n and len(xs) < len(tr) * 0.9 and float(np.mean(xs)) <= neg_cut:
@@ -96,3 +98,14 @@ def study(rows: List[Dict[str, Any]], source: str = "BRAIN") -> Dict[str, Any]:
     return {"status": "OK", "n": len(rs), "span": [rs[0]["ts"], rs[-1]["ts"]], "overall_mean_r": round(float(np.mean([e["r"] for e in rs])), 3),
             "overall_win": round(sum(1 for e in rs if e["tp"]) / max(1, sum(1 for e in rs if e["tp"] or e["sl"])), 3), "cells_tested": len(cells), "stable": stable,
             "worst": sorted(cells, key=lambda c: c["mean_r"])[:8], "best": sorted(cells, key=lambda c: -c["mean_r"])[:8], "all": cells, "oos_filter": train_test_filter(rs)}
+
+
+def study_rows(rs: List[Dict[str, Any]], features) -> Dict[str, Any]:
+    """Те саме для готових рядків {ts,r,tp,sl,f} (старий Лев з ознаками, відновленими зі свічок)."""
+    rs = sorted(rs, key=lambda e: e["ts"])
+    if len(rs) < 100:
+        return {"status": "INSUFFICIENT", "n": len(rs)}
+    cells = cell_table(rs, features)
+    return {"status": "OK", "n": len(rs), "span": [rs[0]["ts"], rs[-1]["ts"]], "overall_mean_r": round(float(np.mean([e["r"] for e in rs])), 3),
+            "overall_win": round(sum(1 for e in rs if e["tp"]) / max(1, sum(1 for e in rs if e["tp"] or e["sl"])), 3), "cells_tested": len(cells),
+            "stable": [c for c in cells if c["status"] != "NOT_STABLE"], "all": cells, "oos_filter": train_test_filter(rs, features=features)}
