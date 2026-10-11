@@ -58,6 +58,17 @@ def candles_list(a, t0, t1):
     return [{"ts": float(a["t"][k]), "high": float(a["h"][k]), "low": float(a["l"][k])} for k in range(i0, min(i1, len(a["t"])))]
 
 
+def run_sim(T, plan, cl, data_end):
+    """Як живий трекер: «зараз» не пізніше за fill+72 год; без цього OPEN_TIMEOUT спрацьовує на першій свічці після входу."""
+    res = T.simulate(plan, cl, now_ts=min(data_end, plan["valid_until_ts"]))       # 1) заповнення до кінця дії плану
+    if res.get("filled_at") is not None:
+        now2 = min(data_end, float(res["filled_at"]) + T.MAX_TRACK_SEC - 1)
+        res = T.simulate(plan, cl, now_ts=now2)
+        if res["status"] == "PENDING" and now2 >= float(res["filled_at"]) + T.MAX_TRACK_SEC - 1:
+            res = {**res, "status": "OPEN_TIMEOUT"}
+    return res
+
+
 def main():
     from office2.learning import costs as C
     from office2.learning import feature_study as FS
@@ -94,7 +105,8 @@ def main():
                 cover[day]["NO_CANDLES"] += 1
                 continue
             plan = {"direction": p["dir"], "entry": p["entry"], "sl": p["sl"], "tp1": p["tp1"], "confirmed_ts": p["ts"], "valid_until_ts": p["valid"]}
-            res = T.simulate(plan, candles_list(a, p["ts"], p["valid"] + 3 * 86400), now_ts=float(a["t"][-1]) + 900)
+            cl = candles_list(a, p["ts"], p["valid"] + 4 * 86400)
+            res = run_sim(T, plan, cl, float(a["t"][-1]) + 900)
             st = res["status"]
             if p["src"] == "LEV_PLAN" and p.get("tracker_out"):
                 val[(p["tracker_out"], st)] += 1
