@@ -129,6 +129,10 @@ P.tick(db, mk_fetch(), T0 + 400, log=log.append)
 _execute(db, "INSERT INTO office2_paper_position(scenario_id,symbol,direction,status,generated_ts,delivered_ts,miss_reason) VALUES (?,?,?,?,?,?,?)", ("BOGUS", "BOGUSUSDT", "LONG", "MISSED", P.PAPER_SINCE_TS - 100, P.PAPER_SINCE_TS - 90, "NO_DATA"))
 check("історичний сигнал до запуску не обліковується", "OLD" not in {x["scenario_id"] for x in P.summary(db)["items"]})
 
+from office2.learning.models import model_of
+check("моделі PA за видом тези", model_of("SWEEP_SEQ") == "REJECTION" and model_of("PULLBACK_BREAK") == "BREAKOUT_RETEST" and model_of("X") == "UNKNOWN" and model_of(None) == "UNKNOWN")
+check("summary: розріз за моделями", "by_model" in P.summary(db)["stats"])
+
 # --- 4. збій Telegram → технічне попередження в БД (раз на сигнал)
 from office2 import delivery as DL
 from office_bridge import init_office_db as _init

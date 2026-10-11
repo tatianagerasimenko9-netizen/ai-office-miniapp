@@ -310,7 +310,7 @@ function paperHtml(d){
   if(!d||!d.stats) return '';
   const st=d.stats, m=v=>(v>=0?'+':'')+v+'$';
   const ts=t=>t?new Date(t*1000).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
-  const rows=(d.items||[]).slice(0,10).map(x=>`<div class="mut" style="margin-top:6px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.status==='CLOSED'?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}</div>`).join('');
+  const rows=(d.items||[]).slice(0,10).map(x=>`<div class="mut" style="margin-top:6px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.kind||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.status==='CLOSED'?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}</div>`).join('');
   return `<h2>PAPER · живі позиції</h2><div class="card"><div class="mut">Модель, не реальні гроші й не ордери. Вхід лише після Telegram-доставки; комісія+slippage 0.15%.
     Усього ${st.total} · відкрито ${st.open} · закрито ${st.closed} (TP ${st.tp}, SL ${st.sl}) · пропущено (MISSED) ${st.missed} · комісії ${st.fees_usd}$ ·
     результат A ${m(st.pnl_a_usd)} · B ${m(st.pnl_b_usd)} · C ${m(st.pnl_c_usd)} (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Позицій поки немає</div>'}</div>`;

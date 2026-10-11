@@ -30,10 +30,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
     miss_reason TEXT, qty DOUBLE PRECISION, notional DOUBLE PRECISION, cost_usd DOUBLE PRECISION,
     tp1_ts DOUBLE PRECISION, tp2_ts DOUBLE PRECISION, tp3_ts DOUBLE PRECISION, sl_ts DOUBLE PRECISION, close_ts DOUBLE PRECISION, close_reason TEXT,
     r_a DOUBLE PRECISION, r_b DOUBLE PRECISION, r_c DOUBLE PRECISION, pnl_a DOUBLE PRECISION, pnl_b DOUBLE PRECISION, pnl_c DOUBLE PRECISION,
-    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION)""",)
+    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT)""",)
 _COLS = ("scenario_id", "symbol", "direction", "status", "generated_ts", "delivered_ts", "plan_entry", "sl", "tp1", "tp2", "tp3", "fill_ts", "fill_price", "miss_reason", "qty",
          "notional", "cost_usd", "tp1_ts", "tp2_ts", "tp3_ts", "sl_ts", "close_ts", "close_reason", "r_a", "r_b", "r_c", "pnl_a", "pnl_b", "pnl_c", "mfe_r", "mae_r", "coarse",
-         "session", "btc", "updated_ts")
+         "session", "btc", "updated_ts", "kind")
 _READY = {"done": False}
 
 
@@ -44,6 +44,10 @@ def _ensure(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
+    try:
+        _execute(db, "ALTER TABLE office2_paper_position ADD COLUMN IF NOT EXISTS kind TEXT")      # міграція таблиці, створеної до появи колонки (Postgres)
+    except Exception:  # noqa: BLE001
+        pass
     _READY["done"] = True
 
 
@@ -185,7 +189,7 @@ def _from_signal(row: tuple) -> Dict[str, Any]:
     btc = (snap.get("market_at_signal") or {}).get("btc") or (snap.get("market_at_signal") or {})
     return {"scenario_id": sid, "symbol": sym, "direction": d, "generated_ts": float(created), "delivered_ts": float(delivered) if delivered else None,
             "plan_entry": float(th["entry"]) if th.get("entry") else None, "sl": float(th["sl"]) if th.get("sl") else None, "tp1": tp(0), "tp2": tp(1), "tp3": tp(2),
-            "session": ((snap.get("session_tag") or {}).get("session")), "btc": json.dumps(btc, ensure_ascii=False, default=str)[:600], "coarse": 0,
+            "kind": th.get("kind"), "session": ((snap.get("session_tag") or {}).get("session")), "btc": json.dumps(btc, ensure_ascii=False, default=str)[:600], "coarse": 0,
             "_status": status, "_err": last_error}
 
 
@@ -304,6 +308,12 @@ def summary(db: str, limit: int = 30, since_ts_: Optional[float] = None) -> Dict
             v = [x[f"pnl_{k}"] for x in cl if x[f"pnl_{k}"] is not None]
             st[f"pnl_{k}_usd"] = round(sum(v), 2)
             st[f"wins_{k}"] = sum(1 for x in v if x > 0)
+        from office2.learning.models import model_of
+
+        st["by_model"] = {}
+        for m_ in sorted({model_of(x["kind"]) for x in cl}):
+            sub = [x for x in cl if model_of(x["kind"]) == m_]
+            st["by_model"][m_] = {"closed": len(sub), "pnl_a_usd": round(sum(x["pnl_a"] or 0 for x in sub), 2), "pnl_b_usd": round(sum(x["pnl_b"] or 0 for x in sub), 2)}
         st["sl"] = sum(1 for x in cl if x["close_reason"] == "SL")
         st["tp"] = sum(1 for x in cl if str(x["close_reason"]).startswith("TP"))
         out["stats"] = st
