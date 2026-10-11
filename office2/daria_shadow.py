@@ -1,7 +1,7 @@
 """Методика Дарії Жданової — shadow-спостерігач (НЕ торгове правило, у LIVE не підключений).
 
 Джерело правил: docs/office2/DARIA_ZHDANOVA_METHOD.md, docs/strategies/DARIA_ZHDANOVA.md. Модуль лише ВИМІРЮЄ спостережувані ознаки на закритих свічках до моменту рішення
-(жодних майбутніх барів) і описує їх простою мовою. Порогів «добре/погано» тут немає навмисне: у матеріалах авторки їх немає як чисел — вони чекають перевірки
+(жодних майбутніх барів) і описує їх простою мовою. Порогів «добре/погано» для торгового рішення тут немає; TOUCH_ATR і LOOKBACK є вимірювальними домовленостями, а не словами авторки: у матеріалах авторки їх немає як чисел — вони чекають перевірки
 на незалежних даних. Результат шляхом `observe()` можна зберігати поруч із карткою й порівнювати з фактичним результатом (збіги/розбіжності з основною стратегією)."""
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def observe(direction: str, level: float, candles: List[Dict[str, Any]], decisio
     """direction — напрям ідеї ('LONG'/'SHORT'); level — ключовий рівень; candles — свічки {ts, open?, high, low, close, volume?}; decision_ts — момент рішення.
     Використовуються ЛИШЕ бари, що ЗАКРИЛИСЬ до decision_ts (ts + bar ≤ decision_ts)."""
     cl = sorted((b for b in candles if b.get("ts") is not None and b["ts"] + bar <= decision_ts), key=lambda b: b["ts"])[-LOOKBACK:]
-    out: Dict[str, Any] = {"version": VERSION, "direction": direction, "level": level, "decision_ts": decision_ts, "bars_used": len(cl), "lines": [], "status": "OBSERVED",
+    out: Dict[str, Any] = {"version": VERSION, "direction": direction, "level": level, "decision_ts": decision_ts, "bars_used": len(cl), "lines": [], "status": "OBSERVED", "source_scope": "DARIA_METHOD_SUMMARY_UNVERIFIED_AGAINST_ORIGINAL", "measurement_scope": "OUR_IMPLEMENTATION",
                            "thresholds": "числових порогів у джерелі немає — потребують перевірки на незалежних даних"}
     if len(cl) < 8 or not level:
         out.update(status="NOT_AVAILABLE", reason="замало закритих свічок до моменту рішення")
@@ -60,7 +60,7 @@ def observe(direction: str, level: float, candles: List[Dict[str, Any]], decisio
         med = statistics.median(vols[:-3]) or 1e-12
         rel = sum(vols[-3:]) / 3.0 / med
         prog = abs(cl[-1]["close"] - cl[-4]["close"]) / atr
-        out["volume_x_result"] = {"volume_rel": round(rel, 2), "progress_atr": round(prog, 2), "reading": "обсяг без прогресу ціни — боротьба/поглинання" if rel > 1.5 and prog < 0.5 else "обсяг і прогрес узгоджені" if rel > 1.5 and prog >= 0.5 else "без вираженого обсягу"}
+        out["volume_x_result"] = {"volume_rel": round(rel, 2), "progress_atr": round(prog, 2), "reading": "Виміряно відносний обсяг і рух ціни; оцінка боротьби/поглинання НЕ ПІДТВЕРДЖЕНА без авторських числових критеріїв.", "interpretation_status": "UNVERIFIED", "basis": "OUR_IMPLEMENTATION"}
     else:
         out["volume_x_result"] = None
     ln = out["lines"]
