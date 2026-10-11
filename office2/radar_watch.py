@@ -34,10 +34,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -56,7 +56,7 @@ def _ensure(db: str) -> None:
             _execute(db, d)
     except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
         print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
-    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT"):
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -284,6 +284,57 @@ def backfill_stops(db: str, now: Optional[float] = None) -> int:
     return n
 
 
+AFTER_HOURS = (1, 3, 6, 24)
+
+
+def postmortem_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: float) -> Optional[Dict[str, Any]]:
+    """Відтворюваний розбір завершеної навчальної угоди (SL/ціль): лише факти зі свічок і даних картки. Прапори — ознаки для статистики, не докази помилки;
+    один збиток нічого не доводить. Чого немає — None (не вигадуємо)."""
+    st = card.get("paper_status")
+    if st not in ("SL", "TP1", "TP2", "TP3") or card.get("entry_ts") is None or card.get("exit_ts") is None:
+        return None
+    sg = 1.0 if card["direction"] == "LONG" else -1.0
+    e, sl = float(card["entry"]), float(card["sl"])
+    risk = abs(e - sl)
+    if risk <= 0:
+        return None
+    ent, ext = float(card["entry_ts"]), float(card["exit_ts"])
+    cs = sorted((c for c in candles if c.get("ts") is not None), key=lambda c: c["ts"])
+    path = [c for c in cs if ent - 900 < c["ts"] <= ext]
+    mfe = max(((c["high"] if sg > 0 else -c["low"]) - (e if sg > 0 else -e)) / risk for c in path) if path else None
+    mae = max((((e if sg > 0 else -e) - (c["low"] if sg > 0 else -c["high"])) / risk) for c in path) if path else None
+    exit_px = sl if st == "SL" else float(card["tp1"])
+    after: Dict[str, Any] = {}
+    for h in AFTER_HOURS:
+        bar = next((c for c in cs if c["ts"] >= ext + h * 3600 - 900 and c["ts"] + 900 <= now), None)
+        after[f"{h}h"] = round((bar["close"] - exit_px) * sg / risk, 2) if bar else None
+    created, sent = card.get("created_ts"), card.get("sent_ts")
+    timing = {"created_to_sent_sec": round(sent - created) if created and sent else None, "sent_to_entry_sec": round(ent - sent) if sent else None, "hold_min": round((ext - ent) / 60.0)}
+    flags: List[Dict[str, str]] = []
+    try:
+        s1 = (json.loads(card.get("stops_json") or "null") or {}).get("v1") or {}
+    except ValueError:
+        s1 = {}
+    if s1 and s1.get("noise_ok") is False:
+        flags.append({"k": "STOP_LT_1ATR", "t": "стоп ближче за 1 ATR від входу — у межах звичайного шуму"})
+    if s1.get("liq"):
+        flags.append({"k": "STOP_NEAR_LIQUIDITY", "t": "стоп стояв біля очевидного рівня: " + str(s1["liq"])})
+    if timing["created_to_sent_sec"] is not None and timing["created_to_sent_sec"] > 600:
+        flags.append({"k": "LATE_DELIVERY", "t": f"картка дійшла до Telegram через {timing['created_to_sent_sec'] // 60} хв після появи"})
+    if st == "SL" and mfe is not None and mfe >= 0.8:
+        flags.append({"k": "NEAR_TP_BEFORE_SL", "t": f"до стопа ціна пройшла {mfe:.1f} від ризику у бік ідеї — майже до цілі"})
+    res = ("стоп спрацював" if st == "SL" else "ціль досягнута")
+    line = f"Угода закрилась: {res}, тримали {timing['hold_min']} хв."
+    if mfe is not None:
+        line += f" Найкращий рух у бік ідеї — {mfe:.1f}× ризику, найгірший проти — {mae:.1f}×."
+    a6 = after.get("6h")
+    if a6 is not None and st == "SL":
+        line += (f" Через 6 год ціна була на {abs(a6):.1f}× ризику {'вище стопа — у бік ідеї' if a6 > 0 else 'нижче стопа — далі проти ідеї'}.")
+    final = all(v is not None for v in after.values())
+    return {"version": "cpm-1", "status": st, "mfe_r": None if mfe is None else round(mfe, 2), "mae_r": None if mae is None else round(mae, 2), "after_r": after, "timing": timing, "flags": flags,
+            "summary": line, "note": "Прапори — ознаки для статистики, а не доказ помилки; один збиток нічого не доводить.", "final": final, "ts": now}
+
+
 def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
@@ -303,6 +354,12 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
             return True
         if c0.get("stops_json") and not c0.get("stop_eval"):
             return True
+        if (c0.get("paper_status") in ("SL", "TP1", "TP2", "TP3")) and c0.get("exit_ts") is not None:
+            try:
+                if not (json.loads(c0.get("postmortem_json") or "null") or {}).get("final"):
+                    return True
+            except ValueError:
+                return True
         try:
             ev0 = json.loads(c0.get("stop_eval") or "null") or {}
         except ValueError:
@@ -324,6 +381,12 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
             vv = evaluate_variants(c, cl, t)
             _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=? WHERE card_id=?",
                      (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, c["card_id"]))
+            try:
+                pm = postmortem_card(dict(c, paper_status=ev["paper_status"], entry_ts=ev["entry_ts"], exit_ts=ev["exit_ts"]), cl, t)
+                if pm:
+                    _execute(db, "UPDATE office2_radar_card SET postmortem_json=? WHERE card_id=?", (json.dumps(pm, ensure_ascii=False), c["card_id"]))
+            except Exception as exc:  # noqa: BLE001
+                log(f"[radar] розбір {c['card_id']}: {type(exc).__name__}: {str(exc)[:100]}")
             n += 1
         except Exception as exc:  # noqa: BLE001
             log(f"[radar] супровід {c['card_id']}: {type(exc).__name__}: {str(exc)[:100]}")

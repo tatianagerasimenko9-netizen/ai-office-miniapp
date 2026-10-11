@@ -145,6 +145,22 @@ def stops_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "note": "Показуємо для порівняння. Фактична навчальна угода веде за стопом 1 (поточний); інші варіанти оцінюються окремо."}
 
 
+def postmortem_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Розбір завершеної навчальної угоди простою мовою (дані з radar_watch.postmortem_card)."""
+    import json
+
+    try:
+        pm = json.loads(c.get("postmortem_json") or "null")
+    except ValueError:
+        return None
+    if not pm:
+        return None
+    af = pm.get("after_r") or {}
+    after = [f"через {k.rstrip('h')} год: {v:+.1f}× ризику від ціни виходу" for k, v in af.items() if v is not None]
+    return {"summary": pm.get("summary"), "flags": [f.get("t") for f in pm.get("flags") or []], "after": after, "note": pm.get("note"),
+            "final": bool(pm.get("final")), "timing": pm.get("timing") or {}}
+
+
 def present(c: Dict[str, Any]) -> Dict[str, Any]:
     """Усі готові до показу тексти картки (один раз на сервері: Telegram і Mini App показують однаково)."""
     blocked = c.get("kind") == "BLOCKED"
@@ -173,7 +189,7 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
             "entry": num(e, sym) if e else None, "sl": num(sl, sym) if sl else None, "sl_pct": pct(abs(sl - e) / e * 100.0) if e and sl else None,
             "targets": [dict(t, price_txt=num(t["price"], sym), pct_txt=pct(t["pct"]), mult_txt=(pct(t["mult"]) if t.get("mult") else None)) for t in targets(c)],
             "expires": kyiv(c.get("expires_ts")), "paper": paper, "result": res, "entry_note": c.get("entry_note"),
-            "stops": stops_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
+            "stops": stops_view(c), "postmortem": postmortem_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
 
 
 def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:

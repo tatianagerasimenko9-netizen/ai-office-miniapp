@@ -97,6 +97,18 @@ OB._execute(db, "UPDATE office2_radar_card SET stop_eval = ?, paper_status = ?, 
 sm = RW.summary(db, NOW + 100000)
 view = [x for x in sm["cards"] if x["card_id"] == f"B|O2|{HEX}"][0]["h"]["stops"]
 check("Mini App отримує готовий показ трьох стопів із поясненнями й висновком після стопа", len(view["items"]) == 3 and view["items"][0]["after"] and view["items"][0]["explain"] and view["summary"], str(view)[:300])
+# --- розбір завершеної угоди (postmortem_card): факти зі свічок, без вигадок
+card2 = dict(card, paper_status=prim["paper_status"], entry_ts=prim.get("entry_ts"), exit_ts=prim.get("exit_ts"))
+pm = RW.postmortem_card(card2, cl, tb + 900 * 400)
+check("розбір угоди: статус SL, рух до стопа, що було після, прапори й примітка", pm and pm["status"] == "SL" and pm["mae_r"] >= 1.0 and pm["after_r"]["1h"] is not None and pm["note"] and pm["version"] == "cpm-1", str(pm))
+check("розбір не має висновку 'помилка': лише ознаки", all(set(f) == {"k", "t"} for f in pm["flags"]))
+check("відкрита угода розбору не має", RW.postmortem_card(dict(card2, paper_status="ENTERED"), cl, tb + 900 * 400) is None)
+pm_early = RW.postmortem_card(card2, cl, tb + 900 * 20)
+check("якщо 24 год ще не минуло — final=False, невідомі горизонти None", pm_early and pm_early["final"] is False and pm_early["after_r"]["24h"] is None, str(pm_early))
+from office2 import radar_text as RTx
+view = RTx.postmortem_view(dict(card2, postmortem_json=json.dumps(pm)))
+check("Mini App отримує готовий розбір простою мовою", view and "закрилась" in view["summary"] and view["note"], str(view))
+
 study = sm["stats"]["stop_study"]
 check("порівняльна статистика: замало даних → чесний вердикт без висновків", study["n"] <= 1 and "Замало даних" in study["verdict"], str(study)[:200])
 # ≥30 угод: синтетична агрегація
