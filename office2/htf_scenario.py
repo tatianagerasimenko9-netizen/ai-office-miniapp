@@ -1,4 +1,4 @@
-"""HTF_STRONG_CANDLE_PULLBACK (SHADOW): сильна свічка старшого ТФ → відкат у її область → точний вхід на молодшому ТФ.
+"""HTF_STRONG_CANDLE_PULLBACK (SHADOW; USER_REQUIREMENT, не авторське правило — реєстр docs/sources/evidence.jsonl): сильна свічка старшого ТФ → відкат у її область → точний вхід на молодшому ТФ.
 
 Джерело послідовності: опис методики Дарії Жданової від власниці (11.10.2026), docs/strategies/SOURCE_RULES.md. Усе, чого в описі немає, позначено `ГІПОТЕЗА`/`OUR_IMPLEMENTATION`
 у кожному доказі (поле `src`) і не видається за правило авторки. Немає даних/підтвердження — `ok=None` («НЕ ПІДТВЕРДЖЕНО»). Лише ЗАКРИТІ бари до `as_of` (без майбутніх).
@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 VERSION = "htf-scp-1"
-S_OWNER = "ДЖЕРЕЛО: опис методики Дарії від власниці 11.10.2026"
-S_FIB = "ДЖЕРЕЛО: каруселі Дарії (DARIA_ZHDANOVA_METHOD.md п.10)"
+S_OWNER = "USER_REQUIREMENT D-HTF-STRONG-CANDLE-PULLBACK: опис власниці 11.10.2026; слайда-першоджерела серед 415 зображень НЕ знайдено"
+S_FIB = "ДЖЕРЕЛО D-FIB-LEVELS: каруселі Дарії, слайди ч.4 «Хвилі Еліотта» (#265–273)"
 S_HYP = "ГІПОТЕЗА (не правило авторки)"
 S_OUR = "OUR_IMPLEMENTATION"
 FIB_RETRACE = (0.236, 0.382, 0.5, 0.618, 0.786)            # ДЖЕРЕЛО: S_FIB

@@ -670,6 +670,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
             threading.Thread(target=_radar_loop, args=(db,), name="office2-radar", daemon=True).start()
         if os.getenv("OFFICE2_HTF_SHADOW", "1").strip() != "0":
             threading.Thread(target=_htf_loop, args=(db,), name="office2-htf", daemon=True).start()
+        if os.getenv("OFFICE2_SOURCE_SHADOW", "1").strip() != "0":
+            threading.Thread(target=_source_shadow_loop, args=(db,), name="office2-srcshadow", daemon=True).start()
         if _LJ.enabled():
             threading.Thread(target=_learning_loop, args=(db,), name="office2-learning", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
@@ -769,6 +771,22 @@ def _htf_loop(db: str) -> None:
         except Exception as exc:  # noqa: BLE001
             _log(f"[htf] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
         time.sleep(900)
+
+
+def _source_shadow_loop(db: str) -> None:
+    """SOURCE_SHADOW (office2.source_shadow): паранормальний D1-бар за Герчиком і база після нього за Дарією; раз на 30 хв. Лише таблиця office2_source_shadow; Telegram, ордерів і впливу на READY немає."""
+    from office2 import source_shadow as SS
+    from office_market_data import fetch_candles
+
+    time.sleep(300)
+    while True:
+        try:
+            r = SS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
+            if r["new"] or r["changed"] or r["errors"]:
+                _log(f"[srcshadow] символів {r['symbols']}, нових {r['new']}, змін стану {r['changed']}, помилок {r['errors']}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[srcshadow] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
+        time.sleep(1800)
 
 
 def _learning_loop(db: str) -> None:

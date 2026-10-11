@@ -1491,6 +1491,10 @@ class Handler(BaseHTTPRequestHandler):
                 from office2 import htf_scenario as _HS
 
                 data = _HS.summary(_db_target_for_identity())
+            elif u.path == "/api/v2/source_shadow":
+                from office2 import source_shadow as _SS
+
+                data = _SS.summary(_db_target_for_identity())
             elif u.path in ("/api/v2/trainer", "/api/v2/trainer_reveal"):
                 import re as _re
 
