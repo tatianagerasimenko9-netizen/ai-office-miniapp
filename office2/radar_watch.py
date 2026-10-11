@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -36,6 +37,7 @@ _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "crea
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
          "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version")
 _READY: set = set()
+_TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
 
 def tg_enabled() -> bool:
@@ -142,6 +144,7 @@ def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: floa
     from office2.learning import costs as C
 
     vis = float(card.get("sent_ts") or card["created_ts"])
+    vis = (vis // 900 + 1) * 900.0        # вхід можливий лише в барі, що ПОЧАВСЯ після появи картки (бар, у якому картка з'явилась, ціну якого ми вже могли не встигнути взяти, пропускається)
     plan = {"direction": card["direction"], "entry": card["entry"], "sl": card["sl"], "tp1": card["tp1"], "tp2": card.get("tp2"), "tp3": card.get("tp3"),
             "confirmed_ts": vis, "valid_until_ts": float(card["expires_ts"])}
     res = T.simulate(plan, candles, now_ts=now)
@@ -320,8 +323,6 @@ def mark_notified(db: str, cid: str, new: List[str], prev: Optional[str]) -> Non
 async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable[..., Any], fetch: Callable[[str, str, int], Any], render: Callable[..., Dict[str, Any]],
                     now: Optional[float] = None, log: Callable[[str], None] = print) -> Dict[str, int]:
     """Один прохід: нові WATCH/BLOCKED-картки (з графіком) і follow-up за віхами. Помилка однієї картки не зачіпає інші."""
-    import tempfile
-
     from office2.delivery import run_o2, run_o2_pick
 
     t = time.time() if now is None else now
@@ -340,7 +341,7 @@ async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable
                 chart = evd.freeze_chart(cds if isinstance(cds, list) else [], t, "15m", symbol=c["symbol"])
                 img = await run_o2(render, symbol=c["symbol"], direction=c["direction"], candles=evd.candles_from_chart(chart) if chart.get("candles") else (cds if isinstance(cds, list) else []),
                                    entry=c["entry"], zone=[c["zone_lo"], c["zone_hi"]], sl=c["sl"], tp1=c["tp1"], tp2=c.get("tp2"), tp3=c.get("tp3"), ready_price=c["entry"],
-                                   key_level=c.get("level_price"), key_label="рівень", path=os.path.join(tempfile.gettempdir(), f"radar_{c['symbol']}_{int(t)}.png"))
+                                   key_level=c.get("level_price"), key_label="рівень", path=os.path.join(_TMP, f"radar_{c['symbol']}_{int(t)}.png"))
             except Exception as exc_img:  # noqa: BLE001
                 img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
             mid = await (send_photo(str(img["path"]), text, symbol=c["symbol"], direction=c["direction"]) if img.get("ok") else send_text(text, symbol=c["symbol"], direction=c["direction"]))

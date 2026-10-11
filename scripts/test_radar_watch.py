@@ -113,20 +113,21 @@ def cds(bars, t0):
 
 card = dict(zip(RW._COLS, OB._fetchall(db, "SELECT " + ",".join(RW._COLS) + " FROM office2_radar_card WHERE card_id = 'W|O2|a1'")[0]))
 t0 = card["sent_ts"]
-pre = cds([(100.5, 99.9)], t0 - 900)                                 # свічка ДО появи картки (торкається входу) не рахується
-ev = RW.evaluate_card(card, pre + cds([(101.0, 100.6), (101.1, 100.7)], t0 + 900), t0 + 3 * 900)
-check("свічка до картки не дає входу; ціна не дійшла до входу → чекаємо", ev["paper_status"] == "WAITING_ENTRY" and ev["entry_ts"] is None, str(ev))
-ev = RW.evaluate_card(card, cds([(101.0, 100.6), (100.5, 100.1), (101.5, 100.3)], t0), t0 + 4 * 900)
+tb = (t0 // 900 + 1) * 900          # перший бар, що почався після появи картки
+pre = cds([(100.5, 99.9)], tb - 900)                                 # свічка ДО появи картки (торкається входу) не рахується
+ev = RW.evaluate_card(card, pre + cds([(101.0, 100.6), (101.1, 100.7)], tb + 900), tb + 3 * 900)
+check("свічка до картки і бар її появи не дають входу; ціна не дійшла до входу → чекаємо", ev["paper_status"] == "WAITING_ENTRY" and ev["entry_ts"] is None, str(ev))
+ev = RW.evaluate_card(card, cds([(101.0, 100.6), (100.5, 100.1), (101.5, 100.3)], tb), tb + 4 * 900)
 check("вхід лімітом, потім TP1 → результат моделі A додатний, уже з витратами", ev["paper_status"] in ("ENTERED", "TP1") and "TP1" in (ev["reached"] or "") and ev["r_net"] is not None and ev["r_net"] > 0, str(ev))
-ev = RW.evaluate_card(card, cds([(100.5, 100.1), (100.3, 98.9)], t0 + 900), t0 + 4 * 900)
+ev = RW.evaluate_card(card, cds([(100.5, 100.1), (100.3, 98.9)], tb + 900), tb + 4 * 900)
 check("вхід, далі SL першим → SL, від'ємний результат", ev["paper_status"] == "SL" and ev["r_net"] < -1.0, str(ev))
-ev = RW.evaluate_card(card, cds([(100.5, 100.1), (102.0, 98.9)], t0 + 900), t0 + 4 * 900)
+ev = RW.evaluate_card(card, cds([(100.5, 100.1), (102.0, 98.9)], tb + 900), tb + 4 * 900)
 check("свічка зі стопом і ціллю разом → SL (консервативно)", ev["paper_status"] == "SL" and ev["r_net"] < -1.0, str(ev))
-ev = RW.evaluate_card(card, cds([(101.0, 100.6)] * 20, t0 + 900), card["expires_ts"] + 5 * 900)
+ev = RW.evaluate_card(card, cds([(101.0, 100.6)] * 20, tb + 900), card["expires_ts"] + 5 * 900)
 check("вхід так і не відбувся до кінця строку → NO_ENTRY", ev["paper_status"] == "NO_ENTRY", str(ev))
 
 # --- 5. track + follow-up (віхи один раз)
-state = {"bars": cds([(100.5, 100.1), (101.5, 100.3)], t0 + 900)}
+state = {"bars": cds([(100.5, 100.1), (101.5, 100.3)], tb + 900)}
 n = RW.track(db, lambda s, tf, k: state["bars"] if s == "AAAUSDT" else [], NOW + 5000)
 fu = RW.pending_followups(db)
 check("track пише paper-стан, follow-up містить вхід і TP1", n >= 1 and any(x["card_id"] == "W|O2|a1" and "TP1" in x["_new"] and "ENTERED" in x["_new"] for x in fu), str(fu)[:300])
