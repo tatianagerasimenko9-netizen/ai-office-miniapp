@@ -390,6 +390,10 @@ async function openRadarCard(id){
       <span class="o2m">До цілей: ${i.mult1?'ціль 1 ≈'+esc(i.mult1)+'× стопа':''}${i.mult2?' · ціль 2 ≈'+esc(i.mult2)+'×':''}${i.mult3?' · ціль 3 ≈'+esc(i.mult3)+'×':''}</span><br>${esc(i.explain)}<br>
       <span class="o2m">Результат цього варіанта: ${esc(i.status)}${i.r_net!=null?' · '+(i.r_net>=0?'+':'')+i.r_net+' від ризику (з комісіями)':''}</span>${i.after?'<br><span class="o2y">Після стопа: '+esc(i.after)+'</span>':''}</div>`).join('')}
     <div class="o2need"><b>${esc(sv.summary)}</b></div></div>`:'';
+  const pmv=h.postmortem; const pmHtml=pmv?`<div class="card"><b>Розбір угоди</b><div class="o2need">${esc(pmv.summary||'')}</div>
+    ${(pmv.after||[]).length?'<div class="o2m">Що було з ціною після виходу: '+pmv.after.map(esc).join(' · ')+(pmv.final?'':' (спостереження триває)')+'</div>':''}
+    ${(pmv.flags||[]).length?'<div class="o2m">Ознаки для статистики: '+pmv.flags.map(esc).join('; ')+'</div>':''}
+    <div class="o2sub">${esc(pmv.note||'')}</div></div>`:'';
   app.innerHTML=`<button class="back" id="back">← Радар</button>
     <div class="card"><div class="top"><span class="sym">${h.icon||''} ${esc(h.coin||x.symbol)}</span><span class="pill ${x.kind==='BLOCKED'?'ok':'watch'}">${esc(h.badge||'')}</span></div>
       <div class="mut" style="margin-top:6px"><b>${esc(h.dir||'')}</b> · ${esc(h.status||'')}</div>
@@ -397,7 +401,7 @@ async function openRadarCard(id){
     <div id="ch" style="height:320px;margin:10px 0"></div><div class="mut" id="asof"></div>
     <div class="card"><b>План</b><div class="mut" style="margin-top:6px">${lrPlan(h)}</div>
       ${kv('Чому',esc(h.why||''))}${h.need?kv('Чекаємо',esc(h.need)):''}${kv('Створено',LR_TM(x.created_ts))}${kv('Діє до',esc(h.expires||''))}</div>
-    ${stopsHtml}
+    ${stopsHtml}${pmHtml}
     <div class="card"><b>Супровід навчальної угоди</b>${kv('Стан',esc(h.paper||''))}
       ${x.entry_ts?kv('Ціна дійшла до входу',LR_TM(x.entry_ts)):''}${x.exit_ts?kv('Завершено',LR_TM(x.exit_ts)):''}${h.result?kv('Результат',esc(h.result)):''}
       <div class="o2sub">Telegram: ${x.tg_status==='SENT'?'надіслано '+LR_TM(x.sent_ts):'ще не надсилали'}. ${esc(x.last_error||'')}</div>
