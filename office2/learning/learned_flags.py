@@ -8,16 +8,21 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-VERSION = "lf-1"
+VERSION = "lf-2"
 
 # id → (опис, предикат на features.extract(), доказ з feature-study)
 RULES: Dict[str, Dict[str, Any]] = {
     "WEEKEND": {"label": "вихідні (сб–нд UTC)", "pred": lambda f: f.get("weekend") is True,
-                "evidence": {"n": 622, "mean_r": -0.323, "rest_mean_r": -0.018, "train": -0.365, "test": -0.267, "source": "feature-study run 38133925197"}},
+                "evidence": {"n": 622, "mean_r": -0.323, "rest_mean_r": -0.018, "train": -0.365, "test": -0.267, "source": "feature-study run 38133925197"},
+                "replication": "НЕ відтворилась на старому Леві (history-study run 38136531269): клітинка не пройшла критерій стабільності"},
     "COST_HEAVY": {"label": "витрати ≥ 0.25 R (малий стоп)", "pred": lambda f: f.get("cost_heavy") is True,
-                   "evidence": {"n": 144, "mean_r": -0.478, "rest_mean_r": -0.087, "train": -0.576, "test": -0.380, "source": "feature-study run 38133925197"}},
+                   "evidence": {"n": 144, "mean_r": -0.478, "rest_mean_r": -0.087, "train": -0.576, "test": -0.380, "source": "feature-study run 38133925197"},
+                   "replication": "відтворилась на старому Леві: стоп < 0.7 % (n=234) середнє −0.616 R, train −0.334 → test −0.857 (run 38136531269)"},
     "OFF_HOURS": {"label": "сесія OFF_HOURS", "pred": lambda f: f.get("session") == "OFF_HOURS",
                   "evidence": {"n": 198, "mean_r": -0.286, "rest_mean_r": -0.097, "train": -0.313, "test": -0.244, "source": "feature-study run 38133925197"}},
+    "COUNTER_TREND": {"label": "угода проти старшого тренду (інтегральна оцінка Brain)", "pred": lambda f: f.get("counter_trend") is True,
+                      "evidence": {"n": 540, "mean_r": -0.169, "rest_mean_r": -0.096, "train": -0.129, "test": -0.225, "source": "feature-study run 38133925197"},
+                      "replication": "відтворилась на старому Леві (інше означення: D1 SMA5/20 проти напряму): n=1121, −0.221 R, train −0.280 → test −0.142 (run 38136531269). Різниця до решти у Brain-replay < 0.10 R, тому вага доказу — у збігу двох незалежних наборів"},
 }
 # RS_FLAT (rs_1h=FLAT, n=347, −0.219 vs −0.094) теж пройшла критерій, але потребує відносної сили до BTC на момент READY, якої немає у знімку paper-позиції: додається окремо.
 
@@ -58,7 +63,7 @@ def evaluate(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Прямий (forward) ефект позначок за paper-результатами (модель A). rows: dict з pnl_a, learned_flags (список id) — окремо за scope."""
     res: Dict[str, Any] = {"version": VERSION, "rules": {}, "note": "ефект «якби цих угод не брали»; фільтри LIVE не змінено"}
     for rid, r in RULES.items():
-        e = {"label": r["label"], "evidence": r["evidence"], "by_scope": {}}
+        e = {"label": r["label"], "evidence": r["evidence"], "replication": r.get("replication"), "by_scope": {}}
         for sc in sorted({x.get("scope") or "?" for x in rows}):
             e["by_scope"][sc] = _effect([x for x in rows if (x.get("scope") or "?") == sc], rid)
         res["rules"][rid] = e

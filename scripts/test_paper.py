@@ -251,6 +251,7 @@ WED = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc).timestamp()
 thf = {"dir": "LONG", "sizing": {"stop_pct": 0.5}}
 fs, fw = LF.flags_for(thf, SAT), LF.flags_for(thf, WED)
 check("позначки: субота + малий стоп → WEEKEND і COST_HEAVY", "WEEKEND" in fs and "COST_HEAVY" in fs, str(fs))
+check("позначки: проти тренду → COUNTER_TREND", "COUNTER_TREND" in LF.flags_for({"dir": "LONG", "integral": {"counter_trend": True}}, WED) and "COUNTER_TREND" not in fw, "")
 check("позначки: середа не WEEKEND", "WEEKEND" not in fw, str(fw))
 rows_f = [{"scope": "LIVE", "pnl_a": -10.0, "_flags": ["WEEKEND"]}, {"scope": "LIVE", "pnl_a": 8.0, "_flags": ["WEEKEND"]}, {"scope": "LIVE", "pnl_a": 8.0, "_flags": []}]
 ev = LF.evaluate(rows_f)["rules"]["WEEKEND"]["by_scope"]["LIVE"]

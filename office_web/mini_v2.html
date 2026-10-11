@@ -327,7 +327,7 @@ function lfHtml(l){
   const r=Object.entries(l.rules).map(([id,e])=>{
     const sc=Object.entries(e.by_scope||{}).map(([k,v])=>`${esc(k)}: позначено ${v.flagged} з ${v.resolved} · SL уникнуто ${v.sl_avoided} · TP втрачено ${v.tp_lost} · ефект ${m(v.effect_usd)} · ${esc(v.verdict)}`).join('<br>');
     const ev=e.evidence||{};
-    return `<div class="mut" style="margin-top:6px"><b>${esc(id)}</b> — ${esc(e.label)} · історія: n=${ev.n}, середнє ${ev.mean_r} R проти ${ev.rest_mean_r} R (train ${ev.train} / test ${ev.test})<br>${sc||'ще немає нових результатів'}</div>`;
+    return `<div class="mut" style="margin-top:6px"><b>${esc(id)}</b> — ${esc(e.label)} · історія: n=${ev.n}, середнє ${ev.mean_r} R проти ${ev.rest_mean_r} R (train ${ev.train} / test ${ev.test})${e.replication?'<br>Повторна перевірка: '+esc(e.replication):''}<br>${sc||'ще немає нових результатів'}</div>`;
   }).join('');
   return `<div class="mut" style="margin-top:10px"><b>Shadow-позначки (⚑)</b> — нічого не блокують; ефект рахується на нових paper-результатах. Фільтр LIVE змінюється лише за рішенням власниці.</div>${r}`;
 }
