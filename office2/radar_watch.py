@@ -253,11 +253,46 @@ def evaluate_variants(card: Dict[str, Any], candles: List[Dict[str, Any]], now: 
     return out
 
 
+def backfill_stops(db: str, now: Optional[float] = None) -> int:
+    """Контрольний перерахунок трьох стопів для карток, створених ДО появи stops_json (#207). Лише допоміжна колонка для порівняння:
+    план картки (вхід/SL/цілі) не змінюється. Екстремум події й ATR беруться з preview сценарію Brain; «Стоп 1» = фактичний стоп картки (заморожений).
+    Позначка stops.backfill фіксує, що це перерахунок, а не розрахунок у момент створення."""
+    from office_bridge import _execute, _fetchall
+    from office2 import stops as SV
+
+    t = time.time() if now is None else now
+    n = 0
+    rows = _fetchall(db, "SELECT c.card_id, c.direction, c.entry, c.sl, s.thesis_json FROM office2_radar_card c JOIN office2_live_scenario s ON s.scenario_id = c.scenario_id "
+                         "WHERE c.plan_ok = 1 AND c.stops_json IS NULL AND c.created_ts > ?", (t - TRACK_MAX_AGE_SEC,))
+    for cid, d, entry, sl, tj in rows:
+        try:
+            th = json.loads(tj or "{}")
+            st = th.get("stops") or (th.get("preview") or {}).get("stops")
+            if not st or entry is None or sl is None or not st.get("extreme"):
+                continue
+            ext = float(st["extreme"])
+            if (d == "LONG" and not sl <= ext) or (d == "SHORT" and not sl >= ext):
+                continue       # фактичний стоп не за екстремумом події — цю картку не порівнюємо, нічого не вигадуємо
+            st = {k: (dict(v) if isinstance(v, dict) else v) for k, v in st.items()}
+            st["v1"] = dict(st.get("v1") or {}, sl=float(sl), name=SV.NAMES["v1"], beyond_extreme=True)
+            fin = SV.finalize_for_entry(st, d, float(entry))
+            fin["backfill"] = {"ts": t, "basis": "екстремум і ATR зі сценарію Brain; Стоп 1 = фактичний стоп картки; план картки не змінювався"}
+            _execute(db, "UPDATE office2_radar_card SET stops_json = ? WHERE card_id = ? AND stops_json IS NULL", (json.dumps(fin), cid))
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[radar] backfill стопів {cid}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
+    return n
+
+
 def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
     t = time.time() if now is None else now
     _ensure(db)
+    try:
+        backfill_stops(db, t)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[radar] backfill стопів: {type(exc).__name__}: {str(exc)[:100]}")
     cols = ",".join(_COLS)
     rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit * 2))
     final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID")
