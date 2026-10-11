@@ -1,0 +1,27 @@
+name: Gate study (3 SL/day, read-only research)
+
+# Дослідження денного ліміту на would-be READY, відсічених ним (fixtures/learning/gate_*). Лише читає публічний архів Binance; production і Telegram не чіпає; LIVE-правил не змінює.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Gate counterfactual
+        run: python -u scripts/gate_counterfactual.py gate_study.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gate-study
+          path: gate_study.json
