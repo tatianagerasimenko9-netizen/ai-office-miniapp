@@ -231,5 +231,17 @@ check("контроль не змішується з LIVE", sm["stats"]["total"]
 check("контроль згруповано за причиною ліміту", any("стопи" in k for k in sm["control"]["by_gate"]), str(sm["control"]["by_gate"]))
 check("learning-звіт paper не містить CONTROL", P.learning_report(db)["overall"]["total"] == live_before)
 
+# --- 8. статус ліміту для Mini App
+NOWG = T0 + 3600
+for i, (lvl, off) in enumerate((("ENTRY", 0), ("TP1", 100), ("SL", 200), ("SL", 300), ("SL", 400))):
+    from office_bridge import log_event as _le
+    _le(db, "SCENARIO_MILESTONE", {"level": lvl, "sent_ts": T0 + off}, "O2|g1")
+_le(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": T0 + 500}, "O2|g2")
+_le(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": T0 + 600}, "O2|g3")
+g = P.gate_status(db, NOWG)
+check("ліміт: 5 стопів за добу, locked, блок почався з 3-го (T0+400)", len(g["stops"]) == 5 and g["locked"] and abs(g["locked_since_ts"] - (T0 + 400)) < 1, str(g)[:300])
+check("ліміт: стоп після TP1 позначено, кінець блоку — наступна доба 00:00 UTC", any(x["after_tp1"] for x in g["stops"]) and g["lock_ends_ts"] % 86400 == 0)
+check("ліміт: shadow_today та лічильники відсічених", "shadow_today" in g and "candidates_blocked_today" in g)
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

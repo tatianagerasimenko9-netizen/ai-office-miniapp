@@ -329,11 +329,15 @@ function paperHtml(d){
   const rows=(d.items||[]).slice(0,10).map(row).join('');
   const bf=d.backfill||{}, bs=bf.stats||{};
   const bfh=(bs.total?`<div class="mut" style="margin-top:10px"><b>Перевірка правил на раніше доставлених сигналах</b> (до запуску контуру, у результат запуску НЕ входить): розв'язано ${bs.closed} (SL ${bs.sl}, TP ${bs.tp}) · відкрито ${bs.open} · A ${m(bs.pnl_a_usd)}. Невалідних записів без даних: ${bf.invalid_no_data||0} (виключені зі статистики, збережені для аудиту).</div>${(bf.items||[]).map(row).join('')}`:'');
+  const g=d.gate||{}; const hh=t=>t?new Date(t*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'—';
+  const gh=g.stops?`<div class="card" style="margin-top:8px"><b>Денний ліміт: ${g.stops.length} із ${g.limit} стопи за добу UTC</b> — ${g.locked?'<b>нові READY заблоковано</b> з '+hh(g.locked_since_ts)+' до 00:00 UTC (03:00 Київ)':'нові READY дозволені'}.
+    <div class="mut" style="margin-top:4px">Стопи: ${(g.stops||[]).map(x=>esc((x.symbol||'?').replace('USDT',''))+' '+hh(x.sent_ts)+(x.after_tp1?' (після TP1)':'')).join(' · ')||'—'}. Знайдено кандидатів, відсічених лімітом сьогодні: ${g.candidates_blocked_today||0} на ${g.blocked_symbols_today||0} монетах; доставлено READY: ${g.ready_delivered_today||0}.
+    Shadow-результат відсічених (модель, не угоди): розв'язано ${(g.shadow_today||{}).closed||0} (TP ${(g.shadow_today||{}).tp||0}, SL ${(g.shadow_today||{}).sl||0}), A ${m((g.shadow_today||{}).pnl_a_usd)}. Ліміт не змінюється без рішення власниці.</div></div>`:'';
   const c=d.control||{}, cs=c.stats||{};
   const ch=(cs.total?`<div class="mut" style="margin-top:10px"><b>Контрольний потік</b> (would-be READY, відсічені лімітами; у результат не входить): ${cs.total} · розв'язано ${cs.closed} (TP ${cs.tp}, SL ${cs.sl}) · умовно A ${m(cs.pnl_a_usd)}. ${Object.keys(c.by_gate||{}).map(k=>esc(k)+': '+c.by_gate[k].total+' (A '+m(c.by_gate[k].pnl_a_usd)+')').join(' · ')}</div>`:'');
   return `<h2>PAPER · живі позиції</h2><div class="card"><div class="mut">Модель, не реальні гроші й не ордери. Вхід лише після Telegram-доставки; комісія+slippage 0.15% кола (припущення, без funding).
     З моменту запуску: ${st.total} · відкрито ${st.open} · розв'язано ${st.closed} (TP ${st.tp}, SL ${st.sl}) · пропущено (MISSED) ${st.missed} · комісії ${st.fees_usd}$ ·
-    результат A ${m(st.pnl_a_usd)} · B ${m(st.pnl_b_usd)} · C ${m(st.pnl_c_usd)} (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Нових позицій після запуску поки немає — чекаємо справжній READY</div>'}${bfh}${ch}</div>`;
+    результат A ${m(st.pnl_a_usd)} · B ${m(st.pnl_b_usd)} · C ${m(st.pnl_c_usd)} (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Нових позицій після запуску поки немає — чекаємо справжній READY</div>'}${gh}${bfh}${ch}</div>`;
 }
 function dynWatchHtml(d){
   if(!d||d.mode==='off'||!d.stats) return '';
