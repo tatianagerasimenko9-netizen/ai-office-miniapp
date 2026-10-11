@@ -419,6 +419,14 @@ def _fallback_klines(sym: str, tf: str, limit: int) -> List[Dict[str, Any]]:
         return []
 
 
+def _office_db_target() -> str:
+    """Та сама БД, що Worker і Mini App: Postgres, якщо є DATABASE_URL (він має пріоритет над локальним файлом OFFICE_DB_PATH)."""
+    url = (os.getenv("DATABASE_URL") or "").strip()
+    if url.lower().startswith(("postgres://", "postgresql://")):
+        return url
+    return (os.getenv("OFFICE_DB_PATH") or "").strip() or "office_bridge.db"
+
+
 def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Futures-свічки Binance для будь-якої USDT-пари. Список свічок або {} при збої.
@@ -1524,12 +1532,7 @@ def fetch_probability_score(symbol: str, db_path: Optional[str] = None) -> Dict[
                 fk = 80
             else:
                 fk = 20
-            dbp = (
-                (db_path or "").strip()
-                or os.getenv("OFFICE_DB_PATH", "").strip()
-                or os.getenv("DATABASE_URL", "").strip()
-                or "office_bridge.db"
-            )
+            dbp = (db_path or "").strip() or _office_db_target()
             wr = 0.5
             try:
                 from office_bridge import trade_journal_get_stats
@@ -1789,7 +1792,7 @@ def fetch_edge_score(symbol: str) -> Dict[str, Any]:
         funding = fetch_funding_rate(sym)
         regime_sym = fetch_market_regime(sym)
         regime_btc = fetch_market_regime("BTCUSDT")
-        _dbp = (os.getenv("OFFICE_DB_PATH") or os.getenv("DATABASE_URL") or "").strip() or None
+        _dbp = _office_db_target() or None
         prob = fetch_probability_score(sym, _dbp)
 
         atr_d = atr if isinstance(atr, dict) else {}

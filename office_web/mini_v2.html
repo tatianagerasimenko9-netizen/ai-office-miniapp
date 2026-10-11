@@ -370,7 +370,8 @@ function lrHtml(d){
     ${lrStat('Сьогодні (за Києвом)',st.today)}${lrStat('Усі навчальні угоди',st.learning)}${lrStat('Спостереження, що дійшли до плану',st.watch)}
     <div class="o2sub">${esc((st.all||{}).note||'')}</div>
     ${lrStopStudy(st.stop_study)}
-    ${done.length?`<details class="o2d"><summary>Завершені ідеї (${done.length})</summary>${done.map(lrCard).join('')}</details>`:''}`;
+    ${done.length?`<details class="o2d"><summary>Завершені ідеї (${done.length})</summary>${done.map(lrCard).join('')}</details>`:''}
+    <div class="o2sub">Джерело даних: ${esc((d.db||{}).backend||'—')} · відбиток ${esc((d.db||{}).fingerprint||'—')} (має збігатися з воркером)</div>`;
 }
 async function openRadarCard(id){
   const T0=++RT; killPoll();

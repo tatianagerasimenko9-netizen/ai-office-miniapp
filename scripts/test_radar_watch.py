@@ -231,6 +231,9 @@ btn = TP.radar_card_button("Відкрити картку:\nhttps://ai-office-mi
 check("кнопка Telegram містить посилання на конкретну картку", btn and btn["inline_keyboard"][0][0]["url"] == "https://ai-office-miniapp.onrender.com/v2?tab=radar&card=B-dbcd04afd7a2", str(btn))
 check("без посилання на картку кнопка не підміняється", TP.radar_card_button("звичайний текст", "https://x") is None)
 
+sdb = RW.summary(db, NOW + 400)
+check("summary показує джерело даних (backend + відбиток) для звірки Mini App ↔ воркер", (sdb.get("db") or {}).get("backend") == "sqlite" and len((sdb["db"].get("fingerprint") or "")) == 16, str(sdb.get("db")))
+
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
 

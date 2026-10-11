@@ -636,6 +636,13 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
     t = time.time() if now is None else now
     out: Dict[str, Any] = {"ok": True, "now": t, "version": VERSION, "tg_enabled": tg_enabled(), "cards": [], "stats": {}, "why_no_ready": {}}
     try:
+        from office_bridge import office_db_identity
+
+        idn = office_db_identity(db)
+        out["db"] = {"backend": idn.get("backend"), "fingerprint": idn.get("fingerprint")}      # джерело даних видно в Mini App: має збігатися з відбитком у логах воркера
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         _ensure(db)
         cols = ",".join(_COLS)
         if card_id:
