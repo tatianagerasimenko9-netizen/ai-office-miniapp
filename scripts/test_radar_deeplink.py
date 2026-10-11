@@ -65,5 +65,12 @@ try:
     check("HTTP: список карток із готовими українськими текстами", lst["cards"] and lst["cards"][0]["h"]["title"].startswith("🎓") and lst["why_no_ready"]["message"], str(lst)[:200])
 finally:
     proc.terminate()
+# --- регресія production 11.10: Mini App читав радар/paper з локального SQLite (DB_PATH), а не з Postgres (DATABASE_URL) → «Картку не знайдено», `no such table`
+src = (ROOT / "office_mini_app.py").read_text(encoding="utf-8")
+check("радар/paper/dynamic-ендпоінти не читають локальний DB_PATH напряму", "summary(DB_PATH" not in src, "знайдено summary(DB_PATH")
+r = subprocess.run([sys.executable, "-c", "import office_mini_app as m; print(m._db_target_for_identity())"], cwd=str(ROOT),
+                   env={**os.environ, "DATABASE_URL": "postgresql://u:p@h:5432/d", "OFFICE_DB_PATH": "/tmp/local.db"}, capture_output=True, text=True)
+check("з DATABASE_URL ціль БД Mini App — Postgres, не локальний файл", r.stdout.strip() == "postgresql://u:p@h:5432/d", (r.stdout + r.stderr)[-200:])
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

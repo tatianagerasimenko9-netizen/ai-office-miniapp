@@ -1482,11 +1482,11 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v2/paper":
                 from office2 import paper as _PP
 
-                data = _PP.summary(DB_PATH)
+                data = _PP.summary(_db_target_for_identity())
             elif u.path == "/api/v2/live_radar":
                 from office2 import radar_watch as _RW
 
-                data = _RW.summary(DB_PATH, card_id=_q("card") or None)
+                data = _RW.summary(_db_target_for_identity(), card_id=_q("card") or None)
             elif u.path in ("/api/v2/trainer", "/api/v2/trainer_reveal"):
                 import re as _re
 
@@ -1510,7 +1510,7 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/v2/dynamic_watch":
                 from office2 import dynamic_watch as _DW
 
-                data = _DW.summary(DB_PATH)
+                data = _DW.summary(_db_target_for_identity())
             elif u.path == "/api/v2/overview":
                 data = overview_payload()
             elif u.path == "/api/v2/scanner":

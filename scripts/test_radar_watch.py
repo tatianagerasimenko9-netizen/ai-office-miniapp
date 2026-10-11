@@ -225,6 +225,15 @@ check("backfill: 3 варіанти записані, Стоп 1 = фактич�
 check("backfill не змінює план картки (вхід/SL/ціль)", c1[:3] == c0[:3])
 check("backfill ідемпотентний", RW.backfill_stops(db8, NOW + 20) == 0)
 
+# --- кнопка Telegram веде на конкретну картку (регресія: у #211 регулярний вираз не збігався з "/v2?tab=radar", кнопка лишалась загальною «Графік»)
+import office_telegram_policy as TP
+btn = TP.radar_card_button("Відкрити картку:\nhttps://ai-office-miniapp.onrender.com/v2?tab=radar&card=B-dbcd04afd7a2", "https://ai-office-miniapp.onrender.com")
+check("кнопка Telegram містить посилання на конкретну картку", btn and btn["inline_keyboard"][0][0]["url"] == "https://ai-office-miniapp.onrender.com/v2?tab=radar&card=B-dbcd04afd7a2", str(btn))
+check("без посилання на картку кнопка не підміняється", TP.radar_card_button("звичайний текст", "https://x") is None)
+
+sdb = RW.summary(db, NOW + 400)
+check("summary показує джерело даних (backend + відбиток) для звірки Mini App ↔ воркер", (sdb.get("db") or {}).get("backend") == "sqlite" and len((sdb["db"].get("fingerprint") or "")) == 16, str(sdb.get("db")))
+
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
 

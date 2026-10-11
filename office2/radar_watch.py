@@ -184,7 +184,18 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
 
 # ------------------------------------------------------------------ paper-супровід
 def _candles(rows: Any) -> List[Dict[str, Any]]:
-    return [c for c in rows if isinstance(c, dict)] if isinstance(rows, list) else []
+    """Свічки біржі мають ts як ISO-рядок; усередині працюємо з epoch-секундами (число), щоб порівняння й розбір не залежали від формату."""
+    import office_signal_track as T
+
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for c in rows:
+        if not isinstance(c, dict):
+            continue
+        t = T._ts(c.get("ts"))
+        out.append(dict(c, ts=t) if t is not None else c)
+    return out
 
 
 def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
@@ -624,6 +635,13 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
 
     t = time.time() if now is None else now
     out: Dict[str, Any] = {"ok": True, "now": t, "version": VERSION, "tg_enabled": tg_enabled(), "cards": [], "stats": {}, "why_no_ready": {}}
+    try:
+        from office_bridge import office_db_identity
+
+        idn = office_db_identity(db)
+        out["db"] = {"backend": idn.get("backend"), "fingerprint": idn.get("fingerprint")}      # джерело даних видно в Mini App: має збігатися з відбитком у логах воркера
+    except Exception:  # noqa: BLE001
+        pass
     try:
         _ensure(db)
         cols = ",".join(_COLS)
