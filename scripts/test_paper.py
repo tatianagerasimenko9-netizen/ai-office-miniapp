@@ -175,5 +175,53 @@ pm2 = PM.analyze({"thesis": {}}, dict(posx, sl_ts=None), None, T0)
 check("розбір без даних: NO_DATA, а не вигадані причини", pm2["events"]["level"] == "NO_DATA" and pm2["events"]["after_sl"] == "NO_DATA" and not pm2["flags"] and "level" in pm2["missing"])
 check("частка витрат у збитку", abs(pm["events"]["cost"]["share_of_loss_pct"] - 16.6) < 0.2, str(pm["events"]["cost"]))
 
+# --- 6. класи помилок + альтернативи
+snap_link["evidence"] = [{"module": "M5/M1 тригер", "status": "USED", "supports": 0, "finding": "M5: закриття вище максимуму 3 попередніх барів — ні"},
+                         {"module": "OB / FVG / OTE (premium-discount)", "status": "USED", "supports": -1, "finding": "зона в premium діапазону H4 (75%): ПРОТИ LONG"},
+                         {"module": "Wyckoff (spring/upthrust, тест)", "status": "USED", "supports": 0, "finding": "фаза не визначена"},
+                         {"module": "DOM / order book", "status": "NOT_CONNECTED", "supports": 0, "finding": "немає надійного джерела"}]
+pm = PM.analyze(snap_link, posx, bars15, T0 + 900 * 4)
+codes = {c["code"] for c in pm["error_classes"]}
+check("класи: EARLY_ENTRY, WEAK_LEVEL, BTC_CONFLICT, HTF_CONFLICT, SESSION_RISK, BAD_PREMIUM_DISCOUNT, SL_HUNT_CANDIDATE", {"EARLY_ENTRY", "WEAK_LEVEL", "BTC_CONFLICT", "HTF_CONFLICT", "SESSION_RISK", "BAD_PREMIUM_DISCOUNT", "SL_HUNT_CANDIDATE"} <= codes, str(codes))
+check("кожен клас має доказ і статус «кандидат»", all(c["proof"] and "не доведена" in c["status"] for c in pm["error_classes"]))
+check("Wyckoff без фази = UNKNOWN, не вигадано", pm["events"]["wyckoff"].startswith("UNKNOWN"))
+check("модулі без підключення перелічені окремо", "DOM / order book" in pm["events"]["evidence"]["not_connected"])
+clean = PM.analyze({"thesis": {"kind": "SWEEP_SEQ", "sequence": [{"ok": True, "step": "подія", "value": "SWEEP 1"}, {"ok": True, "step": "зсув структури", "value": "x"}, {"ok": True, "step": "ретрейс у зону", "value": "y"}],
+                              "level": {"kind": "X", "p": 1, "strength": 2}, "quality": {"risk_atr15": 2}, "sizing": {"stop_pct": 2.0}}, "session_tag": {"session": "LONDON", "weekend": False}, "evidence": []},
+                   {"direction": "LONG", "plan_entry": 10, "sl": 9, "fill_price": 10, "cost_usd": 1, "pnl_a": -11, "sl_ts": None, "generated_ts": 1, "delivered_ts": 30}, None, T0)
+check("коректна угода без ознак → VALID_LOSS", [c["code"] for c in clean["error_classes"]] == ["VALID_LOSS"], str(clean["error_classes"]))
+# альтернативи: рішення на барі T0+900*k, свічки до/після
+import numpy as np
+nb = 60
+tb = [T0 - 900 * 40 + 900 * i for i in range(nb)]
+bb = [(t_, 100.0, 100.2, 99.8, 100.0) for t_ in tb]
+bb[44] = (tb[44], 100.0, 100.6, 99.9, 100.5)        # BOS-бар після рішення (i=42)
+bb[46] = (tb[46], 100.5, 102.6, 100.4, 102.4)       # досягнуто TP1
+snapx = {"decided_ts": tb[42] + 900, "thesis": {"entry": 100.0, "sl": 99.0, "targets": [{"p": 102.0}]}}
+alt = PM.alternatives(snapx, {"direction": "LONG", "symbol": "X"}, bb)
+check("альтернативи V0..V8 на одній угоді + NO_TRADE + попередження про вибірку", alt["status"] == "OK" and "V8_bos_confirm" in alt["variants"] and alt["no_trade"]["r_net"] == 0.0 and "вибірці" in alt["note"], str(alt)[:300])
+alt2 = PM.alternatives({"thesis": {}}, {"direction": "LONG", "symbol": "X"}, bb)
+check("альтернативи без даних → NO_DATA", alt2["status"] == "NO_DATA")
+
+# --- 6b. інтеграція: tick сам запускає авто-розбір закритих угод (S1 закрита за TP1 у секції 3)
+row = _fetchall(db, "SELECT postmortem_json FROM office2_paper_position WHERE scenario_id = 'S1'")[0][0]
+check("tick сам записує postmortem_json для закритої угоди", bool(row) and json.loads(row).get("version") == PM.VERSION, str(row)[:120])
+
+# --- 7. контрольний потік: would-be READY, відсічений лімітом, не потрапляє в LIVE
+_execute(db, """CREATE TABLE IF NOT EXISTS office2_live_scenario (scenario_id TEXT PRIMARY KEY, symbol TEXT, direction TEXT, kind TEXT, state TEXT, created_ts DOUBLE PRECISION,
+    updated_ts DOUBLE PRECISION, expires_ts DOUBLE PRECISION, reason TEXT, thesis_json TEXT, version TEXT)""")
+_execute(db, "INSERT INTO office2_live_scenario VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("O2|ctl|1", "DDDUSDT", "LONG", "SWEEP_SEQ", "NO_TRADE", T0, T0, None,
+         "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC", json.dumps({"entry": 100, "sl": 99, "targets": [{"p": 102}, {"p": 104}]}), "t"))
+DATA["DDDUSDT"] = [B(T0 + 60, 100.1, 100.4, 100.0, 100.3), B(T0 + 120, 100.3, 102.3, 100.2, 102.0)]
+live_before = P.summary(db)["stats"]["total"]
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)           # повтор: без дублів
+sm = P.summary(db)
+ct = sm["control"]["stats"]
+check("контроль: 1 позиція, розв'язана за TP1 (A), без дубля; B/C ще ведуть залишок", ct["total"] == 1 and ct["closed"] == 1 and ct["tp"] == 1 and ct["b_c_still_open"] == 1, str(ct))
+check("контроль не змішується з LIVE", sm["stats"]["total"] == live_before and all(x["scope"] == "LIVE" for x in sm["items"]))
+check("контроль згруповано за причиною ліміту", any("стопи" in k for k in sm["control"]["by_gate"]), str(sm["control"]["by_gate"]))
+check("learning-звіт paper не містить CONTROL", P.learning_report(db)["overall"]["total"] == live_before)
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

@@ -8,7 +8,7 @@
 | Підтримка/опір, локальний екстремум | є | swing-детектор (fractal n=2) |
 | Дзеркальний рівень | немає | role-reversal явно не моделюється |
 | Хибний пробій / sweep + повернення | є | `SWEEP_SEQ`, `SWEEP_RECLAIM` (модель REJECTION) |
-| Справжній пробій + закріплення + ретест | є | `PULLBACK_BREAK` (BREAKOUT_RETEST), ретрейс у зону, тригер M15 |
+| Справжній пробій + закріплення + ретест | частково | `pullback_break` (v1) у v2.1 лише як джерело ORIGIN_SEQ (≈7 % подій replay); окремої живої моделі BREAKOUT+RETEST немає (див. KNOWLEDGE_AUDIT.md) |
 | Відбій від рівня | є | sweep-reclaim + тригер закриття M15 |
 | Підтискання / проторгівка | частково | `compression`/`attacks` в ORIGIN-тезі; окремого детектора підтискання до рівня немає |
 | Імпульс | є | `_origin_events` (impulse, retrace) |

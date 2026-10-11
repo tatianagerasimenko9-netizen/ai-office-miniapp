@@ -30,10 +30,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
     miss_reason TEXT, qty DOUBLE PRECISION, notional DOUBLE PRECISION, cost_usd DOUBLE PRECISION,
     tp1_ts DOUBLE PRECISION, tp2_ts DOUBLE PRECISION, tp3_ts DOUBLE PRECISION, sl_ts DOUBLE PRECISION, close_ts DOUBLE PRECISION, close_reason TEXT,
     r_a DOUBLE PRECISION, r_b DOUBLE PRECISION, r_c DOUBLE PRECISION, pnl_a DOUBLE PRECISION, pnl_b DOUBLE PRECISION, pnl_c DOUBLE PRECISION,
-    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT, scope TEXT, postmortem_json TEXT)""",)
+    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT, scope TEXT, postmortem_json TEXT, gate_reason TEXT)""",)
 _COLS = ("scenario_id", "symbol", "direction", "status", "generated_ts", "delivered_ts", "plan_entry", "sl", "tp1", "tp2", "tp3", "fill_ts", "fill_price", "miss_reason", "qty",
          "notional", "cost_usd", "tp1_ts", "tp2_ts", "tp3_ts", "sl_ts", "close_ts", "close_reason", "r_a", "r_b", "r_c", "pnl_a", "pnl_b", "pnl_c", "mfe_r", "mae_r", "coarse",
-         "session", "btc", "updated_ts", "kind", "scope", "postmortem_json")
+         "session", "btc", "updated_ts", "kind", "scope", "postmortem_json", "gate_reason")
 _READY = {"done": False}
 
 
@@ -44,7 +44,7 @@ def _ensure(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
-    for col in ("kind TEXT", "scope TEXT", "postmortem_json TEXT"):
+    for col in ("kind TEXT", "scope TEXT", "postmortem_json TEXT", "gate_reason TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_paper_position ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -215,12 +215,12 @@ def _apply(p: Dict[str, Any], w: Dict[str, Any], now: float) -> None:
             p[f"pnl_{key}"] = round((c["r"] - cr) * RISK_USD, 2)
         else:
             p[f"r_{key}"] = p[f"pnl_{key}"] = None
+    a = w["closed"]["A"]
+    if a["done"]:                          # заголовковий результат — модель A (усе на TP1 або SL); B/C можуть ще вести залишок
+        p["close_ts"], p["close_reason"] = a["ts"], a["why"]
+    p["status"] = "CLOSED" if done else "OPEN"
     if done:
-        p["status"] = "CLOSED"
         p["close_ts"] = max(w["closed"][m]["ts"] for m in MODELS)
-        p["close_reason"] = w["closed"]["A"]["why"]
-    else:
-        p["status"] = "OPEN"
 
 
 def open_position(p: Dict[str, Any], bars1: List[Tuple[float, ...]]) -> None:
@@ -237,14 +237,15 @@ def postmortem_pass(db: str, fetch: Callable[[str, str, int], Any], now: float, 
     from office_bridge import _execute, _fetchall
 
     n = 0
-    rows = _fetchall(db, "SELECT scenario_id, postmortem_json FROM office2_paper_position WHERE status = 'CLOSED' AND COALESCE(scope,'') <> 'BACKFILL_INVALID' ORDER BY close_ts DESC LIMIT 60")
+    rows = _fetchall(db, "SELECT scenario_id, postmortem_json FROM office2_paper_position WHERE pnl_a IS NOT NULL AND COALESCE(scope,'') NOT IN ('BACKFILL_INVALID','CONTROL') ORDER BY close_ts DESC LIMIT 60")
     for sid, pj in rows:
         if n >= limit:
             break
         try:
             if pj:
-                a = (json.loads(pj).get("events") or {}).get("after_sl")
-                if not (isinstance(a, dict) and a.get("status") == "PENDING"):
+                old = json.loads(pj)
+                a = (old.get("events") or {}).get("after_sl")
+                if old.get("version") == PM.VERSION and not (isinstance(a, dict) and a.get("status") == "PENDING"):
                     continue
             vals = _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position WHERE scenario_id = ?", (sid,))
             p = _rowdict(vals[0])
@@ -256,6 +257,42 @@ def postmortem_pass(db: str, fetch: Callable[[str, str, int], Any], now: float, 
             n += 1
         except Exception as exc:  # noqa: BLE001
             log(f"[paper] розбір {sid}: {type(exc).__name__}: {str(exc)[:120]}")
+    return n
+
+
+CONTROL_GATE = "ємність сценаріїв%"
+CONTROL_LOOKBACK_SEC = 15 * 3600       # 1m-історія Binance у запиті ≤ 1000 хв; старші would-be READY не відновлюємо (немає даних про момент рішення)
+CONTROL_ASSUMED_DELIVERY_SEC = 60      # припущення: типова доставка ≈ 1 хв після рішення (реальної доставки не було)
+
+
+def control_tick(db: str, fetch: Callable[[str, str, int], Any], now: float, log: Callable[[str], None] = print) -> int:
+    """Контрольний потік: would-be READY, відсічені лімітом ємності/стопів (office2_live_scenario NO_TRADE 'ємність сценаріїв…').
+    Лише статистика «що було б»: scope='CONTROL', у LIVE-результат не входить, на ліміти не впливає. Вхід — за тим самим правилом доступності (open 1m після рішення + умовна доставка)."""
+    from office_bridge import _fetchall
+
+    _ensure(db)
+    known = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_paper_position WHERE scope = 'CONTROL'")}
+    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, kind, updated_ts, reason, thesis_json FROM office2_live_scenario WHERE state = 'NO_TRADE' AND reason LIKE ? AND updated_ts > ? ORDER BY updated_ts",
+                     (CONTROL_GATE, max(since_ts(), now - CONTROL_LOOKBACK_SEC)))
+    n = 0
+    for sid, sym, d, kind, upd, reason, tj in rows:
+        cid = "CTL|" + sid
+        if cid in known:
+            continue
+        try:
+            th = json.loads(tj or "{}")
+            tg = th.get("targets") or []
+            if not (th.get("entry") and th.get("sl") and tg):
+                continue
+            p = {"scenario_id": cid, "symbol": sym, "direction": d, "generated_ts": float(upd), "delivered_ts": float(upd) + CONTROL_ASSUMED_DELIVERY_SEC, "plan_entry": float(th["entry"]), "sl": float(th["sl"]),
+                 "tp1": float(tg[0]["p"]), "tp2": float(tg[1]["p"]) if len(tg) > 1 else None, "tp3": float(tg[2]["p"]) if len(tg) > 2 else None, "kind": kind, "scope": "CONTROL",
+                 "gate_reason": str(reason or "")[:120], "coarse": 0}
+            nb = max(5, min(1000, int((now - p["delivered_ts"]) // 60) + 5))
+            open_position(p, bars_of(fetch(sym, "1m", nb)))
+            _save(db, p)
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            log(f"[paper][control] {sid}: {type(exc).__name__}: {str(exc)[:100]}")
     return n
 
 
@@ -319,14 +356,22 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
         except Exception as exc:  # noqa: BLE001
             out["errors"] += 1
             log(f"[paper] помилка супроводу {p['scenario_id']}: {type(exc).__name__}: {str(exc)[:120]}")
+    try:
+        out["control"] = control_tick(db, fetch, now, log)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[paper] контрольний потік збій: {type(exc).__name__}: {str(exc)[:120]}")
+    try:
+        out["postmortem"] = postmortem_pass(db, fetch, now, log)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[paper] розбір збій: {type(exc).__name__}: {str(exc)[:120]}")
     return out
 
 
 def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     from office2.learning.models import model_of
 
-    cl = [x for x in rows if x["status"] == "CLOSED"]
-    st: Dict[str, Any] = {"total": len(rows), "open": sum(1 for x in rows if x["status"] == "OPEN"), "closed": len(cl), "missed": sum(1 for x in rows if x["status"] == "MISSED"),
+    cl = [x for x in rows if x["pnl_a"] is not None]           # розв'язані за моделлю A (TP1 або SL); B/C можуть ще вести залишок
+    st: Dict[str, Any] = {"total": len(rows), "open": sum(1 for x in rows if x["status"] == "OPEN" and x["pnl_a"] is None), "closed": len(cl), "missed": sum(1 for x in rows if x["status"] == "MISSED"),
                           "fees_usd": round(sum(x["cost_usd"] or 0 for x in cl), 2), "note": "n<30 — лише спостереження"}
     for k in ("a", "b", "c"):
         v = [x[f"pnl_{k}"] for x in cl if x[f"pnl_{k}"] is not None]
@@ -336,8 +381,9 @@ def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for m_ in sorted({model_of(x["kind"]) for x in cl}):
         sub = [x for x in cl if model_of(x["kind"]) == m_]
         st["by_model"][m_] = {"closed": len(sub), "pnl_a_usd": round(sum(x["pnl_a"] or 0 for x in sub), 2), "pnl_b_usd": round(sum(x["pnl_b"] or 0 for x in sub), 2)}
-    st["sl"] = sum(1 for x in cl if x["close_reason"] == "SL")
-    st["tp"] = sum(1 for x in cl if str(x["close_reason"]).startswith("TP"))
+    st["sl"] = sum(1 for x in cl if x["pnl_a"] <= 0)
+    st["tp"] = sum(1 for x in cl if x["pnl_a"] > 0)
+    st["b_c_still_open"] = sum(1 for x in cl if x["status"] == "OPEN")
     return st
 
 
@@ -356,6 +402,12 @@ def summary(db: str, limit: int = 30) -> Dict[str, Any]:
         bf = [x for x in rows if x["scope"] == "BACKFILL" and x["status"] in ("CLOSED", "OPEN")]
         out["backfill"] = {"note": "сигнали, доставлені ДО запуску paper-контуру (валідація правил, не результат запуску)", "stats": _stats(bf), "items": sorted(bf, key=lambda x: x["delivered_ts"] or 0),
                            "invalid_no_data": sum(1 for x in rows if x["scope"] == "BACKFILL_INVALID"), "not_delivered_before_launch": sum(1 for x in rows if x["scope"] == "BACKFILL" and x["status"] == "MISSED")}
+        ctl = [x for x in rows if x["scope"] == "CONTROL"]
+        by: Dict[str, Any] = {}
+        for g in sorted({(x["gate_reason"] or "?").split(":")[-1].strip()[:60] for x in ctl}):
+            by[g] = _stats([x for x in ctl if (x["gate_reason"] or "?").split(":")[-1].strip()[:60] == g])
+        out["control"] = {"note": "would-be READY, відсічені лімітами ємності/стопів: умовний результат «якби не ліміт» (вхід через ~1 хв після рішення — припущення). Ліміти не змінюються; це дані для рішення власниці.",
+                          "stats": _stats(ctl), "by_gate": by}
     except Exception as exc:  # noqa: BLE001
         out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
     return out
@@ -367,7 +419,7 @@ def learning_report(db: str) -> Optional[Dict[str, Any]]:
 
     _ensure(db)
     rows = [_rowdict(r) for r in _fetchall(db, f"SELECT {','.join(_COLS)} FROM office2_paper_position WHERE scope = 'LIVE'")]
-    cl = [x for x in rows if x["status"] == "CLOSED"]
+    cl = [x for x in rows if x["pnl_a"] is not None]
     if not rows:
         return None
     rep: Dict[str, Any] = {"scope": "LIVE", "overall": _stats(rows), "by_direction": {}, "by_session": {}, "flag_counts": {}, "missed_reasons": {}}
@@ -380,7 +432,7 @@ def learning_report(db: str) -> Optional[Dict[str, Any]]:
             for f in (json.loads(x["postmortem_json"] or "{}").get("flags") or []):
                 c = rep["flag_counts"].setdefault(f, {"n": 0, "sl": 0, "tp": 0})
                 c["n"] += 1
-                c["sl" if x["close_reason"] == "SL" else "tp"] += 1
+                c["sl" if x["pnl_a"] <= 0 else "tp"] += 1
         except ValueError:
             continue
     for x in rows:
