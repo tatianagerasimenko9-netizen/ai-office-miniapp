@@ -15,6 +15,7 @@ LEVEL_UA = {
     "D1SW": "локальний пік/впадина на денному графіку", "W1SW": "локальний пік/впадина на тижневому графіку", "M15SW": "локальний пік/впадина на 15-хвилинному графіку",
     "H1SW": "локальний пік/впадина на годинному графіку", "ORIGIN_LOW": "початок руху",
 }
+LEVEL_SHORT = {"H4SW": "пік/впадина 4 год", "D1SW": "пік/впадина доби", "W1SW": "пік/впадина тижня", "M15SW": "пік/впадина 15 хв", "H1SW": "пік/впадина 1 год"}
 FINAL_PAPER = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT")
 
 
@@ -181,7 +182,7 @@ def _a(x: Any) -> str:
         return ""
 
 
-REASONS_VERSION = 2
+REASONS_VERSION = 3
 MODULE_UA = {"HTF MN/W1/4D/3D/D1/H4/H1": "Старші таймфрейми", "OB / FVG / OTE (premium-discount)": "Положення зони в діапазоні", "Gerchik mirror level + люфт": "Дзеркальний рівень (Герчик)",
              "Wyckoff (spring/upthrust, тест)": "Вайкофф", "Bulkowski (формалізовані фігури)": "Фігури (Булковскі)", "regression channel": "Регресійний канал",
              "volume / taker-delta / CVD": "Обсяг і дельта", "Strong Candle (наша реалізація sc-ours-1)": "Сильна свічка", "M5/M1 тригер": "Мікро-підтвердження M5"}
@@ -262,12 +263,12 @@ def reasons_from_thesis(th: Dict[str, Any], direction: str, sym: str) -> Dict[st
     if tg:
         bits = []
         for i, x in enumerate(tg[:2], 1):
-            bits.append(f"ціль {i} {num(x.get('p'), sym)}" + (f" ({level_ua(x['kind'])})" if i == 1 and x.get("kind") else ""))
+            bits.append(f"ціль {i} {num(x.get('p'), sym)}" + (f" ({LEVEL_SHORT.get(x['kind']) or level_ua(x['kind'])})" if i == 1 and x.get("kind") else ""))
         add("room", "Запас ходу: " + "; ".join(bits) + ".")
     # 6) докази модулів (лише ті, що підтримують), далі суперечності
     for m in th.get("evidence") or []:
         if isinstance(m, dict) and (m.get("supports") or 0) > 0 and m.get("finding") and "—" != str(m.get("finding")).strip():
-            add("evidence", f"{MODULE_UA.get(m.get('module'), m.get('module'))}: {plain_fact(m['finding'], long_)}.")
+            add("evidence", f"{MODULE_UA.get(m.get('module'), m.get('module'))}: {plain_fact(m['finding'], long_).removeprefix('M5: ')}.")
     against = [plain_fact(m.get("text"), long_) for m in (th.get("alignment") or []) if isinstance(m, dict) and "ПРОТИ" in str(m.get("verdict", "")) and m.get("text")]
     against += [f"{MODULE_UA.get(m.get('module'), m.get('module'))}: {plain_fact(m['finding'], long_)}" for m in (th.get("evidence") or []) if isinstance(m, dict) and (m.get("supports") or 0) < 0 and m.get("finding")]
     inv = th.get("invalidation") or {}
@@ -328,15 +329,25 @@ def card_url(card_id: str, base_url: str = "https://ai-office-miniapp.onrender.c
     return base_url.rstrip("/") + "/v2?tab=radar&card=" + quote(link_id(card_id), safe="")
 
 
+def _limit_short(gate_reason: Optional[str]) -> str:
+    g = str(gate_reason or "")
+    if "3 стоп" in g or "стопи за добу" in g:
+        return "денний ліміт 3 стопи"
+    if "READY за добу" in g or "кількості" in g:
+        return "денна кількість сигналів вичерпана"
+    if "кластер" in g or "ALT" in g or "ємність" in g:
+        return "ліміт сумарного ризику"
+    return "діє обмеження ризику"
+
+
 def _stop_line(p: Dict[str, Any]) -> tuple:
     """(рядок стопа, чи є обґрунтований стоп). У Telegram — лише рекомендований стоп; немає такого — чесне попередження."""
     st = p.get("stops") or {}
     rec = next((x for x in st.get("items") or [] if x["key"] == st.get("recommended")), None) if st.get("recommended") else None
     if rec:
-        extra = "" if rec["key"] == "v1" else f"; навчальна угода веде за поточним {p['sl']}"
-        return f"Стоп: {rec['sl_txt']} (−{rec['risk_pct']}%), структурно обґрунтований{extra}.", True
+        return f"Стоп: {rec['sl_txt']} (−{rec['risk_pct']}%), структурно обґрунтований.", True
     if st.get("items"):
-        return "Безпечний стоп не підтверджений. Вхід не дозволений.", False
+        return "Стоп: безпечний стоп не підтверджений.", False
     return (f"Стоп: {p['sl']} (−{p['sl_pct']}%)." if p.get("sl") else "Стоп не розраховано."), None
 
 
@@ -368,11 +379,11 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
     if plan.get("against"):
         tail.append("Проти: " + plan["against"][0] + ".")
     if learning:
-        concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f": {p['limit_note']}" if p.get("limit_note") else "") + "."
+        concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f" ({_limit_short(c.get('gate_reason'))})" if c.get("gate_reason") else "") + "."
     else:
         concl = "СПОСТЕРІГАЄМО — вхід ще не підтверджений."
     if stop_ok is False:
-        concl = "Безпечний стоп не підтверджений — вхід не дозволений." if not learning else concl + " Безпечний стоп не підтверджений."
+        concl = concl.rstrip(".") + ". Безпечний стоп не підтверджений. Вхід не дозволений."
     tail_end = ["Висновок: " + concl, f"⏳ До {p['expires']}", "📊 Відкрити графік:", card_url(c["card_id"], base_url)]
     items = list(plan["items"])
 
@@ -380,22 +391,19 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
         head = [f"{coin_short} · {p['dir'].lower()} · {status}", "ПЛАН І ПРИЧИНИ:"]
         if rs:
             head += [f"{i + 1}. " + (r["text"] if len(r["text"]) <= cut else r["text"][:cut - 1].rstrip() + "…") for i, r in enumerate(rs)]
-            if plan.get("extra"):
-                head.append(f"+ ще підтверджень: {plan['extra']} — у картці.")
+            omitted = plan.get("extra", 0) + len(items) - len(rs)
+            if omitted:
+                head.append(f"+ ще підтверджень: {omitted} — у картці.")
         else:
             head.append("Підтверджених причин у даних поки немає — не вигадуємо.")
         return "\n".join(head + tail + tail_end)
 
-    for cut in (150, 120, 95):
-        rs = items[:]
-        while True:
-            txt = build(rs, cut)
-            if len(txt) <= 1024 or len(rs) <= 3:
-                break
-            rs = rs[:-1]
-        if len(txt) <= 1024:
-            return txt
-    return build(items[:3], 80)[:1024]
+    for n in range(len(items), 2, -1):                     # спершу зберігаємо причини, потім скорочуємо їхній текст
+        for cut in (170, 130):
+            txt = build(items[:n], cut)
+            if len(txt) <= 1024:
+                return txt
+    return build(items[:3], 90)[:1024]
 
 
 def link_id(card_id: str) -> str:
