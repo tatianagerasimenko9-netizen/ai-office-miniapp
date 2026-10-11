@@ -265,7 +265,7 @@ def run_once(db: str, fetch: Any, symbols: List[str], now: float, log: Any = pri
     return res
 
 
-def summary(db: str, limit: int = 40) -> Dict[str, Any]:
+def summary(db: str, limit: int = 40, now: Optional[float] = None) -> Dict[str, Any]:
     """Для Mini App: активні й нещодавні shadow-сценарії з доказами (кожен з позначкою джерела/гіпотези) і станом. Не торгові сигнали."""
     import json
     import time
@@ -278,7 +278,7 @@ def summary(db: str, limit: int = 40) -> Dict[str, Any]:
         out["db"] = {"backend": idn.get("backend"), "fingerprint": idn.get("fingerprint")}
         _ensure(db)
         rows = _fetchall(db, "SELECT scenario_id, symbol, direction, tf, strong_ts, state, first_seen_ts, updated_ts, trigger_ts, would_be_ready, evidence_json, plan_json, state_history FROM office2_htf_shadow "
-                             "WHERE updated_ts > ? ORDER BY CASE state WHEN 'TRIGGERED' THEN 0 WHEN 'IN_ZONE' THEN 1 WHEN 'WAIT_PULLBACK' THEN 2 ELSE 3 END, updated_ts DESC LIMIT ?", (time.time() - 3 * 86400, limit))
+                             "WHERE updated_ts > ? ORDER BY CASE state WHEN 'TRIGGERED' THEN 0 WHEN 'IN_ZONE' THEN 1 WHEN 'WAIT_PULLBACK' THEN 2 ELSE 3 END, updated_ts DESC LIMIT ?", ((time.time() if now is None else now) - 3 * 86400, limit))
         names = ("scenario_id", "symbol", "direction", "tf", "strong_ts", "state", "first_seen_ts", "updated_ts", "trigger_ts", "would_be_ready", "evidence_json", "plan_json", "state_history")
         for r in rows:
             d = dict(zip(names, r))

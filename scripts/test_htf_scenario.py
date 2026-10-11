@@ -117,7 +117,7 @@ OB.init_office_db(db2)
 rr = H.run_once(db2, _fetch, ["TESTUSDT"], as_of)
 check("прохід по universe читає свічки з ISO-ts (формат біржі) і пише shadow", rr["errors"] == 0 and rr["new"] == 1 and OB._fetchall(db2, "SELECT state FROM office2_htf_shadow")[0][0] == "TRIGGERED", str(rr))
 
-sm = H.summary(db2)
+sm = H.summary(db2, now=as_of + 60)
 check("summary для Mini App: сценарій зі станом, доказами з позначкою джерела і нотатка «не сигнал»", sm["ok"] and len(sm["items"]) == 1 and sm["items"][0]["state"] == "TRIGGERED" and all(e.get("src") for e in sm["items"][0]["evidence"]) and "не сигнал" in sm["note"] and sm["db"]["backend"] == "sqlite", str(sm)[:200])
 
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
