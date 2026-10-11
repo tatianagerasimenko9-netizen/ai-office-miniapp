@@ -1,0 +1,81 @@
+name: Feature study (Brain replay, error analysis on full history)
+
+# Робота над помилками: replay Brain v2.1 на реальних свічках Binance за кілька вікон + таблиця «ознака → результат» з перевіркою на пізнішому періоді.
+# Лише читає публічний архів; production, Telegram і LIVE-правила не чіпає.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Символи через кому'
+        default: 'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,LTCUSDT,NEARUSDT,OPUSDT,SUIUSDT,UNIUSDT,ETCUSDT,FILUSDT,HBARUSDT,TIAUSDT,SEIUSDT,1000PEPEUSDT,1000SHIBUSDT,FETUSDT,RUNEUSDT,ALGOUSDT,MKRUSDT,WLDUSDT,ONDOUSDT,JUPUSDT'
+      end_dates:
+        description: 'Кінці вікон через кому, YYYY-MM-DD'
+        default: '2026-10-09,2026-09-25,2026-09-11'
+      days:
+        description: 'Днів на вікно'
+        default: '14'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          s = [x.strip().upper() for x in os.environ["SYMS"].split(",") if x.strip()]
+          e = [x.strip() for x in os.environ["ENDS"].split(",") if x.strip()]
+          print("matrix=" + json.dumps({"include": [{"symbol": a, "end": b} for a in s for b in e]}))
+          PY
+        env:
+          SYMS: ${{ inputs.symbols }}
+          ENDS: ${{ inputs.end_dates }}
+  replay:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay ${{ matrix.symbol }} → ${{ matrix.end }}
+        timeout-minutes: 30
+        run: python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "${{ matrix.end }}" "${{ inputs.days }}" "out.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-${{ matrix.symbol }}-${{ matrix.end }}
+          path: out.json
+  report:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Звіт
+        run: python scripts/feature_study_report.py parts feature_study.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feature-study
+          path: feature_study.json
