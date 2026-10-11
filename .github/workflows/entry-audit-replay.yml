@@ -1,0 +1,31 @@
+name: Entry audit replay (isolated, read-only)
+
+# Ручний запуск. Реальні M15 Binance USDT-M → чи paper-вхід карток радара відбувся після власного тригера. Нічого не пише в БД/Render/Telegram.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Символи через кому (порожньо = усі з фікстури)'
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay
+        run: python -u scripts/entry_audit_replay.py --symbols "${{ inputs.symbols }}" | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entry-audit-replay
+          path: entry_audit_replay.json
