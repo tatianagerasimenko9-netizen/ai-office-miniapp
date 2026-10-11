@@ -1,4 +1,4 @@
-# HANDOFF — AI Trading Office (оновлено 11.10.2026 ~09:15Z)
+# HANDOFF — AI Trading Office (оновлено 11.10.2026 ~10:05Z)
 
 Нова сесія: прочитай цей файл, перевір факти в GitHub/Render/БД (не довіряй файлу сліпо), продовжуй з «Наступний крок».
 
@@ -15,6 +15,14 @@
 - #192 (49b20ad) DYNAMIC WATCH_ONLY: `OFFICE2_DYNAMIC_UNIVERSE=watch` виставлено на Worker 11.10 08:59Z (`live` = єдиний шлях в основний цикл; `1/on/watch` = лише спостереження). Таблиці `office2_dynamic_candidate`/`office2_dynamic_log` створюються при першому оновленні; перевірити рядки. Mini App: Радар → «DYNAMIC · WATCH_ONLY», `/api/v2/dynamic_watch`.
 - P3 (PR #193): `office2/paper.py` — paper-позиції за правилами «вхід лише після доставки» (open першої 1m-свічки ≥ delivered_ts, MISSED якщо chase>0.5R/ціна за SL/TP1/нема даних), моделі A/B/C, витрати 0.15%, потік `office2-paper` (60 с), `/api/v2/paper`, `OFFICE2_TELEGRAM_FAILURE` у БД.
 - Прогалини: 41-ша SMC-схема відсутня — не вигадувати (unverified).
+
+## 11.10 10:05Z — що змінилось після #193–#195
+- **Злито й задеплоєно:** #192 DYNAMIC WATCH_ONLY (6 монет, 12 кандидатів, 0 витоків у LIVE), #193 paper-контур (`office2/paper.py`, потік `office2-paper`), #194 scope LIVE/BACKFILL/BACKFILL_INVALID (33 NO_DATA збережені, але поза статистикою), #195 Trade Intelligence (`office2/postmortem.py`: класи помилок з доказами, альтернативи V0–V8, evidence-digest; Mini App «Чому ця угода?»). #196 (контрольний потік без PAPER_SINCE) — у роботі.
+- **Підтверджено в production:** paper-розрахунок збігся з milestone-трекером на 4 сигналах до запуску (LINK/HBAR/NEAR SL, SOL відкрита); авто-розбір записаний (`postmortem_json` pm-2). LIVE paper-позицій після запуску ще 0 (немає нових READY).
+- **Чому немає нових READY:** денний ліміт «3 стопи за добу UTC» (діє до 00:00 UTC), за добу відсік 30 would-be READY на 18 монетах. Ліміт НЕ змінювався (рішення власниці). Контрольний потік (`scope='CONTROL'`) рахує, що було б.
+- **V7/V8:** `fixtures/learning/replay_paired_2026-10.json`, `BINANCE_REPLAY_2026-10.md`: переваги не підтверджено в обох періодах; у LIVE не вмикати.
+- **Знання:** `KNOWLEDGE_AUDIT.md`, `GERCHIK_AUDIT.md`, `COST_MODEL.md`. Прогалини: окрема модель BREAKOUT+RETEST у v2.1 відсутня; DOM/GEX/календар не підключені; книги Вайкоффа немає.
+- **Актуальний контекст:** артефакти Actions не завантажуються з sandbox (host заблоковано) — читати aggregate через `get_job_logs(return_content=true)` + розбір JSON; `gh api` працює лише для api.github.com.
 
 ## Інструменти (без участі Render)
 - Replay на реальних свічках Binance: GitHub Actions → `binance-replay.yml` (workflow_dispatch; inputs symbols/end_date/days; публічний архів data.binance.vision; жодних секретів). Результат — у логу job `aggregate` + артефакт `aggregate.json`. Запуск через `actions_run_trigger` з `ref=<гілка>`.
@@ -34,6 +42,7 @@
 4. `OFFICE2_SMC_REPLAY` на живому сервісі НЕ потрібен — замінено Actions-replay.
 
 ## Наступний крок
+0. Дочекатись першого справжнього READY після запуску: перевірити ланцюг сигнал → Telegram → paper-позиція → TP/SL → postmortem → Mini App.
 1. Paper-forward: накопичувати `learning_flags`/`session_tag`/`conflict` у READY; через ≥ 30 розв'язаних угод з кожною міткою перерахувати (звіт `office2_learning_report`).
 2. Причини затримок доставки 297–1062 с: логи 6.10 17:45 BTC, 9.10 01:15 WLD / 02:15 NEAR+ONDO.
 3. Структурний SL та sweep/BOS-вхід у counterfactual (потрібні swing-и в подіях replay).
