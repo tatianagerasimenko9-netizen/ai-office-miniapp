@@ -6,7 +6,7 @@
   BLOCKED — READY-рівень, який відсік захист (ліміт стопів/ємність): показуємо, чому, і ведемо paper «що було б»; захист не послаблюється;
   READY   — окремий LIVE-потік (office2.delivery), тут лише позначка PROMOTED.
 Супровід: paper-симуляція за свічками Binance ПІСЛЯ появи картки (вхід — лише лімітом на ціні входу, SL першим у спірній свічці, витрати 0.15 %), без заглядання в майбутнє.
-У Telegram іде короткий WATCH-пост лише для ARMED 3/3 і BLOCKED (антиспам: ≤ N/год, ≤ M/добу, 1 картка на монету/4 год), з позначкою «не вхід».
+У Telegram йдуть навчальні спостереження RETRACE 2/3, ARMED 3/3 та BLOCKED (антиспам: ≤ N/год, ≤ M/добу, 1 картка на монету/4 год), з позначкою «не вхід».
 """
 from __future__ import annotations
 
@@ -303,7 +303,7 @@ def format_card(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.on
 
 
 def pick_for_tg(db: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Картки, що йдуть у Telegram: plan_ok, ARMED або BLOCKED, строк не вийшов, ще не відправлені; ліміти антиспаму."""
+    """Картки в Telegram: plan_ok, ранній RETRACE / ARMED / BLOCKED, актуальні, ще не відправлені; ліміти антиспаму."""
     from office_bridge import _fetchall
 
     t = time.time() if now is None else now
@@ -317,8 +317,8 @@ def pick_for_tg(db: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
         return []
     recent_syms = {r[0] for r in _fetchall(db, "SELECT symbol FROM office2_radar_card WHERE sent_ts > ?", (t - TG_SYMBOL_COOLDOWN_SEC,))}
     cols = ",".join(_COLS)
-    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ('ARMED','BLOCKED')) AND scen_state IN ('WAIT','NO_TRADE') "
-                         "AND COALESCE(paper_status,'') IN ('','WAITING_ENTRY') AND tg_tries < ? ORDER BY CASE kind WHEN 'BLOCKED' THEN 0 ELSE 1 END, created_ts", (t, TG_MAX_TRIES))
+    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ('RETRACE','ARMED','BLOCKED')) AND scen_state IN ('WAIT','NO_TRADE') "
+                         "AND COALESCE(paper_status,'') IN ('','WAITING_ENTRY') AND tg_tries < ? ORDER BY CASE stage WHEN 'BLOCKED' THEN 0 WHEN 'ARMED' THEN 1 ELSE 2 END, created_ts", (t, TG_MAX_TRIES))
     out, seen = [], set(recent_syms)
     for r in rows:
         c = dict(zip(_COLS, r))
