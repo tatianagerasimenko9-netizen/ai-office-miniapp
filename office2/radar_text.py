@@ -161,6 +161,111 @@ def postmortem_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "final": bool(pm.get("final")), "timing": pm.get("timing") or {}}
 
 
+ZONE_PART_UA = {"OTE 62–79%": "відкат 62–79% імпульсу", "OB": "блок ордерів (OB)", "FVG": "незаповнений розрив (FVG)", "BPR": "перетин розривів (BPR)"}
+
+
+def _dt(ts: Any) -> str:
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        return datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Kyiv")).strftime("%d.%m %H:%M")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _a(x: Any) -> str:
+    try:
+        return f"{float(x):.1f}".replace(".", ",")
+    except (TypeError, ValueError):
+        return ""
+
+
+def reasons_from_thesis(th: Dict[str, Any], direction: str, sym: str) -> Dict[str, Any]:
+    """Пронумеровані ПРИЧИНИ з фактів сценарію Brain (рівень, подія, зсув структури, нога й зона, відкат, тригер, запас ходу, докази модулів). Кожна причина — лише те, що є в даних:
+    немає факту — немає пункту. Суперечності (alignment/докази проти) — окремо. Спільне для Telegram і Mini App (формується на сервері один раз)."""
+    long_ = str(direction).upper() != "SHORT"
+    ev = th.get("event") or {}
+    lvl, br, leg = th.get("level") or ev.get("level") or {}, th.get("break") or {}, th.get("leg") or {}
+    seq = th.get("sequence") or []
+    R: List[Dict[str, str]] = []
+
+    def add(kind: str, text: str) -> None:
+        if text:
+            R.append({"kind": kind, "text": text})
+
+    # 1) рівень і подія
+    if ev.get("src") == "ORIGIN" and ev.get("origin"):
+        o = ev["origin"]
+        imp = o.get("impulse") or {}
+        t = f"Початок руху: імпульс {_a(imp.get('size_atr'))} ATR ({_a(imp.get('size_pct'))}%)"
+        if o.get("retrace") is not None:
+            t += f", відкат {int(round(float(o['retrace']) * 100))}% імпульсу"
+        if (o.get("attacks") or {}).get("n"):
+            t += f", атак на рівень {o['attacks']['n']}"
+        if o.get("compression"):
+            t += ", є підтиснення"
+        add("event", t + ".")
+    elif lvl.get("p"):
+        how = "повторний тест рівня" if ev.get("class") == "LATE_SWEEP" else "зняття ліквідності за рівнем"
+        t = f"Рівень: {level_ua(lvl.get('kind'))} {num(lvl['p'], sym)} — {how}" + (f" {_dt(ev['ts'])}" if ev.get("ts") else "")
+        if ev.get("extreme"):
+            t += f" (екстремум {num(ev['extreme'], sym)})"
+        pr = ev.get("prior") or {}
+        if pr.get("closes_beyond"):
+            t += f"; перед цим за {pr.get('bars')} барів — закриттів за рівнем: {pr['closes_beyond']}"
+        add("event", t + ".")
+    # 2) зсув структури
+    if br.get("level"):
+        add("structure", f"Зсув структури: закриття {'вище' if long_ else 'нижче'} {num(br['level'], sym)}" + (f" {_dt(br['ts'])}" if br.get("ts") else "")
+            + (f", тіло свічки {_a(br['body_atr'])} ATR" if br.get("body_atr") else "") + (f", утримується {br['bars_held']} барів" if br.get("bars_held") else "") + ".")
+    # 3) нога й зона
+    zn = th.get("entry_zone") or th.get("zone")
+    if leg.get("from") and leg.get("to") and zn:
+        parts = " + ".join(ZONE_PART_UA.get(x, x) for x in (th.get("zone_parts") or []))
+        add("zone", f"Імпульс {num(leg['from'], sym)}→{num(leg['to'], sym)} ({_a(leg.get('atr'))} ATR); зона інтересу {num(min(zn), sym)}–{num(max(zn), sym)}" + (f": {parts}" if parts else "") + ".")
+    # 4) відкат / тригер — лише підтверджені кроки послідовності
+    for st in seq:
+        step, val = str(st.get("step") or ""), st.get("value")
+        if not st.get("ok") or not val:
+            continue
+        if step.startswith("ретрейс"):
+            add("retrace", "Відкат у зону: " + str(val).replace("low", "мінімум").replace("high", "максимум") + ".")
+        elif step.startswith("тригер"):
+            add("trigger", "Підтвердження на 15 хв: " + str(val) + ".")
+    # 5) запас ходу
+    tg = th.get("targets") or (th.get("preview") or {}).get("targets") or []
+    if tg:
+        bits = []
+        for i, x in enumerate(tg[:2], 1):
+            bits.append(f"ціль {i} {num(x.get('p'), sym)}" + (f" ({level_ua(x['kind'])})" if i == 1 and x.get("kind") else "") + (f" ≈{_a(x['r'])}× стопа" if x.get("r") else ""))
+        add("room", "Запас ходу: " + "; ".join(bits) + ".")
+    # 6) докази модулів (лише ті, що підтримують), далі суперечності
+    for m in th.get("evidence") or []:
+        if isinstance(m, dict) and (m.get("supports") or 0) > 0 and m.get("finding") and "—" != str(m.get("finding")).strip():
+            add("evidence", f"{m.get('module')}: {m['finding']}.")
+    against = [str(m.get("text")) for m in (th.get("alignment") or []) if isinstance(m, dict) and "ПРОТИ" in str(m.get("verdict", "")) and m.get("text")]
+    against += [f"{m.get('module')}: {m['finding']}" for m in (th.get("evidence") or []) if isinstance(m, dict) and (m.get("supports") or 0) < 0 and m.get("finding")]
+    inv = th.get("invalidation") or {}
+    return {"reasons": R, "against": against[:2], "wait": plain_need((th.get("need") or {}).get("text")),
+            "cancel": (f"ціна закріпиться за {num(inv['price'], sym)} (екстремум події)" if inv.get("price") else None)}
+
+
+def reasons_view(c: Dict[str, Any], limit: int = 5) -> Optional[Dict[str, Any]]:
+    import json
+
+    try:
+        d = json.loads(c.get("reasons_json") or "null")
+    except ValueError:
+        return None
+    if not d:
+        return None
+    rs = d.get("reasons") or []
+    order = {"event": 0, "structure": 1, "zone": 2, "retrace": 3, "trigger": 4, "room": 5, "evidence": 6}
+    top = sorted(rs, key=lambda r: order.get(r["kind"], 9))[:limit]
+    return {"items": [{"n": i + 1, **r} for i, r in enumerate(top)], "extra": max(0, len(rs) - len(top)), "against": d.get("against") or [], "wait": d.get("wait"), "cancel": d.get("cancel")}
+
+
 def present(c: Dict[str, Any]) -> Dict[str, Any]:
     """Усі готові до показу тексти картки (один раз на сервері: Telegram і Mini App показують однаково)."""
     blocked = c.get("kind") == "BLOCKED"
@@ -189,7 +294,7 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
             "entry": num(e, sym) if e else None, "sl": num(sl, sym) if sl else None, "sl_pct": pct(abs(sl - e) / e * 100.0) if e and sl else None,
             "targets": [dict(t, price_txt=num(t["price"], sym), pct_txt=pct(t["pct"]), mult_txt=(pct(t["mult"]) if t.get("mult") else None)) for t in targets(c)],
             "expires": kyiv(c.get("expires_ts")), "paper": paper, "result": res, "entry_note": c.get("entry_note"),
-            "stops": stops_view(c), "postmortem": postmortem_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
+            "stops": stops_view(c), "plan": reasons_view(c), "postmortem": postmortem_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
 
 
 def card_url(card_id: str, base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
@@ -199,34 +304,72 @@ def card_url(card_id: str, base_url: str = "https://ai-office-miniapp.onrender.c
     return base_url.rstrip("/") + "/v2?tab=radar&card=" + quote(link_id(card_id), safe="")
 
 
-def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
-    """Short readable Telegram caption: <=1024 chars so photo and text carry same essentials."""
-    p = present(c)
-    is_learning = c.get("kind") == "BLOCKED"
-    title = "🎓 НАВЧАЛЬНА УГОДА" if is_learning else "👀 СПОСТЕРІГАЄМО — НЕ ВХОДИТИ"
-    lines = [f"{title} · {p['coin'].split(' ')[0]}", f"{p['icon']} {p['dir']}"]
-    lines.append("✅ Умови підтверджені тільки для навчання." if is_learning else
-                 ("⏳ Ціна біля входу, бракує підтвердження." if c.get("stage") == "ARMED" else
-                  "⏳ Чекаємо повернення ціни в зону та підтвердження."))
-    lines.append(p["why"] + ".")
-    if p.get("zone"):
-        lines.append("Зона: " + p["zone"])
-    if p.get("entry"):
-        lines.append("Плановий вхід: " + p["entry"])
-    if p.get("sl"):
-        lines.append("Стоп: " + p["sl"])
-    active_targets = [x for x in p["targets"] if x["active"]]
-    if active_targets:
-        lines.append("Цілі: " + " · ".join(f"{x['n']}) {x['price_txt']}" for x in active_targets[:2]))
+def _stop_line(p: Dict[str, Any]) -> tuple:
+    """(рядок стопа, чи є обґрунтований стоп). У Telegram — лише рекомендований стоп; немає такого — чесне попередження."""
     st = p.get("stops") or {}
+    rec = next((x for x in st.get("items") or [] if x["key"] == st.get("recommended")), None) if st.get("recommended") else None
+    if rec:
+        extra = "" if rec["key"] == "v1" else f"; навчальна угода веде за поточним {p['sl']}"
+        return f"Стоп: {rec['sl_txt']} (−{rec['risk_pct']}%), структурно обґрунтований{extra}.", True
     if st.get("items"):
-        valid = [x for x in st["items"] if x.get("justified")]
-        lines.append("⚠️ Усі варіанти стопа потребують переоцінки." if not valid else
-                     f"Стопи: {len(valid)}/{len(st['items'])} пройшли структурну перевірку.")
-    if c.get("paper_status") in ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT"):
-        lines.append("Підсумок: " + p["paper"] + ".")
-    lines.extend(["⏳ До " + p["expires"], "📊 Відкрити картку:", card_url(c["card_id"], base_url)])
-    return "\n".join(lines)[:1024]
+        return "Безпечний стоп не підтверджений. Вхід не дозволений.", False
+    return (f"Стоп: {p['sl']} (−{p['sl_pct']}%)." if p.get("sl") else "Стоп не розраховано."), None
+
+
+def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
+    """Підпис картки Telegram (≤1024, щоб лінк на картку не обрізався): монета · напрям · статус → пронумеровані ПРИЧИНИ (лише підтверджені факти) → чекаємо → вхід/стоп/цілі →
+    скасування → висновок → лінк. Три варіанти стопа й усі докази — у картці Mini App."""
+    p = present(c)
+    learning = c.get("kind") == "BLOCKED"
+    coin_short = p["coin"].split(" ")[0]
+    status = "навчальна угода" if learning else "спостереження"
+    plan = p.get("plan") or {"items": [], "extra": 0, "against": [], "wait": None, "cancel": None}
+    stop_txt, stop_ok = _stop_line(p)
+    act = [x for x in p["targets"] if x["active"]]
+    tail: List[str] = []
+    if not learning:
+        tail.append("Чекаємо: " + (plan.get("wait") or p.get("need") or ("підтвердження біля зони входу." if c.get("stage") == "ARMED" else "повернення ціни в зону входу та підтвердження.")))
+    entry_bits = []
+    if p.get("zone"):
+        entry_bits.append("зона " + p["zone"])
+    if p.get("entry"):
+        entry_bits.append("орієнтир " + p["entry"])
+    if entry_bits:
+        tail.append(("Вхід (умовний): " if learning else "Вхід (після підтвердження): ") + ", ".join(entry_bits) + ".")
+    tail.append(stop_txt)
+    if act:
+        tail.append("Цілі: " + " / ".join(f"{x['price_txt']}" + (f" (≈{x['mult_txt']}×)" if x.get("mult_txt") else "") for x in act[:2]) + ".")
+    if plan.get("cancel"):
+        tail.append("Скасування: " + plan["cancel"] + ".")
+    if plan.get("against"):
+        tail.append("Проти: " + plan["against"][0] + ".")
+    if learning:
+        concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f" ({p['limit_note']})" if p.get("limit_note") else "") + "."
+    else:
+        concl = "СПОСТЕРІГАЄМО — вхід ще не підтверджений."
+    if stop_ok is False:
+        concl = "Безпечний стоп не підтверджений — вхід не дозволений." if not learning else concl + " Безпечний стоп не підтверджений."
+    tail_end = ["Висновок: " + concl, f"⏳ До {p['expires']}", "📊 Відкрити графік:", card_url(c["card_id"], base_url)]
+    items = list(plan["items"])
+
+    def build(rs: List[Dict[str, Any]], cut: int) -> str:
+        head = [f"{coin_short} · {p['dir'].lower()} · {status}", "ПЛАН І ПРИЧИНИ:"]
+        if rs:
+            head += [f"{i + 1}. " + (r["text"] if len(r["text"]) <= cut else r["text"][:cut - 1].rstrip() + "…") for i, r in enumerate(rs)]
+        else:
+            head.append("Підтверджених причин у даних поки немає — не вигадуємо.")
+        return "\n".join(head + tail + tail_end)
+
+    for cut in (150, 120, 95):
+        rs = items[:]
+        while True:
+            txt = build(rs, cut)
+            if len(txt) <= 1024 or len(rs) <= 3:
+                break
+            rs = rs[:-1]
+        if len(txt) <= 1024:
+            return txt
+    return build(items[:3], 80)[:1024]
 
 
 def link_id(card_id: str) -> str:

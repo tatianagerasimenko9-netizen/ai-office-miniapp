@@ -112,6 +112,7 @@ details.dbg>summary{cursor:pointer;color:var(--mut);font-size:13px;padding:8px 0
 .o2need{background:var(--raise);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px;line-height:1.45}
 details.o2d>summary{cursor:pointer;color:var(--acc);font-size:13px;padding:6px 0}
 details.o2d pre{white-space:pre-wrap;word-break:break-word;font-size:11px;margin:4px 0;color:var(--mut)}
+.o2ol{margin:8px 0 4px 18px;padding:0}.o2ol li{margin:4px 0;line-height:1.35}
 </style>
 </head>
 <body>
@@ -386,6 +387,11 @@ async function openRadarCard(id){
   const sv=h.stops; const COL={v1:'#F36B78',v2:'#FFB347',v3:'#C792EA'};
   const s={symbol:x.symbol,zone_lo:x.zone_lo,zone_hi:x.zone_hi,sl:x.sl,tp1:x.tp1,tp2:x.tp2,tp3:x.tp3,entry_px:x.entry,display:{},__ua:true,
     __extra:sv?sv.items.filter(i=>i.key!=='v1').map(i=>({p:i.sl,color:COL[i.key],title:i.name})):[]};
+  const pl=h.plan; const planHtml=`<div class="card"><b>План і причини входу</b>
+    ${pl&&pl.items&&pl.items.length?'<ol class="o2ol">'+pl.items.map(i=>'<li>'+esc(i.text)+'</li>').join('')+'</ol>'+(pl.extra?'<div class="o2sub">Ще підтверджень: '+pl.extra+' (нижче в деталях)</div>':''):'<div class="o2sub">Підтверджених причин у даних поки немає — не вигадуємо.</div>'}
+    ${pl&&pl.against&&pl.against.length?'<div class="o2need"><b>Проти:</b> '+pl.against.map(esc).join('; ')+'</div>':''}
+    ${pl&&pl.wait?'<div class="o2need"><b>Чекаємо:</b> '+esc(pl.wait)+'</div>':''}
+    ${pl&&pl.cancel?'<div class="o2m">Скасування: '+esc(pl.cancel)+'</div>':''}</div>`;
   const stopsHtml=sv?`<div class="card"><b>Три варіанти стопа</b><div class="o2sub">${esc(sv.note)}</div>
     ${sv.items.map(i=>`<div class="o2need" style="border-left:4px solid ${COL[i.key]}"><b>${esc(i.name)}</b>: <span class="num">${esc(i.sl_txt)}</span> (ризик ${esc(i.risk_pct)}%) ${i.justified?'<span class="pill ok">обґрунтований</span>':'<span class="pill watch">сумнівний</span>'}<br>
       <span class="o2m">До цілей: ${i.mult1?'ціль 1 ≈'+esc(i.mult1)+'× стопа':''}${i.mult2?' · ціль 2 ≈'+esc(i.mult2)+'×':''}${i.mult3?' · ціль 3 ≈'+esc(i.mult3)+'×':''}</span><br>${esc(i.explain)}<br>
@@ -402,7 +408,7 @@ async function openRadarCard(id){
     <div id="ch" style="height:320px;margin:10px 0"></div><div class="mut" id="asof"></div>
     <div class="card"><b>План</b><div class="mut" style="margin-top:6px">${lrPlan(h)}</div>
       ${kv('Чому',esc(h.why||''))}${h.need?kv('Чекаємо',esc(h.need)):''}${kv('Створено',LR_TM(x.created_ts))}${kv('Діє до',esc(h.expires||''))}</div>
-    ${stopsHtml}${pmHtml}
+    ${planHtml}${stopsHtml}${pmHtml}
     <div class="card"><b>Супровід навчальної угоди</b>${kv('Стан',esc(h.paper||''))}
       ${x.entry_ts?kv('Ціна дійшла до входу',LR_TM(x.entry_ts)):''}${x.exit_ts?kv('Завершено',LR_TM(x.exit_ts)):''}${h.result?kv('Результат',esc(h.result)):''}
       <div class="o2sub">Telegram: ${x.tg_status==='SENT'?'надіслано '+LR_TM(x.sent_ts):'ще не надсилали'}. ${esc(x.last_error||'')}</div>
