@@ -229,6 +229,17 @@ def finish_trade_telegram(*, key: str, delivered: bool, now_ts: float = 0.0) -> 
         _TRADE_TG_LAST[k] = float(now_ts or time_mod.time())
 
 
+def radar_card_button(text: str, base_url: str = "") -> Optional[Dict[str, Any]]:
+    """Кнопка «Відкрити цю картку» для навчальних карток радара: бере короткий ідентифікатор із посилання в тексті картки (…/v2?tab=radar&card=B-abc123)."""
+    import re as _re
+
+    base = str(base_url or "").strip().rstrip("/")
+    m = _re.search(r"/v2\?tab=radar&card=([A-Za-z0-9_-]+)", str(text or ""))
+    if not base or not m:
+        return None
+    return {"inline_keyboard": [[{"text": "📊 Відкрити цю картку", "url": f"{base}/v2?tab=radar&card={m.group(1)}"}]]}
+
+
 def mini_app_button(
     *, symbol: str = "", scenario_id: str = "", base_url: str = "",
 ) -> Optional[Dict[str, Any]]:

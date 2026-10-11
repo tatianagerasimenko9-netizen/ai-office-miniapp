@@ -2846,10 +2846,9 @@ async def run() -> None:
                     base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
                 )
                 if intent == "WATCH_RADAR":
-                    match = re.search(r"/v2\\?tab=radar&card=([A-Za-z0-9_-]+)", text_part)
-                    if match:
-                        base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").rstrip("/")
-                        btn_markup = {"inline_keyboard": [[{"text": "📊 Відкрити цю картку", "url": base + "/v2?tab=radar&card=" + match.group(1)}]]}
+                    from office_telegram_policy import radar_card_button
+
+                    btn_markup = radar_card_button(text_part, os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com")) or btn_markup
             token = agent_bot_tokens.get(agent_key or "")
             _rel: Dict[str, Any] = {"retries": 2, "timeout_sec": 30.0} if btn_markup else {}
             _dkey = delivery_key("TXT|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, text_part)
@@ -2969,10 +2968,9 @@ async def run() -> None:
             base_url=os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"),
         )
         if intent == "WATCH_RADAR":
-            match = re.search(r"/v2\\?tab=radar&card=([A-Za-z0-9_-]+)", cap)
-            if match:
-                base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").rstrip("/")
-                photo_btn = {"inline_keyboard": [[{"text": "📊 Відкрити цю картку", "url": base + "/v2?tab=radar&card=" + match.group(1)}]]}
+            from office_telegram_policy import radar_card_button
+
+            photo_btn = radar_card_button(cap, os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com")) or photo_btn
         if token:
             _dk = delivery_key("PHOTO|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, "" if scenario_id else cap)
 
