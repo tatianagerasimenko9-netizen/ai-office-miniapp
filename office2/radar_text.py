@@ -200,33 +200,48 @@ def card_url(card_id: str, base_url: str = "https://ai-office-miniapp.onrender.c
 
 
 def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
-    """Short readable Telegram caption: <=1024 chars so photo and text carry same essentials."""
+    """Підпис картки в Telegram: СПОЧАТКУ людський висновок (що бачимо, що чекаємо, чи можна входити), потім умовний план у кількох рядках. ≤1024 символів.
+    Деталі (три варіанти стопа, далекі цілі, примітки) — у картці Mini App."""
     p = present(c)
-    is_learning = c.get("kind") == "BLOCKED"
-    title = "🎓 НАВЧАЛЬНА УГОДА" if is_learning else "👀 СПОСТЕРІГАЄМО — НЕ ВХОДИТИ"
-    lines = [f"{title} · {p['coin'].split(' ')[0]}", f"{p['icon']} {p['dir']}"]
-    lines.append("✅ Умови підтверджені тільки для навчання." if is_learning else
-                 ("⏳ Ціна біля входу, бракує підтвердження." if c.get("stage") == "ARMED" else
-                  "⏳ Чекаємо повернення ціни в зону та підтвердження."))
-    lines.append(p["why"] + ".")
-    if p.get("zone"):
-        lines.append("Зона: " + p["zone"])
+    learning = c.get("kind") == "BLOCKED"
+    coin_short = p["coin"].split(" ")[0]
+    if learning:
+        L = [f"🎓 {coin_short}: {p['dir'].lower()} — навчальна угода",
+             "Входити за реальні гроші? НІ. Це тренування: умови підтверджені, але ордерів і грошей немає.",
+             "Що бачимо: " + p["why"] + "."]
+        if p.get("limit_note"):
+            L.append("Чому не реальна: " + str(p["limit_note"]).rstrip(".") + ".")
+    else:
+        L = [f"👀 {coin_short}: {p['dir'].lower()} — спостерігаємо, НЕ ВХОДИТИ",
+             "Входити? НІ — вхід ще не підтверджений.",
+             "Що бачимо: " + p["why"] + "."]
+        if p.get("need"):
+            L.append("Чекаємо: " + p["need"])
+        else:
+            L.append("Чекаємо: " + ("підтвердження біля зони входу." if c.get("stage") == "ARMED" else "повернення ціни в зону входу та підтвердження."))
+    plan = []
     if p.get("entry"):
-        lines.append("Плановий вхід: " + p["entry"])
+        plan.append("вхід " + p["entry"])
     if p.get("sl"):
-        lines.append("Стоп: " + p["sl"])
-    active_targets = [x for x in p["targets"] if x["active"]]
-    if active_targets:
-        lines.append("Цілі: " + " · ".join(f"{x['n']}) {x['price_txt']}" for x in active_targets[:2]))
+        plan.append(f"стоп {p['sl']} (−{p['sl_pct']}%)")
+    act = [x for x in p["targets"] if x["active"]]
+    for x in act[:2]:
+        plan.append(f"ціль {x['n']} {x['price_txt']} (≈{x['mult_txt']}× стопа)" if x.get("mult_txt") else f"ціль {x['n']} {x['price_txt']}")
+    if plan:
+        L.append(("Умовний план: " if learning else "Якщо підтвердиться, план: ") + " · ".join(plan) + ".")
+    if p.get("zone"):
+        L.append("Зона входу: " + p["zone"])
     st = p.get("stops") or {}
     if st.get("items"):
-        valid = [x for x in st["items"] if x.get("justified")]
-        lines.append("⚠️ Усі варіанти стопа потребують переоцінки." if not valid else
-                     f"Стопи: {len(valid)}/{len(st['items'])} пройшли структурну перевірку.")
+        ok = [x for x in st["items"] if x.get("justified")]
+        if not ok:
+            L.append("Про стоп: він короткий для такої волатильності або біля очевидного рівня — легко вибити випадковим рухом. Деталі в картці.")
+        else:
+            L.append(f"Про стоп: структурно обґрунтований — {ok[0]['name'].split('·')[-1].strip()}. Усі три варіанти в картці.")
     if c.get("paper_status") in ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT"):
-        lines.append("Підсумок: " + p["paper"] + ".")
-    lines.extend(["⏳ До " + p["expires"], "📊 Відкрити картку:", card_url(c["card_id"], base_url)])
-    return "\n".join(lines)[:1024]
+        L.append("Підсумок: " + p["paper"] + ".")
+    L.extend(["⏳ До " + p["expires"], "📊 Відкрити картку:", card_url(c["card_id"], base_url)])
+    return "\n".join(L)[:1024]
 
 
 def link_id(card_id: str) -> str:
