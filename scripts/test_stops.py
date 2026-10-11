@@ -105,6 +105,16 @@ check("розбір не має висновку 'помилка': лише оз
 check("відкрита угода розбору не має", RW.postmortem_card(dict(card2, paper_status="ENTERED"), cl, tb + 900 * 400) is None)
 pm_early = RW.postmortem_card(card2, cl, tb + 900 * 20)
 check("якщо 24 год ще не минуло — final=False, невідомі горизонти None", pm_early and pm_early["final"] is False and pm_early["after_r"]["24h"] is None, str(pm_early))
+# --- формат реальних свічок біржі: ts — ISO-рядок (регресія: у production розбір падав на порівнянні float з рядком)
+from datetime import datetime, timezone
+cl_iso = [dict(b, ts=datetime.fromtimestamp(b["ts"], tz=timezone.utc).isoformat()) for b in cl]
+cln = RW._candles(cl_iso)
+check("свічки з ISO-рядком ts нормалізуються в число", all(isinstance(b["ts"], float) for b in cln))
+sv_iso = RW.evaluate_variants(card, cln, tb + 900 * 20)
+check("оцінка варіантів стопа з реальним форматом свічок працює і збігається", sv_iso["v1"]["status"] == "SL" and (sv_iso["v1"].get("after") or {}).get("verdict") == "STOP_HUNT", str(sv_iso)[:200])
+pm_iso = RW.postmortem_card(card2, cln, tb + 900 * 400)
+check("розбір угоди з реальним форматом свічок працює", pm_iso and pm_iso["mae_r"] >= 1.0, str(pm_iso))
+
 from office2 import radar_text as RTx
 view = RTx.postmortem_view(dict(card2, postmortem_json=json.dumps(pm)))
 check("Mini App отримує готовий розбір простою мовою", view and "закрилась" in view["summary"] and view["note"], str(view))
