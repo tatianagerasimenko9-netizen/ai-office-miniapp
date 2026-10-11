@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 RISK_USD = 10.0
 MAX_CHASE_R = 0.5
 MAX_HOLD_SEC = 48 * 3600
+# paper-облік веде лише сигнали, доставлені після запуску контуру: історичні (до 11.10 09:20Z) не мають 1m-даних про момент доставки й дали б хибні MISSED
+PAPER_SINCE_TS = 1791710400.0
 MODELS = {"A": ((1.0,), False), "B": ((0.5, 0.5), True), "C": ((0.3, 0.4, 0.3), True)}
 
 DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
@@ -221,6 +223,15 @@ def open_position(p: Dict[str, Any], bars1: List[Tuple[float, ...]]) -> None:
     p["fill_ts"], p["fill_price"], p["status"] = d["fill_ts"], d["fill_price"], "OPEN"
 
 
+def since_ts() -> float:
+    import os
+
+    try:
+        return float(os.getenv("OFFICE2_PAPER_SINCE", "") or PAPER_SINCE_TS)
+    except ValueError:
+        return PAPER_SINCE_TS
+
+
 def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, lookback_days: int = 7) -> Dict[str, int]:
     """Один прохід: нові доставлені → вхід/MISSED; відкриті → перерахунок за свічками. Ідемпотентний."""
     from office_bridge import _fetchall
@@ -230,7 +241,7 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
     out = {"new": 0, "missed": 0, "updated": 0, "closed": 0, "errors": 0}
     known = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_paper_position")}
     rows = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, delivered_ts, status, last_error, snapshot_json FROM office2_live_signal "
-                         "WHERE status IN ('DELIVERED','SUPPRESSED') AND created_ts > ? ORDER BY created_ts", (now - lookback_days * 86400,))
+                         "WHERE status IN ('DELIVERED','SUPPRESSED') AND created_ts > ? ORDER BY created_ts", (max(now - lookback_days * 86400, since_ts()),))
     for row in rows:
         if row[0] in known:
             continue

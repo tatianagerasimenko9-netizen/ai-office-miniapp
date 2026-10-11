@@ -21,7 +21,7 @@ def B(t, o, h, l, c):
     return (float(t), float(o), float(h), float(l), float(c))
 
 
-T0 = 1_800_000_000.0
+T0 = 1_800_000_000.0   # після PAPER_SINCE_TS
 # LONG: план 100, SL 99 (risk 1), TP1 102, TP2 104, TP3 106
 D = T0 + 30      # доставка посеред хвилини
 # --- 1. вхід
@@ -121,6 +121,12 @@ gross_a = 1.9 / 1.1  # (102-100.1)/1.1
 check("витрати 0.15% ноціоналу відняті: A", abs(p1["pnl_a"] - round((gross_a - cost / 10.0) * 10.0, 2)) < 0.011 and abs(p1["cost_usd"] - cost) < 1e-6, str((p1["pnl_a"], cost)))
 check("summary: комісії і сума PnL", s["stats"]["closed"] == 1 and s["stats"]["open"] == 0 and s["stats"]["missed"] == 2 and abs(s["stats"]["fees_usd"] - round(cost, 2)) < 0.011)
 check("B і C відрізняються від A (часткові виходи)", p1["pnl_b"] != p1["pnl_a"] and p1["pnl_c"] != p1["pnl_b"])
+
+# історичні сигнали (до запуску контуру) не створюють paper-рядків
+_execute(db, "INSERT INTO office2_live_signal(scenario_id,symbol,direction,created_ts,valid_until_ts,status,snapshot_json,version,delivered_ts,msg_id,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+         ("OLD", "OLDUSDT", "LONG", P.PAPER_SINCE_TS - 3600, P.PAPER_SINCE_TS + 9999, "DELIVERED", snap(100, 99, [102]), "v", P.PAPER_SINCE_TS - 3500, 9, None))
+P.tick(db, mk_fetch(), T0 + 400, log=log.append)
+check("історичний сигнал до запуску не обліковується", "OLD" not in {x["scenario_id"] for x in P.summary(db)["items"]})
 
 # --- 4. збій Telegram → технічне попередження в БД (раз на сигнал)
 from office2 import delivery as DL
