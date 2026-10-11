@@ -38,6 +38,16 @@ def main(out: str) -> None:
             e["no_data"] = True
     blocked = [e for e in events if e["source"] == "BLOCKED"]
     deliv = [e for e in events if e["source"] == "DELIVERED"]
+    # фактичні стопи доставлених: час SL-milestone з production (а не симульований) — саме його бачить лічильник ліміту
+    real_sl = {}
+    for r in mil:
+        if r["level"] == "SL":
+            real_sl[r["sid"]] = float(r["sent"])
+    for e in deliv:
+        if e["id"] in real_sl:
+            e["sl_milestone_ts"] = real_sl[e["id"]]
+    for e in events:
+        e["after_data_end"] = bool(e["decision_ts"] >= data_end - 3600)
     # валідація симуляції проти реального трекера Office2 (milestones): перший результат TP1/SL
     ms = {}
     for r in sorted(mil, key=lambda r: float(r["sent"])):
@@ -58,7 +68,9 @@ def main(out: str) -> None:
     res = {"data": {"symbols": len(bars), "missing": missing, "data_end": data_end, "events": len(events), "blocked": len(blocked), "delivered": len(deliv)},
            "validation_vs_tracker": {"compared": comp, "agree": agree, "mismatches": mism[:10]},
            "gate_timeline": G.gate_timeline(mil),
-           "blocked_summary": G.metrics(blocked, "blocked_all"),
+           "actual_delivered_baseline": G.metrics(deliv, "actual_delivered"),
+           "blocked_summary": G.metrics([e for e in blocked if not e["after_data_end"]], "blocked_with_data"),
+           "blocked_no_data_after_archive_end": sum(1 for e in blocked if e["after_data_end"]),
            "blocked_by_day": {},
            "rules": {k: G.run_rule(k, events) for k in G.RULES},
            "flags_blocked": G.flag_table(blocked), "flags_all": G.flag_table([e for e in events if e["source"] in ("BLOCKED", "DELIVERED")]),
@@ -70,7 +82,7 @@ def main(out: str) -> None:
     res["blocked_expectancy_ci95"] = G.bootstrap_mean_ci(xs)
     Path(out).write_text(json.dumps(res, ensure_ascii=False, indent=1, default=float))
     c = {k: {x: v[x] for x in ("admitted", "entered", "tp1_first", "sl_first", "unresolved", "pnl_a_usd", "pnl_b_usd", "expectancy_r_a", "profit_factor_a", "max_drawdown_usd")} for k, v in res["rules"].items()}
-    print(json.dumps({"data": res["data"], "validation": res["validation_vs_tracker"], "timeline": res["gate_timeline"], "blocked": res["blocked_summary"], "blocked_ci95": res["blocked_expectancy_ci95"],
+    print(json.dumps({"data": res["data"], "validation": res["validation_vs_tracker"], "timeline": res["gate_timeline"], "actual_delivered": res["actual_delivered_baseline"], "blocked": res["blocked_summary"], "blocked_no_data": res["blocked_no_data_after_archive_end"], "blocked_ci95": res["blocked_expectancy_ci95"],
                       "blocked_by_day": res["blocked_by_day"], "rules": c, "flags_blocked": res["flags_blocked"], "flags_all": res["flags_all"]}, ensure_ascii=False, indent=1, default=float))
 
 
