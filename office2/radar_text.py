@@ -192,34 +192,41 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
             "stops": stops_view(c), "postmortem": postmortem_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
 
 
-def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
+def card_url(card_id: str, base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
+    """Canonical deep link to this exact radar card, not the generic symbol chart."""
     from urllib.parse import quote
 
+    return base_url.rstrip("/") + "/v2?tab=radar&card=" + quote(link_id(card_id), safe="")
+
+
+def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
+    """Short readable Telegram caption: <=1024 chars so photo and text carry same essentials."""
     p = present(c)
-    L = [f"{p['title']} — без реальних грошей", f"{p['icon']} {p['dir']} · {p['coin']}", f"Статус: {p['status']}.", f"Що робити: {p['todo']}", "", p["why"] + "."]
-    if p.get("need") and not c.get("kind") == "BLOCKED":
-        L.append(f"Чекаємо: {p['need']}")
-    if p["zone"]:
-        L.append(f"Зона входу: {p['zone']}")
-    L.append(f"Вхід (навчальний): {p['entry']}" + (f" — {p['entry_note']}" if p.get("entry_note") else ""))
-    L.append(f"Стоп (якщо ідея не спрацювала): {p['sl']} (−{p['sl_pct']}%)")
-    for t in p["targets"]:
-        if t["active"]:
-            L.append(f"Ціль {t['n']}: {t['price_txt']} (+{t['pct_txt']}%; ≈{t['mult_txt']}× розміру стопа)")
-        else:
-            L.append(f"Ціль {t['n']}: {t['price_txt']} (+{t['pct_txt']}%) — далека, у навчальному результаті не враховуємо")
-    sv = p.get("stops")
-    if sv:
-        L.append("")
-        L.append("Три варіанти стопа (для порівняння):")
-        for it in sv["items"]:
-            L.append(f"• {it['name']}: {it['sl_txt']} (−{it['risk_pct']}%){' ✅ обґрунтований' if it['justified'] else ' ⚠️ ' + ('біля очевидного рівня' if it['liq'] else 'сумнівний')}")
-        L.append(sv["summary"])
-        L.append("")
-    L.append(f"⏳ Діє до {p['expires']}")
-    L.append("Графік і результат: " + base_url.rstrip("/") + "/v2?tab=radar&card=" + quote(link_id(c["card_id"]), safe=""))
-    L.append(f"Технічно: {p['tech']}")
-    return "\n".join(L)
+    is_learning = c.get("kind") == "BLOCKED"
+    title = "🎓 НАВЧАЛЬНА УГОДА" if is_learning else "👀 СПОСТЕРІГАЄМО — НЕ ВХОДИТИ"
+    lines = [f"{title} · {p['coin'].split(' ')[0]}", f"{p['icon']} {p['dir']}"]
+    lines.append("✅ Умови підтверджені тільки для навчання." if is_learning else
+                 ("⏳ Ціна біля входу, бракує підтвердження." if c.get("stage") == "ARMED" else
+                  "⏳ Чекаємо повернення ціни в зону та підтвердження."))
+    lines.append(p["why"] + ".")
+    if p.get("zone"):
+        lines.append("Зона: " + p["zone"])
+    if p.get("entry"):
+        lines.append("Плановий вхід: " + p["entry"])
+    if p.get("sl"):
+        lines.append("Стоп: " + p["sl"])
+    active_targets = [x for x in p["targets"] if x["active"]]
+    if active_targets:
+        lines.append("Цілі: " + " · ".join(f"{x['n']}) {x['price_txt']}" for x in active_targets[:2]))
+    st = p.get("stops") or {}
+    if st.get("items"):
+        valid = [x for x in st["items"] if x.get("justified")]
+        lines.append("⚠️ Усі варіанти стопа потребують переоцінки." if not valid else
+                     f"Стопи: {len(valid)}/{len(st['items'])} пройшли структурну перевірку.")
+    if c.get("paper_status") in ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT"):
+        lines.append("Підсумок: " + p["paper"] + ".")
+    lines.extend(["⏳ До " + p["expires"], "📊 Відкрити картку:", card_url(c["card_id"], base_url)])
+    return "\n".join(lines)[:1024]
 
 
 def link_id(card_id: str) -> str:

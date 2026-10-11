@@ -119,7 +119,7 @@ for i in range(30):
 z = RW.stop_study(rows)
 check("≥30 угод: сума й різниця проти поточного стопа рахуються; вердикт називає найкращий", z["n"] == 30 and z["variants"]["v3"]["delta_sum_r_vs_current"] > 0 and "v3" in z["verdict"], str(z))
 tx = RW.format_card(card)
-check("Telegram: три варіанти стопа простою мовою з позначкою обґрунтований/сумнівний", "Три варіанти стопа" in tx and "Стоп 1 · поточний" in tx and "Стоп 3 · структура + запас ATR" in tx, tx)
+check("Telegram короткий: підсумок трьох стопів, а деталі в Mini App", "Стопи: 3/3" in tx and "Відкрити картку:" in tx and len(tx) <= 1024 and "Стоп 3 ·" not in tx, tx)
 JARGON = ("ATR(", "SL ", "TP1", "R ")
 check("у тексті Telegram немає англійських скорочень стопів/цілей (лише ATR як назва в підписі варіанта)", "TP" not in tx.split("Технічно:")[0] and " SL" not in tx.split("Технічно:")[0], tx)
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
