@@ -47,6 +47,125 @@ def after_sl(direction: str, sl: float, tp1: float, sl_ts: float, bars: List[Tup
             "hours_to_tp1": round((hit_ts - sl_ts) / 3600.0, 1) if hit_ts else None, "extreme_after": extreme}
 
 
+LABEL = "ОЗНАКА (кандидат), не доведена причина"
+
+
+def evidence_digest(snap: Dict[str, Any]) -> Dict[str, Any]:
+    """Підсумок модулів доказів зі знімка READY (існуючий office2.evidence): що підтримувало, що суперечило, чого не було. Wyckoff/Bulkowski/Gerchik — вже в знімку, нічого не перераховуємо."""
+    out = {"for": [], "against": [], "neutral": [], "not_connected": []}
+    for e in snap.get("evidence") or []:
+        item = {"module": e.get("module"), "finding": str(e.get("finding", ""))[:160]}
+        if e.get("status") == "NOT_CONNECTED":
+            out["not_connected"].append(e.get("module"))
+        elif e.get("supports") == 1:
+            out["for"].append(item)
+        elif e.get("supports") == -1:
+            out["against"].append(item)
+        else:
+            out["neutral"].append(item)
+    return out
+
+
+def classify(snap: Dict[str, Any], pos: Dict[str, Any], pm: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Класи помилок (кандидати) з доказами. Не доведені причини: один SL нічого не доводить; VALID_LOSS — якщо жодна ознака не спрацювала."""
+    th = snap.get("thesis") or {}
+    seq = th.get("sequence") or []
+    ev = pm.get("events") or {}
+    fl = set(pm.get("flags") or [])
+    dg = evidence_digest(snap)
+    codes: List[Dict[str, Any]] = []
+
+    def add(code: str, proof: str) -> None:
+        codes.append({"code": code, "proof": proof, "status": LABEL})
+
+    for e in (snap.get("evidence") or []):
+        if str(e.get("module", "")).startswith("M5/M1") and e.get("supports") == 0 and "— ні" in str(e.get("finding", "")):
+            add("EARLY_ENTRY", f"M5-тригер не підтверджений на момент READY: {e.get('finding')}")
+    rt = _step(seq, "ретрейс у зону")
+    if seq and not (rt and rt.get("ok")):
+        add("NO_RETEST", "у послідовності немає виконаного кроку «ретрейс у зону»")
+    bos = _step(seq, "зсув структури")
+    if seq and not (bos and bos.get("ok")):
+        add("NO_BOS", "крок «зсув структури (MSS/BOS)» не підтверджений")
+    if "EVENT_IS_RETEST_NOT_FRESH_SWEEP" in fl:
+        add("WEAK_LEVEL", f"подія — повторний тест прийнятого рівня, не свіжий sweep: {ev.get('event')}")
+    lvl = th.get("level") or {}
+    if lvl and (lvl.get("strength") or 1) < 2 and not any("Gerchik mirror" in str(x.get("module")) for x in dg["for"]):
+        add("WEAK_LEVEL", f"strength={lvl.get('strength')} і дзеркального підтвердження Gerchik немає")
+    if fl & {"BTC_DAILY_REGIME_CONFLICT"}:
+        add("BTC_CONFLICT", f"напрям {pos['direction']} проти денного режиму BTC ({(ev.get('btc') or {}).get('regime_daily')})")
+    if fl & {"HTF_CONFLICT_H4"}:
+        add("HTF_CONFLICT", f"проти H4 ({(ev.get('htf_structure') or {}).get('h4')})")
+    if fl & {"WEEKEND", "OFF_HOURS"}:
+        add("SESSION_RISK", f"сесія {(ev.get('session') or {}).get('session')}, weekend={(ev.get('session') or {}).get('weekend')}")
+    for a in dg["against"]:
+        if "premium-discount" in str(a["module"]):
+            add("BAD_PREMIUM_DISCOUNT", a["finding"])
+    if "TP1_REACHED_AFTER_SL" in fl:
+        add("SL_HUNT_CANDIDATE", f"після SL ціна дійшла до TP1 (через {(ev.get('after_sl') or {}).get('hours_to_tp1')} год)")
+    if "SL_WICK_ONLY_M15_CLOSED_INSIDE" in fl:
+        add("SL_WICK_ONLY", "M15-свічка SL закрилась всередині: прокол, не закріплення за SL")
+    if "COST_HEAVY" in fl:
+        add("COST_HEAVY", f"витрати {(ev.get('cost') or {}).get('cost_r')} R")
+    lag = None
+    try:
+        lag = float(pos.get("delivered_ts")) - float(pos.get("generated_ts"))
+    except (TypeError, ValueError):
+        pass
+    if lag is not None and lag > 120:
+        add("DELIVERY_DELAY", f"доставка через {int(lag)} с після рішення")
+    if pm.get("missing") and len(pm["missing"]) >= 3:
+        add("INSUFFICIENT_DATA", "відсутні: " + ", ".join(pm["missing"]))
+    if not codes:
+        add("VALID_LOSS", "жодна з перевірених ознак не спрацювала: угода відповідала правилам, збиток у межах очікуваного")
+    return codes
+
+
+def alternatives(snap: Dict[str, Any], pos: Dict[str, Any], bars: List[Tuple[float, ...]]) -> Dict[str, Any]:
+    """Формалізовані альтернативи (office2.learning.counterfactual V1–V8) на ЦІЙ угоді. Це ілюстрація, не доказ: перевага підтверджується лише на вибірці (population)."""
+    import numpy as np
+
+    from office2.learning import counterfactual as CF
+
+    th = snap.get("thesis") or {}
+    tg = th.get("targets") or []
+    decided = snap.get("decided_ts")
+    if not (decided and tg and th.get("entry") and th.get("sl") and bars):
+        return {"status": ND, "note": "немає decided_ts/цілей/свічок"}
+    t = np.array([b[0] for b in bars], dtype=float)
+    idx = int(np.searchsorted(t, float(decided) - 900.0, side="left"))      # бар, що закрився в decided_ts
+    if idx >= len(t) - 1 or abs(t[idx] - (float(decided) - 900.0)) > 1:
+        return {"status": ND, "note": "бар рішення поза доступними свічками (угода надто стара для 15m-вікна 50 год)"}
+    m15 = {"t": t, "o": np.array([b[1] for b in bars]), "h": np.array([b[2] for b in bars]), "l": np.array([b[3] for b in bars]), "c": np.array([b[4] for b in bars]),
+           "v": np.ones(len(t)), "tbv": np.ones(len(t))}
+    entry, sl, tp1 = float(th["entry"]), float(th["sl"]), float(tg[0]["p"])
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return {"status": ND, "note": "нульовий ризик"}
+    ev = {"dir": pos["direction"], "entry": entry, "sl": sl, "tp1": tp1, "i": idx, "r_tp1": abs(tp1 - entry) / risk, "risk_pct": risk / entry * 100.0, "source": "PAPER", "ts_bar": float(t[idx]), "symbol": pos["symbol"]}
+    rows = CF.per_event([ev], m15)
+    if not rows:
+        return {"status": ND, "note": "per_event порожній"}
+    v = rows[0]["variants"]
+    out = {"status": "OK", "variants": {k: {"outcome": x["outcome"], "r_net": x["r_net"], "usd_at_10": (round(x["r_net"] * 10.0, 2) if x["r_net"] is not None else None)} for k, x in v.items()},
+           "no_trade": {"outcome": "NO_TRADE", "r_net": 0.0, "usd_at_10": 0.0},
+           "note": "ілюстрація на одній угоді: альтернатива не вважається покращенням, поки не підтверджена на вибірці (див. population)"}
+    out["population"] = population_evidence()
+    return out
+
+
+def population_evidence() -> Dict[str, Any]:
+    """Підсумок replay на вибірці (fixtures/learning/replay_paired_*.json): як кожна альтернатива поводилась на сотнях подій, а не на цій угоді."""
+    import json
+    import os
+
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures", "learning", "replay_paired_2026-10.json")
+    try:
+        return json.load(open(p))
+    except Exception:  # noqa: BLE001
+        return {"status": ND, "note": "файл вибірки відсутній"}
+
+
 def analyze(snap: Dict[str, Any], pos: Dict[str, Any], bars: Optional[List[Tuple[float, ...]]] = None, now: Optional[float] = None) -> Dict[str, Any]:
     import time
 
@@ -147,5 +266,11 @@ def analyze(snap: Dict[str, Any], pos: Dict[str, Any], bars: Optional[List[Tuple
     for k in ("sl_candle", "after_sl"):
         if ev[k] == ND:
             missing.append(k)
-    return {"version": "pm-1", "analyzed_at": now, "closed_utc": _kyiv(pos.get("close_ts")), "events": ev, "flags": flags, "missing": missing,
-            "note": "Прапори — ознаки для накопичення статистики, не доказ помилки і не правило. Висновки — лише з ≥30 угод та незалежного replay."}
+    ev["evidence"] = evidence_digest(snap)
+    if any("Wyckoff" in str(e.get("module")) and "не визначена" in str(e.get("finding", "")) for e in (snap.get("evidence") or [])):
+        ev["wyckoff"] = "UNKNOWN (фаза не визначена модулем office_wyckoff)"
+    pm = {"version": "pm-2", "analyzed_at": now, "closed_utc": _kyiv(pos.get("close_ts")), "events": ev, "flags": flags, "missing": missing,
+          "note": "Прапори — ознаки для накопичення статистики, не доказ помилки і не правило. Висновки — лише з ≥30 угод та незалежного replay."}
+    pm["error_classes"] = classify(snap, pos, pm)
+    pm["alternatives"] = alternatives(snap, pos, bars) if bars else {"status": ND, "note": "немає свічок"}
+    return pm

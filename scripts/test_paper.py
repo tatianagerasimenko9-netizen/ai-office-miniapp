@@ -175,5 +175,33 @@ pm2 = PM.analyze({"thesis": {}}, dict(posx, sl_ts=None), None, T0)
 check("розбір без даних: NO_DATA, а не вигадані причини", pm2["events"]["level"] == "NO_DATA" and pm2["events"]["after_sl"] == "NO_DATA" and not pm2["flags"] and "level" in pm2["missing"])
 check("частка витрат у збитку", abs(pm["events"]["cost"]["share_of_loss_pct"] - 16.6) < 0.2, str(pm["events"]["cost"]))
 
+# --- 6. класи помилок + альтернативи
+snap_link["evidence"] = [{"module": "M5/M1 тригер", "status": "USED", "supports": 0, "finding": "M5: закриття вище максимуму 3 попередніх барів — ні"},
+                         {"module": "OB / FVG / OTE (premium-discount)", "status": "USED", "supports": -1, "finding": "зона в premium діапазону H4 (75%): ПРОТИ LONG"},
+                         {"module": "Wyckoff (spring/upthrust, тест)", "status": "USED", "supports": 0, "finding": "фаза не визначена"},
+                         {"module": "DOM / order book", "status": "NOT_CONNECTED", "supports": 0, "finding": "немає надійного джерела"}]
+pm = PM.analyze(snap_link, posx, bars15, T0 + 900 * 4)
+codes = {c["code"] for c in pm["error_classes"]}
+check("класи: EARLY_ENTRY, WEAK_LEVEL, BTC_CONFLICT, HTF_CONFLICT, SESSION_RISK, BAD_PREMIUM_DISCOUNT, SL_HUNT_CANDIDATE", {"EARLY_ENTRY", "WEAK_LEVEL", "BTC_CONFLICT", "HTF_CONFLICT", "SESSION_RISK", "BAD_PREMIUM_DISCOUNT", "SL_HUNT_CANDIDATE"} <= codes, str(codes))
+check("кожен клас має доказ і статус «кандидат»", all(c["proof"] and "не доведена" in c["status"] for c in pm["error_classes"]))
+check("Wyckoff без фази = UNKNOWN, не вигадано", pm["events"]["wyckoff"].startswith("UNKNOWN"))
+check("модулі без підключення перелічені окремо", "DOM / order book" in pm["events"]["evidence"]["not_connected"])
+clean = PM.analyze({"thesis": {"kind": "SWEEP_SEQ", "sequence": [{"ok": True, "step": "подія", "value": "SWEEP 1"}, {"ok": True, "step": "зсув структури", "value": "x"}, {"ok": True, "step": "ретрейс у зону", "value": "y"}],
+                              "level": {"kind": "X", "p": 1, "strength": 2}, "quality": {"risk_atr15": 2}, "sizing": {"stop_pct": 2.0}}, "session_tag": {"session": "LONDON", "weekend": False}, "evidence": []},
+                   {"direction": "LONG", "plan_entry": 10, "sl": 9, "fill_price": 10, "cost_usd": 1, "pnl_a": -11, "sl_ts": None, "generated_ts": 1, "delivered_ts": 30}, None, T0)
+check("коректна угода без ознак → VALID_LOSS", [c["code"] for c in clean["error_classes"]] == ["VALID_LOSS"], str(clean["error_classes"]))
+# альтернативи: рішення на барі T0+900*k, свічки до/після
+import numpy as np
+nb = 60
+tb = [T0 - 900 * 40 + 900 * i for i in range(nb)]
+bb = [(t_, 100.0, 100.2, 99.8, 100.0) for t_ in tb]
+bb[44] = (tb[44], 100.0, 100.6, 99.9, 100.5)        # BOS-бар після рішення (i=42)
+bb[46] = (tb[46], 100.5, 102.6, 100.4, 102.4)       # досягнуто TP1
+snapx = {"decided_ts": tb[42] + 900, "thesis": {"entry": 100.0, "sl": 99.0, "targets": [{"p": 102.0}]}}
+alt = PM.alternatives(snapx, {"direction": "LONG", "symbol": "X"}, bb)
+check("альтернативи V0..V8 на одній угоді + NO_TRADE + попередження про вибірку", alt["status"] == "OK" and "V8_bos_confirm" in alt["variants"] and alt["no_trade"]["r_net"] == 0.0 and "вибірці" in alt["note"], str(alt)[:300])
+alt2 = PM.alternatives({"thesis": {}}, {"direction": "LONG", "symbol": "X"}, bb)
+check("альтернативи без даних → NO_DATA", alt2["status"] == "NO_DATA")
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

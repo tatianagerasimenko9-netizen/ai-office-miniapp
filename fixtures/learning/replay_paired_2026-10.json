@@ -1,0 +1,339 @@
+{
+ "status": "OK",
+ "source": "GitHub Actions binance-replay.yml, runs 38128155822 (decisions 2026-09-11..09-25) and 38128160959 (2026-09-25..10-09), 29 CORE symbols, Binance Futures archive, costs 0.15%",
+ "note": "Вибірка для порівняння альтернатив. mean_delta_r = середня різниця R на подію проти V0 (пропущений вхід = 0R). STABLE лише при n≥30, 95% CI без нуля і однаковому знаку на навчальній/тестовій частинах.",
+ "periods": {
+  "A_2026-09-11_to_09-25": {
+   "BRAIN": {
+    "events": 761,
+    "variants": {
+     "V0_current": {
+      "trades": 761,
+      "missed": 0,
+      "tp1": 276,
+      "sl": 432,
+      "mean_r_per_taken": -0.147,
+      "usd_at_10": -1119.6,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": null,
+      "ci95": null,
+      "train_delta": null,
+      "test_delta": null,
+      "status": null
+     },
+     "V1_delay_15m": {
+      "trades": 744,
+      "missed": 17,
+      "tp1": 267,
+      "sl": 424,
+      "mean_r_per_taken": -0.105,
+      "usd_at_10": -783.2,
+      "winners_skipped_vs_v0": 9,
+      "losers_avoided_vs_v0": 8,
+      "mean_delta_r_per_event": 0.044,
+      "ci95": [
+       -0.023,
+       0.127
+      ],
+      "train_delta": 0.086,
+      "test_delta": -0.019,
+      "status": "NOT_STABLE"
+     },
+     "V2_delay_30m": {
+      "trades": 716,
+      "missed": 45,
+      "tp1": 259,
+      "sl": 404,
+      "mean_r_per_taken": -0.155,
+      "usd_at_10": -1106.5,
+      "winners_skipped_vs_v0": 17,
+      "losers_avoided_vs_v0": 28,
+      "mean_delta_r_per_event": 0.002,
+      "ci95": [
+       -0.045,
+       0.049
+      ],
+      "train_delta": 0.039,
+      "test_delta": -0.055,
+      "status": "NOT_STABLE"
+     },
+     "V3_delay_60m": {
+      "trades": 662,
+      "missed": 99,
+      "tp1": 247,
+      "sl": 363,
+      "mean_r_per_taken": -0.179,
+      "usd_at_10": -1187.4,
+      "winners_skipped_vs_v0": 29,
+      "losers_avoided_vs_v0": 69,
+      "mean_delta_r_per_event": -0.009,
+      "ci95": [
+       -0.055,
+       0.04
+      ],
+      "train_delta": 0.046,
+      "test_delta": -0.092,
+      "status": "NOT_STABLE"
+     },
+     "V4_sl_plus_0.5atr": {
+      "trades": 761,
+      "missed": 0,
+      "tp1": 302,
+      "sl": 387,
+      "mean_r_per_taken": -0.119,
+      "usd_at_10": -905.2,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": 0.028,
+      "ci95": [
+       -0.003,
+       0.063
+      ],
+      "train_delta": 0.06,
+      "test_delta": -0.019,
+      "status": "NOT_STABLE"
+     },
+     "V5_sl_plus_1.0atr": {
+      "trades": 761,
+      "missed": 0,
+      "tp1": 325,
+      "sl": 344,
+      "mean_r_per_taken": -0.083,
+      "usd_at_10": -634.3,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": 0.064,
+      "ci95": [
+       0.018,
+       0.111
+      ],
+      "train_delta": 0.12,
+      "test_delta": -0.02,
+      "status": "NOT_STABLE"
+     },
+     "V6_limit_retest": {
+      "trades": 759,
+      "missed": 2,
+      "tp1": 274,
+      "sl": 432,
+      "mean_r_per_taken": -0.151,
+      "usd_at_10": -1146.9,
+      "winners_skipped_vs_v0": 2,
+      "losers_avoided_vs_v0": 0,
+      "mean_delta_r_per_event": -0.004,
+      "ci95": [
+       -0.01,
+       0.0
+      ],
+      "train_delta": -0.006,
+      "test_delta": 0.0,
+      "status": "NOT_STABLE"
+     },
+     "V7_structural_sl": {
+      "trades": 761,
+      "missed": 0,
+      "tp1": 280,
+      "sl": 427,
+      "mean_r_per_taken": -0.15,
+      "usd_at_10": -1145.0,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": -0.003,
+      "ci95": [
+       -0.018,
+       0.011
+      ],
+      "train_delta": 0.01,
+      "test_delta": -0.023,
+      "status": "NOT_STABLE"
+     },
+     "V8_bos_confirm": {
+      "trades": 351,
+      "missed": 410,
+      "tp1": 170,
+      "sl": 165,
+      "mean_r_per_taken": -0.17,
+      "usd_at_10": -597.7,
+      "winners_skipped_vs_v0": 106,
+      "losers_avoided_vs_v0": 267,
+      "mean_delta_r_per_event": 0.069,
+      "ci95": [
+       -0.0,
+       0.131
+      ],
+      "train_delta": 0.082,
+      "test_delta": 0.049,
+      "status": "NOT_STABLE"
+     }
+    }
+   }
+  },
+  "B_2026-09-25_to_10-09": {
+   "BRAIN": {
+    "events": 523,
+    "variants": {
+     "V0_current": {
+      "trades": 523,
+      "missed": 0,
+      "tp1": 204,
+      "sl": 259,
+      "mean_r_per_taken": 0.011,
+      "usd_at_10": 58.9,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": null,
+      "ci95": null,
+      "train_delta": null,
+      "test_delta": null,
+      "status": null
+     },
+     "V1_delay_15m": {
+      "trades": 518,
+      "missed": 5,
+      "tp1": 203,
+      "sl": 256,
+      "mean_r_per_taken": -0.01,
+      "usd_at_10": -50.0,
+      "winners_skipped_vs_v0": 1,
+      "losers_avoided_vs_v0": 3,
+      "mean_delta_r_per_event": -0.021,
+      "ci95": [
+       -0.063,
+       0.023
+      ],
+      "train_delta": -0.013,
+      "test_delta": -0.033,
+      "status": "NOT_STABLE"
+     },
+     "V2_delay_30m": {
+      "trades": 498,
+      "missed": 25,
+      "tp1": 196,
+      "sl": 243,
+      "mean_r_per_taken": -0.012,
+      "usd_at_10": -60.2,
+      "winners_skipped_vs_v0": 8,
+      "losers_avoided_vs_v0": 16,
+      "mean_delta_r_per_event": -0.023,
+      "ci95": [
+       -0.077,
+       0.031
+      ],
+      "train_delta": -0.037,
+      "test_delta": -0.001,
+      "status": "NOT_STABLE"
+     },
+     "V3_delay_60m": {
+      "trades": 462,
+      "missed": 61,
+      "tp1": 177,
+      "sl": 230,
+      "mean_r_per_taken": -0.062,
+      "usd_at_10": -287.8,
+      "winners_skipped_vs_v0": 27,
+      "losers_avoided_vs_v0": 29,
+      "mean_delta_r_per_event": -0.066,
+      "ci95": [
+       -0.122,
+       -0.01
+      ],
+      "train_delta": -0.068,
+      "test_delta": -0.063,
+      "status": "STABLE"
+     },
+     "V4_sl_plus_0.5atr": {
+      "trades": 523,
+      "missed": 0,
+      "tp1": 218,
+      "sl": 237,
+      "mean_r_per_taken": 0.013,
+      "usd_at_10": 66.9,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": 0.002,
+      "ci95": [
+       -0.039,
+       0.046
+      ],
+      "train_delta": 0.005,
+      "test_delta": -0.004,
+      "status": "NOT_STABLE"
+     },
+     "V5_sl_plus_1.0atr": {
+      "trades": 523,
+      "missed": 0,
+      "tp1": 226,
+      "sl": 222,
+      "mean_r_per_taken": -0.009,
+      "usd_at_10": -44.9,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": -0.02,
+      "ci95": [
+       -0.069,
+       0.036
+      ],
+      "train_delta": -0.017,
+      "test_delta": -0.024,
+      "status": "NOT_STABLE"
+     },
+     "V6_limit_retest": {
+      "trades": 521,
+      "missed": 2,
+      "tp1": 203,
+      "sl": 258,
+      "mean_r_per_taken": 0.012,
+      "usd_at_10": 60.3,
+      "winners_skipped_vs_v0": 1,
+      "losers_avoided_vs_v0": 1,
+      "mean_delta_r_per_event": 0.0,
+      "ci95": [
+       -0.006,
+       0.007
+      ],
+      "train_delta": 0.0,
+      "test_delta": 0.0,
+      "status": "NOT_STABLE"
+     },
+     "V7_structural_sl": {
+      "trades": 523,
+      "missed": 0,
+      "tp1": 210,
+      "sl": 252,
+      "mean_r_per_taken": 0.02,
+      "usd_at_10": 104.8,
+      "winners_skipped_vs_v0": null,
+      "losers_avoided_vs_v0": null,
+      "mean_delta_r_per_event": 0.009,
+      "ci95": [
+       -0.015,
+       0.036
+      ],
+      "train_delta": 0.009,
+      "test_delta": 0.009,
+      "status": "NOT_STABLE"
+     },
+     "V8_bos_confirm": {
+      "trades": 231,
+      "missed": 292,
+      "tp1": 116,
+      "sl": 95,
+      "mean_r_per_taken": -0.079,
+      "usd_at_10": -181.4,
+      "winners_skipped_vs_v0": 88,
+      "losers_avoided_vs_v0": 164,
+      "mean_delta_r_per_event": -0.046,
+      "ci95": [
+       -0.128,
+       0.034
+      ],
+      "train_delta": -0.031,
+      "test_delta": -0.069,
+      "status": "NOT_STABLE"
+     }
+    }
+   }
+  }
+ }
+}
