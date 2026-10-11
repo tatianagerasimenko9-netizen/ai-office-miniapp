@@ -664,6 +664,8 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
     try:
         from office2.learning import job as _LJ
 
+        if os.getenv("OFFICE2_PAPER", "1").strip() != "0":
+            threading.Thread(target=_paper_loop, args=(db,), name="office2-paper", daemon=True).start()
         if _LJ.enabled():
             threading.Thread(target=_learning_loop, args=(db,), name="office2-learning", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
@@ -714,6 +716,22 @@ def _smc_replay_job(db: str, feed: "Feed") -> None:
         RP.run_spec(db, feed, os.getenv("OFFICE2_SMC_REPLAY", ""), log=_log)
     except Exception as exc:  # noqa: BLE001
         _log(f"[smc-replay] помилка: {type(exc).__name__}: {str(exc)[:160]}")
+
+
+def _paper_loop(db: str) -> None:
+    """Paper-супровід доставлених READY (office2.paper): вхід лише після доставки, TP/SL за 1m Binance, PnL з витратами. Ордерів немає."""
+    from office2 import paper as PP
+    from office_market_data import fetch_candles
+
+    time.sleep(60)
+    while True:
+        try:
+            r = PP.tick(db, fetch_candles, log=_log)
+            if r["new"] or r["closed"] or r["errors"]:
+                _log(f"[paper] {r}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[paper] збій проходу: {type(exc).__name__}: {str(exc)[:160]}")
+        time.sleep(60)
 
 
 def _learning_loop(db: str) -> None:

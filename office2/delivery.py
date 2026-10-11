@@ -162,6 +162,19 @@ def _close_scenario(db: str, sid: str, state: str, reason: str, now: float) -> N
     _execute(db, "INSERT INTO office2_live_transition(scenario_id, ts, from_state, to_state, reason, version) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING", (parent, now, row[0], state, reason[:400], "o2-delivery"))
 
 
+def _tg_alert(db: str, sid: str, sym: str, d: str, why: str) -> None:
+    """Технічне попередження про збій доставки зберігається в БД (раз на сигнал на годину), щоб Mini App показував стан Telegram."""
+    from office_bridge import _fetchall, log_event
+
+    try:
+        if _fetchall(db, "SELECT 1 FROM office_events WHERE event_type = 'OFFICE2_TELEGRAM_FAILURE' AND signal_id = ? AND ts_utc > ? LIMIT 1",
+                     (sid, datetime.fromtimestamp(time.time() - 3600, tz=timezone.utc).isoformat())):
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    log_event(db, "OFFICE2_TELEGRAM_FAILURE", {"scenario_id": sid, "symbol": sym, "direction": d, "reason": why, "ts": time.time()}, sid)
+
+
 async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]], fetch: Callable[[str, str, int], Any], render: Callable[..., Dict[str, Any]],
                           event_type: str, now: Optional[float] = None, log: Callable[[str], None] = print) -> int:
     """Один прохід по outbox. Повертає число доставлених. Помилка одного сигналу не зачіпає інші."""
@@ -263,6 +276,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             tm["send_ms"] = int((t_sent - t_a) * 1000)
             if not mid:
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", ("Telegram не підтвердив доставку", sid))
+                await run_o2(_tg_alert, db, sid, sym, d, "Telegram не підтвердив доставку READY (повтор у наступному проході)")
                 log(f"[office2] delivery not verified {sid}: лишаю для повтору")
                 return 0
             # повна хронологія в мс: закриття бару → пробудження → бар доступний → старт → дані → рішення → черга → Telegram
@@ -289,6 +303,10 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             return 1
         except Exception as exc:  # noqa: BLE001
             log(f"[office2] delivery error {sid}: {type(exc).__name__}: {exc}")
+            try:
+                await run_o2(_tg_alert, db, sid, row[1], row[2], f"помилка доставки: {type(exc).__name__}: {str(exc)[:160]}")
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"{type(exc).__name__}: {exc}"[:300], sid))
             except Exception:  # noqa: BLE001
