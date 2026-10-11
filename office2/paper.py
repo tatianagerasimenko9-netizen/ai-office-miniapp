@@ -273,7 +273,7 @@ def control_tick(db: str, fetch: Callable[[str, str, int], Any], now: float, log
     _ensure(db)
     known = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_paper_position WHERE scope = 'CONTROL'")}
     rows = _fetchall(db, "SELECT scenario_id, symbol, direction, kind, updated_ts, reason, thesis_json FROM office2_live_scenario WHERE state = 'NO_TRADE' AND reason LIKE ? AND updated_ts > ? ORDER BY updated_ts",
-                     (CONTROL_GATE, max(since_ts(), now - CONTROL_LOOKBACK_SEC)))
+                     (CONTROL_GATE, now - CONTROL_LOOKBACK_SEC))      # без PAPER_SINCE: контрольний потік — окрема вибірка, межа лише наявність 1m-історії
     n = 0
     for sid, sym, d, kind, upd, reason, tj in rows:
         cid = "CTL|" + sid
