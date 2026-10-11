@@ -39,6 +39,7 @@ for b in v[-3:]:
     b["volume"] = 400.0
     b["close"] = v[-4]["close"] + 0.05
 vo = D.observe("LONG", 103.0, v, v[-1]["ts"] + 900)
-check("обсяг без прогресу ціни читається як боротьба/поглинання", vo["volume_x_result"] and "поглинання" in vo["volume_x_result"]["reading"], str(vo["volume_x_result"]))
+check("без джерельних порогів не стверджуємо поглинання з обсягу", vo["volume_x_result"] and vo["volume_x_result"]["interpretation_status"] == "UNVERIFIED" and vo["volume_x_result"]["volume_rel"] > 1 and "НЕ ПІДТВЕРДЖЕНА" in vo["volume_x_result"]["reading"], str(vo["volume_x_result"]))
+check("позначено різницю авторського методу та нашої реалізації", r["measurement_scope"] == "OUR_IMPLEMENTATION" and "UNVERIFIED" in r["source_scope"])
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
