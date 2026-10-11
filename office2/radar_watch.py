@@ -493,6 +493,34 @@ def stop_study(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def scanner_diag(db: str, now: Optional[float] = None) -> Dict[str, Any]:
+    """Чому немає нових карток: що саме бачив сканер за останні 40 хв (без вигаданих причин — лише лічильники з БД)."""
+    from office_bridge import _fetchall
+
+    t = time.time() if now is None else now
+    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, reason FROM office2_live_scenario WHERE state = 'WAIT' AND updated_ts > ?", (t - 2400,))
+    own = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_radar_card WHERE created_ts > ?", (t - 86400,))}
+    d = {"wait_total": len(rows), "no_structure": 0, "with_card": 0, "without_card": 0}
+    for sid, _sym, _dr, reason in rows:
+        m = re.match(r"^WAIT (\d)/3", str(reason or ""))
+        if not m or m.group(1) == "1":
+            d["no_structure"] += 1
+        elif sid in own or ("W|" + sid) in own or ("B|" + sid) in own:
+            d["with_card"] += 1
+        else:
+            d["without_card"] += 1
+    lc = _fetchall(db, "SELECT MAX(created_ts) FROM office2_radar_card")
+    d["last_card_ts"] = lc[0][0] if lc and lc[0][0] else None
+    d["new_cards_hour"] = _fetchall(db, "SELECT COUNT(*) FROM office2_radar_card WHERE created_ts > ?", (t - 3600,))[0][0] or 0
+    if d["without_card"]:
+        d["message"] = f"Є {d['without_card']} ідей без картки — вони з'являться після наступної синхронізації (або це дубль активної ідеї по тій самій монеті й напряму)."
+    elif d["with_card"]:
+        d["message"] = f"Нових незалежних ідей немає: усі {d['with_card']} поточні ідеї вже мають картки. Ще {d['no_structure']} лише на першому кроці (структури поки немає) — картки для них не створюються."
+    else:
+        d["message"] = f"Підтверджених кроків структури зараз немає: {d['no_structure']} ідей лише на першому кроці."
+    return d
+
+
 def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
@@ -549,6 +577,10 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
         g = wr.get("gate") or {}
         wr["message"] = (f"Сьогодні нових дозволених входів немає: спрацював денний ліміт ризику (до {RT.kyiv(g.get('lock_ends_ts'))}). Навчальні сигнали без реальних грошей продовжують надходити."
                          if g.get("locked") else "Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Навчальні сигнали без реальних грошей надходять далі.")
+        try:
+            wr["scanner"] = scanner_diag(db, t)
+        except Exception as exc:  # noqa: BLE001
+            wr["scanner_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
         out["why_no_ready"] = wr
     except Exception as exc:  # noqa: BLE001
         out["ok"] = False

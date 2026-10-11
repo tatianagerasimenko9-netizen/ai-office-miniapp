@@ -208,5 +208,8 @@ check("summary на порожній БД: ok, 0 карток, блок «чом
 sm = RW.summary(db, NOW + 400)
 check("summary: картки зі статусом, статистика WATCH/BLOCKED окремо", len(sm["cards"]) >= 4 and "watch" in sm["stats"] and "blocked" in sm["stats"] and all("status_ua" in x for x in sm["cards"]))
 
+sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
+check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
