@@ -34,10 +34,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -51,9 +51,12 @@ def _ensure(db: str) -> None:
         return
     from office_bridge import _execute
 
-    for d in DDL:
-        _execute(db, d)
-    for col in ("far_targets TEXT", "entry_note TEXT"):
+    try:
+        for d in DDL:
+            _execute(db, d)
+    except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
+        print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -112,9 +115,18 @@ def plan_of(th: Dict[str, Any]) -> Dict[str, Any]:
         if not near or near[0]["n"] != 1:
             ok, rej = False, f"перша ціль далі за {MAX_TP_PCT:g}% від входу: за 4 години недосяжна"
     tp = lambda i: next((x["p"] for x in near if x["n"] == i), None)  # noqa: E731
+    stops_json = None
+    st = th.get("stops") or (th.get("preview") or {}).get("stops")
+    if ok and st:
+        try:
+            from office2 import stops as SV
+
+            stops_json = json.dumps(SV.finalize_for_entry(st, "LONG" if long_ else "SHORT", entry))
+        except Exception:  # noqa: BLE001
+            stops_json = None
     risk_pct = abs(entry - sl) / entry * 100.0 if ok else _f(th.get("risk_pct"))
     return {"entry": entry, "sl": sl, "tp1": tp(1), "tp2": tp(2), "tp3": tp(3), "risk_pct": risk_pct, "plan_ok": 1 if ok else 0, "reject": None if ok else (rej or "план неповний"),
-            "zone_lo": zlo, "zone_hi": zhi, "far_targets": json.dumps(far) if far else None, "entry_note": note}
+            "zone_lo": zlo, "zone_hi": zhi, "far_targets": json.dumps(far) if far else None, "entry_note": note, "stops_json": stops_json}
 
 
 def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
@@ -156,9 +168,9 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
             continue
         tg_status, paper = ex[0]
         if tg_status == "NEW" and not paper:      # план ще не опублікований і не в paper — оновлюємо до найточнішого (ARMED точніший за RETRACE)
-            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=?, far_targets=?, entry_note=? WHERE card_id=?",
+            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=?, far_targets=?, entry_note=?, stops_json=? WHERE card_id=?",
                      (st, float(upd), pl["zone_lo"], pl["zone_hi"], pl["entry"], pl["sl"], pl["tp1"], pl["tp2"], pl["tp3"], pl["risk_pct"], pl["plan_ok"], pl["reject"], need, str(reason or "")[:400], state,
-                      pl["far_targets"], pl["entry_note"], cid))
+                      pl["far_targets"], pl["entry_note"], pl["stops_json"], cid))
         else:
             _execute(db, "UPDATE office2_radar_card SET updated_ts=?, scen_state=?, need_text=?, reason=?, stage=? WHERE card_id=?", (float(upd), state, need, str(reason or "")[:400], st, cid))
         out["updated"] += 1
@@ -216,14 +228,53 @@ def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: floa
     return out
 
 
+def evaluate_variants(card: Dict[str, Any], candles: List[Dict[str, Any]], now: float) -> Optional[Dict[str, Any]]:
+    """Окрема оцінка трьох стопів (той самий вхід і цілі, інший SL) + аналіз руху ПІСЛЯ спрацювання стопа. Фактичний результат картки (поточний стоп) не підміняється."""
+    from office2 import stops as SV
+
+    try:
+        st = json.loads(card.get("stops_json") or "null")
+    except ValueError:
+        st = None
+    if not st:
+        return None
+    out: Dict[str, Any] = {}
+    for k in ("v1", "v2", "v3"):
+        v = st.get(k)
+        if not v or v.get("side_ok") is False:
+            out[k] = {"status": "INVALID"}
+            continue
+        c2 = dict(card, sl=v["sl"], risk_pct=v.get("risk_pct"))
+        ev = evaluate_card(c2, candles, now)
+        item = {"sl": v["sl"], "risk_pct": v.get("risk_pct"), "status": ev["paper_status"], "r_net": ev["r_net"], "entry_ts": ev["entry_ts"], "exit_ts": ev["exit_ts"], "reached": ev["reached"]}
+        if ev["paper_status"] == "SL" and ev.get("exit_ts"):
+            item["after"] = SV.after_stop(card["direction"], candles, float(ev["exit_ts"]), card["entry"], v["sl"], card["tp1"], st.get("extreme"))
+        out[k] = item
+    return out
+
+
 def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
     t = time.time() if now is None else now
     _ensure(db)
     cols = ",".join(_COLS)
-    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? AND COALESCE(paper_status,'') NOT IN ('SL','TP1','TP2','TP3','NO_ENTRY','TIMEOUT') "
-                         "ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit))
+    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit * 2))
+    final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID")
+
+    def _open(r: tuple) -> bool:
+        c0 = dict(zip(_COLS, r))
+        if (c0.get("paper_status") or "") not in final:
+            return True
+        if c0.get("stops_json") and not c0.get("stop_eval"):
+            return True
+        try:
+            ev0 = json.loads(c0.get("stop_eval") or "null") or {}
+        except ValueError:
+            return False
+        return any((v or {}).get("status") not in final for v in ev0.values())
+
+    rows = [r for r in rows if _open(r)][:limit]
     n = 0
     cache: Dict[str, List[Dict[str, Any]]] = {}      # одна вибірка свічок на монету за прохід (мало запитів до біржі)
     for r in rows:
@@ -235,8 +286,9 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
             if not cl:
                 continue
             ev = evaluate_card(c, cl, t)
-            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=? WHERE card_id=?",
-                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], c["card_id"]))
+            vv = evaluate_variants(c, cl, t)
+            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=? WHERE card_id=?",
+                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, c["card_id"]))
             n += 1
         except Exception as exc:  # noqa: BLE001
             log(f"[radar] супровід {c['card_id']}: {type(exc).__name__}: {str(exc)[:100]}")
@@ -329,6 +381,14 @@ def mark_notified(db: str, cid: str, new: List[str], prev: Optional[str]) -> Non
     _execute(db, "UPDATE office2_radar_card SET notified = ? WHERE card_id = ?", (allm, cid))
 
 
+def _extra_stops(c: Dict[str, Any]) -> List[Any]:
+    try:
+        st = json.loads(c.get("stops_json") or "null") or {}
+        return [(st[k]["sl"], f"Стоп {i}") for i, k in ((2, "v2"), (3, "v3")) if st.get(k) and st[k].get("side_ok") is not False]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
 async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable[..., Any], fetch: Callable[[str, str, int], Any], render: Callable[..., Dict[str, Any]],
                     now: Optional[float] = None, log: Callable[[str], None] = print) -> Dict[str, int]:
     """Один прохід: нові WATCH/BLOCKED-картки (з графіком) і follow-up за віхами. Помилка однієї картки не зачіпає інші."""
@@ -350,7 +410,7 @@ async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable
                 chart = evd.freeze_chart(cds if isinstance(cds, list) else [], t, "15m", symbol=c["symbol"])
                 img = await run_o2(render, symbol=c["symbol"], direction=c["direction"], candles=evd.candles_from_chart(chart) if chart.get("candles") else (cds if isinstance(cds, list) else []),
                                    entry=c["entry"], zone=[c["zone_lo"], c["zone_hi"]], sl=c["sl"], tp1=c["tp1"], tp2=c.get("tp2"), tp3=c.get("tp3"), ready_price=c["entry"],
-                                   key_level=c.get("level_price"), key_label="рівень", learning=True, path=os.path.join(_TMP, f"radar_{c['symbol']}_{int(t)}.png"))
+                                   key_level=c.get("level_price"), key_label="рівень", learning=True, extra_stops=_extra_stops(c), path=os.path.join(_TMP, f"radar_{c['symbol']}_{int(t)}.png"))
             except Exception as exc_img:  # noqa: BLE001
                 img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
             mid = await (send_photo(str(img["path"]), text, symbol=c["symbol"], direction=c["direction"]) if img.get("ok") else send_text(text, symbol=c["symbol"], direction=c["direction"]))
@@ -391,6 +451,48 @@ def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "note": "Навчальний результат без реальних грошей: ризик 10 $ на угоду, вхід лише після появи картки, комісії й проковзування 0,15 % враховано; менше 30 завершених угод — це лише спостереження."}
 
 
+def stop_study(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Порівняння трьох стопів на навчальних угодах (той самий вхід і цілі). Не підміняє фактичний результат; вердикт лише за n ≥ 30 завершених."""
+    final = ("SL", "TP1", "TP2", "TP3")
+    per = {k: {"n": 0, "sl": 0, "tp": 0, "sum_r": 0.0, "loss_r": 0.0, "risk_pct": 0.0, "hunt": 0, "broken": 0} for k in ("v1", "v2", "v3")}
+    used = 0
+    for x in rows:
+        try:
+            ev = json.loads(x.get("stop_eval") or "null") or {}
+        except ValueError:
+            continue
+        if not ev or any((ev.get(k) or {}).get("status") not in final for k in ("v1", "v2", "v3")):
+            continue          # у порівняння входять лише угоди, де всі три варіанти вже мають завершений результат (однакова база)
+        used += 1
+        for k in per:
+            v = ev[k]
+            p = per[k]
+            p["n"] += 1
+            p["sl" if v["status"] == "SL" else "tp"] += 1
+            p["sum_r"] += v["r_net"] or 0.0
+            p["loss_r"] += min(v["r_net"] or 0.0, 0.0)
+            p["risk_pct"] += v.get("risk_pct") or 0.0
+            a = (v.get("after") or {}).get("verdict")
+            p["hunt"] += a == "STOP_HUNT"
+            p["broken"] += a == "BROKEN"
+    out: Dict[str, Any] = {"n": used, "variants": {}}
+    for k, p in per.items():
+        n = p["n"] or 1
+        out["variants"][k] = {"n": p["n"], "sl": p["sl"], "tp": p["tp"], "win_rate": round(p["tp"] / n * 100.0, 1) if p["n"] else None, "sum_r": round(p["sum_r"], 2), "loss_r": round(p["loss_r"], 2),
+                              "avg_risk_pct": round(p["risk_pct"] / n, 2) if p["n"] else None, "after_stop_hunt": p["hunt"], "after_stop_broken": p["broken"]}
+    base = out["variants"]["v1"]
+    for k in ("v2", "v3"):
+        v = out["variants"][k]
+        v["delta_sum_r_vs_current"] = round(v["sum_r"] - base["sum_r"], 2)
+        v["delta_loss_r_vs_current"] = round(v["loss_r"] - base["loss_r"], 2)
+    if used < 30:
+        out["verdict"] = f"Замало даних: завершених угод {used} із 30 потрібних. Це спостереження, а не висновок; поточний стоп у навчальних угодах не змінюється."
+    else:
+        best = max(("v1", "v2", "v3"), key=lambda k: out["variants"][k]["sum_r"])
+        out["verdict"] = f"За {used} завершеними угодами найкращий сумарний результат дає {best}. Перед будь-якою зміною потрібна перевірка на незалежному періоді."
+    return out
+
+
 def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
@@ -416,6 +518,7 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
                 c["active"] = bool(c["expires_ts"] and c["expires_ts"] > t and c["scen_state"] in ("WAIT", "NO_TRADE") and c["paper_status"] in (None, "", "WAITING_ENTRY", "ENTERED"))
                 c["h"] = RT.present(c)
             out["card"] = c
+            print(f"[radar] картка за посиланням «{str(card_id)[:40]}»: {'знайдено ' + c['card_id'] if c else 'НЕ знайдено'}", flush=True)
             return out
         rows = [dict(zip(_COLS, r)) for r in _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE created_ts > ? ORDER BY created_ts DESC LIMIT 120", (t - 3 * 86400,))]
         from office2 import radar_text as RT
@@ -431,7 +534,7 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
         k0 = datetime.fromtimestamp(t, ZoneInfo("Europe/Kyiv")).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()      # «сьогодні» — за київською добою
         ok_rows = [x for x in rows if x["plan_ok"]]
         out["stats"] = {"watch": _stats([x for x in ok_rows if x["kind"] == "WATCH"]), "blocked": _stats([x for x in ok_rows if x["kind"] == "BLOCKED"]),
-                        "learning": _stats([x for x in ok_rows if x["kind"] == "BLOCKED"]), "today": _stats([x for x in ok_rows if x["created_ts"] >= k0]), "all": _stats(ok_rows)}
+                        "learning": _stats([x for x in ok_rows if x["kind"] == "BLOCKED"]), "stop_study": stop_study(ok_rows), "today": _stats([x for x in ok_rows if x["created_ts"] >= k0]), "all": _stats(ok_rows)}
         cnt = _fetchall(db, "SELECT state, COUNT(*) FROM office2_live_scenario WHERE updated_ts > ? GROUP BY state", (t - 3600,))
         stg = _fetchall(db, "SELECT COUNT(*) FROM office2_live_scenario WHERE state='WAIT' AND updated_ts > ? AND reason LIKE 'WAIT 3/3%'", (t - 3600,))
         last = _fetchall(db, "SELECT MAX(updated_ts) FROM office2_live_scenario")
@@ -450,4 +553,5 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
     except Exception as exc:  # noqa: BLE001
         out["ok"] = False
         out["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        print(f"[radar] summary помилка (card={card_id}): {out['error']}", flush=True)       # у логах Render видно причину, а не лише «200»
     return out
