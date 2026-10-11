@@ -208,5 +208,24 @@ check("summary на порожній БД: ok, 0 карток, блок «чом
 sm = RW.summary(db, NOW + 400)
 check("summary: картки зі статусом, статистика WATCH/BLOCKED окремо", len(sm["cards"]) >= 4 and "watch" in sm["stats"] and "blocked" in sm["stats"] and all("status_ua" in x for x in sm["cards"]))
 
+# --- 8. контрольний перерахунок стопів для карток без stops_json (створені до #207)
+from office2 import stops as SVx
+db8 = new_db()
+put_scenario(db8, "O2|cccccccccccc", "DOTUSDT", "LONG", "WAIT", "WAIT 2/3 · зсув структури: sweep", thesis_wait())
+RW.sync(db8, NOW + 5)
+c0 = OB._fetchall(db8, "SELECT entry, sl, tp1, plan_ok, stops_json FROM office2_radar_card WHERE symbol='DOTUSDT'")[0]
+check("картка створена без stops_json (старий формат)", c0[3] == 1 and c0[4] is None, str(c0))
+th8 = thesis_wait(); th8["preview"]["stops"] = SVx.variants("LONG", 99.2, 0.2, 0.5, [], entry=100.2)
+OB._execute(db8, "UPDATE office2_live_scenario SET thesis_json = ? WHERE scenario_id = ?", (json.dumps(th8), "O2|cccccccccccc"))
+n8 = RW.backfill_stops(db8, NOW + 10)
+c1 = OB._fetchall(db8, "SELECT entry, sl, tp1, stops_json FROM office2_radar_card WHERE symbol='DOTUSDT'")[0]
+st8 = json.loads(c1[3] or "null") or {}
+check("backfill: 3 варіанти записані, Стоп 1 = фактичний стоп картки, backfill-позначка є", n8 == 1 and abs(st8["v1"]["sl"] - c0[1]) < 1e-9 and "v2" in st8 and "v3" in st8 and "backfill" in st8, str(st8)[:200])
+check("backfill не змінює план картки (вхід/SL/ціль)", c1[:3] == c0[:3])
+check("backfill ідемпотентний", RW.backfill_stops(db8, NOW + 20) == 0)
+
+sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
+check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

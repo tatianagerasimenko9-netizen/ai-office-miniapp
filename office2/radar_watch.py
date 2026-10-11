@@ -253,11 +253,46 @@ def evaluate_variants(card: Dict[str, Any], candles: List[Dict[str, Any]], now: 
     return out
 
 
+def backfill_stops(db: str, now: Optional[float] = None) -> int:
+    """Контрольний перерахунок трьох стопів для карток, створених ДО появи stops_json (#207). Лише допоміжна колонка для порівняння:
+    план картки (вхід/SL/цілі) не змінюється. Екстремум події й ATR беруться з preview сценарію Brain; «Стоп 1» = фактичний стоп картки (заморожений).
+    Позначка stops.backfill фіксує, що це перерахунок, а не розрахунок у момент створення."""
+    from office_bridge import _execute, _fetchall
+    from office2 import stops as SV
+
+    t = time.time() if now is None else now
+    n = 0
+    rows = _fetchall(db, "SELECT c.card_id, c.direction, c.entry, c.sl, s.thesis_json FROM office2_radar_card c JOIN office2_live_scenario s ON s.scenario_id = c.scenario_id "
+                         "WHERE c.plan_ok = 1 AND c.stops_json IS NULL AND c.created_ts > ?", (t - TRACK_MAX_AGE_SEC,))
+    for cid, d, entry, sl, tj in rows:
+        try:
+            th = json.loads(tj or "{}")
+            st = th.get("stops") or (th.get("preview") or {}).get("stops")
+            if not st or entry is None or sl is None or not st.get("extreme"):
+                continue
+            ext = float(st["extreme"])
+            if (d == "LONG" and not sl <= ext) or (d == "SHORT" and not sl >= ext):
+                continue       # фактичний стоп не за екстремумом події — цю картку не порівнюємо, нічого не вигадуємо
+            st = {k: (dict(v) if isinstance(v, dict) else v) for k, v in st.items()}
+            st["v1"] = dict(st.get("v1") or {}, sl=float(sl), name=SV.NAMES["v1"], beyond_extreme=True)
+            fin = SV.finalize_for_entry(st, d, float(entry))
+            fin["backfill"] = {"ts": t, "basis": "екстремум і ATR зі сценарію Brain; Стоп 1 = фактичний стоп картки; план картки не змінювався"}
+            _execute(db, "UPDATE office2_radar_card SET stops_json = ? WHERE card_id = ? AND stops_json IS NULL", (json.dumps(fin), cid))
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[radar] backfill стопів {cid}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
+    return n
+
+
 def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
     t = time.time() if now is None else now
     _ensure(db)
+    try:
+        backfill_stops(db, t)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[radar] backfill стопів: {type(exc).__name__}: {str(exc)[:100]}")
     cols = ",".join(_COLS)
     rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit * 2))
     final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID")
@@ -493,6 +528,34 @@ def stop_study(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def scanner_diag(db: str, now: Optional[float] = None) -> Dict[str, Any]:
+    """Чому немає нових карток: що саме бачив сканер за останні 40 хв (без вигаданих причин — лише лічильники з БД)."""
+    from office_bridge import _fetchall
+
+    t = time.time() if now is None else now
+    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, reason FROM office2_live_scenario WHERE state = 'WAIT' AND updated_ts > ?", (t - 2400,))
+    own = {r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_radar_card WHERE created_ts > ?", (t - 86400,))}
+    d = {"wait_total": len(rows), "no_structure": 0, "with_card": 0, "without_card": 0}
+    for sid, _sym, _dr, reason in rows:
+        m = re.match(r"^WAIT (\d)/3", str(reason or ""))
+        if not m or m.group(1) == "1":
+            d["no_structure"] += 1
+        elif sid in own or ("W|" + sid) in own or ("B|" + sid) in own:
+            d["with_card"] += 1
+        else:
+            d["without_card"] += 1
+    lc = _fetchall(db, "SELECT MAX(created_ts) FROM office2_radar_card")
+    d["last_card_ts"] = lc[0][0] if lc and lc[0][0] else None
+    d["new_cards_hour"] = _fetchall(db, "SELECT COUNT(*) FROM office2_radar_card WHERE created_ts > ?", (t - 3600,))[0][0] or 0
+    if d["without_card"]:
+        d["message"] = f"Є {d['without_card']} ідей без картки — вони з'являться після наступної синхронізації (або це дубль активної ідеї по тій самій монеті й напряму)."
+    elif d["with_card"]:
+        d["message"] = f"Нових незалежних ідей немає: усі {d['with_card']} поточні ідеї вже мають картки. Ще {d['no_structure']} лише на першому кроці (структури поки немає) — картки для них не створюються."
+    else:
+        d["message"] = f"Підтверджених кроків структури зараз немає: {d['no_structure']} ідей лише на першому кроці."
+    return d
+
+
 def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
@@ -549,6 +612,10 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
         g = wr.get("gate") or {}
         wr["message"] = (f"Сьогодні нових дозволених входів немає: спрацював денний ліміт ризику (до {RT.kyiv(g.get('lock_ends_ts'))}). Навчальні сигнали без реальних грошей продовжують надходити."
                          if g.get("locked") else "Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Навчальні сигнали без реальних грошей надходять далі.")
+        try:
+            wr["scanner"] = scanner_diag(db, t)
+        except Exception as exc:  # noqa: BLE001
+            wr["scanner_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
         out["why_no_ready"] = wr
     except Exception as exc:  # noqa: BLE001
         out["ok"] = False

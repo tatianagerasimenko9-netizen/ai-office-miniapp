@@ -361,7 +361,7 @@ function lrHtml(d){
   const sc=w.scenarios_last_hour||{}; const tm=t=>t?new Date(t*1000).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'}):'—';
   return `<div class="banner"><b>Як читати.</b> «Сигнали для дії» — лише коли умови входу підтверджені й дозволені. «Спостереження» — ціна біля зони, але ще не вхід. «Навчальні угоди» — ідеї без реальних грошей: офіс сам перевіряє, чим вони закінчились. Ордерів офіс не відкриває.</div>
     <h2>Сигнали для дії</h2>
-    <div class="o2need">${esc(w.message||'')}<br><span class="o2m">Остання перевірка ринку: ${tm(w.last_scan_ts)} за Києвом · у стані «чекаємо підтвердження»: ${w.armed_now??'—'} · за останню годину: ${Object.keys(sc).map(k=>esc(({WAIT:'очікують умов',NO_TRADE:'відхилено',READY:'умови входу підтверджені',WATCH:'спостерігаємо',MISSED:'запізно',INVALIDATED:'скасовано',EXPIRED:'строк вийшов'})[k]||k)+' '+sc[k]).join(', ')||'—'}</span></div>
+    <div class="o2need">${esc(w.message||'')}<br><span class="o2m">${esc((w.scanner||{}).message||'')}</span><br><span class="o2m">Остання перевірка ринку: ${tm(w.last_scan_ts)} за Києвом · у стані «чекаємо підтвердження»: ${w.armed_now??'—'} · за останню годину: ${Object.keys(sc).map(k=>esc(({WAIT:'очікують умов',NO_TRADE:'відхилено',READY:'умови входу підтверджені',WATCH:'спостерігаємо',MISSED:'запізно',INVALIDATED:'скасовано',EXPIRED:'строк вийшов'})[k]||k)+' '+sc[k]).join(', ')||'—'}</span></div>
     <h2>Навчальні угоди · ${learn.length}</h2>
     ${learn.length?learn.map(lrCard).join(''):'<div class="empty">Зараз немає нових навчальних угод. Щойно з\'явиться підтверджена ідея — вона буде тут і в Telegram.</div>'}
     <h2>Спостереження · ${watch.length}</h2>
