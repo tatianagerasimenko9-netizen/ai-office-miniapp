@@ -212,13 +212,21 @@ _execute(db, """CREATE TABLE IF NOT EXISTS office2_live_scenario (scenario_id TE
     updated_ts DOUBLE PRECISION, expires_ts DOUBLE PRECISION, reason TEXT, thesis_json TEXT, version TEXT)""")
 _execute(db, "INSERT INTO office2_live_scenario VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("O2|ctl|1", "DDDUSDT", "LONG", "SWEEP_SEQ", "NO_TRADE", T0, T0, None,
          "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC", json.dumps({"entry": 100, "sl": 99, "targets": [{"p": 102}, {"p": 104}]}), "t"))
+# сценарій ДО запуску контуру (PAPER_SINCE), але в межах 15 год від now: контрольний потік його бере
+DATA["DDDUSDT"] = [B(T0 + 60, 100.1, 100.4, 100.0, 100.3), B(T0 + 120, 100.3, 102.3, 100.2, 102.0)]
+NOW7 = T0 + 400 if False else P.PAPER_SINCE_TS + 3600
+_execute(db, "INSERT INTO office2_live_scenario VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("O2|ctl|2", "EEEUSDT", "SHORT", "SWEEP_SEQ", "NO_TRADE", P.PAPER_SINCE_TS - 600, P.PAPER_SINCE_TS - 600, None,
+         "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC", json.dumps({"entry": 100, "sl": 101, "targets": [{"p": 98}]}), "t"))
+DATA["EEEUSDT"] = [B(P.PAPER_SINCE_TS - 600 + 60, 99.9, 100.0, 97.9, 98.0)]
+n7 = P.control_tick(db, mk_fetch(), NOW7, log=log.append)
+check("контрольний потік бере сценарій до запуску (без PAPER_SINCE)", n7 >= 1 and any(r[0] == "CTL|O2|ctl|2" for r in _fetchall(db, "SELECT scenario_id FROM office2_paper_position")))
 DATA["DDDUSDT"] = [B(T0 + 60, 100.1, 100.4, 100.0, 100.3), B(T0 + 120, 100.3, 102.3, 100.2, 102.0)]
 live_before = P.summary(db)["stats"]["total"]
 P.tick(db, mk_fetch(), T0 + 400, log=log.append)
 P.tick(db, mk_fetch(), T0 + 400, log=log.append)           # повтор: без дублів
 sm = P.summary(db)
 ct = sm["control"]["stats"]
-check("контроль: 1 позиція, розв'язана за TP1 (A), без дубля; B/C ще ведуть залишок", ct["total"] == 1 and ct["closed"] == 1 and ct["tp"] == 1 and ct["b_c_still_open"] == 1, str(ct))
+check("контроль: 2 позиції (до і після запуску), обидві розв'язані за TP1 (A), без дубля; в однієї B/C ще ведуть залишок", ct["total"] == 2 and ct["closed"] == 2 and ct["tp"] == 2 and ct["b_c_still_open"] == 1, str(ct))
 check("контроль не змішується з LIVE", sm["stats"]["total"] == live_before and all(x["scope"] == "LIVE" for x in sm["items"]))
 check("контроль згруповано за причиною ліміту", any("стопи" in k for k in sm["control"]["by_gate"]), str(sm["control"]["by_gate"]))
 check("learning-звіт paper не містить CONTROL", P.learning_report(db)["overall"]["total"] == live_before)
