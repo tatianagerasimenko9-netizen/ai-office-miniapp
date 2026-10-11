@@ -31,4 +31,14 @@ assert HS.usable({"sym": "X", "dir": "SHORT", "entry": 2, "sl": 3, "tp1": 1, "ts
 assert HS.usable({"sym": "X", "dir": "SHORT", "entry": 2, "sl": None, "tp1": 1, "ts": 1, "valid": 2}) == "NO_LEVELS"
 pl = HS.dedup([{"sym": "A", "dir": "LONG", "ts": 1000.0, "sid": "1"}, {"sym": "A", "dir": "LONG", "ts": 2000.0, "sid": "2"}, {"sym": "A", "dir": "SHORT", "ts": 2000.0, "sid": "3"}])
 assert [x["dup"] for x in pl] == [False, True, False]
-print("OK геометрія/дедуп\nALL OK")
+import office_signal_track as T  # noqa: E402
+e0 = float(t[10]); base = 100.0
+cl = [{"ts": e0 + 900 * k, "high": base + 0.2, "low": base - 0.2} for k in range(0, 700)]
+cl[300]["low"] = 98.9        # SL=99 зачеплено через ~75 год після входу? ні: 300*900 c = 75 год
+pl = {"direction": "LONG", "entry": 100.0, "sl": 99.0, "tp1": 102.0, "confirmed_ts": e0, "valid_until_ts": e0 + 3600}
+r = HS.run_sim(T, pl, cl, e0 + 900 * 700)
+assert r["status"] == "OPEN_TIMEOUT", r          # SL після 72 год → тайм-аут, як у трекері
+cl[100]["low"] = 98.9; cl[300]["low"] = 99.8     # SL через ~25 год
+r = HS.run_sim(T, pl, cl, e0 + 900 * 700)
+assert r["status"] == "STOP", r
+print("OK симуляція: STOP до 72 год, тайм-аут після (без хибного OPEN_TIMEOUT)\nALL OK")

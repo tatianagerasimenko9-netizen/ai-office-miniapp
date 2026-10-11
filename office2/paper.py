@@ -30,10 +30,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_paper_position (
     miss_reason TEXT, qty DOUBLE PRECISION, notional DOUBLE PRECISION, cost_usd DOUBLE PRECISION,
     tp1_ts DOUBLE PRECISION, tp2_ts DOUBLE PRECISION, tp3_ts DOUBLE PRECISION, sl_ts DOUBLE PRECISION, close_ts DOUBLE PRECISION, close_reason TEXT,
     r_a DOUBLE PRECISION, r_b DOUBLE PRECISION, r_c DOUBLE PRECISION, pnl_a DOUBLE PRECISION, pnl_b DOUBLE PRECISION, pnl_c DOUBLE PRECISION,
-    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT, scope TEXT, postmortem_json TEXT, gate_reason TEXT)""",)
+    mfe_r DOUBLE PRECISION, mae_r DOUBLE PRECISION, coarse INTEGER DEFAULT 0, session TEXT, btc TEXT, updated_ts DOUBLE PRECISION, kind TEXT, scope TEXT, postmortem_json TEXT, gate_reason TEXT, learned_flags TEXT)""",)
 _COLS = ("scenario_id", "symbol", "direction", "status", "generated_ts", "delivered_ts", "plan_entry", "sl", "tp1", "tp2", "tp3", "fill_ts", "fill_price", "miss_reason", "qty",
          "notional", "cost_usd", "tp1_ts", "tp2_ts", "tp3_ts", "sl_ts", "close_ts", "close_reason", "r_a", "r_b", "r_c", "pnl_a", "pnl_b", "pnl_c", "mfe_r", "mae_r", "coarse",
-         "session", "btc", "updated_ts", "kind", "scope", "postmortem_json", "gate_reason")
+         "session", "btc", "updated_ts", "kind", "scope", "postmortem_json", "gate_reason", "learned_flags")
 _READY = {"done": False}
 
 
@@ -44,7 +44,7 @@ def _ensure(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
-    for col in ("kind TEXT", "scope TEXT", "postmortem_json TEXT", "gate_reason TEXT"):
+    for col in ("kind TEXT", "scope TEXT", "postmortem_json TEXT", "gate_reason TEXT", "learned_flags TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_paper_position ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -180,6 +180,33 @@ def _save(db: str, p: Dict[str, Any]) -> None:
     _execute(db, f"INSERT INTO office2_paper_position({','.join(_COLS)}) VALUES ({ph}) ON CONFLICT (scenario_id) DO UPDATE SET {upd}", tuple(p.get(c) for c in _COLS))
 
 
+def _lf_of(th: Dict[str, Any], ts: Any) -> List[str]:
+    from office2.learning import learned_flags as LF
+
+    return LF.flags_for(th, float(ts))
+
+
+def flags_pass(db: str, log: Callable[[str], None] = print, limit: int = 40) -> int:
+    """Донос shadow-позначок для позицій, створених до появи колонки (з тезиса у знімку/сценарії). Лише запис позначок, на результат/гейти не впливає."""
+    from office_bridge import _execute, _fetchall
+
+    n = 0
+    for sid, gen in _fetchall(db, "SELECT scenario_id, generated_ts FROM office2_paper_position WHERE learned_flags IS NULL AND COALESCE(scope,'') != 'BACKFILL_INVALID' LIMIT ?", (limit,)):
+        try:
+            if str(sid).startswith("CTL|"):
+                r = _fetchall(db, "SELECT thesis_json FROM office2_live_scenario WHERE scenario_id = ?", (sid[4:],))
+                th = json.loads(r[0][0]) if r else {}
+            else:
+                r = _fetchall(db, "SELECT snapshot_json FROM office2_live_signal WHERE scenario_id = ?", (sid,))
+                th = (json.loads(r[0][0]) if r else {}).get("thesis") or {}
+            fl = _lf_of(th, gen or 0) if th else []
+            _execute(db, "UPDATE office2_paper_position SET learned_flags = ? WHERE scenario_id = ?", (json.dumps(fl, ensure_ascii=False), sid))
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            log(f"[paper] позначки {sid}: {type(exc).__name__}: {str(exc)[:100]}")
+    return n
+
+
 def _from_signal(row: tuple) -> Dict[str, Any]:
     sid, sym, d, created, delivered, status, last_error, sj = row
     snap = {}
@@ -194,7 +221,7 @@ def _from_signal(row: tuple) -> Dict[str, Any]:
     return {"scenario_id": sid, "symbol": sym, "direction": d, "generated_ts": float(created), "delivered_ts": float(delivered) if delivered else None,
             "plan_entry": float(th["entry"]) if th.get("entry") else None, "sl": float(th["sl"]) if th.get("sl") else None, "tp1": tp(0), "tp2": tp(1), "tp3": tp(2),
             "kind": th.get("kind"), "scope": "LIVE", "session": ((snap.get("session_tag") or {}).get("session")), "btc": json.dumps(btc, ensure_ascii=False, default=str)[:600], "coarse": 0,
-            "_status": status, "_err": last_error}
+            "learned_flags": json.dumps(_lf_of(th, created), ensure_ascii=False), "_status": status, "_err": last_error}
 
 
 def _apply(p: Dict[str, Any], w: Dict[str, Any], now: float) -> None:
@@ -286,7 +313,7 @@ def control_tick(db: str, fetch: Callable[[str, str, int], Any], now: float, log
                 continue
             p = {"scenario_id": cid, "symbol": sym, "direction": d, "generated_ts": float(upd), "delivered_ts": float(upd) + CONTROL_ASSUMED_DELIVERY_SEC, "plan_entry": float(th["entry"]), "sl": float(th["sl"]),
                  "tp1": float(tg[0]["p"]), "tp2": float(tg[1]["p"]) if len(tg) > 1 else None, "tp3": float(tg[2]["p"]) if len(tg) > 2 else None, "kind": kind, "scope": "CONTROL",
-                 "gate_reason": str(reason or "")[:120], "coarse": 0}
+                 "gate_reason": str(reason or "")[:120], "coarse": 0, "learned_flags": json.dumps(_lf_of(th, upd), ensure_ascii=False)}
             nb = max(5, min(1000, int((now - p["delivered_ts"]) // 60) + 5))
             open_position(p, bars_of(fetch(sym, "1m", nb)))
             _save(db, p)
@@ -364,6 +391,10 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
         out["postmortem"] = postmortem_pass(db, fetch, now, log)
     except Exception as exc:  # noqa: BLE001
         log(f"[paper] розбір збій: {type(exc).__name__}: {str(exc)[:120]}")
+    try:
+        out["flags"] = flags_pass(db, log)
+    except Exception as exc:  # noqa: BLE001
+        log(f"[paper] позначки збій: {type(exc).__name__}: {str(exc)[:120]}")
     return out
 
 
@@ -444,6 +475,11 @@ def summary(db: str, limit: int = 30) -> Dict[str, Any]:
         cols = ",".join(_COLS)
         rows = [_rowdict(r) for r in _fetchall(db, f"SELECT {cols} FROM office2_paper_position")]
         live = sorted([x for x in rows if x["scope"] == "LIVE"], key=lambda x: -(x["delivered_ts"] or x["generated_ts"] or 0))
+        for x in rows:
+            try:
+                x["flags"] = json.loads(x.get("learned_flags") or "[]")
+            except ValueError:
+                x["flags"] = []
         out["items"] = live[:limit]
         out["stats"] = _stats(live)
         bf = [x for x in rows if x["scope"] == "BACKFILL" and x["status"] in ("CLOSED", "OPEN")]
@@ -454,11 +490,26 @@ def summary(db: str, limit: int = 30) -> Dict[str, Any]:
         for g in sorted({(x["gate_reason"] or "?").split(":")[-1].strip()[:60] for x in ctl}):
             by[g] = _stats([x for x in ctl if (x["gate_reason"] or "?").split(":")[-1].strip()[:60] == g])
         out["gate"] = gate_status(db)
+        out["learned_flags"] = _learned(rows)
         out["control"] = {"note": "would-be READY, відсічені лімітами ємності/стопів: умовний результат «якби не ліміт» (вхід через ~1 хв після рішення — припущення). Ліміти не змінюються; це дані для рішення власниці.",
                           "stats": _stats(ctl), "by_gate": by}
     except Exception as exc:  # noqa: BLE001
         out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
     return out
+
+
+def _learned(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from office2.learning import learned_flags as LF
+
+    rs = []
+    for x in rows:
+        try:
+            fl = json.loads(x.get("learned_flags") or "null")
+        except ValueError:
+            fl = None
+        if fl is not None and x.get("scope") in ("LIVE", "CONTROL", "BACKFILL"):
+            rs.append({**x, "_flags": fl})
+    return LF.evaluate(rs)
 
 
 def learning_report(db: str) -> Optional[Dict[str, Any]]:

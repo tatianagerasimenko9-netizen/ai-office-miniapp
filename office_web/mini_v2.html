@@ -321,11 +321,21 @@ function whyHtml(x){
     <div class="mut" style="margin-top:6px">${sl}</div>
     <div class="mut" style="margin-top:6px"><b>Альтернативи на цій угоді (ілюстрація)</b>: ${vs}. <i>Покращенням не вважається, поки не підтверджене на вибірці (NOT_STABLE у V7/V8).</i></div></details>`;
 }
+function lfHtml(l){
+  if(!l||!l.rules) return '';
+  const m=v=>(v==null?'—':(v>=0?'+':'')+v+'$');
+  const r=Object.entries(l.rules).map(([id,e])=>{
+    const sc=Object.entries(e.by_scope||{}).map(([k,v])=>`${esc(k)}: позначено ${v.flagged} з ${v.resolved} · SL уникнуто ${v.sl_avoided} · TP втрачено ${v.tp_lost} · ефект ${m(v.effect_usd)} · ${esc(v.verdict)}`).join('<br>');
+    const ev=e.evidence||{};
+    return `<div class="mut" style="margin-top:6px"><b>${esc(id)}</b> — ${esc(e.label)} · історія: n=${ev.n}, середнє ${ev.mean_r} R проти ${ev.rest_mean_r} R (train ${ev.train} / test ${ev.test})<br>${sc||'ще немає нових результатів'}</div>`;
+  }).join('');
+  return `<div class="mut" style="margin-top:10px"><b>Shadow-позначки (⚑)</b> — нічого не блокують; ефект рахується на нових paper-результатах. Фільтр LIVE змінюється лише за рішенням власниці.</div>${r}`;
+}
 function paperHtml(d){
   if(!d||!d.stats) return '';
   const st=d.stats, m=v=>(v==null?'—':(v>=0?'+':'')+v+'$');
   const ts=t=>t?new Date(t*1000).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
-  const row=x=>`<div class="mut" style="margin-top:8px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.kind||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.pnl_a!=null?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}${whyHtml(x)}</div>`;
+  const row=x=>`<div class="mut" style="margin-top:8px"><b>${esc((x.symbol||'').replace('USDT',''))}</b> ${esc(x.direction||'')} · ${esc(x.kind||'')} · ${esc(x.status||'')}${x.status==='MISSED'?' — '+esc(x.miss_reason||''):''}${x.fill_price?' · вхід '+x.fill_price+' ('+ts(x.fill_ts)+')':''}${x.pnl_a!=null?' · '+esc(x.close_reason||'')+' · A '+m(x.pnl_a)+' / B '+m(x.pnl_b)+' / C '+m(x.pnl_c):''}${(x.flags&&x.flags.length)?' · ⚑ '+esc(x.flags.join(', ')):''}${whyHtml(x)}</div>`;
   const rows=(d.items||[]).slice(0,10).map(row).join('');
   const bf=d.backfill||{}, bs=bf.stats||{};
   const bfh=(bs.total?`<div class="mut" style="margin-top:10px"><b>Перевірка правил на раніше доставлених сигналах</b> (до запуску контуру, у результат запуску НЕ входить): розв'язано ${bs.closed} (SL ${bs.sl}, TP ${bs.tp}) · відкрито ${bs.open} · A ${m(bs.pnl_a_usd)}. Невалідних записів без даних: ${bf.invalid_no_data||0} (виключені зі статистики, збережені для аудиту).</div>${(bf.items||[]).map(row).join('')}`:'');
@@ -337,7 +347,7 @@ function paperHtml(d){
   const ch=(cs.total?`<div class="mut" style="margin-top:10px"><b>Контрольний потік</b> (would-be READY, відсічені лімітами; у результат не входить): ${cs.total} · розв'язано ${cs.closed} (TP ${cs.tp}, SL ${cs.sl}) · умовно A ${m(cs.pnl_a_usd)}. ${Object.keys(c.by_gate||{}).map(k=>esc(k)+': '+c.by_gate[k].total+' (A '+m(c.by_gate[k].pnl_a_usd)+')').join(' · ')}</div>`:'');
   return `<h2>PAPER · живі позиції</h2><div class="card"><div class="mut">Модель, не реальні гроші й не ордери. Вхід лише після Telegram-доставки; комісія+slippage 0.15% кола (припущення, без funding).
     З моменту запуску: ${st.total} · відкрито ${st.open} · розв'язано ${st.closed} (TP ${st.tp}, SL ${st.sl}) · пропущено (MISSED) ${st.missed} · комісії ${st.fees_usd}$ ·
-    результат A ${m(st.pnl_a_usd)} · B ${m(st.pnl_b_usd)} · C ${m(st.pnl_c_usd)} (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Нових позицій після запуску поки немає — чекаємо справжній READY</div>'}${gh}${bfh}${ch}</div>`;
+    результат A ${m(st.pnl_a_usd)} · B ${m(st.pnl_b_usd)} · C ${m(st.pnl_c_usd)} (${esc(st.note||'')})</div>${rows||'<div class="mut" style="margin-top:6px">Нових позицій після запуску поки немає — чекаємо справжній READY</div>'}${gh}${bfh}${ch}${lfHtml(d.learned_flags)}</div>`;
 }
 function dynWatchHtml(d){
   if(!d||d.mode==='off'||!d.stats) return '';

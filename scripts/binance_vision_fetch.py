@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -65,11 +66,11 @@ def fetch(sym: str, interval: str, d0: date, d1: date, today: date = None) -> di
     for y, m in _months(d0, d1):
         first, last = date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
         if first >= d0 and last <= d1 and last < today - timedelta(days=2):
-            jobs.append(f"{BASE}/monthly/klines/{sym}/{interval}/{sym}-{interval}-{y}-{m:02d}.zip")
+            jobs.append(f"{BASE}/monthly/klines/{quote(sym)}/{interval}/{quote(sym)}-{interval}-{y}-{m:02d}.zip")
         else:
             a, b = max(first, d0), min(last, d1)
             for k in range((b - a).days + 1):
-                jobs.append(f"{BASE}/daily/klines/{sym}/{interval}/{sym}-{interval}-{(a + timedelta(days=k)).isoformat()}.zip")
+                jobs.append(f"{BASE}/daily/klines/{quote(sym)}/{interval}/{quote(sym)}-{interval}-{(a + timedelta(days=k)).isoformat()}.zip")
     print(f"[fetch] {sym} {interval}: {len(jobs)} файлів", flush=True)
     t0 = time.time()
     with ThreadPoolExecutor(8) as ex:
