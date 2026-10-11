@@ -51,8 +51,11 @@ def _ensure(db: str) -> None:
         return
     from office_bridge import _execute
 
-    for d in DDL:
-        _execute(db, d)
+    try:
+        for d in DDL:
+            _execute(db, d)
+    except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
+        print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
     for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
@@ -515,6 +518,7 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
                 c["active"] = bool(c["expires_ts"] and c["expires_ts"] > t and c["scen_state"] in ("WAIT", "NO_TRADE") and c["paper_status"] in (None, "", "WAITING_ENTRY", "ENTERED"))
                 c["h"] = RT.present(c)
             out["card"] = c
+            print(f"[radar] картка за посиланням «{str(card_id)[:40]}»: {'знайдено ' + c['card_id'] if c else 'НЕ знайдено'}", flush=True)
             return out
         rows = [dict(zip(_COLS, r)) for r in _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE created_ts > ? ORDER BY created_ts DESC LIMIT 120", (t - 3 * 86400,))]
         from office2 import radar_text as RT
@@ -549,4 +553,5 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
     except Exception as exc:  # noqa: BLE001
         out["ok"] = False
         out["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        print(f"[radar] summary помилка (card={card_id}): {out['error']}", flush=True)       # у логах Render видно причину, а не лише «200»
     return out

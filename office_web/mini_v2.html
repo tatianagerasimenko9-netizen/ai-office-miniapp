@@ -378,6 +378,7 @@ async function openRadarCard(id){
   let d; try{d=await j('/api/v2/live_radar?card='+encodeURIComponent(id||''));}catch(e){return fail(e,'картка');}
   if(T0!==RT) return;
   const x=d.card;
+  if(d.ok===false){ app.innerHTML='<button class="back" id="back">← Радар</button><div class="empty">Не вдалося завантажити картку: '+esc(d.error||'помилка сервера')+'. Спробуйте ще раз.</div>'; $('back').onclick=()=>go('radar'); return; }
   if(!x){ app.innerHTML='<button class="back" id="back">← Радар</button><div class="empty">Цю картку не знайдено: можливо, посилання застаріло. Усі актуальні ідеї — у Радарі.</div>'; $('back').onclick=()=>go('radar'); return; }
   const h=x.h||{};
   const kv=(k,v)=>`<div class="kv"><span>${esc(k)}</span><b class="num">${v}</b></div>`;
