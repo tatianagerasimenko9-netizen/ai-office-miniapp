@@ -34,10 +34,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT, daria_observation_json TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -56,7 +56,7 @@ def _ensure(db: str) -> None:
             _execute(db, d)
     except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
         print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
-    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT"):
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT", "daria_observation_json TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -413,6 +413,17 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
             cl = cache[c["symbol"]]
             if not cl:
                 continue
+            if not c.get("daria_observation_json") and c.get("level_price") and c.get("created_ts"):
+                try:
+                    from office2 import daria_shadow
+                    # As-of: observer сам відсікає свічки, що закрилися ПІСЛЯ часу створення картки.
+                    obs = daria_shadow.observe(c["direction"], float(c["level_price"]), cl, float(c["created_ts"]))
+                    obs["trade_policy"] = "SHADOW_ONLY"
+                    obs["radar_card_id"] = c["card_id"]
+                    _execute(db, "UPDATE office2_radar_card SET daria_observation_json=? WHERE card_id=? AND daria_observation_json IS NULL",
+                             (json.dumps(obs, ensure_ascii=False), c["card_id"]))
+                except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
+                    log(f"[radar] Дарія shadow {c['card_id']}: {type(exc).__name__}")
             ev = evaluate_card(c, cl, t)
             vv = evaluate_variants(c, cl, t)
             _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=? WHERE card_id=?",

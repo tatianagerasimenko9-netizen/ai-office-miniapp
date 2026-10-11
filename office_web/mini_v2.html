@@ -408,6 +408,17 @@ async function openRadarCard(id){
       <span class="o2m">До цілей: ${i.mult1?'ціль 1 ≈'+esc(i.mult1)+'× стопа':''}${i.mult2?' · ціль 2 ≈'+esc(i.mult2)+'×':''}${i.mult3?' · ціль 3 ≈'+esc(i.mult3)+'×':''}</span><br>${esc(i.explain)}<br>
       <span class="o2m">Результат цього варіанта: ${esc(i.status)}${i.r_net!=null?' · '+(i.r_net>=0?'+':'')+i.r_net+' від ризику (з комісіями)':''}</span>${i.after?'<br><span class="o2y">Після стопа: '+esc(i.after)+'</span>':''}</div>`).join('')}
     <div class="o2need"><b>${esc(sv.summary)}</b></div></div>`:'';
+  let dariaObs=null; try{dariaObs=JSON.parse(x.daria_observation_json||'null')}catch(e){}
+  const dariaHtml=dariaObs?`<details class="card"><summary><b>Методика Дарії · дослідницькі спостереження</b></summary>
+    <div class="o2sub">Розраховано на момент створення ідеї, лише за закритими свічками. Не є сигналом і не змінює план. Параметри вимірювань — наші, не правила авторки.</div>
+    ${dariaObs.status==='OBSERVED'?`
+      <div class="o2m">Закриття відносно рівня: ${esc(String((dariaObs.close_vs_level||{}).side||'невідомо'))} · ${esc(String((dariaObs.close_vs_level||{}).atr??'—'))} ATR</div>
+      <div class="o2m">Реакції біля рівня: ${esc(String(dariaObs.touches??'—'))} · даних: ${esc(String(dariaObs.bars_used??'—'))} закритих свічок</div>
+      <div class="o2m">Частка послідовних свічок у напрямку підтиснення: ${dariaObs.squeeze_share==null?'—':esc(String(Math.round(dariaObs.squeeze_share*100)))+'%'}</div>
+      <div class="o2m">Глибина відкату в досліджуваному діапазоні: ${dariaObs.pullback_share==null?'—':esc(String(Math.round(dariaObs.pullback_share*100)))+'%'}</div>
+      <div class="o2m">Запас ходу: ${dariaObs.room_atr==null?'перешкоду не задано':esc(String(dariaObs.room_atr))+' ATR'}</div>
+      <div class="o2sub">Ці вимірювання не доводять перевагу методу. Висновок про вхід не робиться.</div>`:`<div class="o2sub">Недостатньо даних: ${esc(dariaObs.reason||'без пояснення')}</div>`}
+    </details>`:'';
   const pmv=h.postmortem; const pmHtml=pmv?`<div class="card"><b>Розбір угоди</b><div class="o2need">${esc(pmv.summary||'')}</div>
     ${(pmv.after||[]).length?'<div class="o2m">Що було з ціною після виходу: '+pmv.after.map(esc).join(' · ')+(pmv.final?'':' (спостереження триває)')+'</div>':''}
     ${(pmv.flags||[]).length?'<div class="o2m">Ознаки для статистики: '+pmv.flags.map(esc).join('; ')+'</div>':''}
@@ -419,7 +430,7 @@ async function openRadarCard(id){
     <div id="ch" style="height:320px;margin:10px 0"></div><div class="mut" id="asof"></div>
     <div class="card"><b>План</b><div class="mut" style="margin-top:6px">${lrPlan(h)}</div>
       ${kv('Чому',esc(h.why||''))}${h.need?kv('Чекаємо',esc(h.need)):''}${kv('Створено',LR_TM(x.created_ts))}${kv('Діє до',esc(h.expires||''))}</div>
-    ${planHtml}${stopsHtml}${pmHtml}
+    ${planHtml}${stopsHtml}${dariaHtml}${pmHtml}
     <div class="card"><b>Супровід навчальної угоди</b>${kv('Стан',esc(h.paper||''))}
       ${x.entry_ts?kv('Ціна дійшла до входу',LR_TM(x.entry_ts)):''}${x.exit_ts?kv('Завершено',LR_TM(x.exit_ts)):''}${h.result?kv('Результат',esc(h.result)):''}
       <div class="o2sub">Telegram: ${x.tg_status==='SENT'?'надіслано '+LR_TM(x.sent_ts):'ще не надсилали'}. ${esc(x.last_error||'')}</div>

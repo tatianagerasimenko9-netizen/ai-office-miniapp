@@ -296,5 +296,19 @@ check("RUNE: без обґрунтованого стопа — чесне «Б�
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))
 
+# --- 9. Реальний shadow-зріз Дарії у картці: дані до created_ts, без впливу на план і Telegram.
+db9 = new_db()
+put_scenario(db9, "O2|daria9", "DARIAUSDT", "LONG", "WAIT", "WAIT 2/3 · ретрейс", thesis_wait())
+RW.sync(db9, NOW + 15)
+before9 = OB._fetchall(db9, "SELECT entry, sl, tp1, tg_status FROM office2_radar_card WHERE symbol='DARIAUSDT'")[0]
+cs9 = [{"ts": NOW - 900 * (40 - i), "open": 99.7, "high": 100.2,
+        "low": 99.6, "close": 99.9, "volume": 100.0} for i in range(44)]
+RW.track(db9, lambda *_: cs9, now=NOW + 930)
+rr9 = OB._fetchall(db9, "SELECT entry, sl, tp1, tg_status, daria_observation_json FROM office2_radar_card WHERE symbol='DARIAUSDT'")[0]
+d9 = json.loads(rr9[4] or "null") or {}
+check("Daria shadow: записано as-of спостереження в колонку картки", d9.get("status") == "OBSERVED" and d9.get("trade_policy") == "SHADOW_ONLY", str(d9)[:280])
+check("Daria shadow: рішення не бере пізні свічки та не змінює план/TG", d9.get("decision_ts") == NOW and rr9[:4] == before9 and d9.get("bars_used", 999) <= 24, str(d9)[:280])
+check("Daria shadow: числова інтерпретація позначена як наша, не авторська", d9.get("measurement_scope") == "OUR_IMPLEMENTATION" and "UNVERIFIED" in d9.get("source_scope", ""), str(d9)[:280])
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
