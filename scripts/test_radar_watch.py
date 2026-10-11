@@ -92,13 +92,16 @@ check("повторний sync без дублів", OB._fetchall(db, "SELECT CO
 pk = RW.pick_for_tg(db, NOW + 100)
 check("у Telegram лише ARMED/BLOCKED із планом (RETRACE і plan_ok=0 — ні), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1"], str([x["card_id"] for x in pk]))
 txt = RW.format_card(pk[1])
-check("текст WATCH: не вхід, зона, SL, TP1–TP3, строк, лінк на картку", all(s in txt for s in ("WATCH · не вхід", "Зона входу", "SL:", "TP1:", "TP2:", "TP3:", "актуально до", "не сигнал і не ордер", "tab=radar&card=W%7CO2%7Ca1")), txt)
+check("текст «Спостерігаємо»: людською мовою, що робити, зона, стоп, цілі, строк, лінк", all(s in txt for s in ("Спостерігаємо", "Очікуємо зростання", "Що робити: Не входити", "Зона входу", "Стоп (якщо ідея не спрацювала)", "Ціль 1", "Ціль 2", "Ціль 3", "Діє до", "tab=radar&card=")), txt)
+JARGON = ("READY", "WATCH", "PAPER", "LONG", "SHORT", "SL:", "TP1", "M15", "paper", "ЗАБЛОКОВАНО")
+check("у головному тексті немає жаргону (технічний код лише в останньому рядку «Технічно»)", not any(j in txt.split("Технічно:")[0] for j in JARGON), txt)
 txtb = RW.format_card(pk[0])
-check("текст BLOCKED показує причину ліміту й що це не вхід", "ЗАБЛОКОВАНО · не вхід" in txtb and "денний ліміт" in txtb, txtb)
+check("навчальний сигнал: без слова «заблоковано», є «без реальних грошей», пояснення про ліміт для реальної торгівлі і що робити",
+      "ЗАБЛОКОВАНО" not in txtb and "без реальних грошей" in txtb and "для реальної торгівлі сьогодні вичерпано денний ліміт ризику" in txtb and "Що робити: Нічого не робити" in txtb and "Очікуємо падіння" in txtb, txtb)
 RW.mark_sent(db, "W|O2|a1", 111, NOW + 100)
 RW.mark_sent(db, "B|O2|b1", 112, NOW + 101)
 check("після відправки картка не вибирається повторно", RW.pick_for_tg(db, NOW + 200) == [])
-for i in range(5):
+for i in range(RW.TG_PER_HOUR + 4):
     put_scenario(db, f"O2|n{i}", f"N{i}USDT", "LONG", "WAIT", "WAIT 3/3 · ARMED", thesis_wait(), upd=NOW + 300)
 RW.sync(db, NOW + 310)
 check("антиспам: не більше TG_PER_HOUR карток за годину (вже 2 відправлено)", len(RW.pick_for_tg(db, NOW + 320)) == RW.TG_PER_HOUR - 2)
@@ -134,7 +137,7 @@ check("track пише paper-стан, follow-up містить вхід і TP1",
 c1 = [x for x in fu if x["card_id"] == "W|O2|a1"][0]
 RW.mark_notified(db, c1["card_id"], c1["_new"], c1.get("notified"))
 check("після повідомлення віхи не повторюються", not [x for x in RW.pending_followups(db) if x["card_id"] == "W|O2|a1"])
-check("текст follow-up: paper, не ордер", "Paper, не ордер" in RW.followup_text(c1))
+check("текст follow-up: навчальна угода, не ордер", "Навчальна угода, не ордер" in RW.followup_text(c1))
 
 # --- 6. send_pass (фейковий Telegram): надсилає, фіксує msg_id, помилка не ламає інших
 sent = []
@@ -157,6 +160,45 @@ res = asyncio.run(RW.send_pass(db2, fake_photo, fake_text, lambda s, tf, k: [], 
 check("send_pass: 2 картки відправлено (текстом, бо графік недоступний), msg_id збережено", res["sent"] == 2 and len(sent) == 2 and all(OB._fetchall(db2, "SELECT msg_id FROM office2_radar_card WHERE tg_status='SENT'")[i][0] for i in range(2)), f"{res} {sent}")
 res = asyncio.run(RW.send_pass(db2, fake_photo, fake_text, lambda s, tf, k: [], lambda **kw: {"ok": False}, now=NOW + 120, log=lambda m: None))
 check("повторний прохід нічого не шле (дедуп)", res["sent"] == 0 and len(sent) == 2)
+
+
+# --- 8. вимоги власниці 11.10 (Issue #199): навчальні сигнали після 3 стопів, deep link, зона входу, далекі цілі, дедуплікація
+from office2 import radar_text as RT  # noqa: E402
+
+db4 = new_db()
+HEX = "687671d4c162"
+put_scenario(db4, f"O2|{HEX}", "DOTUSDT", "SHORT", "NO_TRADE", "ємність сценаріїв: денний ліміт: 3 стопи за добу UTC",
+             {"id": "d", "dir": "SHORT", "entry": 1.2337, "sl": 1.246, "risk_pct": 1.0, "targets": [{"p": 1.2, "kind": "PDL", "r": 3.0}, {"p": 1.15, "kind": "D1L", "r": 7.0}, {"p": 1.0075, "kind": "W1L", "r": 18.0}],
+              "entry_zone": [1.2338, 1.2399], "level": {"p": 1.2434, "kind": "D1H"}})
+RW.sync(db4, NOW + 10)
+row = dict(zip(RW._COLS, OB._fetchall(db4, "SELECT " + ",".join(RW._COLS) + f" FROM office2_radar_card WHERE card_id = 'B|O2|{HEX}'")[0]))
+check("після 3 стопів навчальна картка створюється й іде в Telegram (обмеження ризику її не гасить)", row["plan_ok"] == 1 and [x["card_id"] for x in RW.pick_for_tg(db4, NOW + 20)] == [f"B|O2|{HEX}"])
+check("структурна перевірка: вхід (1.2337) лежить поза зоною 1.2338–1.2399 → зсунуто на межу зони з приміткою", row["entry"] == 1.2338 and "поза зоною" in (row["entry_note"] or ""), str(row))
+far = json.loads(row["far_targets"] or "[]")
+check("далекі цілі (≈+18 %, понад 8 %) не входять у paper-результат і позначені як далекі", row["tp3"] is None and far and far[0]["n"] == 3 and row["tp1"] == 1.2, str(row["far_targets"]))
+tx = RW.format_card(row)
+check("текст: «Ціль 3 … далека, у навчальному результаті не враховуємо», примітка про вхід, 1000-контракти пояснені", "далека, у навчальному результаті не враховуємо" in tx and "поза зоною" in tx, tx)
+check("1000PEPE пояснюється, тикер не перейменовується", RT.coin("1000PEPEUSDT") == "1000PEPE (контракт на 1000 токенів PEPE)" and RT.coin("DOTUSDT") == "DOT")
+lid = RT.link_id(f"B|O2|{HEX}")
+check("посилання без «|» і «%»; розпізнається нове, старе й подвійно закодоване", lid == f"B-{HEX}" and f"B|O2|{HEX}" in RT.parse_link_id(lid) and f"B|O2|{HEX}" in RT.parse_link_id(f"B%257CO2%257C{HEX}") and f"B|O2|{HEX}" in RT.parse_link_id(f"B%7CO2%7C{HEX}") and f"B|O2|{HEX}" in RT.parse_link_id(f"O2|{HEX}"))
+for tok in (lid, f"B|O2|{HEX}", f"B%7CO2%7C{HEX}", f"B%257CO2%257C{HEX}", HEX):
+    got = RW.summary(db4, NOW + 30, card_id=tok).get("card")
+    check(f"картку знайдено за посиланням «{tok[:28]}»", bool(got) and got["card_id"] == f"B|O2|{HEX}" and got["h"]["title"].startswith("🎓"), str(got)[:120])
+check("текст у посиланні картки Telegram — короткий ідентифікатор", f"card={lid}" in tx, tx)
+put_scenario(db4, "O2|aaaaaaaaaaaa", "DOTUSDT", "SHORT", "NO_TRADE", "ємність сценаріїв: ємність сценаріїв Office2: 50$ > 40$", thesis_blocked() | {"dir": "SHORT"})
+RW.sync(db4, NOW + 40)
+check("дедуплікація: одна активна ідея на монету й напрям", OB._fetchall(db4, "SELECT COUNT(*) FROM office2_radar_card WHERE symbol='DOTUSDT' AND kind='BLOCKED'")[0][0] == 1)
+put_scenario(db4, "O2|bbbbbbbbbbbb", "XRPUSDT", "SHORT", "NO_TRADE", "ємність сценаріїв: по цій монеті вже є живий сигнал Office2", thesis_blocked())
+RW.sync(db4, NOW + 50)
+check("«по монеті вже є живий сигнал» — не навчальна ідея (дубль справжнього)", not OB._fetchall(db4, "SELECT 1 FROM office2_radar_card WHERE symbol='XRPUSDT'"))
+fl = RT.followup_text(dict(row, _new=["SL"], r_net=-1.12, paper_status="SL"))
+check("follow-up простою мовою без жаргону", "стоп спрацював" in fl and "Навчальна угода, не ордер" in fl and not any(j in fl for j in ("SL", "paper", "PAPER", "R ")), fl)
+sm4 = RW.summary(db4, NOW + 60)
+check("summary: пояснення «чому немає дозволених входів» і навчальні картки з готовим текстом", "Навчальні сигнали" in sm4["why_no_ready"]["message"] and all("h" in x for x in sm4["cards"]) and "today" in sm4["stats"], str(sm4["why_no_ready"]))
+pl = RW.plan_of({"dir": "LONG", "entry": 100.0, "sl": 99.0, "targets": [{"p": 99.5, "kind": "X", "r": 0.5}], "entry_zone": [99.9, 100.1]})
+check("некоректна геометрія (ціль нижче входу для LONG) → план відхилено", pl["plan_ok"] == 0 and "геометрія" in pl["reject"], str(pl))
+pl = RW.plan_of({"dir": "LONG", "entry": 100.0, "sl": 99.0, "targets": [{"p": 112.0, "kind": "X", "r": 12.0}], "entry_zone": [99.9, 100.1]})
+check("перша ціль далі за 8 % → план відхилено з поясненням", pl["plan_ok"] == 0 and "8%" in pl["reject"], str(pl))
 
 # --- 7. summary: порожній стан чесний, причина «чому немає READY» є
 db3 = new_db()

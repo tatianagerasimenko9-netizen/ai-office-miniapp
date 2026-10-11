@@ -146,7 +146,8 @@ def _ohlc_sha(cs: List[Dict[str, Any]], tsf: Any) -> str:
 
 
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
-           ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800) -> Dict[str, Any]:
+           ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800,
+           learning: bool = False) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
         import matplotlib
@@ -370,23 +371,23 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         hline(float(key_level), "#8b96a8", "--", 1.4)
         labels.append((float(key_level), key_label, "#8b96a8", False))
     hline(sl_, SLC)
-    labels.append((sl_, f"SL  {_num(sl_, symbol)}", SLC, True))
+    labels.append((sl_, f"{'Стоп' if learning else 'SL'}  {_num(sl_, symbol)}", SLC, True))
     for k, v in ((1, t1), (2, t2), (3, t3)):
         if v is None or (k == 3 and t3_edge):
             continue
         hline(v, TPC)
-        labels.append((v, f"TP{k}  {_num(v, symbol)}", TPC, True))
+        labels.append((v, f"{'Ціль ' + str(k) if learning else 'TP' + str(k)}  {_num(v, symbol)}", TPC, True))
     if t3_edge:
         up = (t3 > e)
         ax.annotate("", xy=(n * 0.5, y1 - rng * 0.005 if up else y0 + rng * 0.005), xytext=(n * 0.5, (y1 if up else y0) + (-rng * 0.07 if up else rng * 0.07)),
                     arrowprops=dict(arrowstyle="-|>", color=TPC, lw=3), zorder=6)
-        labels.append((y1 - rng * 0.02 if up else y0 + rng * 0.02, f"TP3  {_num(t3, symbol)}", TPC, True))
+        labels.append((y1 - rng * 0.02 if up else y0 + rng * 0.02, f"{'Ціль 3' if learning else 'TP3'}  {_num(t3, symbol)}", TPC, True))
     labels.append(((zlo + zhi) / 2, "ВХІД  " + (_num(zlo, symbol) if zlo == zhi else f"{_num(zlo, symbol)}–{_num(zhi, symbol)}"), YEL, True))
     rp = _f(ready_price)
     if rp is not None and y0 < rp < y1:
         block(n - 1, rp, 14.0)
         ax.scatter([n - 1], [rp], s=120, color="#ffffff", edgecolors=BG, linewidths=2, zorder=7)
-        labels.append((rp, f"READY  {_num(rp, symbol)}", "#ffffff", True))
+        labels.append((rp, f"{'Вхід (навчальний)' if learning else 'READY'}  {_num(rp, symbol)}", "#ffffff", True))
     # підписи справа без накладання: мінімальний крок 6,5% висоти
     gap = rng * 0.065
     labels.sort(key=lambda t: t[0])
@@ -404,8 +405,8 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
                     arrowprops=dict(arrowstyle="-", color=col, lw=1.2, alpha=0.8, shrinkA=0, shrinkB=0), zorder=8)
         right_boxes.append((txt, ann))
     dot, word = _dir_head(direction)
-    fig.text(0.03, 0.935, f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34, fontweight="bold", va="center")
-    fig.text(0.03, 0.015, "15 хв · аналіз, не ордер", color="#6b778c", fontsize=14, va="bottom")
+    fig.text(0.03, 0.935, f"{'Очікуємо падіння' if short else 'Очікуємо зростання'}  {ticker(symbol)}" if learning else f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34 if not learning else 28, fontweight="bold", va="center")
+    fig.text(0.03, 0.015, "Навчальний сигнал · без реальних грошей · 15 хв" if learning else "15 хв · аналіз, не ордер", color="#6b778c", fontsize=14, va="bottom")
     from matplotlib.text import Text as _Text
 
     fig.canvas.draw()   # позиції підписів-анотацій уточнюються лише під час малювання

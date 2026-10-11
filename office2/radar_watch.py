@@ -20,9 +20,11 @@ from typing import Any, Callable, Dict, List, Optional
 VERSION = "radar-1"
 TTL_SEC = 4 * 3600
 TRACK_MAX_AGE_SEC = 48 * 3600
-TG_PER_HOUR = 4
-TG_PER_DAY = 12
-TG_SYMBOL_COOLDOWN_SEC = 4 * 3600
+TG_PER_HOUR = 12
+TG_PER_DAY = 60
+TG_SYMBOL_COOLDOWN_SEC = 3600
+MAX_TP_PCT = 8.0              # ціль далі за 8 % від входу за 4-годинний строк не вважаємо короткостроковою: показуємо як «далеку», у paper не враховуємо
+MAX_TP_MULT = 8.0
 TG_MAX_TRIES = 3
 BLOCK_PREFIX = "ємність сценаріїв"
 
@@ -32,10 +34,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -51,6 +53,11 @@ def _ensure(db: str) -> None:
 
     for d in DDL:
         _execute(db, d)
+    for col in ("far_targets TEXT", "entry_note TEXT"):
+        try:
+            _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
+        except Exception:  # noqa: BLE001
+            pass
     _READY.add(db)
 
 
@@ -72,19 +79,42 @@ def stage_of(state: str, reason: Any) -> Optional[str]:
 
 
 def plan_of(th: Dict[str, Any]) -> Dict[str, Any]:
-    """План картки: повний (READY-рівень, відсічений ємністю/знижений до WAIT) або preview Brain (орієнтир). Нічого не вигадуємо: немає цілей → plan_ok=0."""
+    """План картки: повний (READY-рівень, відсічений обмеженням/знижений до WAIT) або preview Brain (орієнтир). Нічого не вигадуємо: немає цілей → plan_ok=0.
+    Структурна перевірка ДО відправки: вхід лежить у зоні входу (інакше — на найближчій межі зони, з приміткою), геометрія стоп/вхід/ціль коректна,
+    цілі далі за MAX_TP_PCT/MAX_TP_MULT позначаються «далекими» й не входять у paper-результат."""
     tg = th.get("targets") or []
     if th.get("entry") is not None and th.get("sl") is not None and tg:
-        entry, sl, tgs, risk_pct, ok, rej = _f(th["entry"]), _f(th["sl"]), tg, _f(th.get("risk_pct")), True, None
+        entry, sl, tgs, ok, rej = _f(th["entry"]), _f(th["sl"]), tg, True, None
     else:
         pv = th.get("preview") or {}
         ok = bool(pv.get("ok"))
-        entry, sl, tgs, risk_pct, rej = _f(pv.get("entry")), _f(pv.get("sl")), pv.get("targets") or [], _f(pv.get("risk_pct")), pv.get("reject") or ("preview відсутній" if not pv else None)
+        entry, sl, tgs, rej = _f(pv.get("entry")), _f(pv.get("sl")), pv.get("targets") or [], pv.get("reject") or ("preview відсутній" if not pv else None)
     z = th.get("entry_zone") or th.get("zone") or [None, None]
-    tp = lambda i: _f(tgs[i]["p"]) if len(tgs) > i else None  # noqa: E731
-    ok = bool(ok and entry and sl and tp(0))
-    return {"entry": entry, "sl": sl, "tp1": tp(0), "tp2": tp(1), "tp3": tp(2), "risk_pct": risk_pct, "plan_ok": 1 if ok else 0, "reject": None if ok else (rej or "план неповний"),
-            "zone_lo": _f(min(z)) if z and None not in z else None, "zone_hi": _f(max(z)) if z and None not in z else None}
+    zlo, zhi = (_f(min(z)), _f(max(z))) if z and None not in z else (None, None)
+    long_ = str(th.get("dir") or "").upper() != "SHORT"
+    note = None
+    if ok and entry and zlo is not None and zhi is not None and not (zlo <= entry <= zhi):
+        note = f"ціна підтвердження була поза зоною ({entry:.6g}); вхід лімітом на межі зони"
+        entry = zlo if entry < zlo else zhi
+    ps = [_f(t.get("p")) for t in tgs]
+    ps = [p for p in ps if p]
+    if ok and (not entry or not sl or not ps):
+        ok, rej = False, rej or "план неповний"
+    if ok and not ((sl < entry < ps[0]) if long_ else (ps[0] < entry < sl)):
+        ok, rej = False, "геометрія плану некоректна (стоп/вхід/ціль)"
+    near, far = [], []
+    if ok:
+        risk = abs(entry - sl)
+        for i, p in enumerate(ps[:3], 1):
+            d = abs(p - entry)
+            item = {"n": i, "p": p, "pct": d / entry * 100.0, "mult": d / risk if risk else None}
+            (far if (item["pct"] > MAX_TP_PCT or (item["mult"] or 0) > MAX_TP_MULT) else near).append(item)
+        if not near or near[0]["n"] != 1:
+            ok, rej = False, f"перша ціль далі за {MAX_TP_PCT:g}% від входу: за 4 години недосяжна"
+    tp = lambda i: next((x["p"] for x in near if x["n"] == i), None)  # noqa: E731
+    risk_pct = abs(entry - sl) / entry * 100.0 if ok else _f(th.get("risk_pct"))
+    return {"entry": entry, "sl": sl, "tp1": tp(1), "tp2": tp(2), "tp3": tp(3), "risk_pct": risk_pct, "plan_ok": 1 if ok else 0, "reject": None if ok else (rej or "план неповний"),
+            "zone_lo": zlo, "zone_hi": zhi, "far_targets": json.dumps(far) if far else None, "entry_note": note}
 
 
 def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
@@ -95,7 +125,8 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
     _ensure(db)
     out = {"new": 0, "updated": 0}
     rows = _fetchall(db, "SELECT scenario_id, symbol, direction, kind, state, reason, updated_ts, thesis_json FROM office2_live_scenario "
-                         "WHERE (state = 'WAIT' AND updated_ts > ?) OR (state = 'NO_TRADE' AND reason LIKE ? AND updated_ts > ?) ORDER BY updated_ts", (t - 2400, BLOCK_PREFIX + "%", t - 3 * 3600))
+                         "WHERE (state = 'WAIT' AND updated_ts > ?) OR (state = 'NO_TRADE' AND reason LIKE ? AND reason NOT LIKE ? AND updated_ts > ?) ORDER BY updated_ts",
+                   (t - 2400, BLOCK_PREFIX + "%", "%живий сигнал%", t - 3 * 3600))      # «вже є живий сигнал по монеті» — не навчальна ідея, а дубль справжнього READY
     for sid, sym, d, kind, state, reason, upd, tj in rows:
         st = stage_of(state, reason)
         if not st:
@@ -111,23 +142,30 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
         cid = ("B|" if k == "BLOCKED" else "W|") + sid
         ex = _fetchall(db, "SELECT tg_status, paper_status FROM office2_radar_card WHERE card_id = ?", (cid,))
         if not ex:
+            dup = _fetchall(db, "SELECT 1 FROM office2_radar_card WHERE symbol = ? AND direction = ? AND scenario_id <> ? AND expires_ts > ? AND kind = ? "
+                                "AND COALESCE(paper_status,'') NOT IN ('SL','TP1','TP2','TP3','NO_ENTRY','TIMEOUT') LIMIT 1", (sym, d, sid, t, k))
+            if dup:
+                continue         # одна активна ідея на монету й напрям: нова теза з'явиться після завершення попередньої
             vals = {"card_id": cid, "kind": k, "scenario_id": sid, "symbol": sym, "direction": d, "stage": st, "created_ts": float(upd), "updated_ts": float(upd), "expires_ts": float(upd) + TTL_SEC,
                     **pl, "level_kind": lvl.get("kind"), "level_price": _f(lvl.get("p")), "need_text": need, "reason": str(reason or "")[:400], "scen_state": state,
                     "tg_status": "NEW", "tg_tries": 0, "gate_reason": str(reason or "")[:160] if k == "BLOCKED" else None, "version": VERSION}
             _execute(db, f"INSERT INTO office2_radar_card({','.join(_COLS)}) VALUES ({','.join('?' for _ in _COLS)}) ON CONFLICT (card_id) DO NOTHING", tuple(vals.get(c) for c in _COLS))
             out["new"] += 1
+            if k == "BLOCKED":
+                _execute(db, "UPDATE office2_radar_card SET scen_state = 'SUPERSEDED' WHERE card_id = ?", ("W|" + sid,))      # спостереження перетворилось на навчальну угоду
             continue
         tg_status, paper = ex[0]
         if tg_status == "NEW" and not paper:      # план ще не опублікований і не в paper — оновлюємо до найточнішого (ARMED точніший за RETRACE)
-            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=? WHERE card_id=?",
-                     (st, float(upd), pl["zone_lo"], pl["zone_hi"], pl["entry"], pl["sl"], pl["tp1"], pl["tp2"], pl["tp3"], pl["risk_pct"], pl["plan_ok"], pl["reject"], need, str(reason or "")[:400], state, cid))
+            _execute(db, "UPDATE office2_radar_card SET stage=?, updated_ts=?, zone_lo=?, zone_hi=?, entry=?, sl=?, tp1=?, tp2=?, tp3=?, risk_pct=?, plan_ok=?, reject=?, need_text=?, reason=?, scen_state=?, far_targets=?, entry_note=? WHERE card_id=?",
+                     (st, float(upd), pl["zone_lo"], pl["zone_hi"], pl["entry"], pl["sl"], pl["tp1"], pl["tp2"], pl["tp3"], pl["risk_pct"], pl["plan_ok"], pl["reject"], need, str(reason or "")[:400], state,
+                      pl["far_targets"], pl["entry_note"], cid))
         else:
             _execute(db, "UPDATE office2_radar_card SET updated_ts=?, scen_state=?, need_text=?, reason=?, stage=? WHERE card_id=?", (float(upd), state, need, str(reason or "")[:400], st, cid))
         out["updated"] += 1
     # сценарії, що пішли далі (READY / скасовано / запізно / строк): лише позначка стану
     for cid, sid in _fetchall(db, "SELECT card_id, scenario_id FROM office2_radar_card WHERE created_ts > ? AND kind = 'WATCH'", (t - TRACK_MAX_AGE_SEC,)):
         r = _fetchall(db, "SELECT state FROM office2_live_scenario WHERE scenario_id = ?", (sid,))
-        if r and r[0][0] in ("READY", "INVALIDATED", "MISSED", "EXPIRED"):
+        if r and r[0][0] in ("READY", "INVALIDATED", "MISSED", "EXPIRED") and r[0][0] != "NO_TRADE":
             _execute(db, "UPDATE office2_radar_card SET scen_state = ? WHERE card_id = ?", (r[0][0], cid))
     return out
 
@@ -178,7 +216,7 @@ def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: floa
     return out
 
 
-def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 12) -> int:
+def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = None, log: Callable[[str], None] = print, limit: int = 80) -> int:
     from office_bridge import _execute, _fetchall
 
     t = time.time() if now is None else now
@@ -187,10 +225,13 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
     rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? AND COALESCE(paper_status,'') NOT IN ('SL','TP1','TP2','TP3','NO_ENTRY','TIMEOUT') "
                          "ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit))
     n = 0
+    cache: Dict[str, List[Dict[str, Any]]] = {}      # одна вибірка свічок на монету за прохід (мало запитів до біржі)
     for r in rows:
         c = dict(zip(_COLS, r))
         try:
-            cl = _candles(fetch(c["symbol"], "15m", 300))
+            if c["symbol"] not in cache:
+                cache[c["symbol"]] = _candles(fetch(c["symbol"], "15m", 300))
+            cl = cache[c["symbol"]]
             if not cl:
                 continue
             ev = evaluate_card(c, cl, t)
@@ -204,36 +245,9 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
 
 # ------------------------------------------------------------------ Telegram
 def format_card(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
-    import office_ready_card as card
-    import office_ready_core as rc
-    from urllib.parse import quote
-    from office_user_messages import ticker
+    from office2 import radar_text as RT
 
-    sym = c["symbol"]
-    n = lambda x: card._num(x, sym)  # noqa: E731
-    long_ = c["direction"] == "LONG"
-    blocked = c["kind"] == "BLOCKED"
-    L = ["🚫 ЗАБЛОКОВАНО · не вхід (paper)" if blocked else "👀 WATCH · не вхід (paper)", f"{'🟢 LONG' if long_ else '🔴 SHORT'} · {ticker(sym)}"]
-    if blocked:
-        L.append(f"Чому не READY: {str(c.get('gate_reason') or c.get('reason') or '')[len(BLOCK_PREFIX) + 2:].strip() or 'ліміт захисту'}")
-    elif c.get("need_text"):
-        L.append(f"Стан: 3/3 — ціна в зоні, чекаю: {c['need_text']}" if c.get("stage") == "ARMED" else f"Стан: 2/3 — {c['need_text']}")
-    if c.get("level_kind") and c.get("level_price"):
-        L.append(f"Рівень: {c['level_kind']} {n(c['level_price'])}")
-    if c.get("zone_lo") and c.get("zone_hi"):
-        L.append(f"Зона входу: {n(c['zone_lo'])}–{n(c['zone_hi'])}")
-    e, sl = c["entry"], c["sl"]
-    pc = lambda p: f"{abs(p - e) / e * 100:.2f}".replace(".", ",")    # noqa: E731
-    rr = lambda p: f"{abs(p - e) / abs(e - sl):.2f}".replace(".", ",")  # noqa: E731
-    L.append(f"Вхід (орієнтир): {n(e)}")
-    L.append(f"SL: {n(sl)} (−{pc(sl)}%)")
-    for i, k in enumerate(("tp1", "tp2", "tp3"), 1):
-        if c.get(k):
-            L.append(f"TP{i}: {n(c[k])} (+{pc(c[k])}%; {rr(c[k])}R)")
-    L.append(f"⏳ актуально до {rc.kyiv_stamp(c['expires_ts'])} (Київ)")
-    L.append("Це спостереження за ринком, не сигнал і не ордер. Супровід і результат — у Mini App.")
-    L.append(f"{base_url.rstrip('/')}/v2?tab=radar&card={quote(c['card_id'], safe='')}")
-    return "\n".join(L)
+    return RT.card_text(c, base_url)
 
 
 def pick_for_tg(db: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
@@ -277,9 +291,6 @@ def mark_failed(db: str, cid: str, err: str) -> None:
     _execute(db, "UPDATE office2_radar_card SET tg_tries = COALESCE(tg_tries,0) + 1, last_error = ?, tg_status = CASE WHEN COALESCE(tg_tries,0) + 1 >= ? THEN 'FAILED' ELSE 'NEW' END WHERE card_id = ?", (err[:200], TG_MAX_TRIES, cid))
 
 
-MILESTONE_TEXT = {"ENTERED": "вхід за ціною плану торкнуто", "TP1": "TP1 досягнуто", "TP2": "TP2 досягнуто", "TP3": "TP3 досягнуто", "SL": "SL торкнуто", "NO_ENTRY": "вхід не відбувся до кінця строку", "TIMEOUT": "строк вийшов"}
-
-
 def pending_followups(db: str) -> List[Dict[str, Any]]:
     """Відправлені картки, у яких з'явилася нова віха paper (вхід/TP/SL/кінець строку), про яку ще не повідомляли."""
     from office_bridge import _fetchall
@@ -306,11 +317,9 @@ def pending_followups(db: str) -> List[Dict[str, Any]]:
 
 
 def followup_text(c: Dict[str, Any]) -> str:
-    from office_user_messages import ticker
+    from office2 import radar_text as RT
 
-    parts = [MILESTONE_TEXT.get(m, m) for m in c["_new"]]
-    r = f" · модельний результат {c['r_net']:+.2f} R (з витратами)" if c.get("r_net") is not None and c["paper_status"] in ("SL", "TP1", "TP2", "TP3") else ""
-    return f"👀 WATCH {ticker(c['symbol'])} {c['direction']}: {'; '.join(parts)}{r}. Paper, не ордер."
+    return RT.followup_text(c)
 
 
 def mark_notified(db: str, cid: str, new: List[str], prev: Optional[str]) -> None:
@@ -341,7 +350,7 @@ async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable
                 chart = evd.freeze_chart(cds if isinstance(cds, list) else [], t, "15m", symbol=c["symbol"])
                 img = await run_o2(render, symbol=c["symbol"], direction=c["direction"], candles=evd.candles_from_chart(chart) if chart.get("candles") else (cds if isinstance(cds, list) else []),
                                    entry=c["entry"], zone=[c["zone_lo"], c["zone_hi"]], sl=c["sl"], tp1=c["tp1"], tp2=c.get("tp2"), tp3=c.get("tp3"), ready_price=c["entry"],
-                                   key_level=c.get("level_price"), key_label="рівень", path=os.path.join(_TMP, f"radar_{c['symbol']}_{int(t)}.png"))
+                                   key_level=c.get("level_price"), key_label="рівень", learning=True, path=os.path.join(_TMP, f"radar_{c['symbol']}_{int(t)}.png"))
             except Exception as exc_img:  # noqa: BLE001
                 img = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
             mid = await (send_photo(str(img["path"]), text, symbol=c["symbol"], direction=c["direction"]) if img.get("ok") else send_text(text, symbol=c["symbol"], direction=c["direction"]))
@@ -368,17 +377,18 @@ async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable
 
 
 # ------------------------------------------------------------------ Mini App
-STATUS_UA = {"WAITING_ENTRY": "чекаємо вхід", "ENTERED": "вхід був, позиція відкрита (paper)", "TP1": "TP1 досягнуто", "TP2": "TP2 досягнуто", "TP3": "TP3 досягнуто", "SL": "SL",
-             "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов"}
+STATUS_UA = {"WAITING_ENTRY": "чекаємо, поки ціна дійде до входу", "ENTERED": "навчальна угода відкрита", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута",
+             "SL": "стоп спрацював", "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов"}
 
 
 def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     done = [x for x in rows if x["paper_status"] in ("SL", "TP1", "TP2", "TP3") and x["r_net"] is not None]
     tp = [x for x in done if x["paper_status"] != "SL"]
     s = sum(x["r_net"] for x in done)
-    return {"cards": len(rows), "resolved": len(done), "tp": len(tp), "sl": len(done) - len(tp), "no_entry": sum(1 for x in rows if x["paper_status"] == "NO_ENTRY"),
-            "open": sum(1 for x in rows if x["paper_status"] in ("ENTERED",)), "sum_r_net": round(s, 2), "usd_at_10": round(s * 10.0, 2),
-            "note": "paper-модель (не гроші): ризик $10, вхід лімітом після появи картки, витрати 0.15 %; n<30 — лише спостереження"}
+    return {"cards": len(rows), "resolved": len(done), "tp": len(tp), "sl": len(done) - len(tp), "win_rate": round(len(tp) / len(done) * 100.0, 1) if done else None,
+            "no_entry": sum(1 for x in rows if x["paper_status"] == "NO_ENTRY"), "open": sum(1 for x in rows if x["paper_status"] in ("ENTERED",)),
+            "waiting": sum(1 for x in rows if x["paper_status"] in (None, "", "WAITING_ENTRY")), "sum_r_net": round(s, 2), "usd_at_10": round(s * 10.0, 2),
+            "note": "Навчальний результат без реальних грошей: ризик 10 $ на угоду, вхід лише після появи картки, комісії й проковзування 0,15 % враховано; менше 30 завершених угод — це лише спостереження."}
 
 
 def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None) -> Dict[str, Any]:
@@ -390,15 +400,38 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
         _ensure(db)
         cols = ",".join(_COLS)
         if card_id:
-            r = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE card_id = ?", (card_id,))
-            out["card"] = dict(zip(_COLS, r[0])) if r else None
+            from office2 import radar_text as RT
+
+            r = []
+            for cand in RT.parse_link_id(card_id):      # переживає подвійне кодування й старий формат посилання (W|O2|…)
+                r = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE card_id = ?", (cand,))
+                if r:
+                    break
+            if not r:
+                m = re.search(r"([0-9a-f]{8,})\s*$", str(card_id).lower())
+                if m:
+                    r = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE card_id LIKE ? ORDER BY created_ts DESC LIMIT 1", ("%" + m.group(1),))
+            c = dict(zip(_COLS, r[0])) if r else None
+            if c:
+                c["active"] = bool(c["expires_ts"] and c["expires_ts"] > t and c["scen_state"] in ("WAIT", "NO_TRADE") and c["paper_status"] in (None, "", "WAITING_ENTRY", "ENTERED"))
+                c["h"] = RT.present(c)
+            out["card"] = c
             return out
         rows = [dict(zip(_COLS, r)) for r in _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE created_ts > ? ORDER BY created_ts DESC LIMIT 120", (t - 3 * 86400,))]
+        from office2 import radar_text as RT
+
         for x in rows:
+            x["h"] = RT.present(x)
             x["active"] = bool(x["expires_ts"] and x["expires_ts"] > t and x["scen_state"] in ("WAIT", "NO_TRADE") and x["paper_status"] in (None, "", "WAITING_ENTRY", "ENTERED"))
             x["status_ua"] = STATUS_UA.get(x["paper_status"] or "", "") or ("актуальна" if x["active"] else "неактуальна")
         out["cards"] = rows
-        out["stats"] = {"watch": _stats([x for x in rows if x["kind"] == "WATCH" and x["plan_ok"]]), "blocked": _stats([x for x in rows if x["kind"] == "BLOCKED" and x["plan_ok"]])}
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        k0 = datetime.fromtimestamp(t, ZoneInfo("Europe/Kyiv")).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()      # «сьогодні» — за київською добою
+        ok_rows = [x for x in rows if x["plan_ok"]]
+        out["stats"] = {"watch": _stats([x for x in ok_rows if x["kind"] == "WATCH"]), "blocked": _stats([x for x in ok_rows if x["kind"] == "BLOCKED"]),
+                        "learning": _stats([x for x in ok_rows if x["kind"] == "BLOCKED"]), "today": _stats([x for x in ok_rows if x["created_ts"] >= k0]), "all": _stats(ok_rows)}
         cnt = _fetchall(db, "SELECT state, COUNT(*) FROM office2_live_scenario WHERE updated_ts > ? GROUP BY state", (t - 3600,))
         stg = _fetchall(db, "SELECT COUNT(*) FROM office2_live_scenario WHERE state='WAIT' AND updated_ts > ? AND reason LIKE 'WAIT 3/3%'", (t - 3600,))
         last = _fetchall(db, "SELECT MAX(updated_ts) FROM office2_live_scenario")
@@ -410,6 +443,9 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
             wr["gate"] = {"locked": g.get("locked"), "stops_today": len(g.get("stops") or []), "lock_ends_ts": g.get("lock_ends_ts"), "candidates_blocked_today": g.get("candidates_blocked_today")}
         except Exception as exc:  # noqa: BLE001
             wr["gate_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
+        g = wr.get("gate") or {}
+        wr["message"] = (f"Сьогодні нових дозволених входів немає: спрацював денний ліміт ризику (до {RT.kyiv(g.get('lock_ends_ts'))}). Навчальні сигнали без реальних грошей продовжують надходити."
+                         if g.get("locked") else "Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Навчальні сигнали без реальних грошей надходять далі.")
         out["why_no_ready"] = wr
     except Exception as exc:  # noqa: BLE001
         out["ok"] = False
