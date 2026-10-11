@@ -190,7 +190,7 @@ def _evaluate(ctx: Dict[str, Any], ev: Dict[str, Any], direction: str, now: floa
             fin = _finalize(ctx, dict(r), m15, a15, k, now, ev["extreme"], mid_m, levels, risk_usd, sg, ev, [])
             ok = fin.get("state") == "READY"
             r["preview"] = {"ok": ok, "entry": fin.get("entry") if ok else None, "sl": fin.get("sl"), "risk_pct": fin.get("risk_pct"), "targets": fin.get("targets") if ok else None,
-                            "reject": None if ok else fin.get("reason"), "basis": "орієнтир: вхід = середина зони; не сигнал, пройшов лише геометричні фільтри READY (ризик %, шум ATR, простір до цілі)"}
+                            "reject": None if ok else fin.get("reason"), "stops": fin.get("stops"), "basis": "орієнтир: вхід = середина зони; не сигнал, пройшов лише геометричні фільтри READY (ризик %, шум ATR, простір до цілі)"}
     except Exception:  # noqa: BLE001
         pass
     return r
@@ -262,6 +262,12 @@ def _finalize(ctx, base, m15, a15, k, now, lo, px, levels, risk_usd, sg, ev, seq
     inv = {"price": sg * lo, "why": base["invalidation"]["why"], "buffer": float(luft), "buffer_basis": luft_why}
     base["invalidation"] = inv
     base["sl"] = sg * sl
+    try:     # три варіанти стопа для порівняння (office2.stops); поточний SL і всі рішення Brain лишаються без змін
+        from office2 import stops as SV
+
+        base["stops"] = SV.variants("LONG" if sg > 0 else "SHORT", sg * lo, float(luft), float(a15[k]), levels, entry=sg * entry)
+    except Exception:  # noqa: BLE001
+        pass
     if risk <= 0:
         return dict(base, state="NO_TRADE", reason="ціна вже за структурною інвалідацією", sequence=seq)
     risk_pct = risk / abs(entry) * 100.0

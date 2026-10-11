@@ -346,6 +346,13 @@ function lrStat(n,s){
   if(!s||!s.cards) return '';
   return `<div class="kv"><span>${n}</span><b class="num">ідей ${s.cards} · завершено ${s.resolved} (цілі ${s.tp} / стопи ${s.sl})${s.win_rate!=null?' · успішних '+s.win_rate+'%':''} · не відкрились ${s.no_entry} · результат ${s.sum_r_net>=0?'+':''}${s.sum_r_net} від ризику ≈ ${s.usd_at_10>=0?'+':''}${s.usd_at_10} $</b></div>`;
 }
+function lrStopStudy(z){
+  if(!z) return '';
+  const V=z.variants||{}; const nm={v1:'Стоп 1 · поточний',v2:'Стоп 2 · за структурою',v3:'Стоп 3 · структура + запас ATR'};
+  const rows=['v1','v2','v3'].map(k=>{const v=V[k]||{}; return `<div class="kv"><span>${nm[k]}</span><b class="num">завершено ${v.n} (цілі ${v.tp} / стопи ${v.sl}) · результат ${v.sum_r>=0?'+':''}${v.sum_r} · збитки ${v.loss_r} · сер. ризик ${v.avg_risk_pct??'—'}%${k!=='v1'?' · проти поточного: '+(v.delta_sum_r_vs_current>=0?'+':'')+v.delta_sum_r_vs_current:''}${v.after_stop_hunt||v.after_stop_broken?` · після стопа: повернулась ${v.after_stop_hunt}, зламалась ${v.after_stop_broken}`:''}</b></div>`;}).join('');
+  return `<h2>Порівняння стопів (навчальна статистика)</h2>${rows}<div class="o2need">${esc(z.verdict||'')}</div>
+    <div class="o2sub">Усі три варіанти рахуються на тих самих угодах (той самий вхід і цілі), результат у «від ризику» з комісіями. Це окреме порівняння: фактичний результат угоди не змінюється, стоп у реальній торгівлі автоматично не змінюється.</div>`;
+}
 function lrHtml(d){
   if(!d||d.ok===false) return '<div class="empty">Живий радар тимчасово недоступний</div>';
   const cs=d.cards||[], act=cs.filter(c=>c.active);
@@ -362,6 +369,7 @@ function lrHtml(d){
     <h2>Результати</h2>
     ${lrStat('Сьогодні (за Києвом)',st.today)}${lrStat('Усі навчальні угоди',st.learning)}${lrStat('Спостереження, що дійшли до плану',st.watch)}
     <div class="o2sub">${esc((st.all||{}).note||'')}</div>
+    ${lrStopStudy(st.stop_study)}
     ${done.length?`<details class="o2d"><summary>Завершені ідеї (${done.length})</summary>${done.map(lrCard).join('')}</details>`:''}`;
 }
 async function openRadarCard(id){
@@ -373,7 +381,14 @@ async function openRadarCard(id){
   if(!x){ app.innerHTML='<button class="back" id="back">← Радар</button><div class="empty">Цю картку не знайдено: можливо, посилання застаріло. Усі актуальні ідеї — у Радарі.</div>'; $('back').onclick=()=>go('radar'); return; }
   const h=x.h||{};
   const kv=(k,v)=>`<div class="kv"><span>${esc(k)}</span><b class="num">${v}</b></div>`;
-  const s={symbol:x.symbol,zone_lo:x.zone_lo,zone_hi:x.zone_hi,sl:x.sl,tp1:x.tp1,tp2:x.tp2,tp3:x.tp3,entry_px:x.entry,display:{},__ua:true};
+  const sv=h.stops; const COL={v1:'#F36B78',v2:'#FFB347',v3:'#C792EA'};
+  const s={symbol:x.symbol,zone_lo:x.zone_lo,zone_hi:x.zone_hi,sl:x.sl,tp1:x.tp1,tp2:x.tp2,tp3:x.tp3,entry_px:x.entry,display:{},__ua:true,
+    __extra:sv?sv.items.filter(i=>i.key!=='v1').map(i=>({p:i.sl,color:COL[i.key],title:i.name})):[]};
+  const stopsHtml=sv?`<div class="card"><b>Три варіанти стопа</b><div class="o2sub">${esc(sv.note)}</div>
+    ${sv.items.map(i=>`<div class="o2need" style="border-left:4px solid ${COL[i.key]}"><b>${esc(i.name)}</b>: <span class="num">${esc(i.sl_txt)}</span> (ризик ${esc(i.risk_pct)}%) ${i.justified?'<span class="pill ok">обґрунтований</span>':'<span class="pill watch">сумнівний</span>'}<br>
+      <span class="o2m">До цілей: ${i.mult1?'ціль 1 ≈'+esc(i.mult1)+'× стопа':''}${i.mult2?' · ціль 2 ≈'+esc(i.mult2)+'×':''}${i.mult3?' · ціль 3 ≈'+esc(i.mult3)+'×':''}</span><br>${esc(i.explain)}<br>
+      <span class="o2m">Результат цього варіанта: ${esc(i.status)}${i.r_net!=null?' · '+(i.r_net>=0?'+':'')+i.r_net+' від ризику (з комісіями)':''}</span>${i.after?'<br><span class="o2y">Після стопа: '+esc(i.after)+'</span>':''}</div>`).join('')}
+    <div class="o2need"><b>${esc(sv.summary)}</b></div></div>`:'';
   app.innerHTML=`<button class="back" id="back">← Радар</button>
     <div class="card"><div class="top"><span class="sym">${h.icon||''} ${esc(h.coin||x.symbol)}</span><span class="pill ${x.kind==='BLOCKED'?'ok':'watch'}">${esc(h.badge||'')}</span></div>
       <div class="mut" style="margin-top:6px"><b>${esc(h.dir||'')}</b> · ${esc(h.status||'')}</div>
@@ -381,6 +396,7 @@ async function openRadarCard(id){
     <div id="ch" style="height:320px;margin:10px 0"></div><div class="mut" id="asof"></div>
     <div class="card"><b>План</b><div class="mut" style="margin-top:6px">${lrPlan(h)}</div>
       ${kv('Чому',esc(h.why||''))}${h.need?kv('Чекаємо',esc(h.need)):''}${kv('Створено',LR_TM(x.created_ts))}${kv('Діє до',esc(h.expires||''))}</div>
+    ${stopsHtml}
     <div class="card"><b>Супровід навчальної угоди</b>${kv('Стан',esc(h.paper||''))}
       ${x.entry_ts?kv('Ціна дійшла до входу',LR_TM(x.entry_ts)):''}${x.exit_ts?kv('Завершено',LR_TM(x.exit_ts)):''}${h.result?kv('Результат',esc(h.result)):''}
       <div class="o2sub">Telegram: ${x.tg_status==='SENT'?'надіслано '+LR_TM(x.sent_ts):'ще не надсилали'}. ${esc(x.last_error||'')}</div>
@@ -759,7 +775,7 @@ function drawFallback(el, candles, lv, cx){
   ctx.fillStyle='#0E141D'; ctx.fillRect(0,0,w,h);
   if(lv.zone_lo!=null && lv.zone_hi!=null){ctx.fillStyle='rgba(93,169,255,.16)'; ctx.fillRect(pad,y(lv.zone_hi),w-2*pad,y(lv.zone_lo)-y(lv.zone_hi));}
   ctx.lineWidth=2;
-  [['sl','#F36B78'],['tp1','#27C99A'],['tp2','#27C99A'],['tp3','#27C99A'],['entry','#E8EDF4']].forEach(([k,col])=>{
+  [['sl','#F36B78'],['sl2','#FFB347'],['sl3','#C792EA'],['tp1','#27C99A'],['tp2','#27C99A'],['tp3','#27C99A'],['entry','#E8EDF4']].forEach(([k,col])=>{
     if(lv[k]==null) return; ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(pad,y(lv[k])); ctx.lineTo(w-pad,y(lv[k])); ctx.stroke();});
   const chn=cx&&cx.channel;
   if(chn){
@@ -776,6 +792,7 @@ function drawFallback(el, candles, lv, cx){
 }
 function chartLevels(s){
   const L=S.layers, o={};
+  if(L.sl&&s.__extra){ s.__extra.forEach((e,i)=>{o['sl'+(i+2)]=e.p;}); }
   if(L.zone){o.zone_lo=s.zone_lo; o.zone_hi=s.zone_hi;}
   if(L.sl) o.sl=s.sl;
   if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2; o.tp3=s.tp3;}
@@ -809,7 +826,7 @@ async function paintChart(el, s){
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     const zl=(s.__objs&&s.__objs.includes('level'))?'рівень · зона':(s.__objs&&s.__objs.includes('block'))?'блок · зона':'зона';
     line(lv.zone_lo,'#5DA9FF',s.__ua?'Зона входу':zl,2); line(lv.zone_hi,'#5DA9FF',s.__ua?'Зона входу':zl,2);
-    const UA=!!s.__ua; line(lv.sl,'#F36B78',UA?'Стоп':'SL'); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
+    const UA=!!s.__ua; line(lv.sl,'#F36B78',UA?(s.__extra&&s.__extra.length?'Стоп 1 (поточний)':'Стоп'):'SL'); (s.__extra||[]).forEach(e=>line(e.p,e.color,e.title,2)); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
     /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
        OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
     const shown=['зона','SL','TP'];

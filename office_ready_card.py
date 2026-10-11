@@ -147,7 +147,7 @@ def _ohlc_sha(cs: List[Dict[str, Any]], tsf: Any) -> str:
 
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
            ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800,
-           learning: bool = False) -> Dict[str, Any]:
+           learning: bool = False, extra_stops: Any = None) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
         import matplotlib
@@ -168,7 +168,8 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     if e is None or sl_ is None:
         return {"ok": False, "reason": "немає входу/стопа"}
     hi_c, lo_c = max(float(c["high"]) for c in cs), min(float(c["low"]) for c in cs)
-    core = [hi_c, lo_c, e, sl_] + [x for x in (t1, t2, zlo, zhi) if x is not None]
+    xs_ = [(_f(p_), n_) for p_, n_ in (extra_stops or []) if _f(p_) is not None]
+    core = [hi_c, lo_c, e, sl_] + [x for x in (t1, t2, zlo, zhi) if x is not None] + [p_ for p_, _n in xs_]
     top, bot = max(core), min(core)
     span = max(top - bot, e * 0.002)
     t3_edge = False
@@ -371,7 +372,11 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         hline(float(key_level), "#8b96a8", "--", 1.4)
         labels.append((float(key_level), key_label, "#8b96a8", False))
     hline(sl_, SLC)
-    labels.append((sl_, f"{'Стоп' if learning else 'SL'}  {_num(sl_, symbol)}", SLC, True))
+    labels.append((sl_, f"{('Стоп 1' if xs_ else 'Стоп') if learning else 'SL'}  {_num(sl_, symbol)}", SLC, True))
+    for (p_, n_), col_ in zip(xs_, ("#FFB347", "#C792EA")):      # додаткові варіанти стопа (лише навчальні картки): інші кольори, пунктир
+        if y0 < p_ < y1:
+            hline(p_, col_, "--", 1.6)
+            labels.append((p_, f"{n_}  {_num(p_, symbol)}", col_, True))
     for k, v in ((1, t1), (2, t2), (3, t3)):
         if v is None or (k == 3 and t3_edge):
             continue

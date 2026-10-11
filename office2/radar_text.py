@@ -105,6 +105,46 @@ def targets(c: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sorted(out, key=lambda t: t["n"])
 
 
+STOP_STATUS_UA = {"SL": "стоп спрацював", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута", "ENTERED": "угода ще відкрита", "WAITING_ENTRY": "чекаємо вхід",
+                  "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALID": "не застосовний"}
+
+
+def stops_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Три варіанти стопа для показу: ціна, ризик, відношення до цілей, обґрунтованість, пояснення, результат і висновок після стопа."""
+    import json
+
+    from office2 import stops as SV
+
+    try:
+        st = json.loads(c.get("stops_json") or "null")
+        ev = json.loads(c.get("stop_eval") or "null") or {}
+    except ValueError:
+        return None
+    if not st or not c.get("entry"):
+        return None
+    sym, e = c["symbol"], c["entry"]
+    expl = SV.explain_ua(st)
+    items = []
+    for i, k in enumerate(("v1", "v2", "v3")):
+        v = st.get(k)
+        if not v:
+            continue
+        risk = abs(e - v["sl"])
+        mult = {}
+        for n_, key in ((1, "tp1"), (2, "tp2"), (3, "tp3")):
+            p = c.get(key)
+            mult[n_] = pct(abs(p - e) / risk) if p and risk else None
+        r = ev.get(k) or {}
+        after = (r.get("after") or {}).get("verdict")
+        items.append({"key": k, "name": SV.NAMES[k], "sl": v["sl"], "sl_txt": num(v["sl"], sym), "risk_pct": pct(v.get("risk_pct") or 0.0), "justified": bool(v.get("justified")), "liq": v.get("liq"),
+                      "mult1": mult[1], "mult2": mult[2], "mult3": mult[3], "explain": expl[i] if i < len(expl) else "", "status": STOP_STATUS_UA.get(r.get("status") or "", "ще не оцінено"),
+                      "r_net": r.get("r_net"), "after": SV.VERDICT_UA.get(after) if after else None})
+    rec = st.get("recommended")
+    return {"items": items, "recommended": rec, "recommended_name": SV.NAMES.get(rec) if rec else None,
+            "summary": (f"Структурно обґрунтований: {SV.NAMES[rec]}." if rec else "Жоден із трьох варіантів не пройшов усі перевірки (за екстремумом події, поза шумом, не біля очевидного рівня)."),
+            "note": "Показуємо для порівняння. Фактична навчальна угода веде за стопом 1 (поточний); інші варіанти оцінюються окремо."}
+
+
 def present(c: Dict[str, Any]) -> Dict[str, Any]:
     """Усі готові до показу тексти картки (один раз на сервері: Telegram і Mini App показують однаково)."""
     blocked = c.get("kind") == "BLOCKED"
@@ -133,7 +173,7 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
             "entry": num(e, sym) if e else None, "sl": num(sl, sym) if sl else None, "sl_pct": pct(abs(sl - e) / e * 100.0) if e and sl else None,
             "targets": [dict(t, price_txt=num(t["price"], sym), pct_txt=pct(t["pct"]), mult_txt=(pct(t["mult"]) if t.get("mult") else None)) for t in targets(c)],
             "expires": kyiv(c.get("expires_ts")), "paper": paper, "result": res, "entry_note": c.get("entry_note"),
-            "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
+            "stops": stops_view(c), "tech": f"{c.get('kind')} · {c['direction']} · {c.get('stage')}", "limit_note": limit_note_ua(c.get("gate_reason")) if blocked else None, "long": long_}
 
 
 def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onrender.com") -> str:
@@ -152,6 +192,14 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
             L.append(f"Ціль {t['n']}: {t['price_txt']} (+{t['pct_txt']}%; ≈{t['mult_txt']}× розміру стопа)")
         else:
             L.append(f"Ціль {t['n']}: {t['price_txt']} (+{t['pct_txt']}%) — далека, у навчальному результаті не враховуємо")
+    sv = p.get("stops")
+    if sv:
+        L.append("")
+        L.append("Три варіанти стопа (для порівняння):")
+        for it in sv["items"]:
+            L.append(f"• {it['name']}: {it['sl_txt']} (−{it['risk_pct']}%){' ✅ обґрунтований' if it['justified'] else ' ⚠️ ' + ('біля очевидного рівня' if it['liq'] else 'сумнівний')}")
+        L.append(sv["summary"])
+        L.append("")
     L.append(f"⏳ Діє до {p['expires']}")
     L.append("Графік і результат: " + base_url.rstrip("/") + "/v2?tab=radar&card=" + quote(link_id(c["card_id"]), safe=""))
     L.append(f"Технічно: {p['tech']}")
