@@ -382,6 +382,46 @@ async function openRadarCard(id){
   $('back').onclick=()=>{killPoll(); go('radar');};
   paintChart($('ch'), s);
 }
+function trHtml(){
+  return `<h2>Тренажер: історія без майбутнього</h2><div class="card frm">
+    <div class="mut">Офіс повертається на момент T, показує лише свічки до нього й своє рішення. Ти обираєш прогноз, потім відкриваєш майбутнє й бачиш, куди пішла ціна і що вийшло б за планом (paper).</div>
+    <label for="trsym">Монета</label><input id="trsym" type="text" autocomplete="off" value="${esc(S.trsym||'BTCUSDT')}">
+    <label for="trback">Скільки годин тому (порожньо — випадковий момент за 1–7 діб)</label><input id="trback" type="text" inputmode="numeric" placeholder="наприклад 36">
+    <div class="chips" style="margin-top:8px"><button id="trgo">Заморозити історію</button></div><div id="trout" aria-live="polite"></div></div>`;
+}
+function trBind(){
+  const go=$('trgo'); if(!go) return;
+  const tm=t=>new Date(t*1000).toLocaleString('uk-UA',{timeZone:'Europe/Kyiv',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const dirTxt=d=>d==='SHORT'?'▼ SHORT':'▲ LONG';
+  go.onclick=async()=>{
+    const sym=($('trsym').value||'BTCUSDT').trim().toUpperCase(); S.trsym=sym; S.trActive=true;   /* автооновлення Радара не стирає тренажер */ const bh=($('trback').value||'').trim();
+    const out=$('trout'); out.innerHTML='<div class="mut" style="margin-top:8px">Заморожую історію й питаю Brain…</div>';
+    let d; try{d=await j('/api/v2/trainer?symbol='+encodeURIComponent(sym)+(bh?'&back_h='+encodeURIComponent(bh):''));}catch(e){out.innerHTML='<div class="empty">Не вдалося: '+esc(e.message||'')+'</div>'; return;}
+    if(!d.ok){ out.innerHTML='<div class="empty">'+esc(d.reason||'Недоступно')+'</div>'; return; }
+    const dec=d.decisions||[]; const plan=(dec.find(x=>x.plan)||{}).plan||null;
+    const lv=plan?{entry:plan.entry,sl:plan.sl,tp1:plan.tp1,tp2:plan.tp2,tp3:plan.tp3,zone_lo:plan.zone_lo,zone_hi:plan.zone_hi}:{};
+    out.innerHTML=`<div class="mut" style="margin-top:10px"><b>${esc(sym)}</b> · момент T: ${tm(d.t)} Київ · ціна на T ${lrPx(d.price_at_t)}<br>${esc(d.note||'')}</div>
+      <div id="trch" style="height:300px;margin:8px 0"></div>
+      ${dec.map(x=>`<div class="o2need"><b>${dirTxt(x.dir)}:</b> ${esc(x.state)} — ${esc((x.reason||'').slice(0,220))}${x.plan?`<br>План (${esc(x.plan.source)}): вхід ${lrPx(x.plan.entry)} · SL ${lrPx(x.plan.sl)} · TP1 ${lrPx(x.plan.tp1)}${x.plan.tp2?' · TP2 '+lrPx(x.plan.tp2):''}`:''}</div>`).join('')}
+      <div class="mut" style="margin-top:8px">Твій прогноз до розкриття:</div>
+      <div class="chips" id="trg"><button data-g="LONG">▲ LONG</button><button data-g="SHORT">▼ SHORT</button><button data-g="SKIP">Пропустити</button></div>
+      <div class="chips" style="margin-top:8px"><button id="trrev">Розкрити майбутнє</button></div><div id="trres"></div>`;
+    drawFallback($('trch'), d.candles||[], lv, null);
+    let guess=null; out.querySelectorAll('#trg button').forEach(b=>b.onclick=()=>{guess=b.dataset.g; out.querySelectorAll('#trg button').forEach(x=>x.classList.toggle('on',x===b));});
+    $('trrev').onclick=async()=>{
+      const res=$('trres'); res.innerHTML='<div class="mut" style="margin-top:8px">Відкриваю наступні свічки…</div>';
+      let r; try{r=await j('/api/v2/trainer_reveal?symbol='+encodeURIComponent(sym)+'&t='+encodeURIComponent(d.t));}catch(e){res.innerHTML='<div class="empty">Не вдалося: '+esc(e.message||'')+'</div>'; return;}
+      if(!r.ok){ res.innerHTML='<div class="empty">'+esc(r.reason||'Недоступно')+'</div>'; return; }
+      const all=(r.past||[]).concat(r.future||[]); const mv=r.move||{};
+      const verdict=guess&&mv.pct!=null?(guess==='SKIP'?'Пропуск: ціна змінилась на '+mv.pct+' %.':((guess==='LONG')===(mv.pct>0)?'Прогноз збігся з напрямом ціни.':'Прогноз не збігся з напрямом ціни.')):'Прогноз не обрано.';
+      res.innerHTML=`<div id="trch2" style="height:320px;margin:8px 0"></div>
+        <div class="o2need"><b>Що було далі (${mv.after_h??'—'} год):</b> ${mv.pct!=null?(mv.pct>=0?'+':'')+mv.pct+' %':'—'} · максимум вгору ${mv.max_up_pct??'—'} % · вниз ${mv.max_down_pct??'—'} %<br>${esc(verdict)}</div>
+        ${(r.results||[]).map(x=>`<div class="o2sub"><b>${dirTxt(x.dir)}:</b> ${x.outcome==='NO_PLAN'?esc(x.text):'план '+esc(x.source||'')+' → '+esc(x.outcome)+(x.reached?' ('+esc(x.reached)+')':'')+(x.r_net!=null?' · '+(x.r_net>=0?'+':'')+x.r_net+' R':'')}</div>`).join('')}
+        <div class="o2sub">${esc(r.note||'')}</div>`;
+      drawFallback($('trch2'), all, lv, null);
+    };
+  };
+}
 function lfHtml(l){
   if(!l||!l.rules) return '';
   const m=v=>(v==null?'—':(v>=0?'+':'')+v+'$');
@@ -440,16 +480,18 @@ async function radar(){
   app.innerHTML=`<div class="mut" role="status">Радар: автоматичне оновлення кожні 30 с · дані станом на ${o2&&o2.last_cycle_ts?new Date(o2.last_cycle_ts*1000).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'немає свіжого скану'} · ${o2&&o2.symbols_last_hour!=null?o2.symbols_last_hour+' монет за годину':'немає підтвердження свіжості'}</div>
     ${chips([['all','Усе'],['brain','Brain v2.1'],['short','Shortlist і Лев']],f,'rf')}
     ${f!=='short'?lrHtml(lr):''}
+    ${f!=='short'?trHtml():''}
     ${f!=='short'?o2RadarHtml(o2):''}
     ${f!=='short'?paperHtml(pp):''}
     ${f!=='short'?dynWatchHtml(dw):''}
     ${f!=='brain'?`<h2>Shortlist сканера</h2>${shortlist}<h2>Додаткові спостереження Лева</h2>${wl}`:''}`;
   app.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{S.rf=b.dataset.rf; radar();});
+  trBind();
   app.querySelectorAll('[data-lrc]').forEach(el=>{const go1=()=>openRadarCard(el.dataset.lrc); el.onclick=go1; el.onkeydown=e=>{if(e.key==='Enter') go1();};});
   bindCards();
   // Radar is a live monitor, not a static snapshot. Reuse the route-owned
   // timer and stop refreshing immediately when the user navigates away.
-  if(!poll && cur==='radar') poll=setInterval(()=>{if(cur==='radar') radar();},30000);
+  if(!poll && cur==='radar') poll=setInterval(()=>{if(cur==='radar'&&!S.trActive) radar();},30000);
 }
 
 /* ---------- Сценарії ---------- */
@@ -1215,7 +1257,7 @@ async function openSc(id){
 const routes={office,radar,scenarios,journal,risk};
 let cur='office';
 function go(r){
-  killPoll(); cur=r;
+  killPoll(); cur=r; S.trActive=false;
   document.querySelectorAll('nav button').forEach(x=>{const on=x.dataset.r===r; x.classList.toggle('on',on); if(on) x.setAttribute('aria-current','page'); else x.removeAttribute('aria-current');});
   routes[r]();
 }

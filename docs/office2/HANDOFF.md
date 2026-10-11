@@ -1,6 +1,13 @@
-# HANDOFF — AI Trading Office (оновлено 11.10.2026 ~10:05Z)
+# HANDOFF — AI Trading Office (оновлено 11.10.2026 ~12:50Z)
 
 Нова сесія: прочитай цей файл, перевір факти в GitHub/Render/БД (не довіряй файлу сліпо), продовжуй з «Наступний крок».
+
+## 11.10 12:50Z — ЖИВИЙ WATCH/PAPER РАДАР (пріоритет власниці в Issue #199, замість нових досліджень)
+- **Діагноз 0 READY (production):** сканер живий (≈314 WAIT-сценаріїв, 28 монет, LINK SHORT 3/3 ARMED), але в Telegram ішов лише READY, а новий READY з 6.10 щодня відсікав захист «3 стопи/добу UTC» (82 would-be READY). Захист не змінювався.
+- **Додано (PR #204):** `brain2` → `preview` плану для WAIT 2/3–3/3 (стан/причини не змінені); `office2/radar_watch.py` — картки WATCH (ARMED/RETRACE) і BLOCKED, таблиця `office2_radar_card`, paper-супровід (`evaluate_card`, вхід лімітом після появи картки, SL першим, витрати 0.15 %), Telegram-потік «не вхід» (`send_pass`, антиспам ≤4/год, ≤12/добу, 1/монету/4 год; `OFFICE2_RADAR_TG=0` вимикає, `OFFICE2_RADAR=0` вимикає цикл), потік `office2-radar` у worker (sync+track щохвилини), `monitor_office2_radar` у релеї, `/api/v2/live_radar`, Mini App «Живий радар» (головна й Радар) + картка з графіком (`?tab=radar&card=ID`) + блок «чому немає READY».
+- **Тренажер (наступний PR):** `office2/trainer.py` + `/api/v2/trainer`, `/api/v2/trainer_reveal`: історія на момент T без майбутнього (тест: рішення не залежить від майбутніх свічок), прогноз → розкриття → paper-оцінка.
+- **Не підтверджено до першої реальної картки в Telegram:** доставка WATCH у production, follow-up за віхами, поведінка антиспаму на живих даних. Перевіряти: `SELECT * FROM office2_radar_card ORDER BY created_ts DESC`, логи `[radar]`.
+- Shadow-позначки `learned_flags` lf-2 (WEEKEND/COST_HEAVY/OFF_HOURS/COUNTER_TREND) у paper; дослідження — `FEATURE_STUDY.md`, `HISTORY_STUDY.md`. Висновок: edge не підтверджено (Brain-replay −0.115 R, старі плани −0.067 R).
 
 ## Production (перевірено 10.10)
 - Сервіс із живим циклом Office2 (`[o2shadow]`, `[o2smc]`, `[o2learn]`): `srv-d7sui7ok1i2s73a4qod0`; другий: `srv-d7seub3eo5us73c10svg` (у master-промпті підписані навпаки). Postgres `dpg-d7t2lvbrjlhs73d85sng-a`; workspace `tea-d6qnqkc50q8c73bluj6g`.

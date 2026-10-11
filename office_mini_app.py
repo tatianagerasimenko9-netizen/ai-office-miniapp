@@ -1487,6 +1487,26 @@ class Handler(BaseHTTPRequestHandler):
                 from office2 import radar_watch as _RW
 
                 data = _RW.summary(DB_PATH, card_id=_q("card") or None)
+            elif u.path in ("/api/v2/trainer", "/api/v2/trainer_reveal"):
+                import re as _re
+
+                from office2 import trainer as _TR
+
+                _sym = (_q("symbol") or "BTCUSDT").upper().strip()
+                if not _re.fullmatch(r"[A-Z0-9]{2,20}USDT", _sym):
+                    data = {"ok": False, "reason": "символ має бути на кшталт BTCUSDT"}
+                elif u.path == "/api/v2/trainer":
+                    try:
+                        _bh = float(_q("back_h")) if _q("back_h") else None
+                    except ValueError:
+                        _bh = None
+                    data = _TR.decide(_sym, _TR.pick_time(_bh))
+                else:
+                    try:
+                        _t = _TR.align(float(_q("t") or "0"))
+                    except ValueError:
+                        _t = 0.0
+                    data = _TR.reveal(_sym, _t)
             elif u.path == "/api/v2/dynamic_watch":
                 from office2 import dynamic_watch as _DW
 
