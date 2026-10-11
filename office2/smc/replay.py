@@ -130,8 +130,18 @@ def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel) -> 
             ev = th.get("event") or {}
             out.append({"source": "BRAIN", "model": th.get("kind", "SWEEP_SEQ"), "dir": d, "key": th.get("id"), "entry": float(th["entry"]), "sl": float(th["sl"]),
                         "tp1": float(tg[0]["p"]) if tg else None, "r_tp1": float(tg[0]["r"]) if tg else None, "risk_pct": float(th.get("risk_pct") or 0.0),
-                        "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone")})
+                        "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone"),
+                        "f": _features(th, now, mc, rel)})
     return out
+
+
+def _features(th, now, mc, rel):
+    try:
+        from office2.learning import features as FT
+
+        return FT.extract(th, now, mc, rel)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _smc_ready(sym: str, ctx: Dict[str, Any], now: float, levels) -> List[Dict[str, Any]]:

@@ -93,7 +93,7 @@ def per_event(events: List[Dict[str, Any]], m15) -> List[Dict[str, Any]]:
              "V4_sl_plus_0.5atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 0.5 * a), "V5_sl_plus_1.0atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 1.0 * a),
              "V6_limit_retest": _limit(m15, i, ev), "V7_structural_sl": _sim(m15, i, ev, sl=_structural_sl(m15, i, ev, a)), "V8_bos_confirm": _bos(m15, i, ev)}
         out.append({"symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
-                    "late": bool(ev.get("late")), "atr_pct": round(a / max(ev["entry"], 1e-9) * 100, 3), "risk_pct": ev["risk_pct"], "r_tp1": ev["r_tp1"],
+                    "late": bool(ev.get("late")), "f": ev.get("f"), "atr_pct": round(a / max(ev["entry"], 1e-9) * 100, 3), "risk_pct": ev["risk_pct"], "r_tp1": ev["r_tp1"],
                     **SS.session_of(float(ev["ts_bar"])), "variants": v})
     return out
 
