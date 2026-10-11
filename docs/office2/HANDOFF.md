@@ -1,4 +1,4 @@
-# HANDOFF — AI Trading Office (оновлено 10.10.2026 ~21:30Z)
+# HANDOFF — AI Trading Office (оновлено 11.10.2026 ~09:15Z)
 
 Нова сесія: прочитай цей файл, перевір факти в GitHub/Render/БД (не довіряй файлу сліпо), продовжуй з «Наступний крок».
 
@@ -9,6 +9,12 @@
 
 ## Злито: #164 SMC shadow (30d2b7e), #181 радар 30 с (9e40a10), #184 movers (879e3bf), #185 dynamic universe + контроль протилежних сценаріїв (9ba4e0b), #186/#187 docs, #188 learning-контур (577fd56), #189 Binance replay + мітка сесії (d397b77).
 Далі в гілці: `learning_flags` (COST_HEAVY/OFF_HOURS, лише annotate), таблиця фільтрів у replay — див. останній PR.
+
+## 11.10 (після #191/#192)
+- #191 (563ed23) latency-fix у production з 10.10 22:46Z: кеш `office_signals`, окремі пули доставки/трекера, діагностика `[loop-stall]`/`[db-slow]`. Ефект на реальній доставці НЕ підтверджено (потрібен наступний READY: `OFFICE2_READY_SENT.timing`).
+- #192 (49b20ad) DYNAMIC WATCH_ONLY: `OFFICE2_DYNAMIC_UNIVERSE=watch` виставлено на Worker 11.10 08:59Z (`live` = єдиний шлях в основний цикл; `1/on/watch` = лише спостереження). Таблиці `office2_dynamic_candidate`/`office2_dynamic_log` створюються при першому оновленні; перевірити рядки. Mini App: Радар → «DYNAMIC · WATCH_ONLY», `/api/v2/dynamic_watch`.
+- P3 (PR #193): `office2/paper.py` — paper-позиції за правилами «вхід лише після доставки» (open першої 1m-свічки ≥ delivered_ts, MISSED якщо chase>0.5R/ціна за SL/TP1/нема даних), моделі A/B/C, витрати 0.15%, потік `office2-paper` (60 с), `/api/v2/paper`, `OFFICE2_TELEGRAM_FAILURE` у БД.
+- Прогалини: 41-ша SMC-схема відсутня — не вигадувати (unverified).
 
 ## Інструменти (без участі Render)
 - Replay на реальних свічках Binance: GitHub Actions → `binance-replay.yml` (workflow_dispatch; inputs symbols/end_date/days; публічний архів data.binance.vision; жодних секретів). Результат — у логу job `aggregate` + артефакт `aggregate.json`. Запуск через `actions_run_trigger` з `ref=<гілка>`.

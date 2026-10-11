@@ -218,6 +218,29 @@ def test_job_from_db_roundtrip():
         assert OB._fetchone(db, "SELECT COUNT(*) FROM office2_learning_report")[0] == 2
 
 
+def test_structural_sl_and_bos_variants():
+    import numpy as np
+    from office2.learning import counterfactual as CF
+
+    n = 60
+    t = np.arange(n) * 900.0 + 1.8e9
+    c = np.full(n, 100.0)
+    h, l = c + 0.2, c - 0.2
+    l[28] = 98.5
+    c[32], h[32] = 100.5, 100.6
+    h[34] = 102.5
+    m = {"t": t, "o": c.copy(), "h": h, "l": l, "c": c, "v": np.ones(n), "tbv": np.ones(n)}
+    ev = {"dir": "LONG", "entry": 100.0, "sl": 99.0, "tp1": 102.0, "i": 30, "r_tp1": 2.0, "risk_pct": 1.0, "source": "BRAIN", "ts_bar": t[30], "symbol": "X"}
+    assert abs(CF._structural_sl(m, 30, ev, 0.4) - 98.4) < 1e-9           # далі за поточний SL: екстремум 98.5 − 0.25 ATR
+    ev2 = dict(ev, sl=97.0)
+    assert CF._structural_sl(m, 30, ev2, 0.4) == 97.0                      # SL не звужується
+    assert CF._bos(m, 30, ev)["outcome"] == "TP1"
+    m2 = dict(m, c=np.full(n, 100.0), h=np.full(n, 100.2))
+    assert CF._bos(m2, 30, ev)["outcome"] == "MISSED_NO_BOS"                # без пробою входу немає
+    row = CF.per_event([ev], m)[0]["variants"]
+    assert "V7_structural_sl" in row and "V8_bos_confirm" in row
+
+
 if __name__ == "__main__":
     for k, f in list(globals().items()):
         if k.startswith("test_"):
