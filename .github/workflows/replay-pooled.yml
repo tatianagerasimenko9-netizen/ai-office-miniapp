@@ -30,7 +30,43 @@ jobs:
       - run: pip install numpy tzdata
       - uses: actions/download-artifact@v4
         with:
-          pattern: replay-?-*
+          pattern: replay-A-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-B-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-C-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-D-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-E-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-F-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-G-*
           path: parts
           run-id: ${{ inputs.run_id || '38285363196' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
