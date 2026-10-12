@@ -362,27 +362,36 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
     stop_txt, stop_ok = _stop_line(p)
     act = [x for x in p["targets"] if x["active"]]
     tail: List[str] = []
-    if not learning:
-        tail.append("Чекаємо: " + (plan.get("wait") or p.get("need") or ("підтвердження біля зони входу." if c.get("stage") == "ARMED" else "повернення ціни в зону входу та підтвердження.")))
-    entry_bits = []
-    if p.get("zone"):
-        entry_bits.append("зона " + p["zone"])
-    if p.get("entry"):
-        entry_bits.append("орієнтир " + p["entry"])
-    if entry_bits:
-        tail.append(("Вхід (умовний): " if learning else "Вхід (після підтвердження): ") + ", ".join(entry_bits) + ".")
-    tail.append(stop_txt)
-    if act:
-        tail.append("Цілі: " + " / ".join(f"{x['price_txt']}" + (f" (≈{x['mult_txt']}×)" if x.get("mult_txt") else "") for x in act[:2]) + ".")
-    if plan.get("cancel"):
-        tail.append("Скасування: " + plan["cancel"] + ".")
-    if plan.get("against"):
-        tail.append("Проти: " + plan["against"][0] + ".")
+    if learning:
+        entry_bits = []
+        if p.get("zone"):
+            entry_bits.append("зона " + p["zone"])
+        if p.get("entry"):
+            entry_bits.append("ціна підтвердження " + p["entry"])
+        if entry_bits:
+            tail.append("Вхід (умовний): " + ", ".join(entry_bits) + ".")
+        tail.append(stop_txt)
+        if act:
+            tail.append("Цілі: " + " / ".join(f"{x['price_txt']}" + (f" (≈{x['mult_txt']}×)" if x.get("mult_txt") else "") for x in act[:2]) + ".")
+        if plan.get("cancel"):
+            tail.append("Скасування: " + plan["cancel"] + ".")
+        if plan.get("against"):
+            tail.append("Проти: " + plan["against"][0] + ".")
+    else:
+        # СПОСТЕРЕЖЕННЯ: зона інтересу ≠ підтвердження ≠ точка входу ≠ стоп. Вхід, стоп і цілі тут НЕ показуються: вони з'являться лише після підтвердження закритою свічкою.
+        if p.get("zone"):
+            tail.append("Зона інтересу: " + p["zone"] + ".")
+        tail.append("Потрібне підтвердження: " + (plan.get("wait") or p.get("need") or "закриття свічки за умовою методики") + ".")
+        if plan.get("cancel"):
+            tail.append("Скасування: " + plan["cancel"] + ".")
+        if plan.get("against"):
+            tail.append("Проти: " + plan["against"][0] + ".")
+        tail.append("Вхід, стоп і цілі — після підтвердження.")
     if learning:
         concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f" ({_limit_short(c.get('gate_reason'))})" if c.get("gate_reason") else "") + "."
     else:
-        concl = "СПОСТЕРІГАЄМО — вхід ще не підтверджений."
-    if stop_ok is False:
+        concl = "СПОСТЕРІГАЄМО — вхід не підтверджений, входити не можна."
+    if learning and stop_ok is False:
         concl = concl.rstrip(".") + ". Безпечний стоп не підтверджений. Вхід не дозволений."
     tail_end = ["Висновок: " + concl, f"⏳ До {p['expires']}", "📊 Відкрити графік:", card_url(c["card_id"], base_url)]
     items = list(plan["items"])

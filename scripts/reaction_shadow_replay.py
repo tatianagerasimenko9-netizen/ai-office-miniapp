@@ -169,6 +169,69 @@ def summarize(rows):
     return out
 
 
+STOP_VARIANTS = {"W|O2|d37a39e701ba": {"v1": 0.567, "v2": 0.56908616, "v3": 0.5685848214285715}}      # stops_json картки з БД (є лише в d37a); для e008 stops_json=NULL → варіанти недоступні
+
+
+def _path(card, bars, entry_idx, sl, now):
+    """Хід угоди після ринкового входу на open бару entry_idx: SL першим у барі, TP1/TP2/TP3 картки; R до TP1 після витрат."""
+    from office2.learning import costs as C
+
+    long_ = str(card["direction"]).upper() != "SHORT"
+    e = bars[entry_idx]["open"]
+    tps = [(n, card.get(k)) for n, k in (("TP1", "tp1"), ("TP2", "tp2"), ("TP3", "tp3")) if card.get(k)]
+    risk = abs(e - sl)
+    if risk <= 0 or (long_ and sl >= e) or ((not long_) and sl <= e):
+        return {"entry": e, "status": "СТОП_НЕ_ПО_ТУ_СТОРОНУ"}
+    cost = C.cost_r(risk / e * 100.0) or 0.0
+    reached, status, exit_ts = [], "ВІДКРИТА", None
+    for b in bars[entry_idx:]:
+        if (b["low"] <= sl) if long_ else (b["high"] >= sl):
+            status, exit_ts = "SL", b["ts"]
+            break
+        for n, lv in tps:
+            if n not in reached and ((b["high"] >= lv) if long_ else (b["low"] <= lv)):
+                reached.append(n)
+    r1 = abs(tps[0][1] - e) / risk if tps else None
+    res = {"entry": e, "entry_ts": bars[entry_idx]["ts"], "sl": sl, "risk_pct": round(risk / e * 100.0, 3), "status": status if status == "SL" else ("TP1+" if reached else "ВІДКРИТА"), "reached": reached, "exit_ts": exit_ts,
+           "rr_to_tp1": round(r1, 3) if r1 else None}
+    if status == "SL":
+        res["r_net"] = round((r1 - cost) if (reached and r1) else (-1.0 - cost), 3)
+    elif reached and r1:
+        res["r_net"] = round(r1 - cost, 3)
+    return res
+
+
+def abc_cases(cards, fetch_bars, now):
+    """А — старий ранній вхід (ліміт від дотику, V0); Б — вхід ринково на open наступного бару після закриття ЗАЯВЛЕНОГО тригера картки (для BLOCKED тригер виконано при створенні:
+    наступний бар після створення); В — те саме + альтернативні стопи з БД (лише там, де вони збережені)."""
+    from office2 import entry_audit as EA
+
+    out = {}
+    for cid, name in (("B|O2|e008197edf29", "TIA e008"), ("W|O2|d37a39e701ba", "TIA d37a")):
+        c = next(x for x in cards if x["card_id"] == cid)
+        bars = [b for b in fetch_bars(c["symbol"]) if b["ts"] + RS.M15 <= now]
+        trig = EA.trigger_of(c)
+        t_sig = RS.signal_bar_start(c)
+        full = [b for b in sorted(bars, key=lambda x: x["ts"]) if b["ts"] >= t_sig]
+        res = {"trigger": trig}
+        if trig["kind"] == "CLOSE_VS_ZONE_MID":
+            idx = next((i for i, b in enumerate(full) if b["ts"] >= c["created_ts"]), None)
+            conf_close = c["created_ts"]
+        else:
+            ct = EA.first_confirm_ts(c, trig, full)
+            conf_close = ct
+            idx = next((i for i, b in enumerate(full) if ct is not None and b["ts"] >= ct), None)
+        res["confirm_close_ts"] = conf_close
+        if idx is None:
+            res["B"] = {"status": "ПІДТВЕРДЖЕННЯ_ЩЕ_НЕМАЄ"}
+        else:
+            res["B"] = _path(c, full, idx, c["sl"], now)
+            res["B"]["card_entry_orientation"] = c["entry"]
+            res["C"] = {k: _path(c, full, idx, v, now) for k, v in STOP_VARIANTS.get(cid, {}).items()} or "стопи-варіанти в БД відсутні (stops_json=NULL): порівняння неможливе"
+        out[name] = res
+    return out
+
+
 def fmt(x):
     if not isinstance(x, dict):
         return str(x)
@@ -182,6 +245,12 @@ def main() -> int:
     cards = json.loads(FIX.read_text(encoding="utf-8"))["cards"]
     rows = run(cards, fetch_futures_m15, time.time())
     summ = summarize(rows)
+    try:
+        abc = abc_cases(cards, lambda sym: fetch_futures_m15(sym, min(x["created_ts"] for x in cards if x["symbol"] == sym) - 3600, time.time())[0], time.time())
+        summ["ABC"] = abc
+        print("A/B/C:", json.dumps(abc, ensure_ascii=False, indent=1), flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"A/B/C: {type(exc).__name__}: {exc}", flush=True)
     Path(a.out).write_text(json.dumps({"summary": summ, "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
     nodata = sum(1 for r in rows if r.get("status") == "ДАНИХ_НЕМАЄ")
     for r in sorted(rows, key=lambda x: (not x["focus"], x["name"])):

@@ -26,6 +26,7 @@ TG_SYMBOL_COOLDOWN_SEC = 3600
 MAX_TP_PCT = 8.0              # ціль далі за 8 % від входу за 4-годинний строк не вважаємо короткостроковою: показуємо як «далеку», у paper не враховуємо
 MAX_TP_MULT = 8.0
 TG_MAX_TRIES = 3
+TG_STAGES_DEFAULT = "ARMED"   # у Telegram — лише коротке спостереження «зона досягнута, чекаємо підтвердження»; навчальні (BLOCKED) і ранні (RETRACE) картки — у БД і Mini App (RADAR_TG_STAGES=ARMED,RETRACE,BLOCKED повертає старе)
 BLOCK_PREFIX = "ємність сценаріїв"
 
 DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
@@ -97,8 +98,7 @@ def plan_of(th: Dict[str, Any]) -> Dict[str, Any]:
     long_ = str(th.get("dir") or "").upper() != "SHORT"
     note = None
     if ok and entry and zlo is not None and zhi is not None and not (zlo <= entry <= zhi):
-        note = f"ціна підтвердження була поза зоною ({entry:.6g}); вхід лімітом на межі зони"
-        entry = zlo if entry < zlo else zhi
+        note = f"вхід за ціною підтвердження (закриття M15) {entry:.6g}, поза зоною: вхід не переносимо лімітом на межу зони"
     ps = [_f(t.get("p")) for t in tgs]
     ps = [p for p in ps if p]
     if ok and (not entry or not sl or not ps):
@@ -381,6 +381,7 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
     except Exception as exc:  # noqa: BLE001
         log(f"[radar] backfill стопів: {type(exc).__name__}: {str(exc)[:100]}")
     cols = ",".join(_COLS)
+    # WATCH — спостереження: нового paper-входу не відкриваємо (дотик орієнтира ≠ підтвердження); старі WATCH із наявним paper-станом дотрекуються до кінця (див. цикл нижче).
     rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit * 2))
     final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID")
 
@@ -424,6 +425,9 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
                              (json.dumps(obs, ensure_ascii=False), c["card_id"]))
                 except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
                     log(f"[radar] Дарія shadow {c['card_id']}: {type(exc).__name__}")
+            if c.get("kind") == "WATCH" and not c.get("paper_status"):
+                n += 1
+                continue            # спостереження: paper-входу немає (орієнтир ≠ підтвердження); Дарія-shadow вище вже записано
             ev = evaluate_card(c, cl, t)
             vv = evaluate_variants(c, cl, t)
             _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=? WHERE card_id=?",
@@ -462,7 +466,9 @@ def pick_for_tg(db: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
         return []
     recent_syms = {r[0] for r in _fetchall(db, "SELECT symbol FROM office2_radar_card WHERE sent_ts > ?", (t - TG_SYMBOL_COOLDOWN_SEC,))}
     cols = ",".join(_COLS)
-    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ('RETRACE','ARMED','BLOCKED')) AND scen_state IN ('WAIT','NO_TRADE') "
+    stages = [x for x in (y.strip().upper() for y in os.getenv("RADAR_TG_STAGES", TG_STAGES_DEFAULT).split(",")) if x in ("RETRACE", "ARMED", "BLOCKED")] or ["ARMED"]
+    ph = ",".join("'" + x + "'" for x in stages)
+    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ({ph})) AND scen_state IN ('WAIT','NO_TRADE') "
                          "AND COALESCE(paper_status,'') IN ('','WAITING_ENTRY') AND tg_tries < ? ORDER BY CASE stage WHEN 'BLOCKED' THEN 0 WHEN 'ARMED' THEN 1 ELSE 2 END, created_ts", (t, TG_MAX_TRIES))
     out, seen = [], set(recent_syms)
     for r in rows:
