@@ -69,6 +69,15 @@ def _ts(v: Any) -> Optional[float]:
     return None
 
 
+NO_BARS_GRACE_SEC = 600.0
+
+
+def _no_bars_yet(p: Dict[str, Any], now: float) -> bool:
+    """Перша 1m-свічка після доставки може ще не існувати (або не дійти через кеш): це не «пропущений вхід». Рішення відкладається на наступний прохід,
+    але не довше NO_BARS_GRACE_SEC після доставки; після цього NO_DATA фіксується як є (не вигадуємо вхід)."""
+    return p.get("status") == "MISSED" and str(p.get("miss_reason") or "").startswith("NO_DATA: немає 1m-свічок") and (now - float(p.get("delivered_ts") or 0.0)) < NO_BARS_GRACE_SEC
+
+
 def bars_of(rows: Any) -> List[Tuple[float, float, float, float, float]]:
     """[(t, o, h, l, c)] за зростанням часу; сміття відкидається."""
     out = []
@@ -316,10 +325,40 @@ def control_tick(db: str, fetch: Callable[[str, str, int], Any], now: float, log
                  "gate_reason": str(reason or "")[:120], "coarse": 0, "learned_flags": json.dumps(_lf_of(th, upd), ensure_ascii=False)}
             nb = max(5, min(1000, int((now - p["delivered_ts"]) // 60) + 5))
             open_position(p, bars_of(fetch(sym, "1m", nb)))
+            if _no_bars_yet(p, now):
+                continue
             _save(db, p)
             n += 1
         except Exception as exc:  # noqa: BLE001
             log(f"[paper][control] {sid}: {type(exc).__name__}: {str(exc)[:100]}")
+    return n
+
+
+def repair_no_bars(db: str, fetch: Callable[[str, str, int], Any], now: float, log: Callable[[str], None] = print, max_age_sec: float = 3 * 86400) -> int:
+    """LIVE-позиції, зафіксовані як MISSED «NO_DATA: немає 1m-свічок» (гонка: tick спрацював до появи першої свічки): перераховує за тепер доступними ф'ючерсними 1m.
+    Нічого не видаляє: стара причина лишається в журналі подій (PAPER_CORRECTION). Якщо свічок усе ще немає — позиція не змінюється."""
+    from office_bridge import _fetchall, log_event
+
+    n = 0
+    for (sid,) in _fetchall(db, "SELECT scenario_id FROM office2_paper_position WHERE status = 'MISSED' AND COALESCE(scope,'LIVE') = 'LIVE' AND miss_reason LIKE ? AND generated_ts > ?",
+                            ("NO_DATA: немає 1m-свічок%", now - max_age_sec)):
+        try:
+            row = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, delivered_ts, status, last_error, snapshot_json FROM office2_live_signal WHERE scenario_id = ?", (sid,))
+            if not row or not row[0][4]:
+                continue
+            p = _from_signal(row[0])
+            if not (p["plan_entry"] and p["sl"] and p["tp1"]):
+                continue
+            nb = max(5, min(1000, int((now - p["delivered_ts"]) // 60) + 5))
+            open_position(p, bars_of(fetch(p["symbol"], "1m", nb)))
+            if str(p.get("miss_reason") or "").startswith("NO_DATA: немає 1m-свічок"):
+                continue
+            _save(db, {k: v for k, v in p.items() if not k.startswith("_")})
+            log_event(db, "PAPER_CORRECTION", {"scenario_id": sid, "old": "MISSED NO_DATA: немає 1m-свічок після доставки", "new_status": p["status"], "new_reason": p.get("miss_reason"), "fill_ts": p.get("fill_ts")}, sid)
+            log(f"[paper] виправлено {p['symbol']} {sid}: MISSED(NO_DATA) → {p['status']} {p.get('miss_reason') or ''}")
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            log(f"[paper] repair {sid}: {type(exc).__name__}: {str(exc)[:100]}")
     return n
 
 
@@ -354,6 +393,9 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
             else:
                 n = max(5, min(1000, int((now - p["delivered_ts"]) // 60) + 5))
                 open_position(p, bars_of(fetch(p["symbol"], "1m", n)))
+                if _no_bars_yet(p, now):
+                    log(f"[paper] {p['symbol']}: ще немає 1m-свічки після доставки — повтор на наступному проході")
+                    continue
             if p["status"] == "MISSED":
                 out["missed"] += 1
             out["new"] += 1
@@ -384,6 +426,7 @@ def tick(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] = 
             out["errors"] += 1
             log(f"[paper] помилка супроводу {p['scenario_id']}: {type(exc).__name__}: {str(exc)[:120]}")
     try:
+        out["repaired"] = repair_no_bars(db, fetch, now, log)
         out["control"] = control_tick(db, fetch, now, log)
     except Exception as exc:  # noqa: BLE001
         log(f"[paper] контрольний потік збій: {type(exc).__name__}: {str(exc)[:120]}")

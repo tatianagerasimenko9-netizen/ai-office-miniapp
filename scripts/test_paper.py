@@ -263,5 +263,30 @@ check("flags_pass доносить позначки для старих пози
 sm2 = P.summary(db)
 check("summary містить learned_flags і позначки в позиціях; результат/гейти не змінено", "WEEKEND" in sm2["learned_flags"]["rules"] and all("flags" in x for x in sm2["items"]) and sm2["stats"]["total"] == live_before)
 
+# --- гонка в БД: tick до появи першої 1m-свічки → позиція чекає; потім відкривається; а старий MISSED(NO_DATA) виправляється з аудитом
+D4 = T0 + 2000 + 30
+_execute(db, "INSERT INTO office2_live_signal(scenario_id,symbol,direction,created_ts,valid_until_ts,status,snapshot_json,version,delivered_ts,msg_id,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+         ("S4", "DDDUSDT", "LONG", T0 + 2000, T0 + 9999, "DELIVERED", snap(100, 99, [102]), "v", D4, 4, None))
+P._READY["done"] = False
+P.tick(db, mk_fetch(), D4 + 45, log=log.append)
+check("S4: без першої 1m-свічки позиція не фіксується як MISSED (повтор)", "S4" not in {x["scenario_id"] for x in P.summary(db)["items"]})
+P.tick(db, mk_fetch({"DDDUSDT": [B(T0 + 2040, 100.0, 100.3, 99.95, 100.2)]}), D4 + 130, log=log.append)
+s4 = [x for x in P.summary(db)["items"] if x["scenario_id"] == "S4"]
+check("S4: наступний прохід відкриває позицію за open першої свічки", s4 and s4[0]["status"] == "OPEN" and s4[0]["fill_price"] == 100.0)
+_execute(db, "INSERT INTO office2_live_signal(scenario_id,symbol,direction,created_ts,valid_until_ts,status,snapshot_json,version,delivered_ts,msg_id,last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+         ("S5", "EEEUSDT", "LONG", T0 + 3000, T0 + 9999, "DELIVERED", snap(100, 99, [102]), "v", T0 + 3030, 5, None))
+_execute(db, "INSERT INTO office2_paper_position(scenario_id,symbol,direction,status,generated_ts,delivered_ts,miss_reason,scope) VALUES (?,?,?,?,?,?,?,?)",
+         ("S5", "EEEUSDT", "LONG", "MISSED", T0 + 3000, T0 + 3030, "NO_DATA: немає 1m-свічок після доставки (не вигадуємо вхід)", "LIVE"))
+nfix = P.repair_no_bars(db, mk_fetch({"EEEUSDT": [B(T0 + 3060, 100.0, 100.3, 99.95, 100.2)]}), T0 + 3300, log=log.append)
+s5 = [x for x in P.summary(db)["items"] if x["scenario_id"] == "S5"]
+check("S5: MISSED(NO_DATA) виправлено за наявними свічками", nfix == 1 and s5 and s5[0]["status"] == "OPEN", str((nfix, s5[:1])))
+check("repair без свічок нічого не змінює", P.repair_no_bars(db, mk_fetch(), T0 + 3300, log=log.append) == 0)
+
+# гонка: перша 1m-свічка після доставки ще не існує → позиція не фіксується як MISSED, а чекає
+miss = {"status": "MISSED", "miss_reason": "NO_DATA: немає 1m-свічок після доставки (не вигадуємо вхід)", "delivered_ts": 1000.0}
+check("NO_DATA одразу після доставки відкладається (не остаточний MISSED)", P._no_bars_yet(miss, 1000.0 + 90))
+check("після вікна очікування NO_DATA фіксується як є", not P._no_bars_yet(miss, 1000.0 + P.NO_BARS_GRACE_SEC + 1))
+check("інші причини MISSED не відкладаються", not P._no_bars_yet(dict(miss, miss_reason="MISSED: ціна вже за SL"), 1000.0 + 90))
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
