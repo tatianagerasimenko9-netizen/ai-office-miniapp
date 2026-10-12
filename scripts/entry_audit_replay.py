@@ -51,7 +51,21 @@ def fetch_m15(symbol: str, t0: float, t1: float):
         except Exception as exc:  # noqa: BLE001
             print(f"  архів {symbol} {d}: {type(exc).__name__}", flush=True)
         d = datetime.fromtimestamp(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp() + 86400, timezone.utc).date()
-    return [out[k] for k in sorted(out)]
+    if out:
+        return [out[k] for k in sorted(out)]
+    return fetch_m15_miniapp(symbol)
+
+
+def fetch_m15_miniapp(symbol: str):
+    """Запасний шлях: GET /api/v2/candles нашого Mini App (реальні ф'ючерсні свічки Binance, які бачить production). Лише читання; незакрита свічка відкидається вище за течією."""
+    try:
+        d = json.loads(_get(f"https://ai-office-miniapp.onrender.com/api/v2/candles?symbol={symbol}&tf=M15&limit=500"))
+        bars = [{"ts": float(b["time"]), "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"]} for b in (d.get("candles") or d.get("bars") or []) if b.get("time") and not b.get("forming")]
+        print(f"  Mini App {symbol}: {len(bars)} закритих M15, джерело {d.get('source')}", flush=True)
+        return sorted(bars, key=lambda x: x["ts"])
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Mini App {symbol}: {type(exc).__name__}: {str(exc)[:80]}", flush=True)
+        return []
 
 
 def run(cards, fetch, now):
