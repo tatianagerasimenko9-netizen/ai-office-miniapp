@@ -1,0 +1,46 @@
+name: Replay pooled study (reads artifacts of a finished replay-context run)
+
+# Зведення A–G з артефактів завершеного прогону replay-context (не перераховує replay). Лише читання.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'ID прогону replay-context'
+        default: '38285363196'
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/replay-pooled.yml', 'scripts/replay_pooled_study.py']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  pooled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-?-*
+          path: parts
+          run-id: ${{ inputs.run_id || '38285363196' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pooled study
+        run: |
+          set -o pipefail
+          python -u scripts/replay_pooled_study.py parts replay_pooled.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-pooled
+          path: replay_pooled.json
+          if-no-files-found: ignore
