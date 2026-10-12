@@ -36,6 +36,20 @@ check("свічки без позначки джерела відхиляють�
 check("змішаний набір (частина резервна) відхиляється повністю", with_rows([dict(bar, src="binance_futures"), dict(bar, src="binance_spot_vision")]) == {})
 check("порожня відповідь → {}", with_rows({}) == {})
 check("протухла ф'ючерсна свічка (кеш при збої) не є підставою для рішення", with_rows([dict(bar, src="binance_futures", ts="2026-01-01T00:00:00+00:00")]) == {})
+import datetime as _dt
+_now = _dt.datetime.now(_dt.timezone.utc)
+fut_bar = dict(bar, src="binance_futures", ts=(_now + _dt.timedelta(minutes=30)).isoformat())
+check("свічка з майбутньою міткою часу відхиляється", with_rows([fut_bar]) == {})
+cur = dict(bar, src="binance_futures", ts=(_now - _dt.timedelta(minutes=3)).isoformat())
+check("поточна (формується) свічка допустима за замовчуванням", bool(with_rows([cur])))
+def with_closed(rows):
+    MD.fetch_candles = lambda *a, **k: rows
+    try:
+        return MD.fetch_candles_futures("TIAUSDT", "15m", 3, closed_only=True)
+    finally:
+        MD.fetch_candles = orig
+closed = dict(bar, src="binance_futures", ts=(_now - _dt.timedelta(minutes=20)).isoformat())
+check("closed_only відкидає свічку, що формується, і лишає закриті", with_closed([closed, cur]) == [closed] and with_closed([cur]) == {})
 import inspect
 check("fetch_candles за замовчуванням не бере спот/Bybit (allow_fallback=False)", inspect.signature(orig).parameters["allow_fallback"].default is False)
 h = MD.source_health()

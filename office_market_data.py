@@ -510,22 +510,37 @@ _DECISION_REJECT_LOG: Dict[str, float] = {}
 _TF_SEC = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400, "1w": 604800, "1M": 2678400}
 
 
-def _fresh_enough(bar: Dict[str, Any], tf: str) -> bool:
-    """Остання свічка не старіша за два періоди ТФ (+ запас 120 с): кеш «stale_served» при збої Binance не стає підставою для рішення."""
+def _bar_open_ts(bar: Dict[str, Any]) -> Optional[float]:
+    ts = bar.get("ts")
     try:
-        ts = bar.get("ts")
-        o = float(ts) if isinstance(ts, (int, float)) else datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
-        return time.time() - o <= 2 * _TF_SEC.get(tf, 900) + 120
+        return float(ts) if isinstance(ts, (int, float)) else datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
     except Exception:  # noqa: BLE001
+        return None
+
+
+def _fresh_enough(bar: Dict[str, Any], tf: str) -> bool:
+    """Остання свічка: час відкриття не в майбутньому (допуск 5 с на розбіжність годинників) і не старіша за два періоди ТФ (+120 с).
+    Остання біржова свічка може бути поточною (формується) — це допустимо; споживачі беруть закриті бари самі (або викликають з closed_only=True)."""
+    o = _bar_open_ts(bar)
+    if o is None:
         return False
+    age = time.time() - o
+    return -5.0 <= age <= 2 * _TF_SEC.get(tf, 900) + 120
 
 
-def fetch_candles_futures(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+def fetch_candles_futures(symbol: str, tf: str, limit: int = 3, closed_only: bool = False) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """Свічки ЛИШЕ з ф'ючерсів Binance USDⓈ-M для торгових рішень, paper/супроводу сигналів і журналів.
     Резервні (спот Binance, Bybit) та свічки без позначки джерела відхиляються: повертається {} — споживач пропускає цикл і повторює пізніше, рішення на чужих свічках не приймається.
     Лічильники — у source_health(): decision_ok / decision_rejected_nonfutures."""
     rows = fetch_candles(symbol, tf, limit)
     if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows) and _fresh_enough(rows[-1], str(tf)):
+        if closed_only:      # лише закриті бари: свічка, що формується (open + період > зараз), відкидається
+            sec = _TF_SEC.get(str(tf), 900)
+            now_t = time.time()
+            rows = [r for r in rows if (_bar_open_ts(r) or 0.0) + sec <= now_t]
+            if not rows:
+                _HEALTH["decision_no_data"] = _HEALTH.get("decision_no_data", 0) + 1
+                return {}
         _HEALTH["decision_ok"] = _HEALTH.get("decision_ok", 0) + 1
         return rows
     if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows):
