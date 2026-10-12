@@ -67,6 +67,7 @@ def hhmm(ts):
 
 def main():
     cards = json.loads(FIX.read_text(encoding="utf-8"))
+    cards = cards if isinstance(cards, list) else cards["cards"]
     now = time.time()
     data = {}
     for sym in sorted({c["symbol"] for c in cards}):
