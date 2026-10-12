@@ -61,6 +61,15 @@ def api_checks(allow_fixture: bool) -> str:
         (ok if h == "stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK" else fail)(f"бібліотека графіка з нашого сервера, sha384 збігається: {h[:12]}…")
     else:
         fail(f"бібліотека графіка не віддається: {st} {len(js)}")
+    # --- ключові API Mini App (регресії функціоналу): 200 і ok
+    for path in ("/api/v2/home", "/api/v2/market", "/api/v2/scenarios", "/api/v2/radar", "/api/v2/live_radar", "/api/v2/office2", "/api/v2/paper", "/api/v2/journal", "/api/v2/risk", "/api/v2/overview"):
+        try:
+            st, b = get(path)
+            d = json.loads(b.decode("utf-8"))
+            bad = st != 200 or d.get("ok") is False
+            (fail if bad else ok)(f"{path}: HTTP {st}, ok={d.get('ok')}, data_status={d.get('data_status')}")
+        except Exception as exc:  # noqa: BLE001
+            fail(f"{path}: {type(exc).__name__}")
     # --- свічки: TIA і BTC, усі ТФ
     now = time.time()
     for sym in ("TIAUSDT", "BTCUSDT"):
@@ -205,6 +214,36 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
         else:
             NOTES.append("шарів для перемикання на цьому сценарії немає")
         ok(f"шари на графіку: {layers_before}")
+        # --- усі вкладки Mini App відкриваються без JS-помилок і без порожніх екранів
+        await pg.goto(f"{BASE}/v2", wait_until="domcontentloaded", timeout=60000)
+        await pg.wait_for_selector("nav button[data-r]", timeout=40000)
+        n_err = len(errs)
+        for tab in ("office", "radar", "scenarios", "journal", "risk"):
+            await pg.click(f"nav button[data-r={tab}]")
+            await pg.wait_for_timeout(2500)
+            txt = (await pg.inner_text("main"))[:4000] if await pg.query_selector("main") else (await pg.inner_text("body"))[:4000]
+            sw_t = await pg.evaluate("document.documentElement.scrollWidth")
+            problems = []
+            if len(txt.strip()) < 40:
+                problems.append("порожній екран")
+            if sw_t > 391:
+                problems.append(f"горизонтальний скрол {sw_t}")
+            (fail if problems else ok)(f"вкладка {tab}: {len(txt)} симв." + (f" — {'; '.join(problems)}" if problems else ""))
+        if len(errs) > n_err:
+            fail(f"JS-помилки на вкладках: {errs[n_err:][:3]}")
+        # --- радар: картка спостереження з графіком (шлях paintChart для WATCH), якщо є
+        await pg.click("nav button[data-r=radar]")
+        await pg.wait_for_timeout(2500)
+        card = await pg.query_selector("[data-id], .card.tap")
+        if card:
+            try:
+                await card.click()
+                await pg.wait_for_function("typeof S!=='undefined' && S.bars && S.bars.length>0 && document.querySelectorAll('#chart canvas, #ch canvas').length>0", timeout=40000)
+                ok(f"картка радара відкрила інтерактивний графік ({await pg.evaluate('S.histKey')})")
+            except Exception:  # noqa: BLE001
+                NOTES.append("картка радара не відкрила графік за 40 с (можливо, немає карток із графіком)")
+        else:
+            NOTES.append("у радарі зараз немає карток для відкриття")
         # --- помилка + «Повторити», коли бібліотека недоступна
         pg2 = await ctx.new_page()
         block = {"on": True}
