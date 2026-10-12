@@ -28,7 +28,7 @@ def main():
     assert RP._cut_ltf(a, 300.0, 1_000_000.0 + 3 * 300.0, 60) is None
     assert RP._cut_ltf(None, 300.0, now, 60) is None
     assert RP._td_compact(None) is None
-    d = RP._td_compact({"scenario_type": "REVERSAL", "ltf": {"status": "PENDING"}, "conflicts": [{"severity": "warn"}, {"severity": "info"}]})
+    d = RP._td_compact({"scenario_type": {"type": "REVERSAL", "label": "розворот"}, "ltf": {"status": "PENDING"}, "conflicts": [{"severity": "warn"}, {"severity": "info"}]})
     assert d == {"type": "REVERSAL", "ltf": "PENDING", "m5": None, "conflicts_warn": 1, "error": None}, d
     print("ok replay ltf no-future cut")
 

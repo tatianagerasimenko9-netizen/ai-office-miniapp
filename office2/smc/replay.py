@@ -153,7 +153,9 @@ def _td_compact(td: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not td:
         return None
     lt = td.get("ltf") or {}
-    return {"type": td.get("scenario_type"), "ltf": lt.get("status"), "m5": (lt.get("m5") or {}).get("status") if isinstance(lt.get("m5"), dict) else None,
+    st = td.get("scenario_type")
+    st = st.get("type") if isinstance(st, dict) else st
+    return {"type": st, "ltf": lt.get("status"), "m5": (lt.get("m5") or {}).get("status") if isinstance(lt.get("m5"), dict) else None,
             "conflicts_warn": sum(1 for c in (td.get("conflicts") or []) if c.get("severity") == "warn"), "error": td.get("error")}
 
 
