@@ -141,6 +141,38 @@ check("свічка зі стопом і ціллю разом → SL (конс�
 ev = RW.evaluate_card(card, cds([(101.0, 100.6)] * 20, tb + 900), card["expires_ts"] + 5 * 900)
 check("вхід так і не відбувся до кінця строку → NO_ENTRY", ev["paper_status"] == "NO_ENTRY", str(ev))
 
+# --- 4b. життєвий цикл: власна умова скасування (закриття M15 за екстремумом події) ДО входу → INVALIDATED, позиція не відкривається
+def ohlc(bars, t0):
+    return [{"ts": t0 + 900 * i, "open": o, "high": h, "low": l, "close": c} for i, (o, h, l, c) in enumerate(bars)]
+
+
+T0 = 1_791_752_400.0                                                         # межа M15-бару
+lc = {"card_id": "W|O2|zz", "direction": "LONG", "created_ts": T0, "sent_ts": T0 + 97, "expires_ts": T0 + 4 * 3600, "entry": 0.5764, "sl": 0.567, "tp1": 0.5867, "tp2": 0.5924, "tp3": None,
+      "risk_pct": 1.64, "inval_px": 0.5692}
+# d37a: бар створення закрився 0.569 < 0.5692 (скасування), далі ціна повернулась і торкнулась входу → позиція НЕ відкривається
+bars_d = ohlc([(0.5748, 0.5752, 0.5666, 0.569), (0.5690, 0.5730, 0.5688, 0.5725), (0.5725, 0.5770, 0.5720, 0.5765), (0.5765, 0.5790, 0.5760, 0.5785)], T0)
+evd = RW.evaluate_card(lc, bars_d, T0 + 6 * 900)
+check("скасування закриттям за екстремумом ДО заповнення → INVALIDATED, без входу, з причиною й часом", evd["paper_status"] == "INVALIDATED" and evd["entry_ts"] is None and evd["inval_ts"] == T0 + 900 and "0.569" in evd["inval_why"], str(evd))
+check("рішення стабільне при перерахунку (рестарт/повторний прохід)", RW.evaluate_card(lc, bars_d, T0 + 6 * 900) == evd)
+check("до закриття бару скасування (as-of) його ще немає: без lookahead", RW.first_invalidation(lc, bars_d, T0 + 800) is None and RW.first_invalidation(lc, bars_d, T0 + 900)["ts"] == T0 + 900)
+# прокол тінню нижче стопа БЕЗ закриття за екстремумом → це не скасування (може бути частиною хибного пробою)
+bars_w = ohlc([(0.5748, 0.5752, 0.5666, 0.5700), (0.5700, 0.5770, 0.5695, 0.5765), (0.5765, 0.5800, 0.5760, 0.5790), (0.5790, 0.5880, 0.5780, 0.5875)], T0)
+evw = RW.evaluate_card(lc, bars_w, T0 + 6 * 900)
+check("прокол тінню без закриття за екстремумом не скасовує сценарій", RW.first_invalidation(lc, bars_w, T0 + 6 * 900) is None and evw["paper_status"] != "INVALIDATED", str(evw))
+# вхід відбувся ДО скасування → позиція уже відкрита, далі звичайний супровід (SL/TP), а не INVALIDATED
+bars_f = ohlc([(0.5800, 0.5810, 0.5760, 0.5790), (0.5790, 0.5795, 0.5640, 0.5660)], T0 + 900)
+lf = dict(lc, created_ts=T0 - 900, sent_ts=T0 - 900 + 60)
+evf = RW.evaluate_card(lf, ohlc([(0.5800, 0.5810, 0.5770, 0.5790)], T0 - 900) + bars_f, T0 + 6 * 900)
+check("вхід до скасування → звичайний супровід угоди (SL), не INVALIDATED", evf["paper_status"] in ("SL", "ENTERED") and evf["entry_ts"] is not None, str(evf))
+# запізніла доставка: скасування закрилось ще до моменту відправки → вхід після відправки теж заборонено
+ll = dict(lc, sent_ts=T0 + 3 * 900 + 30)
+check("запізніла доставка: скасування до відправки → INVALIDATED", RW.evaluate_card(ll, bars_d, T0 + 8 * 900)["paper_status"] == "INVALIDATED")
+# SHORT дзеркально
+ls = {"card_id": "W|O2|ss", "direction": "SHORT", "created_ts": T0, "sent_ts": T0 + 50, "expires_ts": T0 + 4 * 3600, "entry": 99.0, "sl": 103.0, "tp1": 95.0, "tp2": None, "tp3": None, "risk_pct": 4.0, "inval_px": 101.0}
+bars_s = ohlc([(100.0, 102.0, 99.8, 101.5), (101.5, 101.6, 98.5, 99.0), (99.0, 99.5, 94.0, 94.5)], T0)
+check("SHORT: закриття вище екстремуму до входу → INVALIDATED", RW.evaluate_card(ls, bars_s, T0 + 6 * 900)["paper_status"] == "INVALIDATED")
+check("картка без inval_px (стара) не ламається", RW.evaluate_card(dict(lc, inval_px=None), bars_w, T0 + 6 * 900)["paper_status"] != "INVALIDATED")
+
 # --- 5. track + follow-up (віхи один раз)
 state = {"bars": cds([(100.5, 100.1), (101.5, 100.3)], tb + 900)}
 OB._execute(db, "UPDATE office2_radar_card SET paper_status = 'WAITING_ENTRY' WHERE card_id = 'W|O2|a1'")      # «старий» WATCH, у якого paper уже був: дотрекується до кінця

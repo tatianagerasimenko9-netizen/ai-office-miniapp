@@ -16,7 +16,7 @@ LEVEL_UA = {
     "H1SW": "локальний пік/впадина на годинному графіку", "ORIGIN_LOW": "початок руху",
 }
 LEVEL_SHORT = {"H4SW": "пік/впадина 4 год", "D1SW": "пік/впадина доби", "W1SW": "пік/впадина тижня", "M15SW": "пік/впадина 15 хв", "H1SW": "пік/впадина 1 год"}
-FINAL_PAPER = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT")
+FINAL_PAPER = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALIDATED")
 
 
 def level_ua(kind: Optional[str]) -> str:
@@ -107,7 +107,7 @@ def targets(c: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 STOP_STATUS_UA = {"SL": "стоп спрацював", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута", "ENTERED": "угода ще відкрита", "WAITING_ENTRY": "чекаємо вхід",
-                  "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALID": "не застосовний"}
+                  "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALID": "не застосовний", "INVALIDATED": "сценарій скасовано до входу"}
 
 
 def stops_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -309,7 +309,7 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
     ps = c.get("paper_status") or ""
     paper = {"": "ще не оцінено", "WAITING_ENTRY": "чекаємо, поки ціна дійде до входу", "ENTERED": "навчальна угода відкрита, ціна пішла від входу",
              "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута", "SL": "стоп спрацював", "NO_ENTRY": "ціна не дійшла до входу — угода не відкрилась",
-             "TIMEOUT": "строк вийшов"}.get(ps, ps)
+             "TIMEOUT": "строк вийшов", "INVALIDATED": "сценарій скасовано до входу — позиція не відкривалась"}.get(ps, ps)
     res = None
     if c.get("r_net") is not None and ps in ("SL", "TP1", "TP2", "TP3", "ENTERED"):
         res = f"умовний результат {c['r_net']:+.2f}".replace(".", ",") + f" від ризику (≈ {c['r_net'] * 10:+.1f} $ при ризику 10 $, з комісіями)".replace(".", ",")
@@ -443,7 +443,7 @@ def parse_link_id(token: str) -> List[str]:
 def followup_text(c: Dict[str, Any]) -> str:
     p = present(c)
     parts = {"ENTERED": "ціна дійшла до входу — навчальна угода відкрита (без грошей)", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута",
-             "SL": "стоп спрацював", "NO_ENTRY": "ціна так і не дійшла до входу — навчальна угода не відкрилась", "TIMEOUT": "строк вийшов"}
+             "SL": "стоп спрацював", "NO_ENTRY": "ціна так і не дійшла до входу — навчальна угода не відкрилась", "TIMEOUT": "строк вийшов", "INVALIDATED": "сценарій скасовано до входу — навчальна угода не відкривалась"}
     s = "; ".join(parts.get(m, m) for m in c["_new"])
     tail = f" {p['result']}." if p.get("result") and any(m in ("SL", "TP1", "TP2", "TP3") for m in c["_new"]) else ""
     return f"🎓 {p['coin'].split(' ')[0]}: {s}.{tail} Навчальна угода, не ордер."

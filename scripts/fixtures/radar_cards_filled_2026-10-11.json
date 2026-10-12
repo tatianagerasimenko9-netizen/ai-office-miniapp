@@ -1,5 +1,5 @@
 {
-"source": "office2_radar_card, Postgres Render, зріз 2026-10-11 22:20 UTC; лише картки з paper-входом; без секретів",
+"source": "office2_radar_card, Postgres Render, зріз 2026-10-11 22:20 UTC; лише картки з paper-входом; без секретів; inval_px = екстремум події зі сценарію (thesis.invalidation.price), як у radar_watch.plan_of",
 "cards": [
 {
 "card_id": "B|O2|ef25498af19e",
@@ -23,7 +23,8 @@
 "paper_status": "SL",
 "entry_ts": 1791723600,
 "exit_ts": 1791724500,
-"r_net": -1.233
+"r_net": -1.233,
+"inval_px": 0.6882
 },
 {
 "card_id": "B|O2|687671d4c162",
@@ -47,7 +48,8 @@
 "paper_status": "SL",
 "entry_ts": 1791724500,
 "exit_ts": 1791732600,
-"r_net": -1.15
+"r_net": -1.15,
+"inval_px": 1.2444
 },
 {
 "card_id": "W|O2|e24e36b66a53",
@@ -71,7 +73,8 @@
 "paper_status": "SL",
 "entry_ts": 1791724500,
 "exit_ts": 1791730800,
-"r_net": -1.348
+"r_net": -1.348,
+"inval_px": 8.372
 },
 {
 "card_id": "B|O2|e900f32d43c2",
@@ -95,7 +98,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791724500,
 "exit_ts": null,
-"r_net": 1.259
+"r_net": 1.259,
+"inval_px": 0.11736
 },
 {
 "card_id": "W|O2|7b68061db114",
@@ -119,7 +123,8 @@
 "paper_status": "SL",
 "entry_ts": 1791723600,
 "exit_ts": 1791724500,
-"r_net": -1.371
+"r_net": -1.371,
+"inval_px": 12.96
 },
 {
 "card_id": "W|O2|c4f50e8085bf",
@@ -143,7 +148,8 @@
 "paper_status": "SL",
 "entry_ts": 1791728100,
 "exit_ts": 1791753300,
-"r_net": -1.043
+"r_net": -1.043,
+"inval_px": 0.568
 },
 {
 "card_id": "B|O2|d521fdb8ed2f",
@@ -167,7 +173,8 @@
 "paper_status": "SL",
 "entry_ts": 1791725400,
 "exit_ts": 1791731700,
-"r_net": -1.478
+"r_net": -1.478,
+"inval_px": 751.22
 },
 {
 "card_id": "W|O2|cf2a48866bf8",
@@ -191,7 +198,8 @@
 "paper_status": "SL",
 "entry_ts": 1791725400,
 "exit_ts": 1791729900,
-"r_net": -1.136
+"r_net": -1.136,
+"inval_px": 0.06885
 },
 {
 "card_id": "B|O2|e24e36b66a53",
@@ -215,7 +223,8 @@
 "paper_status": "SL",
 "entry_ts": 1791728100,
 "exit_ts": 1791731700,
-"r_net": -1.266
+"r_net": -1.266,
+"inval_px": 8.372
 },
 {
 "card_id": "B|O2|e008197edf29",
@@ -239,7 +248,8 @@
 "paper_status": "SL",
 "entry_ts": 1791729900,
 "exit_ts": 1791752400,
-"r_net": -1.07
+"r_net": -1.07,
+"inval_px": 0.5722
 },
 {
 "card_id": "B|O2|979ffbaa7f19",
@@ -263,7 +273,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791744300,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 1.3933
 },
 {
 "card_id": "W|O2|0a4c6bceb212",
@@ -287,7 +298,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791744300,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 0.0041107
 },
 {
 "card_id": "B|O2|6dc1c995e183",
@@ -311,7 +323,8 @@
 "paper_status": "SL",
 "entry_ts": 1791747000,
 "exit_ts": 1791752400,
-"r_net": -1.053
+"r_net": -1.053,
+"inval_px": 0.5484
 },
 {
 "card_id": "B|O2|0a4c6bceb212",
@@ -335,7 +348,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791753300,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 0.0041107
 },
 {
 "card_id": "B|O2|1369eb96b78a",
@@ -359,7 +373,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791749700,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 0.3549
 },
 {
 "card_id": "W|O2|d37a39e701ba",
@@ -383,7 +398,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791755100,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 0.5692
 },
 {
 "card_id": "B|O2|c3cbef825098",
@@ -407,7 +423,8 @@
 "paper_status": "ENTERED",
 "entry_ts": 1791756000,
 "exit_ts": null,
-"r_net": null
+"r_net": null,
+"inval_px": 7.505
 }
 ]
 }
