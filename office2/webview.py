@@ -179,7 +179,9 @@ def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
         try:
             from office2 import daria_steps as DS
 
-            item["daria"] = DS.build(snap, valid_until_ts=vu, price_now=(ns or {}).get("price"))      # з заморожених фактів знімка; «ціна зараз» лише для стану входу
+            done_lv = {m.get("level") for m in miles} & {"SL", "TP3", "EXPIRED", "INVALIDATED"}     # сценарій завершено: «ціна зараз / чи входити» вже не стосується
+            item["daria"] = DS.build(snap, valid_until_ts=vu, price_now=None if done_lv else (ns or {}).get("price"))
+            item["daria"]["finished"] = bool(done_lv)      # з заморожених фактів знімка; «ціна зараз» лише для стану входу
         except Exception as exc:  # noqa: BLE001
             item["daria"] = {"error": f"{type(exc).__name__}: {str(exc)[:80]}"}
         item["market_now"] = ({"ts_epoch": ns.get("ts_epoch"), "price": ns.get("price"), "market": ns.get("market"), "ret_1h": ns.get("ret_1h"), "rs_vs_btc_1h": ns.get("rs_vs_btc_1h")} if ns else None)

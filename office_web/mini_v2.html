@@ -1021,8 +1021,8 @@ function o2DariaHtml(D){
     <div class="o2sub">Скасування й захист — різні речі</div>
     ${c?`<div class="o2row"><b>Скасування (закриття ${esc(c.tf)})</b>: ${esc(c.text)}</div>`:''}
     ${p?`<div class="o2row"><b>Захисний SL (дотик)</b>: ${esc(p.text)}</div>`:''}
-    <div class="o2sub">Чому зараз ще / вже НЕ входити</div>
-    ${es.text?`<div class="o2row ${es.state==='IN_ZONE'?'o2g':'o2m'}"><b>Ціна зараз</b>: ${esc(es.text)}</div>`:''}${nn||'<div class="o2row o2g">Застережень не виявлено.</div>'}
+    <div class="o2sub">${D.finished?'Застереження на момент сигналу (сценарій завершено)':'Чому зараз ще / вже НЕ входити'}</div>
+    ${es.text&&!D.finished?`<div class="o2row ${es.state==='IN_ZONE'?'o2g':'o2m'}"><b>Ціна зараз</b>: ${esc(es.text)}</div>`:''}${nn||'<div class="o2row o2g">Застережень не виявлено.</div>'}
     <div class="mut" style="margin-top:6px">${esc(D.note||'')}</div></div>`;
 }
 function o2MapHtml(MM){
