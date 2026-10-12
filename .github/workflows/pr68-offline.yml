@@ -79,7 +79,7 @@ jobs:
       - name: Дослідження ліміту 3 стопи/добу (симуляція, правила, часова лінія)
         run: python scripts/test_gate_study.py
       - name: Живий WATCH/PAPER-радар (preview плану, картки, антиспам, paper-супровід, Telegram-фейк)
-        run: python scripts/test_radar_watch.py && python scripts/test_stops.py && python scripts/test_radar_deeplink.py && python scripts/test_trainer.py && python scripts/test_daria_shadow.py && python scripts/test_htf_scenario.py && python scripts/test_source_shadow.py && python scripts/test_sources_registry.py && python scripts/source_shadow_replay.py --selftest && python scripts/test_entry_audit.py
+        run: python scripts/test_radar_watch.py && python scripts/test_stops.py && python scripts/test_radar_deeplink.py && python scripts/test_trainer.py && python scripts/test_daria_shadow.py && python scripts/test_htf_scenario.py && python scripts/test_source_shadow.py && python scripts/test_sources_registry.py && python scripts/source_shadow_replay.py --selftest && python scripts/test_entry_audit.py && python scripts/test_reaction_shadow.py
       - name: Робота над помилками (ознаки → результат, train/test, захист від підгонки)
         run: python scripts/test_feature_study.py && python scripts/test_history_features.py
       - name: Кеш читань office_signals і окремі пули доставки (затримки Telegram)

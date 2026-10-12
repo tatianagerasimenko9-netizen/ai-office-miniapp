@@ -16,7 +16,7 @@ LEVEL_UA = {
     "H1SW": "локальний пік/впадина на годинному графіку", "ORIGIN_LOW": "початок руху",
 }
 LEVEL_SHORT = {"H4SW": "пік/впадина 4 год", "D1SW": "пік/впадина доби", "W1SW": "пік/впадина тижня", "M15SW": "пік/впадина 15 хв", "H1SW": "пік/впадина 1 год"}
-FINAL_PAPER = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT")
+FINAL_PAPER = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALIDATED")
 
 
 def level_ua(kind: Optional[str]) -> str:
@@ -107,7 +107,7 @@ def targets(c: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 STOP_STATUS_UA = {"SL": "стоп спрацював", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута", "ENTERED": "угода ще відкрита", "WAITING_ENTRY": "чекаємо вхід",
-                  "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALID": "не застосовний"}
+                  "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALID": "не застосовний", "INVALIDATED": "сценарій скасовано до входу"}
 
 
 def stops_view(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -309,7 +309,7 @@ def present(c: Dict[str, Any]) -> Dict[str, Any]:
     ps = c.get("paper_status") or ""
     paper = {"": "ще не оцінено", "WAITING_ENTRY": "чекаємо, поки ціна дійде до входу", "ENTERED": "навчальна угода відкрита, ціна пішла від входу",
              "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута", "SL": "стоп спрацював", "NO_ENTRY": "ціна не дійшла до входу — угода не відкрилась",
-             "TIMEOUT": "строк вийшов"}.get(ps, ps)
+             "TIMEOUT": "строк вийшов", "INVALIDATED": "сценарій скасовано до входу — позиція не відкривалась"}.get(ps, ps)
     res = None
     if c.get("r_net") is not None and ps in ("SL", "TP1", "TP2", "TP3", "ENTERED"):
         res = f"умовний результат {c['r_net']:+.2f}".replace(".", ",") + f" від ризику (≈ {c['r_net'] * 10:+.1f} $ при ризику 10 $, з комісіями)".replace(".", ",")
@@ -362,27 +362,36 @@ def card_text(c: Dict[str, Any], base_url: str = "https://ai-office-miniapp.onre
     stop_txt, stop_ok = _stop_line(p)
     act = [x for x in p["targets"] if x["active"]]
     tail: List[str] = []
-    if not learning:
-        tail.append("Чекаємо: " + (plan.get("wait") or p.get("need") or ("підтвердження біля зони входу." if c.get("stage") == "ARMED" else "повернення ціни в зону входу та підтвердження.")))
-    entry_bits = []
-    if p.get("zone"):
-        entry_bits.append("зона " + p["zone"])
-    if p.get("entry"):
-        entry_bits.append("орієнтир " + p["entry"])
-    if entry_bits:
-        tail.append(("Вхід (умовний): " if learning else "Вхід (після підтвердження): ") + ", ".join(entry_bits) + ".")
-    tail.append(stop_txt)
-    if act:
-        tail.append("Цілі: " + " / ".join(f"{x['price_txt']}" + (f" (≈{x['mult_txt']}×)" if x.get("mult_txt") else "") for x in act[:2]) + ".")
-    if plan.get("cancel"):
-        tail.append("Скасування: " + plan["cancel"] + ".")
-    if plan.get("against"):
-        tail.append("Проти: " + plan["against"][0] + ".")
+    if learning:
+        entry_bits = []
+        if p.get("zone"):
+            entry_bits.append("зона " + p["zone"])
+        if p.get("entry"):
+            entry_bits.append("ціна підтвердження " + p["entry"])
+        if entry_bits:
+            tail.append("Вхід (умовний): " + ", ".join(entry_bits) + ".")
+        tail.append(stop_txt)
+        if act:
+            tail.append("Цілі: " + " / ".join(f"{x['price_txt']}" + (f" (≈{x['mult_txt']}×)" if x.get("mult_txt") else "") for x in act[:2]) + ".")
+        if plan.get("cancel"):
+            tail.append("Скасування: " + plan["cancel"] + ".")
+        if plan.get("against"):
+            tail.append("Проти: " + plan["against"][0] + ".")
+    else:
+        # СПОСТЕРЕЖЕННЯ: зона інтересу ≠ підтвердження ≠ точка входу ≠ стоп. Вхід, стоп і цілі тут НЕ показуються: вони з'являться лише після підтвердження закритою свічкою.
+        if p.get("zone"):
+            tail.append("Зона інтересу: " + p["zone"] + ".")
+        tail.append("Потрібне підтвердження: " + (plan.get("wait") or p.get("need") or "закриття свічки за умовою методики") + ".")
+        if plan.get("cancel"):
+            tail.append("Скасування: " + plan["cancel"] + ".")
+        if plan.get("against"):
+            tail.append("Проти: " + plan["against"][0] + ".")
+        tail.append("Вхід, стоп і цілі — після підтвердження.")
     if learning:
         concl = "НАВЧАЛЬНА УГОДА — реальний вхід не дозволений" + (f" ({_limit_short(c.get('gate_reason'))})" if c.get("gate_reason") else "") + "."
     else:
-        concl = "СПОСТЕРІГАЄМО — вхід ще не підтверджений."
-    if stop_ok is False:
+        concl = "СПОСТЕРІГАЄМО — вхід не підтверджений, входити не можна."
+    if learning and stop_ok is False:
         concl = concl.rstrip(".") + ". Безпечний стоп не підтверджений. Вхід не дозволений."
     tail_end = ["Висновок: " + concl, f"⏳ До {p['expires']}", "📊 Відкрити графік:", card_url(c["card_id"], base_url)]
     items = list(plan["items"])
@@ -434,7 +443,7 @@ def parse_link_id(token: str) -> List[str]:
 def followup_text(c: Dict[str, Any]) -> str:
     p = present(c)
     parts = {"ENTERED": "ціна дійшла до входу — навчальна угода відкрита (без грошей)", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута",
-             "SL": "стоп спрацював", "NO_ENTRY": "ціна так і не дійшла до входу — навчальна угода не відкрилась", "TIMEOUT": "строк вийшов"}
+             "SL": "стоп спрацював", "NO_ENTRY": "ціна так і не дійшла до входу — навчальна угода не відкрилась", "TIMEOUT": "строк вийшов", "INVALIDATED": "сценарій скасовано до входу — навчальна угода не відкривалась"}
     s = "; ".join(parts.get(m, m) for m in c["_new"])
     tail = f" {p['result']}." if p.get("result") and any(m in ("SL", "TP1", "TP2", "TP3") for m in c["_new"]) else ""
     return f"🎓 {p['coin'].split(' ')[0]}: {s}.{tail} Навчальна угода, не ордер."

@@ -47,5 +47,7 @@ am = EA.audit_card(mid, [])
 check("TIA-подібно: тригер при створенні, ліміт нижче за ціну тригера — позначено, відстань у %", am["verdict"].endswith("НИЖЧЕ_ЗА_ЦІНУ_ТРИГЕРА") and am["entry_vs_confirm_close_pct"] > 1.7, am)
 check("незакрита свічка не враховується", all(c["ts"] + M <= now for c in EA.closed_m15(bars, now)))
 
+check("без свічок: НЕМАЄ_СВІЧОК, а не «тригер не виконано»", EA.audit_card(card, [])["verdict"] == "НЕМАЄ_СВІЧОК" and EA.confirmed_variant(card, [], now) is None)
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)

@@ -1,0 +1,33 @@
+name: Reaction shadow replay (isolated, read-only)
+
+# Ручний запуск. Ф'ючерсні M15 Binance USDT-M → V0 (поточний ліміт) vs V1/V2 (вхід після реакції в зоні, RESEARCH_HYPOTHESIS). Нічого не пише в БД/Render/Telegram.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/reaction-shadow-replay.yml', 'office2/reaction_shadow.py', 'scripts/reaction_shadow_replay.py']
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay
+        run: |
+          set -o pipefail
+          python -u scripts/reaction_shadow_replay.py | tee "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reaction-shadow-replay
+          path: reaction_shadow_replay.json

@@ -90,12 +90,20 @@ RW.sync(db, NOW + 90)
 check("повторний sync без дублів", OB._fetchall(db, "SELECT COUNT(*) FROM office2_radar_card")[0][0] == 4)
 
 # --- 3. вибір для Telegram: RETRACE+ARMED+BLOCKED, plan_ok, антиспам
+# нова політика (12.10.2026): за замовчуванням у Telegram лише ARMED-спостереження; BLOCKED/RETRACE — у БД і Mini App
+os.environ.pop("RADAR_TG_STAGES", None)
+pk_def = RW.pick_for_tg(db, NOW + 100)
+check("за замовчуванням у Telegram лише ARMED-спостереження (навчальні BLOCKED і ранні RETRACE — не надсилаються)", pk_def and all(x["stage"] == "ARMED" and x["kind"] == "WATCH" for x in pk_def), str([(x["card_id"], x["stage"]) for x in pk_def]))
+txt_w = RW.format_card(pk_def[0])
+check("спостереження в Telegram: зона / потрібне підтвердження / скасування окремо; БЕЗ входу, стопа і цілей, з висновком «входити не можна»",
+      "Зона інтересу:" in txt_w and "Потрібне підтвердження:" in txt_w and "Вхід, стоп і цілі — після підтвердження" in txt_w and "Стоп" not in txt_w and "Цілі:" not in txt_w and "Вхід (" not in txt_w and "входити не можна" in txt_w and len(txt_w) <= 1024, txt_w)
+os.environ["RADAR_TG_STAGES"] = "ARMED,RETRACE,BLOCKED"          # далі — перевірки старого потоку (режим налагодження)
 pk = RW.pick_for_tg(db, NOW + 100)
 check("у Telegram усі планово готові RETRACE/ARMED/BLOCKED (але не plan_ok=0), BLOCKED першим", [x["card_id"] for x in pk] == ["B|O2|b1", "W|O2|a1", "W|O2|a2"], str([x["card_id"] for x in pk]))
 txt = RW.format_card(pk[1])
 check("картка: монета · напрям · статус → ПЛАН І ПРИЧИНИ → чекаємо → вхід/стоп/цілі → висновок → лінк, <1024 символів",
-      txt.splitlines()[0].endswith("· спостереження") and "очікуємо зростання" in txt.splitlines()[0] and txt.splitlines()[1] == "ПЛАН І ПРИЧИНИ:" and "Чекаємо:" in txt and "Вхід (після підтвердження):" in txt
-      and "Стоп" in txt and "Цілі:" in txt and "Висновок: СПОСТЕРІГАЄМО" in txt and "tab=radar&card=" in txt and len(txt) <= 1024, txt)
+      txt.splitlines()[0].endswith("· спостереження") and "очікуємо зростання" in txt.splitlines()[0] and txt.splitlines()[1] == "ПЛАН І ПРИЧИНИ:" and "Потрібне підтвердження:" in txt
+      and "Стоп" not in txt and "Цілі:" not in txt and "Висновок: СПОСТЕРІГАЄМО" in txt and "tab=radar&card=" in txt and len(txt) <= 1024, txt)
 JARGON = ("READY", "WATCH", "PAPER", "LONG", "SHORT", "SL:", "TP1", "M15", "paper", "ЗАБЛОКОВАНО")
 check("у тексті немає жаргону і технічних кодів", not any(j in txt for j in JARGON), txt)
 txtb = RW.format_card(pk[0])
@@ -133,9 +141,45 @@ check("свічка зі стопом і ціллю разом → SL (конс�
 ev = RW.evaluate_card(card, cds([(101.0, 100.6)] * 20, tb + 900), card["expires_ts"] + 5 * 900)
 check("вхід так і не відбувся до кінця строку → NO_ENTRY", ev["paper_status"] == "NO_ENTRY", str(ev))
 
+# --- 4b. життєвий цикл: власна умова скасування (закриття M15 за екстремумом події) ДО входу → INVALIDATED, позиція не відкривається
+def ohlc(bars, t0):
+    return [{"ts": t0 + 900 * i, "open": o, "high": h, "low": l, "close": c} for i, (o, h, l, c) in enumerate(bars)]
+
+
+T0 = 1_791_752_400.0                                                         # межа M15-бару
+lc = {"card_id": "W|O2|zz", "direction": "LONG", "created_ts": T0, "sent_ts": T0 + 97, "expires_ts": T0 + 4 * 3600, "entry": 0.5764, "sl": 0.567, "tp1": 0.5867, "tp2": 0.5924, "tp3": None,
+      "risk_pct": 1.64, "inval_px": 0.5692}
+# d37a: бар створення закрився 0.569 < 0.5692 (скасування), далі ціна повернулась і торкнулась входу → позиція НЕ відкривається
+bars_d = ohlc([(0.5748, 0.5752, 0.5666, 0.569), (0.5690, 0.5730, 0.5688, 0.5725), (0.5725, 0.5770, 0.5720, 0.5765), (0.5765, 0.5790, 0.5760, 0.5785)], T0)
+evd = RW.evaluate_card(lc, bars_d, T0 + 6 * 900)
+check("скасування закриттям за екстремумом ДО заповнення → INVALIDATED, без входу, з причиною й часом", evd["paper_status"] == "INVALIDATED" and evd["entry_ts"] is None and evd["inval_ts"] == T0 + 900 and "0.569" in evd["inval_why"], str(evd))
+check("рішення стабільне при перерахунку (рестарт/повторний прохід)", RW.evaluate_card(lc, bars_d, T0 + 6 * 900) == evd)
+check("до закриття бару скасування (as-of) його ще немає: без lookahead", RW.first_invalidation(lc, bars_d, T0 + 800) is None and RW.first_invalidation(lc, bars_d, T0 + 900)["ts"] == T0 + 900)
+# прокол тінню нижче стопа БЕЗ закриття за екстремумом → це не скасування (може бути частиною хибного пробою)
+bars_w = ohlc([(0.5748, 0.5752, 0.5666, 0.5700), (0.5700, 0.5770, 0.5695, 0.5765), (0.5765, 0.5800, 0.5760, 0.5790), (0.5790, 0.5880, 0.5780, 0.5875)], T0)
+evw = RW.evaluate_card(lc, bars_w, T0 + 6 * 900)
+check("прокол тінню без закриття за екстремумом не скасовує сценарій", RW.first_invalidation(lc, bars_w, T0 + 6 * 900) is None and evw["paper_status"] != "INVALIDATED", str(evw))
+# вхід відбувся ДО скасування → позиція уже відкрита, далі звичайний супровід (SL/TP), а не INVALIDATED
+bars_f = ohlc([(0.5800, 0.5810, 0.5760, 0.5790), (0.5790, 0.5795, 0.5640, 0.5660)], T0 + 900)
+lf = dict(lc, created_ts=T0 - 900, sent_ts=T0 - 900 + 60)
+evf = RW.evaluate_card(lf, ohlc([(0.5800, 0.5810, 0.5770, 0.5790)], T0 - 900) + bars_f, T0 + 6 * 900)
+check("вхід до скасування → звичайний супровід угоди (SL), не INVALIDATED", evf["paper_status"] in ("SL", "ENTERED") and evf["entry_ts"] is not None, str(evf))
+# запізніла доставка: скасування закрилось ще до моменту відправки → вхід після відправки теж заборонено
+ll = dict(lc, sent_ts=T0 + 3 * 900 + 30)
+check("запізніла доставка: скасування до відправки → INVALIDATED", RW.evaluate_card(ll, bars_d, T0 + 8 * 900)["paper_status"] == "INVALIDATED")
+# SHORT дзеркально
+ls = {"card_id": "W|O2|ss", "direction": "SHORT", "created_ts": T0, "sent_ts": T0 + 50, "expires_ts": T0 + 4 * 3600, "entry": 99.0, "sl": 103.0, "tp1": 95.0, "tp2": None, "tp3": None, "risk_pct": 4.0, "inval_px": 101.0}
+bars_s = ohlc([(100.0, 102.0, 99.8, 101.5), (101.5, 101.6, 98.5, 99.0), (99.0, 99.5, 94.0, 94.5)], T0)
+check("SHORT: закриття вище екстремуму до входу → INVALIDATED", RW.evaluate_card(ls, bars_s, T0 + 6 * 900)["paper_status"] == "INVALIDATED")
+check("картка без inval_px (стара) не ламається", RW.evaluate_card(dict(lc, inval_px=None), bars_w, T0 + 6 * 900)["paper_status"] != "INVALIDATED")
+
 # --- 5. track + follow-up (віхи один раз)
 state = {"bars": cds([(100.5, 100.1), (101.5, 100.3)], tb + 900)}
-n = RW.track(db, lambda s, tf, k: state["bars"] if s == "AAAUSDT" else [], NOW + 5000)
+OB._execute(db, "UPDATE office2_radar_card SET paper_status = 'WAITING_ENTRY' WHERE card_id = 'W|O2|a1'")      # «старий» WATCH, у якого paper уже був: дотрекується до кінця
+asked = []
+n = RW.track(db, lambda s, tf, k: (asked.append(s), state["bars"] if s == "AAAUSDT" else [])[1], NOW + 5000)
+a2row = dict(zip(RW._COLS, OB._fetchall(db, "SELECT " + ",".join(RW._COLS) + " FROM office2_radar_card WHERE card_id = 'W|O2|a2'")[0]))
+check("новий WATCH (спостереження) не отримує paper-входу: дотик орієнтира ≠ підтвердження", not a2row["paper_status"] and not a2row["entry_ts"], str(a2row["paper_status"]))
 fu = RW.pending_followups(db)
 check("track пише paper-стан, follow-up містить вхід і TP1", n >= 1 and any(x["card_id"] == "W|O2|a1" and "TP1" in x["_new"] and "ENTERED" in x["_new"] for x in fu), str(fu)[:300])
 c1 = [x for x in fu if x["card_id"] == "W|O2|a1"][0]
@@ -177,12 +221,12 @@ put_scenario(db4, f"O2|{HEX}", "DOTUSDT", "SHORT", "NO_TRADE", "ємність �
 RW.sync(db4, NOW + 10)
 row = dict(zip(RW._COLS, OB._fetchall(db4, "SELECT " + ",".join(RW._COLS) + f" FROM office2_radar_card WHERE card_id = 'B|O2|{HEX}'")[0]))
 check("після 3 стопів навчальна картка створюється й іде в Telegram (обмеження ризику її не гасить)", row["plan_ok"] == 1 and [x["card_id"] for x in RW.pick_for_tg(db4, NOW + 20)] == [f"B|O2|{HEX}"])
-check("структурна перевірка: вхід (1.2337) лежить поза зоною 1.2338–1.2399 → зсунуто на межу зони з приміткою", row["entry"] == 1.2338 and "поза зоною" in (row["entry_note"] or ""), str(row))
+check("вхід за ціною підтвердження (1.2337) поза зоною 1.2338–1.2399 НЕ переноситься лімітом на межу зони; примітка пояснює", row["entry"] == 1.2337 and "не переносимо" in (row["entry_note"] or ""), str(row))
 far = json.loads(row["far_targets"] or "[]")
 check("далекі цілі (≈+18 %, понад 8 %) не входять у paper-результат і позначені як далекі", row["tp3"] is None and far and far[0]["n"] == 3 and row["tp1"] == 1.2, str(row["far_targets"]))
 tx = RW.format_card(row)
 check("далека ціль і примітка про вхід збережені в деталях Mini App, а Telegram стислий", "далека" in str(RT.present(row)["targets"]) or any(not x["active"] for x in RT.present(row)["targets"]))
-check("примітка про вхід у деталях, короткий текст має дві близькі цілі", "поза зоною" in str(RT.present(row)["entry_note"]) and "ціль 1" in tx and len(tx) <= 1024, tx)
+check("примітка про вхід у деталях, короткий текст має дві близькі цілі", "поза зоною" in str(RT.present(row)["entry_note"]) and "Цілі:" in tx and len(tx) <= 1024, tx)
 check("1000PEPE пояснюється, тикер не перейменовується", RT.coin("1000PEPEUSDT") == "1000PEPE (контракт на 1000 токенів PEPE)" and RT.coin("DOTUSDT") == "DOT")
 lid = RT.link_id(f"B|O2|{HEX}")
 check("посилання без «|» і «%»; розпізнається нове, старе й подвійно закодоване", lid == f"B-{HEX}" and f"B|O2|{HEX}" in RT.parse_link_id(lid) and f"B|O2|{HEX}" in RT.parse_link_id(f"B%257CO2%257C{HEX}") and f"B|O2|{HEX}" in RT.parse_link_id(f"B%7CO2%7C{HEX}") and f"B|O2|{HEX}" in RT.parse_link_id(f"O2|{HEX}"))
@@ -291,7 +335,7 @@ check("навчальна картка: короткий висновок про
 runec = dict(filc, card_id="W|O2|d76e683c1cc7", kind="WATCH", stage="RETRACE", symbol="RUNEUSDT", gate_reason=None, need_text="ретрейс у зону", reasons_json=json.dumps({"v": 2, "reasons": FILR["reasons"][:3], "against": [], "wait": "ретрейс у зону 0.688069–0.693", "cancel": "ціна закріпиться за 0,6841"}, ensure_ascii=False),
              stops_json=json.dumps({"extreme": 1, "atr": 1, "recommended": None, **{k: {"sl": 1.0, "risk_pct": 1.0, "justified": False, "liq": "x", "name": k, "risk_atr": 2.0, "noise_ok": True, "range_ok": True, "beyond_extreme": True, "side_ok": True} for k in ("v1", "v2", "v3")}}))
 tr = RT.card_text(runec)
-check("RUNE: без обґрунтованого стопа — чесне «Безпечний стоп не підтверджений. Вхід не дозволений.» у висновку, без дубля", "Висновок: СПОСТЕРІГАЄМО — вхід ще не підтверджений. Безпечний стоп не підтверджений. Вхід не дозволений." in tr and tr.count("Вхід не дозволений") == 1, tr)
+check("RUNE (спостереження): стоп і вхід не показуються взагалі; висновок «входити не можна», без дубля", "Висновок: СПОСТЕРІГАЄМО — вхід не підтверджений, входити не можна." in tr and "Стоп" not in tr and tr.count("входити не можна") == 1, tr)
 
 sd = RW.summary(db, NOW + 400)["why_no_ready"].get("scanner") or {}
 check("діагностика сканера: лічильники й причина відсутності нових карток", {"wait_total", "with_card", "without_card", "no_structure", "message"} <= set(sd) and isinstance(sd["message"], str) and sd["message"], str(sd))

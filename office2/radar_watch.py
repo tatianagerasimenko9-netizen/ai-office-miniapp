@@ -26,6 +26,7 @@ TG_SYMBOL_COOLDOWN_SEC = 3600
 MAX_TP_PCT = 8.0              # ціль далі за 8 % від входу за 4-годинний строк не вважаємо короткостроковою: показуємо як «далеку», у paper не враховуємо
 MAX_TP_MULT = 8.0
 TG_MAX_TRIES = 3
+TG_STAGES_DEFAULT = "ARMED"   # у Telegram — лише коротке спостереження «зона досягнута, чекаємо підтвердження»; навчальні (BLOCKED) і ранні (RETRACE) картки — у БД і Mini App (RADAR_TG_STAGES=ARMED,RETRACE,BLOCKED повертає старе)
 BLOCK_PREFIX = "ємність сценаріїв"
 
 DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
@@ -34,10 +35,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT, daria_observation_json TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT, daria_observation_json TEXT, inval_px DOUBLE PRECISION, inval_ts DOUBLE PRECISION, inval_why TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json", "inval_px", "inval_ts", "inval_why")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -56,7 +57,7 @@ def _ensure(db: str) -> None:
             _execute(db, d)
     except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
         print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
-    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT", "daria_observation_json TEXT"):
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT", "daria_observation_json TEXT", "inval_px DOUBLE PRECISION", "inval_ts DOUBLE PRECISION", "inval_why TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -97,8 +98,7 @@ def plan_of(th: Dict[str, Any]) -> Dict[str, Any]:
     long_ = str(th.get("dir") or "").upper() != "SHORT"
     note = None
     if ok and entry and zlo is not None and zhi is not None and not (zlo <= entry <= zhi):
-        note = f"ціна підтвердження була поза зоною ({entry:.6g}); вхід лімітом на межі зони"
-        entry = zlo if entry < zlo else zhi
+        note = f"вхід за ціною підтвердження (закриття M15) {entry:.6g}, поза зоною: вхід не переносимо лімітом на межу зони"
     ps = [_f(t.get("p")) for t in tgs]
     ps = [p for p in ps if p]
     if ok and (not entry or not sl or not ps):
@@ -125,7 +125,8 @@ def plan_of(th: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:  # noqa: BLE001
             stops_json = None
     risk_pct = abs(entry - sl) / entry * 100.0 if ok else _f(th.get("risk_pct"))
-    return {"entry": entry, "sl": sl, "tp1": tp(1), "tp2": tp(2), "tp3": tp(3), "risk_pct": risk_pct, "plan_ok": 1 if ok else 0, "reject": None if ok else (rej or "план неповний"),
+    inv = th.get("invalidation") or {}
+    return {"entry": entry, "sl": sl, "tp1": tp(1), "tp2": tp(2), "tp3": tp(3), "risk_pct": risk_pct, "plan_ok": 1 if ok else 0, "reject": None if ok else (rej or "план неповний"), "inval_px": _f(inv.get("price")),
             "zone_lo": zlo, "zone_hi": zhi, "far_targets": json.dumps(far) if far else None, "entry_note": note, "stops_json": stops_json}
 
 
@@ -204,6 +205,25 @@ def _candles(rows: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def first_invalidation(card: Dict[str, Any], candles: List[Dict[str, Any]], now: float) -> Optional[Dict[str, Any]]:
+    """Власна умова скасування картки: ЗАКРИТТЯ закритої M15-свічки за екстремумом події (inval_px; LONG — нижче, SHORT — вище), починаючи з бару, у якому картку створено.
+    Прокол тінню без закриття за рівнем скасуванням НЕ є (він може бути частиною хибного пробою). Без lookahead: враховуються лише бари, що закрились до now."""
+    px = card.get("inval_px")
+    if px is None:
+        return None
+    long_ = str(card.get("direction") or "").upper() != "SHORT"
+    t0 = (float(card["created_ts"]) // 900) * 900.0
+    for c in sorted((x for x in candles if x.get("ts") is not None), key=lambda x: x["ts"]):
+        if c["ts"] < t0:
+            continue
+        if c["ts"] + 900 > now:
+            break
+        cl = c.get("close")
+        if cl is not None and ((float(cl) < float(px)) if long_ else (float(cl) > float(px))):
+            return {"ts": c["ts"] + 900.0, "bar_ts": c["ts"], "close": float(cl), "px": float(px)}
+    return None
+
+
 def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
     """Результат картки за свічками після її появи (office_signal_track.simulate: ліміт на ціні входу; SL першим у свічці зі стопом і ціллю).
     paper_status: WAITING_ENTRY / ENTERED / TP1 / TP2 / TP3 / SL / NO_ENTRY / TIMEOUT. r_net — модель A (усе на TP1) мінус витрати 0.15 % кола."""
@@ -215,12 +235,17 @@ def evaluate_card(card: Dict[str, Any], candles: List[Dict[str, Any]], now: floa
     plan = {"direction": card["direction"], "entry": card["entry"], "sl": card["sl"], "tp1": card["tp1"], "tp2": card.get("tp2"), "tp3": card.get("tp3"),
             "confirmed_ts": vis, "valid_until_ts": float(card["expires_ts"])}
     res = T.simulate(plan, candles, now_ts=now)
+    inv = first_invalidation(card, candles, now)
+    if inv is not None and (res.get("filled_at") is None or float(res["filled_at"]) >= inv["ts"]):
+        # сценарій скасовано власною умовою ДО входу: попередній план не може відкрити позицію (новий вхід — лише за новим підтвердженим сценарієм)
+        return {"reached": None, "entry_ts": None, "exit_ts": None, "r_net": None, "paper_status": "INVALIDATED", "inval_ts": inv["ts"],
+                "inval_why": f"закриття M15 {inv['close']:.6g} за екстремумом події {inv['px']:.6g} (бар {int(inv['bar_ts'])})"}
     reached = res.get("reached") or []
     risk_pct = card.get("risk_pct") or (abs(card["entry"] - card["sl"]) / card["entry"] * 100.0)
     cr = C.cost_r(risk_pct) or 0.0
     r1 = abs(card["tp1"] - card["entry"]) / abs(card["entry"] - card["sl"])
     st = res["status"]
-    out: Dict[str, Any] = {"reached": ",".join(reached) or None, "entry_ts": res.get("filled_at"), "exit_ts": None, "r_net": None}
+    out: Dict[str, Any] = {"reached": ",".join(reached) or None, "entry_ts": res.get("filled_at"), "exit_ts": None, "r_net": None, "inval_ts": None, "inval_why": None}
     at = res.get("at") or {}
     if st in ("STOP", "TP1", "TP2", "TP3", "OPEN_TIMEOUT") and res.get("filled_at") is not None:
         out["exit_ts"] = res.get("result_at")
@@ -268,6 +293,23 @@ def evaluate_variants(card: Dict[str, Any], candles: List[Dict[str, Any]], now: 
             item["after"] = SV.after_stop(card["direction"], candles, float(ev["exit_ts"]), card["entry"], v["sl"], card["tp1"], st.get("extreme"))
         out[k] = item
     return out
+
+
+def backfill_inval(db: str, now: Optional[float] = None) -> int:
+    """Рівень скасування (екстремум події) для карток, створених до появи колонки inval_px: береться з тези сценарію (факт минулого, не залежить від часу)."""
+    from office_bridge import _execute, _fetchall
+
+    t = time.time() if now is None else now
+    n = 0
+    for cid, tj in _fetchall(db, "SELECT c.card_id, s.thesis_json FROM office2_radar_card c JOIN office2_live_scenario s ON s.scenario_id = c.scenario_id WHERE c.inval_px IS NULL AND c.created_ts > ?", (t - TRACK_MAX_AGE_SEC,)):
+        try:
+            px = _f(((json.loads(tj or "{}") or {}).get("invalidation") or {}).get("price"))
+            if px is not None:
+                _execute(db, "UPDATE office2_radar_card SET inval_px = ? WHERE card_id = ? AND inval_px IS NULL", (px, cid))
+                n += 1
+        except (ValueError, TypeError):
+            continue
+    return n
 
 
 def backfill_stops(db: str, now: Optional[float] = None) -> int:
@@ -376,13 +418,15 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
     t = time.time() if now is None else now
     _ensure(db)
     try:
+        backfill_inval(db, t)
         backfill_stops(db, t)
         backfill_reasons(db, t)
     except Exception as exc:  # noqa: BLE001
         log(f"[radar] backfill стопів: {type(exc).__name__}: {str(exc)[:100]}")
     cols = ",".join(_COLS)
+    # WATCH — спостереження: нового paper-входу не відкриваємо (дотик орієнтира ≠ підтвердження); старі WATCH із наявним paper-станом дотрекуються до кінця (див. цикл нижче).
     rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE plan_ok = 1 AND created_ts > ? ORDER BY created_ts DESC LIMIT ?", (t - TRACK_MAX_AGE_SEC, limit * 2))
-    final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID")
+    final = ("SL", "TP1", "TP2", "TP3", "NO_ENTRY", "TIMEOUT", "INVALID", "INVALIDATED")
 
     def _open(r: tuple) -> bool:
         c0 = dict(zip(_COLS, r))
@@ -424,10 +468,13 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
                              (json.dumps(obs, ensure_ascii=False), c["card_id"]))
                 except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
                     log(f"[radar] Дарія shadow {c['card_id']}: {type(exc).__name__}")
+            if c.get("kind") == "WATCH" and not c.get("paper_status"):
+                n += 1
+                continue            # спостереження: paper-входу немає (орієнтир ≠ підтвердження); Дарія-shadow вище вже записано
             ev = evaluate_card(c, cl, t)
             vv = evaluate_variants(c, cl, t)
-            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=? WHERE card_id=?",
-                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, c["card_id"]))
+            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=?, inval_ts=?, inval_why=? WHERE card_id=?",
+                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, ev.get("inval_ts"), ev.get("inval_why"), c["card_id"]))
             try:
                 pm = postmortem_card(dict(c, paper_status=ev["paper_status"], entry_ts=ev["entry_ts"], exit_ts=ev["exit_ts"]), cl, t)
                 if pm:
@@ -462,7 +509,9 @@ def pick_for_tg(db: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
         return []
     recent_syms = {r[0] for r in _fetchall(db, "SELECT symbol FROM office2_radar_card WHERE sent_ts > ?", (t - TG_SYMBOL_COOLDOWN_SEC,))}
     cols = ",".join(_COLS)
-    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ('RETRACE','ARMED','BLOCKED')) AND scen_state IN ('WAIT','NO_TRADE') "
+    stages = [x for x in (y.strip().upper() for y in os.getenv("RADAR_TG_STAGES", TG_STAGES_DEFAULT).split(",")) if x in ("RETRACE", "ARMED", "BLOCKED")] or ["ARMED"]
+    ph = ",".join("'" + x + "'" for x in stages)
+    rows = _fetchall(db, f"SELECT {cols} FROM office2_radar_card WHERE tg_status = 'NEW' AND plan_ok = 1 AND expires_ts > ? AND (stage IN ({ph})) AND scen_state IN ('WAIT','NO_TRADE') "
                          "AND COALESCE(paper_status,'') IN ('','WAITING_ENTRY') AND tg_tries < ? ORDER BY CASE stage WHEN 'BLOCKED' THEN 0 WHEN 'ARMED' THEN 1 ELSE 2 END, created_ts", (t, TG_MAX_TRIES))
     out, seen = [], set(recent_syms)
     for r in rows:
@@ -504,7 +553,7 @@ def pending_followups(db: str) -> List[Dict[str, Any]]:
         for k in str(c.get("reached") or "").split(","):
             if k:
                 ms.append(k)
-        if c["paper_status"] in ("SL", "NO_ENTRY", "TIMEOUT"):
+        if c["paper_status"] in ("SL", "NO_ENTRY", "TIMEOUT", "INVALIDATED"):
             ms.append(c["paper_status"])
         new = [m for m in dict.fromkeys(ms) if m not in done]
         if new:
@@ -583,7 +632,7 @@ async def send_pass(db: str, send_photo: Callable[..., Any], send_text: Callable
 
 # ------------------------------------------------------------------ Mini App
 STATUS_UA = {"WAITING_ENTRY": "чекаємо, поки ціна дійде до входу", "ENTERED": "навчальна угода відкрита", "TP1": "ціль 1 досягнута", "TP2": "ціль 2 досягнута", "TP3": "ціль 3 досягнута",
-             "SL": "стоп спрацював", "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов"}
+             "SL": "стоп спрацював", "NO_ENTRY": "вхід не відбувся", "TIMEOUT": "строк вийшов", "INVALIDATED": "сценарій скасовано до входу"}
 
 
 def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -591,7 +640,7 @@ def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     tp = [x for x in done if x["paper_status"] != "SL"]
     s = sum(x["r_net"] for x in done)
     return {"cards": len(rows), "resolved": len(done), "tp": len(tp), "sl": len(done) - len(tp), "win_rate": round(len(tp) / len(done) * 100.0, 1) if done else None,
-            "no_entry": sum(1 for x in rows if x["paper_status"] == "NO_ENTRY"), "open": sum(1 for x in rows if x["paper_status"] in ("ENTERED",)),
+            "no_entry": sum(1 for x in rows if x["paper_status"] == "NO_ENTRY"), "invalidated": sum(1 for x in rows if x["paper_status"] == "INVALIDATED"), "open": sum(1 for x in rows if x["paper_status"] in ("ENTERED",)),
             "waiting": sum(1 for x in rows if x["paper_status"] in (None, "", "WAITING_ENTRY")), "sum_r_net": round(s, 2), "usd_at_10": round(s * 10.0, 2),
             "note": "Навчальний результат без реальних грошей: ризик 10 $ на угоду, вхід лише після появи картки, комісії й проковзування 0,15 % враховано; менше 30 завершених угод — це лише спостереження."}
 

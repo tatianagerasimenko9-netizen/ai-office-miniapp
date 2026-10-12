@@ -24,7 +24,9 @@ jobs:
           python-version: '3.11'
       - run: pip install numpy tzdata
       - name: Replay
-        run: python -u scripts/entry_audit_replay.py --symbols "${{ inputs.symbols }}" | tee "$GITHUB_STEP_SUMMARY"
+        run: |
+          set -o pipefail
+          python -u scripts/entry_audit_replay.py --symbols "${{ inputs.symbols }}" | tee "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: entry-audit-replay
