@@ -56,8 +56,17 @@ def _tf_text(r: Optional[Dict[str, Any]], tf: str) -> Dict[str, Any]:
     way = "вгору" if t > 0 else "вниз" if t < 0 else "діапазон"
     rel = "ЗА напрям" if r.get("with_trade") else "ПРОТИ напрямку" if r.get("against_trade") else "не підтверджує напрям"
     zone = f"{r.get('zone')}" if r.get("zone") else ""
+    facts = []
+    if r.get("closed_ts"):
+        facts.append(f"остання закрита свічка {_utc(r['closed_ts'])}")
+    if r.get("last_swing_high") is not None or r.get("last_swing_low") is not None:
+        facts.append(f"swing H {_px(r.get('last_swing_high'))} / L {_px(r.get('last_swing_low'))}")
+    rg = r.get("range") or {}
+    if rg.get("hi") is not None:
+        facts.append(f"діапазон {_px(rg.get('lo'))}–{_px(rg.get('hi'))}")
+    tail = f" [{'; '.join(facts)}]" if facts else ""
     return {"tf": tf, "state": "WITH" if r.get("with_trade") else "AGAINST" if r.get("against_trade") else "NEUTRAL",
-            "text": f"{tf}: {way}, {zone} — {rel}".replace(", —", " —")}
+            "text": f"{tf}: {way}, {zone} — {rel}".replace(", —", " —") + tail}
 
 
 def _evid(snap: Dict[str, Any], needle: str) -> Optional[Dict[str, Any]]:
@@ -89,6 +98,30 @@ def entry_state(th: Dict[str, Any], price_now: Optional[float]) -> Dict[str, Any
     if (long_ and px > zhi) or ((not long_) and px < zlo):
         return {"state": "ABOVE_ZONE" if long_ else "BELOW_ZONE", "text": f"Ціна {_px(px)} {'вище' if long_ else 'нижче'} зони входу ({chase:.2f} R від тригера): чекати повернення в зону, не переслідувати.", "chase_r": round(chase, 2)}
     return {"state": "TOWARD_INVALIDATION", "text": f"Ціна {_px(px)} {'нижче' if long_ else 'вище'} зони входу, скасування — закриття M15 {'нижче' if long_ else 'вище'} {_px(inv)}.", "chase_r": round(chase, 2)}
+
+
+def stage_check(th: Dict[str, Any]) -> Dict[str, Any]:
+    """Ті самі оцінки старшого контексту, що в build(), але лише з тези (до заморожування знімка): D1/H4 і H1 проти напряму / підтверджують / нейтральні, наявність доказу повернення H1.
+    Використовується для shadow-міток (annotate) і для ОПЦІЙНОГО гейта OFFICE2_STAGE_GATE=block (за замовчуванням вимкнено). M5/M1 тут НЕ вимагаються: у наданих джерелах Дарії це НЕ ПІДТВЕРДЖЕНО."""
+    rows = {tf: _tf_text(_tf_row(th, tf), tf) for tf in ("D1", "H4", "H1")}
+    dh = [rows["D1"], rows["H4"]]
+    if all(r["state"] == "UNAVAILABLE" for r in dh):
+        d1h4 = "UNAVAILABLE"
+    elif any(r["state"] == "AGAINST" for r in dh):
+        d1h4 = "AGAINST"
+    elif any(r["state"] == "WITH" for r in dh):
+        d1h4 = "CONFIRMED"
+    else:
+        d1h4 = "NEUTRAL"
+    h1 = rows["H1"]["state"]
+    h1s = "UNAVAILABLE" if h1 == "UNAVAILABLE" else "AGAINST" if h1 == "AGAINST" else "CONFIRMED" if h1 == "WITH" else "NEUTRAL"
+    proof = bool((th.get("integral") or {}).get("proof_h1"))
+    codes = []
+    if d1h4 == "AGAINST":
+        codes.append("HTF_AGAINST")
+    if h1s == "AGAINST":
+        codes.append("H1_AGAINST")
+    return {"d1_h4": d1h4, "h1": h1s, "h1_proof": proof, "codes": codes, "texts": {"D1": rows["D1"]["text"], "H4": rows["H4"]["text"], "H1": rows["H1"]["text"]}}
 
 
 def build(snap: Dict[str, Any], valid_until_ts: Optional[float] = None, price_now: Optional[float] = None) -> Dict[str, Any]:

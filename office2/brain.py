@@ -119,7 +119,7 @@ def _tf_row(bars: Dict[str, np.ndarray], width: int, now: float, price: float, n
     raw = (price - lo) / max(1e-12, hi - lo)
     tr = int(reg[k]) if len(reg) > k else 0
     te, broken = eff_trend(tr, price, lsh, lsl)
-    return {"status": "USED", "trend": tr, "trend_eff": te, "broken": broken, "atr": _f(a[k]), "close": float(bars["c"][k]), "last_swing_high": lsh, "last_swing_low": lsl,
+    return {"status": "USED", "trend": tr, "trend_eff": te, "broken": broken, "atr": _f(a[k]), "close": float(bars["c"][k]), "closed_ts": (None if name == "MN" else float(bars["t"][k] + width)), "last_swing_high": lsh, "last_swing_low": lsl,
             "range": {"hi": hi, "lo": lo, "bars": n}, "range_pos": _f(min(1.0, max(0.0, raw))), "range_pos_raw": _f(raw), "outside_range": ("below" if raw < 0 else "above" if raw > 1 else None),
             "zone": ("premium" if raw > 0.5 else "discount")}
 
