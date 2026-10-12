@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: ['claude/eager-pascal-t9e1ac']
-    paths: ['.github/workflows/quality-study.yml', 'scripts/quality_study.py', 'scripts/fixtures/paper_rows_*.json']
+    paths: ['.github/workflows/quality-study.yml', 'scripts/quality_study.py', 'scripts/missed_study.py', 'scripts/fixtures/paper_rows_*.json', 'scripts/fixtures/cards_*.txt']
 
 permissions:
   contents: read
@@ -30,9 +30,15 @@ jobs:
           set -o pipefail
           F=$(ls scripts/fixtures/paper_rows_*.json | sort | tail -1)
           python -u scripts/quality_study.py "$F" quality_study.json | tee "$GITHUB_STEP_SUMMARY"
+      - name: Missed opportunities
+        run: |
+          set -o pipefail
+          python -u scripts/missed_study.py scripts/fixtures/cards_2026-10-12.txt missed_study.json | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: quality-study
-          path: quality_study.json
+          path: |
+            quality_study.json
+            missed_study.json
           if-no-files-found: ignore
