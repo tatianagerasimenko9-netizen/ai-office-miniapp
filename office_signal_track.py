@@ -171,7 +171,7 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
     from office_bridge import log_event
 
     if fetch is None:
-        from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
+        from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
     done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events(db, EV_RESULT)}
     written: List[Dict[str, Any]] = []
@@ -296,7 +296,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача.
     scope: "all" — усі плани; "o2" — лише Office2 (scenario_id «O2|…»), швидкий цикл; "other" — усі, крім Office2 (повільний цикл по сотнях старих планів не затримує Office2)."""
     if fetch is None:
-        from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
+        from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
     since = milestone_since(db)
     seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE)}
@@ -418,7 +418,7 @@ def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     from office_bridge import log_event
 
     if fetch is None:
-        from office_market_data import fetch_candles as fetch  # type: ignore[assignment]
+        from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
     done = {e["p"].get("scenario_id") for e in _events(db, EV_FALSE)}
     out: List[Dict[str, Any]] = []

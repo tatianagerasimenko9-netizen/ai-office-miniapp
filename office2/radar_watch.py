@@ -35,10 +35,10 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
     entry DOUBLE PRECISION, sl DOUBLE PRECISION, tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION, tp3 DOUBLE PRECISION, risk_pct DOUBLE PRECISION,
     level_kind TEXT, level_price DOUBLE PRECISION, need_text TEXT, reason TEXT, plan_ok INTEGER DEFAULT 0, reject TEXT, scen_state TEXT,
     tg_status TEXT DEFAULT 'NEW', tg_tries INTEGER DEFAULT 0, msg_id BIGINT, sent_ts DOUBLE PRECISION, last_error TEXT, notified TEXT,
-    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT, daria_observation_json TEXT, inval_px DOUBLE PRECISION, inval_ts DOUBLE PRECISION, inval_why TEXT)""",)
+    paper_status TEXT, entry_ts DOUBLE PRECISION, exit_ts DOUBLE PRECISION, reached TEXT, r_net DOUBLE PRECISION, gate_reason TEXT, version TEXT, far_targets TEXT, entry_note TEXT, stops_json TEXT, stop_eval TEXT, postmortem_json TEXT, reasons_json TEXT, daria_observation_json TEXT, inval_px DOUBLE PRECISION, inval_ts DOUBLE PRECISION, inval_why TEXT, data_src TEXT)""",)
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
-         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json", "inval_px", "inval_ts", "inval_why")
+         "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json", "inval_px", "inval_ts", "inval_why", "data_src")
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -57,7 +57,7 @@ def _ensure(db: str) -> None:
             _execute(db, d)
     except Exception as exc:  # noqa: BLE001      # таблиця вже є, а ролі веб-сервісу може бракувати прав на DDL: читання від цього не залежить
         print(f"[radar] DDL пропущено ({type(exc).__name__}: {str(exc)[:100]}) — працюю з наявною таблицею", flush=True)
-    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT", "daria_observation_json TEXT", "inval_px DOUBLE PRECISION", "inval_ts DOUBLE PRECISION", "inval_why TEXT"):
+    for col in ("far_targets TEXT", "entry_note TEXT", "stops_json TEXT", "stop_eval TEXT", "postmortem_json TEXT", "reasons_json TEXT", "daria_observation_json TEXT", "inval_px DOUBLE PRECISION", "inval_ts DOUBLE PRECISION", "inval_why TEXT", "data_src TEXT"):
         try:
             _execute(db, f"ALTER TABLE office2_radar_card ADD COLUMN IF NOT EXISTS {col}")      # міграція таблиці, створеної до появи колонки (Postgres)
         except Exception:  # noqa: BLE001
@@ -473,8 +473,8 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
                 continue            # спостереження: paper-входу немає (орієнтир ≠ підтвердження); Дарія-shadow вище вже записано
             ev = evaluate_card(c, cl, t)
             vv = evaluate_variants(c, cl, t)
-            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=?, inval_ts=?, inval_why=? WHERE card_id=?",
-                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, ev.get("inval_ts"), ev.get("inval_why"), c["card_id"]))
+            _execute(db, "UPDATE office2_radar_card SET paper_status=?, entry_ts=?, exit_ts=?, reached=?, r_net=?, stop_eval=?, inval_ts=?, inval_why=?, data_src=? WHERE card_id=?",
+                     (ev["paper_status"], ev["entry_ts"], ev["exit_ts"], ev["reached"], ev["r_net"], json.dumps(vv) if vv else None, ev.get("inval_ts"), ev.get("inval_why"), str((cl[-1] or {}).get("src") or "unknown"), c["card_id"]))
             try:
                 pm = postmortem_card(dict(c, paper_status=ev["paper_status"], entry_ts=ev["entry_ts"], exit_ts=ev["exit_ts"]), cl, t)
                 if pm:

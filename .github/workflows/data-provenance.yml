@@ -1,0 +1,26 @@
+name: Data provenance compare (read-only)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/data-provenance.yml', 'scripts/data_provenance_compare.py']
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - run: |
+          set -o pipefail
+          python -u scripts/data_provenance_compare.py | tee "$GITHUB_STEP_SUMMARY"

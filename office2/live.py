@@ -727,7 +727,7 @@ def _smc_replay_job(db: str, feed: "Feed") -> None:
 def _paper_loop(db: str) -> None:
     """Paper-супровід доставлених READY (office2.paper): вхід лише після доставки, TP/SL за 1m Binance, PnL з витратами. Ордерів немає."""
     from office2 import paper as PP
-    from office_market_data import fetch_candles
+    from office_market_data import fetch_candles_futures as fetch_candles      # торгові рішення/супровід/shadow — лише ф'ючерси Binance (див. fetch_candles_futures)
 
     time.sleep(60)
     while True:
@@ -743,7 +743,7 @@ def _paper_loop(db: str) -> None:
 def _radar_loop(db: str) -> None:
     """WATCH/PAPER-радар (office2.radar_watch): картки з поточних сценаріїв (сканування), paper-супровід за свічками. Telegram-відправку робить worker-релей. Ордерів немає."""
     from office2 import radar_watch as RW
-    from office_market_data import fetch_candles
+    from office_market_data import fetch_candles_futures as fetch_candles      # торгові рішення/супровід/shadow — лише ф'ючерси Binance (див. fetch_candles_futures)
 
     time.sleep(75)
     while True:
@@ -760,7 +760,7 @@ def _radar_loop(db: str) -> None:
 def _htf_loop(db: str) -> None:
     """HTF_STRONG_CANDLE_PULLBACK (shadow, office2.htf_scenario): раз на 15 хв по universe. Лише спостереження в таблиці office2_htf_shadow; Telegram, ордерів і впливу на READY немає."""
     from office2 import htf_scenario as HS
-    from office_market_data import fetch_candles
+    from office_market_data import fetch_candles_futures as fetch_candles      # торгові рішення/супровід/shadow — лише ф'ючерси Binance (див. fetch_candles_futures)
 
     time.sleep(240)
     while True:
@@ -776,7 +776,7 @@ def _htf_loop(db: str) -> None:
 def _source_shadow_loop(db: str) -> None:
     """SOURCE_SHADOW (office2.source_shadow): паранормальний D1-бар за Герчиком і база після нього за Дарією; раз на 30 хв. Лише таблиця office2_source_shadow; Telegram, ордерів і впливу на READY немає."""
     from office2 import source_shadow as SS
-    from office_market_data import fetch_candles
+    from office_market_data import fetch_candles_futures as fetch_candles      # торгові рішення/супровід/shadow — лише ф'ючерси Binance (див. fetch_candles_futures)
 
     time.sleep(300)
     while True:
