@@ -909,10 +909,10 @@ async function paintChart(el, s){
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     const zl=(s.__objs&&s.__objs.includes('level'))?'рівень · зона':(s.__objs&&s.__objs.includes('block'))?'блок · зона':'зона';
     line(lv.zone_lo,'#5DA9FF',s.__ua?'Зона входу':zl,2); line(lv.zone_hi,'#5DA9FF',s.__ua?'Зона входу':zl,2);
-    const UA=!!s.__ua; line(lv.sl,'#F36B78',UA?(s.__extra&&s.__extra.length?'Стоп 1 (поточний)':'Стоп'):'SL'); (s.__extra||[]).forEach(e=>line(e.p,e.color,e.title,2)); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
+    const UA=!!s.__ua; line(lv.sl,'#F36B78',UA?(s.__extra&&s.__extra.length?'Стоп 1 (поточний)':'Стоп'):'SL'); if(S.layers.sl) (s.__extra||[]).forEach(e=>line(e.p,e.color,e.title,2)); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
     /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
        OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
-    const shown=['зона','SL','TP'];
+    const shown=['зона','SL','TP']; if(S.layers.sl&&s.__extra&&s.__extra.length) shown.push('стопи+'+s.__extra.length);
     const mkAll=[];
     let cx=null;
     if(S.layers.ch||S.layers.ctx){
@@ -1106,7 +1106,8 @@ function o2EvidenceHtml(ev){
 async function openO2(d, T0){
   const s=d.scenario||{}, o=d.o2||{}, fr=o.frozen||{}, th=fr.thesis||{}, lv=o.levels||{}, ch=o.changed||{}, I=fr.integral;
   const long_=String(s.direction||'').toUpperCase()!=='SHORT', sd=long_?'L':'S', st=s.status||{};
-  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts; s.__smc=(fr.smc&&fr.smc.overlay)||null; s.__liq=fr.market_map?[].concat(fr.market_map.pools_above||[],fr.market_map.pools_below||[]):null;
+  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts; s.__smc=(fr.smc&&fr.smc.overlay)||null; { const stp=th.stops||{}, SC={v2:'#FFB347',v3:'#C792EA'}; s.__extra=['v2','v3'].filter(k=>stp[k]&&stp[k].sl!=null).map(k=>({p:stp[k].sl,color:SC[k],title:stp[k].name||('Стоп '+k.slice(1))})); }   /* три варіанти стопа зі знімка: поточний, за структурою, структура+ATR */
+  s.__liq=fr.market_map?[].concat(fr.market_map.pools_above||[],fr.market_map.pools_below||[]):null;
   const mn=(o.market_now||{}), m0=((fr.market_at_signal||{}).market)||{}, m1=mn.market||{};
   const cells=[`<div class="en"><span>Вхід (ціна READY)</span><b>${o2px(lv.ready_price)}</b>${lv.zone?`<small>зона ${o2px(lv.zone[0])}–${o2px(lv.zone[1])}</small>`:''}</div>`,
     `<div class="sl"><span>SL</span><b>${o2px(lv.sl)}</b><small>−${o2rg(lv.sl_pct,'').replace(/^/,'')}%</small></div>`]
