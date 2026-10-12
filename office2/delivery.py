@@ -94,6 +94,14 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
         conf = []
     if conf:
         L.append("Підтвердження: " + " · ".join(conf))
+    try:
+        from office2 import topdown as TD
+
+        sl_ = TD.summary_line(th.get("topdown"))
+    except Exception:  # noqa: BLE001
+        sl_ = None
+    if sl_:
+        L.append(sl_[0].upper() + sl_[1:])
     if (th.get("sizing") or {}).get("risk_usd"):
         L.append(f"Ризик моделі: {float(th['sizing']['risk_usd']):.0f} $")
     decided = float(snap.get("decided_ts") or 0.0)

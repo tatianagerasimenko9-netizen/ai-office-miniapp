@@ -338,6 +338,28 @@ def build_map(ctx: Dict[str, Any], now: float, sg: int, entry: float, risk: floa
     return {"tfs": rows, "pools_above": [dist(x) for x in above], "pools_below": [dist(x) for x in below]}
 
 
+def _once_hooks(hooks: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Кожен мережевий хук (flow/m5/m1) викликається щонайбільше раз на оцінку: докази й top-down читають одні й ті самі дані, без дубльованих запитів до біржі."""
+    out: Dict[str, Any] = dict(hooks or {})
+    for key, fn in list(out.items()):
+        if not callable(fn):
+            continue
+        box: Dict[str, Any] = {}
+
+        def _g(fn=fn, box=box):
+            if "v" not in box and "e" not in box:
+                try:
+                    box["v"] = fn()
+                except Exception as exc:  # noqa: BLE001
+                    box["e"] = exc
+            if "e" in box:
+                raise box["e"]
+            return box["v"]
+
+        out[key] = _g
+    return out
+
+
 def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, levels: List[Dict[str, Any]], mc: Optional[Dict[str, Any]], rel: Optional[Dict[str, Any]], hooks: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Кандидат READY читає ВСІ підключені факти ДО рішення (HTF-карта, локація, ліквідність, ринок BTC, докази модулів) і формує цілісну тезу ЗА/ПРОТИ.
     Докази самі нічого не блокують. Єдина умова, що змінює рішення: КОНТРТРЕНД без доказу — старша структура (H4, або D1 коли H4 не за напрямом) проти напряму, подія на ЛОКАЛЬНОМУ
@@ -351,7 +373,7 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
     a15 = float(F.atr(m15r, 14)[k])
     entry, risk = float(th["entry"]), float(th["risk"])
     htf = B.htf_context(ctx, now)
-    hooks = hooks or {}
+    hooks = _once_hooks(hooks)
     ev_items = EV.collect(ctx, th, direction, now, levels, flow_fetch=hooks.get("flow"), m5_fetch=hooks.get("m5"))
     al = AL.alignment(direction, mc or {}, rel or {}, htf)
     loc, loc_txt = _location(th)
@@ -395,6 +417,17 @@ def assess(ctx: Dict[str, Any], th: Dict[str, Any], direction: str, now: float, 
                 "level_provenance": {"kind": level_ref.get("kind"), "price": level_ref.get("p"), "strength": level_ref.get("strength"), "htf_location": loc == "HTF"},
                 "htf_countertrend_override": htf_override, "htf_override_weak_level": bool(htf_override and int(level_ref.get("strength") or 1) <= 2), "inputs": inputs}
     out = dict(th, evidence=ev_items, evidence_counts=EV.summary(ev_items), alignment=al, integral=integral, map=build_map(ctx, now, sg, entry, risk, a15, levels, htf))
+    try:     # top-down: тип сценарію, суперечності за типом, M5/M1 (лише закриті бари ≤ now). У режимі gate READY вимагає підтвердження M5; за замовчуванням (annotate) лише показ і мітки.
+        from office2 import topdown as TD
+
+        if TD.mode() != "off":
+            td = TD.analyze(out, direction, now, hooks.get("m5"), hooks.get("m1"))
+            out["topdown"] = td
+            if TD.mode() == "gate" and verdict != "BLOCK" and (td.get("ltf") or {}).get("status") != "CONFIRMED":
+                out.update(state="WAIT", reason=f"WAIT 4/4 · підтвердження входу на M5/M1: {(td.get('ltf') or {}).get('text')}", blocked_ready=True,
+                           need={"px": None, "text": "підтвердження на M5: закриття за максимумом з моменту дотику зони (мікро-злам), далі ретест на M1"})
+    except Exception as exc:  # noqa: BLE001
+        out["topdown"] = {"version": "topdown-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
     if verdict == "BLOCK":
         out.update(state="WAIT", reason=f"WAIT 3/3 · ARMED, але {why}", blocked_ready=True,
                    need={"px": need, "text": f"закриття H1 {'вище' if sg > 0 else 'нижче'} {need:.6g} (доказ повернення) або подія від HTF-рівня" if need is not None else "доказ повернення на H1"})

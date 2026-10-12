@@ -205,6 +205,22 @@ class Feed:
         return arr
 
 
+def _once(fn):
+    """Один мережевий запит на символ і цикл: докази, top-down і знімок READY читають однакові дані (без дублів до Binance)."""
+    box: Dict[str, Any] = {}
+
+    def _g():
+        if "v" not in box and "e" not in box:
+            try:
+                box["v"] = fn()
+            except Exception as exc:  # noqa: BLE001
+                box["e"] = exc
+        if "e" in box:
+            raise box["e"]
+        return box["v"]
+    return _g
+
+
 def _flow_hook(sym: str):
     """OI / funding / L:S / ліквідації — RESEARCH-факти лише для кандидата READY (мережа; будь-яка помилка → «недоступно»)."""
     def _go() -> Dict[str, Any]:
@@ -529,7 +545,8 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
                 from office2 import engine as EN
 
                 lv = EN.step_symbol(db, sym, ctx, st, mc, relative_strength(st, mc), now, lambda: old_lev_state(db, sym, now),
-                                    flow_fetch=_flow_hook(sym), m5_fetch=lambda sym=sym: feed.klines(sym, "5m", now, limit=60))   # старий Лев читається ліниво: лише при READY (LIKE по office_events дорогий)
+                                    flow_fetch=_flow_hook(sym), m5_fetch=_once(lambda sym=sym: feed.klines(sym, "5m", now, limit=60)),
+                                    m1_fetch=_once(lambda sym=sym: feed.klines(sym, "1m", now, limit=120)))   # старий Лев читається ліниво: лише при READY (LIKE по office_events дорогий)
                 res["live"] = {k: res.get("live", {}).get(k, 0) + v for k, v in lv.items()}
             except Exception as exc:  # noqa: BLE001
                 _bump("errors")

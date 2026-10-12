@@ -315,7 +315,8 @@ def record_funnel(db: str, sym: str, rows: list, now: float) -> None:
 
 
 def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]] = None,
-                allow_ready: bool = True, flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> Dict[str, int]:
+                allow_ready: bool = True, flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None,
+                m1_fetch: Optional[Callable[[], Any]] = None) -> Dict[str, int]:
     """Один символ на закритому барі: детектори → переходи. Повертає лічильники переходів."""
     res = {"watch": 0, "wait": 0, "ready": 0, "no_trade": 0, "missed": 0, "invalidated": 0, "expired": 0}
     allsc = load_scenarios(db, sym, ALL_STATES)
@@ -325,7 +326,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
     funnel: list = []
     for d in ("LONG", "SHORT"):
         if BRAIN_V2:
-            th = B2.thesis(ctx, d, now, levels, RISK_USD, mc=mc, rel=rel, hooks={"flow": flow_fetch, "m5": m5_fetch})
+            th = B2.thesis(ctx, d, now, levels, RISK_USD, mc=mc, rel=rel, hooks={"flow": flow_fetch, "m5": m5_fetch, "m1": m1_fetch})
             if th:
                 th = dict(th, id=scoped_id(sym, th["id"]), symbol=sym)   # id теза-незалежний від монети збігався б між символами на одному барі → перезапис чужих сценаріїв
                 found[th["id"]] = th
@@ -513,12 +514,27 @@ def stage_gate_mode() -> str:
 
 
 def stage_codes(th):
+    """Shadow-мітки етапів і top-down: HTF_AGAINST/H1_AGAINST, TYPE_<тип сценарію>, LTF_CONFIRMED / LTF_NOT_CONFIRMED (лише коли M5/M1 перевірялись)."""
+    out = []
     try:
         from office2 import daria_steps as _DS
 
-        return list(_DS.stage_check(th).get("codes") or [])
+        out += list(_DS.stage_check(th).get("codes") or [])
     except Exception:  # noqa: BLE001
-        return []
+        pass
+    try:
+        td = th.get("topdown") or {}
+        t = (td.get("scenario_type") or {}).get("type")
+        if t:
+            out.append("TYPE_" + str(t))
+        ls = (td.get("ltf") or {}).get("status")
+        if ls == "CONFIRMED":
+            out.append("LTF_CONFIRMED")
+        elif ls in ("PENDING", "NOT_IN_ZONE", "INVALID"):
+            out.append("LTF_NOT_CONFIRMED")
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def stage_gate_reason(th):

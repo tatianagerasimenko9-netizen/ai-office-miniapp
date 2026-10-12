@@ -121,18 +121,40 @@ def simulate(
             "risk_pct_at_fill": actual_risk_pct, "fee_rt_pct": float(fee_rt_pct), "slippage_rt_bps": float(slippage_rt_bps), "cost_rt_pct": costs}
 
 
-def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel) -> List[Dict[str, Any]]:
+def _cut_ltf(a: Optional[Arr], width: float, now: float, limit: int) -> Optional[Arr]:
+    """M5/M1 лише з барів, ЗАКРИТИХ до now (open+width ≤ now); як у live — останні limit барів."""
+    if a is None or not len(a.get("t", [])):
+        return None
+    n = int(np.searchsorted(a["t"] + width, now, side="right"))
+    if n < 5:
+        return None
+    lo = max(0, n - limit)
+    return {k: v[lo:n] for k, v in a.items()}
+
+
+def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel, ltf: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     out = []
+    hooks = None
+    if ltf and (ltf.get("m5") is not None or ltf.get("m1") is not None):
+        hooks = {"m5": lambda: _cut_ltf(ltf.get("m5"), 300.0, now, 60), "m1": lambda: _cut_ltf(ltf.get("m1"), 60.0, now, 120)}
     for d in ("LONG", "SHORT"):
-        th = B2.thesis(ctx, d, now, levels, 10.0, mc=mc, rel=rel, hooks=None)
+        th = B2.thesis(ctx, d, now, levels, 10.0, mc=mc, rel=rel, hooks=hooks)
         if th and th.get("state") == "READY":
             tg = th.get("targets") or []
             ev = th.get("event") or {}
             out.append({"source": "BRAIN", "model": th.get("kind", "SWEEP_SEQ"), "dir": d, "key": th.get("id"), "entry": float(th["entry"]), "sl": float(th["sl"]),
                         "tp1": float(tg[0]["p"]) if tg else None, "r_tp1": float(tg[0]["r"]) if tg else None, "risk_pct": float(th.get("risk_pct") or 0.0),
                         "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone"),
-                        "f": _features(th, now, mc, rel)})
+                        "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown"))})
     return out
+
+
+def _td_compact(td: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not td:
+        return None
+    lt = td.get("ltf") or {}
+    return {"type": td.get("scenario_type"), "ltf": lt.get("status"), "m5": (lt.get("m5") or {}).get("status") if isinstance(lt.get("m5"), dict) else None,
+            "conflicts_warn": sum(1 for c in (td.get("conflicts") or []) if c.get("severity") == "warn"), "error": td.get("error")}
 
 
 def _features(th, now, mc, rel):
@@ -192,7 +214,7 @@ def replay_arrays(sym: str, arrs: Dict[str, Optional[Arr]], t_from: float, t_to:
         if with_brain:
             tb = time.perf_counter()
             try:
-                found += _brain_ready(sym, ctx, now, levels, mc_i, rel_i)
+                found += _brain_ready(sym, ctx, now, levels, mc_i, rel_i, ltf={"m5": arrs.get("m5"), "m1": arrs.get("m1")})
             except Exception as exc:  # noqa: BLE001
                 events.append({"source": "BRAIN", "error": f"{type(exc).__name__}: {str(exc)[:100]}", "ts_bar": int(now)})
             tm["brain_ms"].append((time.perf_counter() - tb) * 1000.0)
