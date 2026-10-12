@@ -20,6 +20,7 @@ EV_MILESTONE = "SCENARIO_MILESTONE"   # досягнення рівня сцен
 EV_MILESTONE_ON = "SCENARIO_MILESTONE_ENABLED"
 FALSE_EXPIRY_WINDOW_SEC = 48 * 3600
 MAX_TRACK_SEC = 72 * 3600
+HOT_WINDOW_SEC = 14 * 86400          # гарячі цикли супроводу дивляться події лише за останні 14 діб (старіші плани вже завершені або не відстежуються)
 TF_SEC = 900
 
 
@@ -188,10 +189,15 @@ def _remember_bar(kind: str, key: Any, candles: Any, now: float, tf_sec: float =
         pass
 
 
-def _events(db: str, etype: str) -> List[Dict[str, Any]]:
+def _events(db: str, etype: str, since_ts: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Події типу etype за зростанням id. since_ts — лише події не старші за цей момент (ts_utc ISO, порівняння рядків): гарячі цикли (супровід кожні 15–45 с) не читають і не розбирають усю історію."""
     from office_bridge import _fetchall
 
-    rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? ORDER BY id", (etype,))
+    if since_ts is not None:
+        iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
+        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? AND ts_utc >= ? ORDER BY id", (etype, iso))
+    else:
+        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? ORDER BY id", (etype,))
     out = []
     for r in rows or []:
         try:
@@ -209,9 +215,10 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
     if fetch is None:
         from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
-    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events(db, EV_RESULT)}
+    horizon = now - HOT_WINDOW_SEC
+    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events(db, EV_RESULT, horizon)}
     written: List[Dict[str, Any]] = []
-    for ev in _events(db, EV_PLAN):
+    for ev in _events(db, EV_PLAN, horizon):
         p = ev["p"]
         key = (p.get("scenario_id"), p.get("confirmed_ts"))
         if key in done:
@@ -337,9 +344,10 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
     since = milestone_since(db)
-    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE)}
+    horizon = now - HOT_WINDOW_SEC
+    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon)}
     out: List[Dict[str, Any]] = []
-    for ev in _events(db, EV_PLAN):
+    for ev in _events(db, EV_PLAN, horizon):
         p = ev["p"]
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue

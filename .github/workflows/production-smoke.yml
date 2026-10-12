@@ -1,0 +1,40 @@
+name: Production smoke (read-only)
+
+# Зовнішня перевірка живого Mini App: API свічок Binance Futures (усі ТФ, свіжість, історія), локальна бібліотека графіка,
+# емуляція iPhone (touch + pinch) для інтерактивного графіка, помилка+«Повторити». Лише GET; нічого не пише, ордерів немає.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/production-smoke.yml', 'scripts/prod_smoke.py']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: https://ai-office-miniapp.onrender.com
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Production smoke
+        run: |
+          set -o pipefail
+          python -u scripts/prod_smoke.py --shots shots | tee "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-smoke-shots
+          path: shots
+          if-no-files-found: ignore
