@@ -469,6 +469,7 @@ def track(db: str, fetch: Callable[[str, str, int], Any], now: Optional[float] =
                 except (TypeError, ValueError, KeyError, ZeroDivisionError) as exc:
                     log(f"[radar] Дарія shadow {c['card_id']}: {type(exc).__name__}")
             if c.get("kind") == "WATCH" and not c.get("paper_status"):
+                _execute(db, "UPDATE office2_radar_card SET data_src=? WHERE card_id=?", (str((cl[-1] or {}).get("src") or "unknown"), c["card_id"]))      # джерело свічок фіксується і для спостереження
                 n += 1
                 continue            # спостереження: paper-входу немає (орієнтир ≠ підтвердження); Дарія-shadow вище вже записано
             ev = evaluate_card(c, cl, t)

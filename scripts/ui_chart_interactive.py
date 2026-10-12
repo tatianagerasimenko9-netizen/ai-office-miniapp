@@ -74,6 +74,8 @@ async def _run(port: int, sid: str, problems: list) -> None:
             problems.append("CDN не має бути потрібен, коли локальна бібліотека віддається")
         if not await pg.evaluate("usingLW"):
             problems.append("графік працює на canvas-заглушці, а не на інтерактивній бібліотеці")
+        if "стопи+2" not in (await pg.evaluate("window.__chartLayers")):
+            problems.append("три варіанти стопа зі знімка не намальовані")
         n0 = await pg.evaluate("S.bars.length")
         if n0 < 400:
             problems.append(f"на старті замало історії: {n0} свічок")
