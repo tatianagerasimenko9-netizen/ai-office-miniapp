@@ -247,6 +247,10 @@ def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None
     """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП): без пояснень про стан угоди, лише факт і рівень."""
     lv = str(level or "").upper()
     px_ = f"Ціна досягла {_px(price, symbol)}." if price is not None else "Ціна досягла рівня плану."
+    if lv == "INVALIDATED":
+        side = "нижче" if str(direction or "").upper() != "SHORT" else "вище"
+        lvl = f" {_px(price, symbol)}" if price is not None else ""
+        return f"⚪ {ticker(symbol)} · СЦЕНАРІЙ СКАСОВАНО\nM15 закрилась {side} рівня скасування{lvl} ще до входу. Входити не треба: вхід більше не діє."
     if lv == "SL":
         return f"❌ {ticker(symbol)} · СТОП\n{px_}\nСценарій завершено по SL."
     return f"🎯 {ticker(symbol)} · {lv}\n{px_}"

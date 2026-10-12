@@ -1009,6 +1009,22 @@ const O2_CLS={COUNTER_NO_PROOF:'контртренд без доказу',COUNTE
 const O2_RL={GATE:'умова',CONTEXT:'контекст',EVIDENCE:'доказ',RESEARCH:'дослідження',NOT_CONNECTED:'не підключено'};
 const o2rg=(r,sg)=>!r?'—':(o2f(r[0])===o2f(r[1])?sg+o2f(r[0]):sg+o2f(r[0])+'…'+sg+o2f(r[1]));
 
+function o2DariaHtml(D){
+  if(!D||D.error||!(D.steps&&D.steps.length)) return '';
+  const ST={CONFIRMED:['o2g','✓ підтверджено'],NEUTRAL:['o2m','· не підтверджує (нейтрально)'],AGAINST:['o2r','⚠ проти'],NOT_REQUIRED_BY_SOURCE:['o2m','∅ не вимагається джерелом'],UNAVAILABLE:['o2m','∅ немає даних']};
+  const rows=D.steps.map(x=>{const t=ST[x.status]||['o2m',x.status];
+    return `<div class="o2row ${t[0]}"><b>${esc(x.tf)} · ${esc(x.title)}</b> — ${t[1]}<br><span class="o2sub">Перевіряється: ${esc(x.checked||'')}</span><br>${esc(x.result||'')}${(x.refutes||[]).length?`<br><b>Спростовує / проти:</b> ${x.refutes.map(esc).join('; ')}`:''}${(x.gaps||[]).length?`<br><b>Чого немає:</b> ${x.gaps.map(esc).join('; ')}`:''}
+      <details class="o2d"><summary>Джерела та що НЕ ПІДТВЕРДЖЕНО</summary><div class="o2sub">Джерела: ${(x.sources||[]).map(esc).join(', ')}<br>${(x.unknown||[]).map(esc).join('<br>')}</div></details></div>`;}).join('');
+  const c=D.cancel, p=D.protective_sl, e=D.entry||{}, es=e.state||{};
+  const nn=(D.not_now||[]).map(x=>`<div class="o2row ${x.type==='ENTRY'?'o2r':'o2m'}">${x.type==='ENTRY'?'⏸ ':'· '}<b>${esc(x.tf)}</b>: ${esc(x.text)}</div>`).join('');
+  return `<div class="sec"><h3>Сценарій AI Office · покрокова перевірка (зверху вниз)</h3>${rows}
+    <div class="o2sub">Скасування й захист — різні речі</div>
+    ${c?`<div class="o2row"><b>Скасування (закриття ${esc(c.tf)})</b>: ${esc(c.text)}</div>`:''}
+    ${p?`<div class="o2row"><b>Захисний SL (дотик)</b>: ${esc(p.text)}</div>`:''}
+    <div class="o2sub">Чому зараз ще / вже НЕ входити</div>
+    ${es.text?`<div class="o2row ${es.state==='IN_ZONE'?'o2g':'o2m'}"><b>Ціна зараз</b>: ${esc(es.text)}</div>`:''}${nn||'<div class="o2row o2g">Застережень не виявлено.</div>'}
+    <div class="mut" style="margin-top:6px">${esc(D.note||'')}</div></div>`;
+}
 function o2MapHtml(MM){
   if(!MM) return '';
   const rows=(MM.tfs||[]).map(r=>{
@@ -1109,7 +1125,7 @@ async function openO2(d, T0){
       <div class="sec"><h3>Журнал подій</h3>${ev?`<div class="tl">${ev}</div>`:'<div class="mut">Подій у журналі ще немає.</div>'}</div>
       <div class="mut">ID ${esc(s.scenario_id)} · Telegram повідомлення ${esc(o.telegram_msg_id||'—')} · ${esc(o.status_ua||'')}</div></details>`;
   if(T0!==RT) return;
-  app.innerHTML=`${top}${chartBlock}${iopen}${why}${seq}${o2MapHtml(fr.market_map)}${o2SmcHtml(fr.smc)}${o2EvidenceHtml(fr.evidence)}${quality}${market}${course}${tech}`;
+  app.innerHTML=`${top}${chartBlock}${iopen}${o2DariaHtml(o.daria)}${why}${seq}${o2MapHtml(fr.market_map)}${o2SmcHtml(fr.smc)}${o2EvidenceHtml(fr.evidence)}${quality}${market}${course}${tech}`;
   $('back').onclick=()=>{killPoll(); go('scenarios');};
   $('iopen').onclick=()=>{killPoll(); S.jkind='trades'; S.prefill={symbol:s.symbol,direction:String(s.direction||'').toUpperCase(),scenario_id:s.scenario_id,
     sl:s.sl==null?'':String(s.sl),tp1:s.tp1==null?'':String(s.tp1),tp2:s.tp2==null?'':String(s.tp2)}; go('journal');};

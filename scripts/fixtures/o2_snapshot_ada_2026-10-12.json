@@ -1,0 +1,1640 @@
+{
+ "why": "Повторний тест прийнятого рівня W1L 0,2502 (раніше 7 закриттів M15 за ним; не свіжий sweep; екстремум 0,25) → зсув: закриття вище 0,252 (тіло 1,3 ATR) → ретрейс у зону 0,2507–0,2513 → тригер M15. BTC −0,06% / 1г; монета +0,28%; відносно +0,34 п.п.",
+ "brain": "o2-brain-2.1",
+ "label": "OFFICE2 · LIVE BETA",
+ "symbol": "ADAUSDT",
+ "thesis": {
+  "id": "O2|1899a369ddff",
+  "sl": 0.24950000000000003,
+  "dir": "LONG",
+  "leg": {
+   "to": 0.2532,
+   "atr": 2.6352941176470406,
+   "from": 0.25
+  },
+  "map": {
+   "tfs": [
+    {
+     "tf": "MN",
+     "note": "місячні бари з фіду; swing n=1; останній бар — поточний місяць (не враховано)",
+     "zone": "premium",
+     "range": {
+      "hi": 0.2955,
+      "lo": 0.1381,
+      "bars": 6
+     },
+     "trend": 0,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.7198221092757308,
+     "trend_eff": 0,
+     "with_trade": false,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.1381,
+     "last_swing_high": 0.2886
+    },
+    {
+     "tf": "W1",
+     "note": null,
+     "zone": "premium",
+     "range": {
+      "hi": 0.2886,
+      "lo": 0.1381,
+      "bars": 26
+     },
+     "trend": 1,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.7528239202657807,
+     "trend_eff": 1,
+     "with_trade": true,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.1901,
+     "last_swing_high": 0.2588
+    },
+    {
+     "tf": "4D",
+     "note": "ресемпл D1×4 (прив'язка до епохи)",
+     "zone": "premium",
+     "range": {
+      "hi": 0.2825,
+      "lo": 0.1532,
+      "bars": 20
+     },
+     "trend": 1,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.7594740912606345,
+     "trend_eff": 1,
+     "with_trade": true,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.1901,
+     "last_swing_high": 0.2588
+    },
+    {
+     "tf": "3D",
+     "note": "ресемпл D1×3 (прив'язка до епохи)",
+     "zone": "premium",
+     "range": {
+      "hi": 0.2825,
+      "lo": 0.1711,
+      "bars": 20
+     },
+     "trend": 1,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.7208258527827651,
+     "trend_eff": 1,
+     "with_trade": true,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.1901,
+     "last_swing_high": 0.2655
+    },
+    {
+     "tf": "D1",
+     "note": null,
+     "zone": "premium",
+     "range": {
+      "hi": 0.2825,
+      "lo": 0.1901,
+      "bars": 30
+     },
+     "trend": 0,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.6634199134199138,
+     "trend_eff": 0,
+     "with_trade": false,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.2235,
+     "last_swing_high": 0.2825
+    },
+    {
+     "tf": "H4",
+     "note": null,
+     "zone": "discount",
+     "range": {
+      "hi": 0.2825,
+      "lo": 0.2235,
+      "bars": 42
+     },
+     "trend": 0,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.47288135593220376,
+     "trend_eff": 0,
+     "with_trade": false,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.2448,
+     "last_swing_high": 0.2563
+    },
+    {
+     "tf": "H1",
+     "note": null,
+     "zone": "discount",
+     "range": {
+      "hi": 0.2594,
+      "lo": 0.2448,
+      "bars": 48
+     },
+     "trend": -1,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.4520547945205486,
+     "trend_eff": -1,
+     "with_trade": false,
+     "swing_stale": false,
+     "against_trade": true,
+     "outside_range": null,
+     "last_swing_low": 0.2484,
+     "last_swing_high": 0.2559
+    },
+    {
+     "tf": "M15",
+     "note": null,
+     "zone": "premium",
+     "range": {
+      "hi": 0.2563,
+      "lo": 0.2461,
+      "bars": 96
+     },
+     "trend": 0,
+     "broken": null,
+     "status": "USED",
+     "range_pos": 0.5196078431372569,
+     "trend_eff": 0,
+     "with_trade": false,
+     "swing_stale": false,
+     "against_trade": false,
+     "outside_range": null,
+     "last_swing_low": 0.2502,
+     "last_swing_high": 0.2532
+    },
+    {
+     "tf": "M5",
+     "note": "структура M5 не рахується; M5 використовується лише як підтвердження тригера (див. докази)",
+     "status": "NOT_CHECKED"
+    },
+    {
+     "tf": "M1",
+     "note": "структура M1 не рахується; M1 — лише для відстеження входу/TP/SL",
+     "status": "NOT_CHECKED"
+    }
+   ],
+   "pools_above": [
+    {
+     "p": 0.2532,
+     "kind": "M15SW",
+     "dist_r": 0.9473684210526223,
+     "dist_atr": 1.4823529411764433,
+     "dist_pct": 0.7159904534606079,
+     "dist_usd": 0.0017999999999999683,
+     "strength": 1
+    },
+    {
+     "p": 0.2544,
+     "kind": "LONDON_H",
+     "dist_r": 1.5789473684210664,
+     "dist_atr": 2.4705882352941178,
+     "dist_pct": 1.1933174224343686,
+     "dist_usd": 0.0030000000000000027,
+     "strength": 1
+    },
+    {
+     "p": 0.2559,
+     "kind": "ASIA_H",
+     "dist_r": 2.3684210526315996,
+     "dist_atr": 3.7058823529411766,
+     "dist_pct": 1.7899761336515527,
+     "dist_usd": 0.004500000000000004,
+     "strength": 1
+    },
+    {
+     "p": 0.2559,
+     "kind": "H1SW",
+     "dist_r": 2.3684210526315996,
+     "dist_atr": 3.7058823529411766,
+     "dist_pct": 1.7899761336515527,
+     "dist_usd": 0.004500000000000004,
+     "strength": 1
+    },
+    {
+     "p": 0.2559,
+     "kind": "M15SW",
+     "dist_r": 2.3684210526315996,
+     "dist_atr": 3.7058823529411766,
+     "dist_pct": 1.7899761336515527,
+     "dist_usd": 0.004500000000000004,
+     "strength": 1
+    }
+   ],
+   "pools_below": [
+    {
+     "p": 0.2502,
+     "kind": "LONDON_L",
+     "dist_r": 0.6315789473684441,
+     "dist_atr": 0.9882352941176745,
+     "dist_pct": 0.47732696897376065,
+     "dist_usd": 0.0012000000000000344,
+     "strength": 1
+    },
+    {
+     "p": 0.2502,
+     "kind": "M15SW",
+     "dist_r": 0.6315789473684441,
+     "dist_atr": 0.9882352941176745,
+     "dist_pct": 0.47732696897376065,
+     "dist_usd": 0.0012000000000000344,
+     "strength": 1
+    },
+    {
+     "p": 0.2492,
+     "kind": "M15SW",
+     "dist_r": 1.1578947368421184,
+     "dist_atr": 1.8117647058823576,
+     "dist_pct": 0.875099443118539,
+     "dist_usd": 0.0022000000000000075,
+     "strength": 1
+    },
+    {
+     "p": 0.2484,
+     "kind": "ASIA_L",
+     "dist_r": 1.5789473684210664,
+     "dist_atr": 2.4705882352941178,
+     "dist_pct": 1.1933174224343686,
+     "dist_usd": 0.0030000000000000027,
+     "strength": 1
+    },
+    {
+     "p": 0.2484,
+     "kind": "H1SW",
+     "dist_r": 1.5789473684210664,
+     "dist_atr": 2.4705882352941178,
+     "dist_pct": 1.1933174224343686,
+     "dist_usd": 0.0030000000000000027,
+     "strength": 1
+    }
+   ]
+  },
+  "kind": "SWEEP_SEQ",
+  "risk": 0.001899999999999985,
+  "zone": [
+   0.250672,
+   0.2513
+  ],
+  "brain": "o2-brain-2.1",
+  "break": {
+   "ts": 1791801000.0,
+   "level": 0.252,
+   "disp_ts": 1791801000.0,
+   "body_atr": 1.2962962962962892,
+   "bars_held": 3
+  },
+  "entry": 0.2514,
+  "event": {
+   "ts": 1791776700.0,
+   "src": "SWEEP",
+   "class": "LATE_SWEEP",
+   "level": {
+    "p": 0.2502,
+    "kind": "W1L",
+    "strength": 1
+   },
+   "prior": {
+    "bars": 12,
+    "closes_beyond": 7,
+    "max_excess_pct": 0.719
+   },
+   "origin": null,
+   "extreme": 0.25
+  },
+  "level": {
+   "p": 0.2502,
+   "kind": "W1L",
+   "strength": 1
+  },
+  "state": "READY",
+  "stops": {
+   "v1": {
+    "sl": 0.24950000000000003,
+    "liq": null,
+    "name": "Стоп 1 · поточний",
+    "noise_ok": true,
+    "range_ok": true,
+    "risk_atr": 1.5647058823529276,
+    "risk_pct": 0.7557677008750935,
+    "justified": true,
+    "beyond_extreme": true
+   },
+   "v2": {
+    "sl": 0.24995,
+    "liq": "поруч кругле число 0.25",
+    "name": "Стоп 2 · за структурою",
+    "noise_ok": true,
+    "range_ok": true,
+    "risk_atr": 1.1941176470588282,
+    "risk_pct": 0.576770087509947,
+    "justified": false,
+    "beyond_extreme": true
+   },
+   "v3": {
+    "sl": 0.2498482142857143,
+    "liq": "поруч кругле число 0.25",
+    "name": "Стоп 3 · структура + запас ATR",
+    "noise_ok": true,
+    "range_ok": true,
+    "risk_atr": 1.2779411764705868,
+    "risk_pct": 0.6172576429139673,
+    "justified": false,
+    "beyond_extreme": true
+   },
+   "atr": 0.0012142857142857153,
+   "extreme": 0.25,
+   "margin_pct": 12.5
+  },
+  "reason": "повна послідовність: подія → зсув структури → ретрейс у зону → тригер",
+  "sizing": {
+   "risk_usd": 10.0,
+   "stop_pct": 0.7557677008750935,
+   "notional_usd": 1323.1578947368525,
+   "fee_slip_note": "комісія+slippage ≈0.15% кола не входять у стоп"
+  },
+  "symbol": "ADAUSDT",
+  "chase_r": 0.0,
+  "impulse": null,
+  "quality": {
+   "min_tp1_r": 1.0,
+   "risk_atr15": 1.5647058823529276,
+   "first_target_r": 1.5789473684210664,
+   "min_stop_atr15": 1.0
+  },
+  "targets": [
+   {
+    "p": 0.2544,
+    "r": 1.5789473684210664,
+    "pct": 1.1933174224343686,
+    "kind": "LONDON_H"
+   },
+   {
+    "p": 0.2559,
+    "r": 2.3684210526315996,
+    "pct": 1.7899761336515527,
+    "kind": "ASIA_H"
+   },
+   {
+    "p": 0.2594,
+    "r": 4.210526315789511,
+    "pct": 3.1821797931583164,
+    "kind": "H4SW"
+   }
+  ],
+  "evidence": [
+   {
+    "data": {
+     "3D": {
+      "trend": 1,
+      "broken": null,
+      "trend_eff": 1
+     },
+     "4D": {
+      "trend": 1,
+      "broken": null,
+      "trend_eff": 1
+     },
+     "D1": {
+      "trend": 0,
+      "broken": null,
+      "trend_eff": 0
+     },
+     "H1": {
+      "trend": -1,
+      "broken": null,
+      "trend_eff": -1
+     },
+     "H4": {
+      "trend": 0,
+      "broken": null,
+      "trend_eff": 0
+     },
+     "MN": {
+      "trend": 0,
+      "broken": null,
+      "trend_eff": 0
+     },
+     "W1": {
+      "trend": 1,
+      "broken": null,
+      "trend_eff": 1
+     },
+     "M15": {
+      "trend": 0,
+      "broken": null,
+      "trend_eff": 0
+     },
+     "_order": null
+    },
+    "role": "CONTEXT",
+    "module": "HTF MN/W1/4D/3D/D1/H4/H1",
+    "status": "USED",
+    "finding": "за напрямом: —; проти: H1",
+    "supports": -1
+   },
+   {
+    "data": {
+     "zone_parts": [
+      "OTE 62–79%",
+      "OB",
+      "FVG"
+     ],
+     "pos_in_h4_range": 0.4658644067796619
+    },
+    "role": "EVIDENCE",
+    "module": "OB / FVG / OTE (premium-discount)",
+    "status": "USED",
+    "finding": "зона в discount діапазону H4 (47%): ЗА LONG",
+    "supports": 1
+   },
+   {
+    "data": {
+     "kind": "W1L",
+     "level": 0.2502,
+     "retests": 9,
+     "cross_bars_ago": 31,
+     "bars_below_before": 224
+    },
+    "role": "EVIDENCE",
+    "module": "Gerchik mirror level + люфт",
+    "status": "USED",
+    "finding": "mirror W1L 0.2502: був опором, ретестів 9; люфт: медіана 15 проколів цього рівня",
+    "supports": 1
+   },
+   {
+    "data": {
+     "range": {
+      "end": 111,
+      "low": 0.2448,
+      "high": 0.2563,
+      "start": 92
+     },
+     "events": []
+    },
+    "role": "EVIDENCE",
+    "module": "Wyckoff (spring/upthrust, тест)",
+    "status": "USED",
+    "finding": "фаза не визначена",
+    "supports": 0
+   },
+   {
+    "data": [
+     {
+      "why": "імпульс 0.0088 ≥3×ATR, відкат 37%",
+      "kind": "flag",
+      "side": "LONG",
+      "level": 0.24368,
+      "lines": [
+       {
+        "p0": 0.2561,
+        "p1": 0.24368,
+        "t0": 1791734400.0,
+        "t1": 1791799200.0
+       },
+       {
+        "p0": 0.25264,
+        "p1": 0.24976,
+        "t0": 1791734400.0,
+        "t1": 1791799200.0
+       }
+      ],
+      "target": 0.26007,
+      "confirmed": true,
+      "confirm_idx": 68
+     }
+    ],
+    "role": "EVIDENCE",
+    "module": "Bulkowski (формалізовані фігури)",
+    "status": "USED",
+    "finding": "підтверджені за напрямом: flag",
+    "supports": 1
+   },
+   {
+    "data": {
+     "edge": 0.2411767589642085
+    },
+    "role": "CONTEXT",
+    "module": "regression channel",
+    "status": "USED",
+    "finding": "межа каналу 0.241177 поза зоною; нахил +0.0001623",
+    "supports": 0
+   },
+   {
+    "data": {
+     "cvd": 5424110.0,
+     "share": 0.026809556729082536
+    },
+    "role": "EVIDENCE",
+    "module": "volume / taker-delta / CVD",
+    "status": "USED",
+    "finding": "CVD з моменту події +5.424e+06 (+3% обсягу): ЗА LONG",
+    "supports": 1
+   },
+   {
+    "data": {
+     "fib": {
+      "ote": [
+       0.2535922,
+       0.2539786
+      ],
+      "anchors": {
+       "low": 0.2531,
+       "high": 0.2554
+      },
+      "extensions": [
+       {
+        "level": 1.272,
+        "price": 0.2560256
+       },
+       {
+        "level": 1.618,
+        "price": 0.25682140000000003
+       },
+       {
+        "level": 2.618,
+        "price": 0.25912140000000006
+       }
+      ]
+     },
+     "candle": {
+      "i": 472,
+      "tf": "M15",
+      "ts": 1791780300.0,
+      "atr": 0.001335714285714321,
+      "low": 0.2531,
+      "body": 0.0012999999999999678,
+      "high": 0.2554,
+      "open": 0.2534,
+      "close": 0.2547,
+      "delta": 2224971.0,
+      "range": 0.0023000000000000242,
+      "params": {
+       "ext": [
+        1.272,
+        1.618,
+        2.618
+       ],
+       "ote": [
+        0.618,
+        0.786
+       ],
+       "vol_x": 2.0,
+       "vol_sma": 20,
+       "atr_period": 14,
+       "range_atr_x": 1.2
+      },
+      "volume": 15732193.0,
+      "version": "sc-ours-1",
+      "vol_rel": 2.237625184557899,
+      "body_atr": 0.9732620320855118,
+      "delta_dir": "LONG",
+      "direction": "LONG",
+      "provenance": "OUR_IMPLEMENTATION",
+      "manipulation": false
+     }
+    },
+    "role": "EVIDENCE",
+    "module": "Strong Candle (наша реалізація sc-ours-1)",
+    "status": "USED",
+    "finding": "сильна свічка M15 за напрямом: тіло 1.0 ATR, обсяг ×2.2, дельта LONG; зона входу не перетинає її OTE 61,8–78,6 %",
+    "supports": 0
+   },
+   {
+    "data": {
+     "funding": {
+      "symbol": "ADAUSDT",
+      "time_ms": 1791804640000,
+      "mark_price": 0.25131353,
+      "index_price": 0.25149303,
+      "funding_rate_pct": 0.009405
+     },
+     "long_short": {
+      "trend": "up",
+      "symbol": "ADAUSDT",
+      "history": [
+       {
+        "ratio": 1.9878,
+        "long_pct": 0.6653,
+        "short_pct": 0.3347,
+        "timestamp": "2026-10-12T08:00:00+00:00"
+       },
+       {
+        "ratio": 2.0175,
+        "long_pct": 0.6686,
+        "short_pct": 0.3314,
+        "timestamp": "2026-10-12T09:00:00+00:00"
+       },
+       {
+        "ratio": 2.0057,
+        "long_pct": 0.6673,
+        "short_pct": 0.3327,
+        "timestamp": "2026-10-12T10:00:00+00:00"
+       },
+       {
+        "ratio": 1.9922,
+        "long_pct": 0.6658,
+        "short_pct": 0.3342,
+        "timestamp": "2026-10-12T11:00:00+00:00"
+       }
+      ],
+      "current_ratio": 1.9922
+     },
+     "liquidations": {
+      "current_price": 0.2513,
+      "liq_zone_above": 0.25681259999999995,
+      "liq_zone_below": 0.24560780000000001
+     }
+    },
+    "role": "RESEARCH",
+    "module": "OI / funding / L:S / ліквідації",
+    "status": "USED",
+    "finding": "зібрано: funding, long_short, liquidations",
+    "supports": 0
+   },
+   {
+    "data": {
+     "micro_bos": false
+    },
+    "role": "EVIDENCE",
+    "module": "M5/M1 тригер",
+    "status": "USED",
+    "finding": "M5: закриття вище максимуму 3 попередніх барів — ні",
+    "supports": 0
+   },
+   {
+    "data": null,
+    "role": "NOT_CONNECTED",
+    "module": "DOM / order book",
+    "status": "NOT_CONNECTED",
+    "finding": "немає надійного джерела",
+    "supports": 0
+   },
+   {
+    "data": null,
+    "role": "NOT_CONNECTED",
+    "module": "GEX / options",
+    "status": "NOT_CONNECTED",
+    "finding": "немає джерела",
+    "supports": 0
+   },
+   {
+    "data": null,
+    "role": "NOT_CONNECTED",
+    "module": "макро-календар",
+    "status": "NOT_CONNECTED",
+    "finding": "office_calendar не підключено до Office2",
+    "supports": 0
+   }
+  ],
+  "integral": {
+   "for": [
+    "зона в discount діапазону H4 (47%): ЗА LONG",
+    "mirror W1L 0.2502: був опором, ретестів 9; люфт: медіана 15 проколів цього рівня",
+    "підтверджені за напрямом: flag",
+    "CVD з моменту події +5.424e+06 (+3% обсягу): ЗА LONG",
+    "відносна сила: ЗА LONG (монета сильніша за BTC на +0,34 п.п.)"
+   ],
+   "why": "подія на старшій локації: W1L 0.2502; стан TF: W1 вгору, D1 діапазон, H4 діапазон, H1 вниз",
+   "inputs": [
+    {
+     "name": "старша структура H4/D1 (trend_eff)",
+     "role": "GATE (умовно)",
+     "value": {
+      "D1": 0,
+      "H1": -1,
+      "H4": 0,
+      "W1": 1
+     },
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "локація події (HTF/LOCAL)",
+     "role": "GATE (умовно)",
+     "value": "W1L 0.2502",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "доказ повернення H1",
+     "role": "GATE (умовно)",
+     "value": false,
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "HTF MN/W1/4D/3D/D1/H4/H1",
+     "role": "CONTEXT",
+     "value": "за напрямом: —; проти: H1",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "OB / FVG / OTE (premium-discount)",
+     "role": "EVIDENCE",
+     "value": "зона в discount діапазону H4 (47%): ЗА LONG",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "Gerchik mirror level + люфт",
+     "role": "EVIDENCE",
+     "value": "mirror W1L 0.2502: був опором, ретестів 9; люфт: медіана 15 проколів цього рівня",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "Wyckoff (spring/upthrust, тест)",
+     "role": "EVIDENCE",
+     "value": "фаза не визначена",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "Bulkowski (формалізовані фігури)",
+     "role": "EVIDENCE",
+     "value": "підтверджені за напрямом: flag",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "regression channel",
+     "role": "CONTEXT",
+     "value": "межа каналу 0.241177 поза зоною; нахил +0.0001623",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "volume / taker-delta / CVD",
+     "role": "EVIDENCE",
+     "value": "CVD з моменту події +5.424e+06 (+3% обсягу): ЗА LONG",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "Strong Candle (наша реалізація sc-ours-1)",
+     "role": "EVIDENCE",
+     "value": "сильна свічка M15 за напрямом: тіло 1.0 ATR, обсяг ×2.2, дельта LONG; зона входу не перетинає її OTE 61,8–78,6 %",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "OI / funding / L:S / ліквідації",
+     "role": "RESEARCH",
+     "value": "зібрано: funding, long_short, liquidations",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "M5/M1 тригер",
+     "role": "EVIDENCE",
+     "value": "M5: закриття вище максимуму 3 попередніх барів — ні",
+     "status": "USED",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "DOM / order book",
+     "role": "NOT_CONNECTED",
+     "value": "немає надійного джерела",
+     "status": "NOT_CONNECTED",
+     "evaluated": false,
+     "did_affect_decision": false
+    },
+    {
+     "name": "GEX / options",
+     "role": "NOT_CONNECTED",
+     "value": "немає джерела",
+     "status": "NOT_CONNECTED",
+     "evaluated": false,
+     "did_affect_decision": false
+    },
+    {
+     "name": "макро-календар",
+     "role": "NOT_CONNECTED",
+     "value": "office_calendar не підключено до Office2",
+     "status": "NOT_CONNECTED",
+     "evaluated": false,
+     "did_affect_decision": false
+    },
+    {
+     "name": "BTC/ринок: відносна сила vs BTC (1г)",
+     "role": "EVIDENCE",
+     "value": "ЗА LONG",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "BTC/ринок: BTC за годину",
+     "role": "EVIDENCE",
+     "value": "НЕЙТРАЛЬНО",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "BTC/ринок: breadth альтів 4г",
+     "role": "EVIDENCE",
+     "value": "ПРОТИ LONG",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "BTC/ринок: тренд H4",
+     "role": "EVIDENCE",
+     "value": "НЕЙТРАЛЬНО",
+     "evaluated": true,
+     "did_affect_decision": false
+    },
+    {
+     "name": "BTC/ринок: тренд D1",
+     "role": "EVIDENCE",
+     "value": "НЕЙТРАЛЬНО",
+     "evaluated": true,
+     "did_affect_decision": false
+    }
+   ],
+   "against": [
+    "за напрямом: —; проти: H1",
+    "7% альтів вгору за 4 год: ПРОТИ LONG",
+    "рівень W1L 0.2502 ще до sweep приймався: 7 із 12 попередніх закриттів M15 були за ним (макс. заступ 0.72%) — це повторний тест після прийняття, а не свіжий grab ліквідності"
+   ],
+   "verdict": "ALLOW",
+   "location": {
+    "text": "W1L 0.2502",
+    "class": "HTF"
+   },
+   "proof_h1": false,
+   "counter_trend": false,
+   "classification": "HTF_LOCATION",
+   "level_provenance": {
+    "kind": "W1L",
+    "price": 0.2502,
+    "strength": 1,
+    "htf_location": true
+   },
+   "htf_override_weak_level": false,
+   "htf_countertrend_override": false,
+   "level_retest_after_acceptance": true
+  },
+  "risk_pct": 0.7557677008750935,
+  "sequence": [
+   {
+    "ok": true,
+    "step": "подія",
+    "value": "ПОВТОРНИЙ ТЕСТ прийнятого рівня 0.25 (не свіжий sweep)"
+   },
+   {
+    "ok": true,
+    "step": "зсув структури (MSS/BOS)",
+    "value": "закриття вище 0.252, тіло 1.30 ATR"
+   },
+   {
+    "ok": true,
+    "step": "нога зміщення і зона входу",
+    "value": "нога 0.25→0.2532 (2.6 ATR); зона OTE 62–79%+OB+FVG"
+   },
+   {
+    "ok": true,
+    "step": "ретрейс у зону",
+    "value": "low 0.251 торкнувся зони 0.250672–0.2513; закриття 0.2514"
+   },
+   {
+    "ok": true,
+    "step": "тригер M15",
+    "value": "закриття 0.2514 ≥ середини зони 0.250986"
+   },
+   {
+    "ok": true,
+    "step": "SL",
+    "value": "інвалідація 0.25 − люфт 0.0005 (медіана 15 проколів цього рівня) = 0.2495; 1.56 ATR(M15)"
+   },
+   {
+    "ok": true,
+    "step": "цілі від реальних рівнів",
+    "value": "TP1 LONDON_H 0.2544 (1.6R), TP2 ASIA_H 0.2559 (2.4R), TP3 H4SW 0.2594 (4.2R)"
+   }
+  ],
+  "alignment": [
+   {
+    "text": "відносна сила: ЗА LONG (монета сильніша за BTC на +0,34 п.п.)",
+    "value": 0.34367495511412605,
+    "factor": "відносна сила vs BTC (1г)",
+    "verdict": "ЗА LONG"
+   },
+   {
+    "text": "BTC −0,06% / 1г: НЕЙТРАЛЬНО",
+    "value": -0.06445676604350803,
+    "factor": "BTC за годину",
+    "verdict": "НЕЙТРАЛЬНО"
+   },
+   {
+    "text": "7% альтів вгору за 4 год: ПРОТИ LONG",
+    "value": 0.07407407407407407,
+    "factor": "breadth альтів 4г",
+    "verdict": "ПРОТИ LONG"
+   },
+   {
+    "text": "тренд H4 (діапазон): НЕЙТРАЛЬНО",
+    "value": 0,
+    "factor": "тренд H4",
+    "verdict": "НЕЙТРАЛЬНО"
+   },
+   {
+    "text": "тренд D1 (діапазон): НЕЙТРАЛЬНО",
+    "value": 0,
+    "factor": "тренд D1",
+    "verdict": "НЕЙТРАЛЬНО"
+   }
+  ],
+  "entry_zone": [
+   0.250672,
+   0.2513
+  ],
+  "zone_parts": [
+   "OTE 62–79%",
+   "OB",
+   "FVG"
+  ],
+  "invalidation": {
+   "why": "екстремум події (sweep/захист origin); SL із люфтом спрацьовує за торканням ціни, без очікування закриття M15",
+   "price": 0.25,
+   "buffer": 0.0004999999999999727,
+   "buffer_basis": "медіана 15 проколів цього рівня"
+  },
+  "trigger_level": 0.2513,
+  "evidence_counts": {
+   "for": 4,
+   "against": 1,
+   "neutral": 5,
+   "unavailable": 3
+  },
+  "obstacles_before_tp1": [
+   {
+    "p": 0.2532,
+    "r": 0.9473684210526223,
+    "pct": 0.7159904534606079,
+    "kind": "M15SW"
+   }
+  ]
+ },
+ "latency": {
+  "wake": 1791804602.0001042,
+  "emitted": 1791804662.4743752,
+  "bar_close": 1791804600.0,
+  "bar_ready": 1791804604.727918,
+  "fetch_done": 1791804638.6717114,
+  "cycle_start": 1791804606.5173879
+ },
+ "version": "o2-live-1",
+ "conflict": null,
+ "integral": {
+  "for": [
+   "зона в discount діапазону H4 (47%): ЗА LONG",
+   "mirror W1L 0.2502: був опором, ретестів 9; люфт: медіана 15 проколів цього рівня",
+   "підтверджені за напрямом: flag",
+   "CVD з моменту події +5.424e+06 (+3% обсягу): ЗА LONG",
+   "відносна сила: ЗА LONG (монета сильніша за BTC на +0,34 п.п.)"
+  ],
+  "why": "подія на старшій локації: W1L 0.2502; стан TF: W1 вгору, D1 діапазон, H4 діапазон, H1 вниз",
+  "inputs": [
+   {
+    "name": "старша структура H4/D1 (trend_eff)",
+    "role": "GATE (умовно)",
+    "value": {
+     "D1": 0,
+     "H1": -1,
+     "H4": 0,
+     "W1": 1
+    },
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "локація події (HTF/LOCAL)",
+    "role": "GATE (умовно)",
+    "value": "W1L 0.2502",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "доказ повернення H1",
+    "role": "GATE (умовно)",
+    "value": false,
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "HTF MN/W1/4D/3D/D1/H4/H1",
+    "role": "CONTEXT",
+    "value": "за напрямом: —; проти: H1",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "OB / FVG / OTE (premium-discount)",
+    "role": "EVIDENCE",
+    "value": "зона в discount діапазону H4 (47%): ЗА LONG",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "Gerchik mirror level + люфт",
+    "role": "EVIDENCE",
+    "value": "mirror W1L 0.2502: був опором, ретестів 9; люфт: медіана 15 проколів цього рівня",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "Wyckoff (spring/upthrust, тест)",
+    "role": "EVIDENCE",
+    "value": "фаза не визначена",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "Bulkowski (формалізовані фігури)",
+    "role": "EVIDENCE",
+    "value": "підтверджені за напрямом: flag",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "regression channel",
+    "role": "CONTEXT",
+    "value": "межа каналу 0.241177 поза зоною; нахил +0.0001623",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "volume / taker-delta / CVD",
+    "role": "EVIDENCE",
+    "value": "CVD з моменту події +5.424e+06 (+3% обсягу): ЗА LONG",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "Strong Candle (наша реалізація sc-ours-1)",
+    "role": "EVIDENCE",
+    "value": "сильна свічка M15 за напрямом: тіло 1.0 ATR, обсяг ×2.2, дельта LONG; зона входу не перетинає її OTE 61,8–78,6 %",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "OI / funding / L:S / ліквідації",
+    "role": "RESEARCH",
+    "value": "зібрано: funding, long_short, liquidations",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "M5/M1 тригер",
+    "role": "EVIDENCE",
+    "value": "M5: закриття вище максимуму 3 попередніх барів — ні",
+    "status": "USED",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "DOM / order book",
+    "role": "NOT_CONNECTED",
+    "value": "немає надійного джерела",
+    "status": "NOT_CONNECTED",
+    "evaluated": false,
+    "did_affect_decision": false
+   },
+   {
+    "name": "GEX / options",
+    "role": "NOT_CONNECTED",
+    "value": "немає джерела",
+    "status": "NOT_CONNECTED",
+    "evaluated": false,
+    "did_affect_decision": false
+   },
+   {
+    "name": "макро-календар",
+    "role": "NOT_CONNECTED",
+    "value": "office_calendar не підключено до Office2",
+    "status": "NOT_CONNECTED",
+    "evaluated": false,
+    "did_affect_decision": false
+   },
+   {
+    "name": "BTC/ринок: відносна сила vs BTC (1г)",
+    "role": "EVIDENCE",
+    "value": "ЗА LONG",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "BTC/ринок: BTC за годину",
+    "role": "EVIDENCE",
+    "value": "НЕЙТРАЛЬНО",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "BTC/ринок: breadth альтів 4г",
+    "role": "EVIDENCE",
+    "value": "ПРОТИ LONG",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "BTC/ринок: тренд H4",
+    "role": "EVIDENCE",
+    "value": "НЕЙТРАЛЬНО",
+    "evaluated": true,
+    "did_affect_decision": false
+   },
+   {
+    "name": "BTC/ринок: тренд D1",
+    "role": "EVIDENCE",
+    "value": "НЕЙТРАЛЬНО",
+    "evaluated": true,
+    "did_affect_decision": false
+   }
+  ],
+  "against": [
+   "за напрямом: —; проти: H1",
+   "7% альтів вгору за 4 год: ПРОТИ LONG",
+   "рівень W1L 0.2502 ще до sweep приймався: 7 із 12 попередніх закриттів M15 були за ним (макс. заступ 0.72%) — це повторний тест після прийняття, а не свіжий grab ліквідності"
+  ],
+  "verdict": "ALLOW",
+  "location": {
+   "text": "W1L 0.2502",
+   "class": "HTF"
+  },
+  "proof_h1": false,
+  "counter_trend": false,
+  "classification": "HTF_LOCATION",
+  "level_provenance": {
+   "kind": "W1L",
+   "price": 0.2502,
+   "strength": 1,
+   "htf_location": true
+  },
+  "htf_override_weak_level": false,
+  "htf_countertrend_override": false,
+  "level_retest_after_acceptance": true
+ },
+ "sequence": [
+  {
+   "ok": true,
+   "step": "подія",
+   "value": "ПОВТОРНИЙ ТЕСТ прийнятого рівня 0.25 (не свіжий sweep)"
+  },
+  {
+   "ok": true,
+   "step": "зсув структури (MSS/BOS)",
+   "value": "закриття вище 0.252, тіло 1.30 ATR"
+  },
+  {
+   "ok": true,
+   "step": "нога зміщення і зона входу",
+   "value": "нога 0.25→0.2532 (2.6 ATR); зона OTE 62–79%+OB+FVG"
+  },
+  {
+   "ok": true,
+   "step": "ретрейс у зону",
+   "value": "low 0.251 торкнувся зони 0.250672–0.2513; закриття 0.2514"
+  },
+  {
+   "ok": true,
+   "step": "тригер M15",
+   "value": "закриття 0.2514 ≥ середини зони 0.250986"
+  },
+  {
+   "ok": true,
+   "step": "SL",
+   "value": "інвалідація 0.25 − люфт 0.0005 (медіана 15 проколів цього рівня) = 0.2495; 1.56 ATR(M15)"
+  },
+  {
+   "ok": true,
+   "step": "цілі від реальних рівнів",
+   "value": "TP1 LONDON_H 0.2544 (1.6R), TP2 ASIA_H 0.2559 (2.4R), TP3 H4SW 0.2594 (4.2R)"
+  }
+ ],
+ "alignment": [
+  {
+   "text": "відносна сила: ЗА LONG (монета сильніша за BTC на +0,34 п.п.)",
+   "value": 0.34367495511412605,
+   "factor": "відносна сила vs BTC (1г)",
+   "verdict": "ЗА LONG"
+  },
+  {
+   "text": "BTC −0,06% / 1г: НЕЙТРАЛЬНО",
+   "value": -0.06445676604350803,
+   "factor": "BTC за годину",
+   "verdict": "НЕЙТРАЛЬНО"
+  },
+  {
+   "text": "7% альтів вгору за 4 год: ПРОТИ LONG",
+   "value": 0.07407407407407407,
+   "factor": "breadth альтів 4г",
+   "verdict": "ПРОТИ LONG"
+  },
+  {
+   "text": "тренд H4 (діапазон): НЕЙТРАЛЬНО",
+   "value": 0,
+   "factor": "тренд H4",
+   "verdict": "НЕЙТРАЛЬНО"
+  },
+  {
+   "text": "тренд D1 (діапазон): НЕЙТРАЛЬНО",
+   "value": 0,
+   "factor": "тренд D1",
+   "verdict": "НЕЙТРАЛЬНО"
+  }
+ ],
+ "direction": "LONG",
+ "decided_ts": 1791804600.0,
+ "market_map": {
+  "tfs": [
+   {
+    "tf": "MN",
+    "note": "місячні бари з фіду; swing n=1; останній бар — поточний місяць (не враховано)",
+    "zone": "premium",
+    "range": {
+     "hi": 0.2955,
+     "lo": 0.1381,
+     "bars": 6
+    },
+    "trend": 0,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.7198221092757308,
+    "trend_eff": 0,
+    "with_trade": false,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.1381,
+    "last_swing_high": 0.2886
+   },
+   {
+    "tf": "W1",
+    "note": null,
+    "zone": "premium",
+    "range": {
+     "hi": 0.2886,
+     "lo": 0.1381,
+     "bars": 26
+    },
+    "trend": 1,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.7528239202657807,
+    "trend_eff": 1,
+    "with_trade": true,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.1901,
+    "last_swing_high": 0.2588
+   },
+   {
+    "tf": "4D",
+    "note": "ресемпл D1×4 (прив'язка до епохи)",
+    "zone": "premium",
+    "range": {
+     "hi": 0.2825,
+     "lo": 0.1532,
+     "bars": 20
+    },
+    "trend": 1,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.7594740912606345,
+    "trend_eff": 1,
+    "with_trade": true,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.1901,
+    "last_swing_high": 0.2588
+   },
+   {
+    "tf": "3D",
+    "note": "ресемпл D1×3 (прив'язка до епохи)",
+    "zone": "premium",
+    "range": {
+     "hi": 0.2825,
+     "lo": 0.1711,
+     "bars": 20
+    },
+    "trend": 1,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.7208258527827651,
+    "trend_eff": 1,
+    "with_trade": true,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.1901,
+    "last_swing_high": 0.2655
+   },
+   {
+    "tf": "D1",
+    "note": null,
+    "zone": "premium",
+    "range": {
+     "hi": 0.2825,
+     "lo": 0.1901,
+     "bars": 30
+    },
+    "trend": 0,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.6634199134199138,
+    "trend_eff": 0,
+    "with_trade": false,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.2235,
+    "last_swing_high": 0.2825
+   },
+   {
+    "tf": "H4",
+    "note": null,
+    "zone": "discount",
+    "range": {
+     "hi": 0.2825,
+     "lo": 0.2235,
+     "bars": 42
+    },
+    "trend": 0,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.47288135593220376,
+    "trend_eff": 0,
+    "with_trade": false,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.2448,
+    "last_swing_high": 0.2563
+   },
+   {
+    "tf": "H1",
+    "note": null,
+    "zone": "discount",
+    "range": {
+     "hi": 0.2594,
+     "lo": 0.2448,
+     "bars": 48
+    },
+    "trend": -1,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.4520547945205486,
+    "trend_eff": -1,
+    "with_trade": false,
+    "swing_stale": false,
+    "against_trade": true,
+    "outside_range": null,
+    "last_swing_low": 0.2484,
+    "last_swing_high": 0.2559
+   },
+   {
+    "tf": "M15",
+    "note": null,
+    "zone": "premium",
+    "range": {
+     "hi": 0.2563,
+     "lo": 0.2461,
+     "bars": 96
+    },
+    "trend": 0,
+    "broken": null,
+    "status": "USED",
+    "range_pos": 0.5196078431372569,
+    "trend_eff": 0,
+    "with_trade": false,
+    "swing_stale": false,
+    "against_trade": false,
+    "outside_range": null,
+    "last_swing_low": 0.2502,
+    "last_swing_high": 0.2532
+   },
+   {
+    "tf": "M5",
+    "note": "структура M5 не рахується; M5 використовується лише як підтвердження тригера (див. докази)",
+    "status": "NOT_CHECKED"
+   },
+   {
+    "tf": "M1",
+    "note": "структура M1 не рахується; M1 — лише для відстеження входу/TP/SL",
+    "status": "NOT_CHECKED"
+   }
+  ],
+  "pools_above": [
+   {
+    "p": 0.2532,
+    "kind": "M15SW",
+    "dist_r": 0.9473684210526223,
+    "dist_atr": 1.4823529411764433,
+    "dist_pct": 0.7159904534606079,
+    "dist_usd": 0.0017999999999999683,
+    "strength": 1
+   },
+   {
+    "p": 0.2544,
+    "kind": "LONDON_H",
+    "dist_r": 1.5789473684210664,
+    "dist_atr": 2.4705882352941178,
+    "dist_pct": 1.1933174224343686,
+    "dist_usd": 0.0030000000000000027,
+    "strength": 1
+   },
+   {
+    "p": 0.2559,
+    "kind": "ASIA_H",
+    "dist_r": 2.3684210526315996,
+    "dist_atr": 3.7058823529411766,
+    "dist_pct": 1.7899761336515527,
+    "dist_usd": 0.004500000000000004,
+    "strength": 1
+   },
+   {
+    "p": 0.2559,
+    "kind": "H1SW",
+    "dist_r": 2.3684210526315996,
+    "dist_atr": 3.7058823529411766,
+    "dist_pct": 1.7899761336515527,
+    "dist_usd": 0.004500000000000004,
+    "strength": 1
+   },
+   {
+    "p": 0.2559,
+    "kind": "M15SW",
+    "dist_r": 2.3684210526315996,
+    "dist_atr": 3.7058823529411766,
+    "dist_pct": 1.7899761336515527,
+    "dist_usd": 0.004500000000000004,
+    "strength": 1
+   }
+  ],
+  "pools_below": [
+   {
+    "p": 0.2502,
+    "kind": "LONDON_L",
+    "dist_r": 0.6315789473684441,
+    "dist_atr": 0.9882352941176745,
+    "dist_pct": 0.47732696897376065,
+    "dist_usd": 0.0012000000000000344,
+    "strength": 1
+   },
+   {
+    "p": 0.2502,
+    "kind": "M15SW",
+    "dist_r": 0.6315789473684441,
+    "dist_atr": 0.9882352941176745,
+    "dist_pct": 0.47732696897376065,
+    "dist_usd": 0.0012000000000000344,
+    "strength": 1
+   },
+   {
+    "p": 0.2492,
+    "kind": "M15SW",
+    "dist_r": 1.1578947368421184,
+    "dist_atr": 1.8117647058823576,
+    "dist_pct": 0.875099443118539,
+    "dist_usd": 0.0022000000000000075,
+    "strength": 1
+   },
+   {
+    "p": 0.2484,
+    "kind": "ASIA_L",
+    "dist_r": 1.5789473684210664,
+    "dist_atr": 2.4705882352941178,
+    "dist_pct": 1.1933174224343686,
+    "dist_usd": 0.0030000000000000027,
+    "strength": 1
+   },
+   {
+    "p": 0.2484,
+    "kind": "H1SW",
+    "dist_r": 1.5789473684210664,
+    "dist_atr": 2.4705882352941178,
+    "dist_pct": 1.1933174224343686,
+    "dist_usd": 0.0030000000000000027,
+    "strength": 1
+   }
+  ]
+ },
+ "version_id": "o2-brain-2.1",
+ "decided_utc": "2026-10-12T11:30:00+00:00",
+ "session_tag": {
+  "session": "LONDON",
+  "weekend": false,
+  "min_to_ny_open": 120.0,
+  "min_to_london_open": 1170.0
+ },
+ "learning_flags": {
+  "mode": "annotate",
+  "note": "кандидати з replay; READY не змінюють",
+  "flags": [],
+  "cost_r": 0.198
+ },
+ "data_provenance": {
+  "tf": "M15",
+  "note": "Brain читає свічки лише з ф'ючерсів Binance (office2/live.py KL_URL); спот і Bybit тут не використовуються",
+  "market": "USDⓈ-M Futures",
+  "source": "binance_futures",
+  "endpoint": "fapi.binance.com/fapi/v1/klines (прямий запит, без резервних джерел)",
+  "decision_ts": 1791804600.0,
+  "last_closed_bar_open_ts": 1791803700.0,
+  "last_closed_bar_close_ts": 1791804600.0
+ },
+ "emitted_wall_ts": 1791804662.4743738,
+ "evidence_counts": {
+  "for": 4,
+  "against": 1,
+  "neutral": 5,
+  "unavailable": 3
+ },
+ "evidence_status": "UNPROVEN",
+ "market_at_signal": {
+  "coin": {
+   "price": 0.2514,
+   "ret_1h": 0.279218189070618,
+   "ret_4h": -0.9456264775413725,
+   "ret_24h": 2.1121039805036546,
+   "atr15_pct": 0.4830094328901015,
+   "pos_24h_range": 0.5196078431372569,
+   "vol_regime_7d": 0.294238683127572
+  },
+  "market": {
+   "n_alts": 27,
+   "btc_reg4": 1,
+   "btc_regd": -1,
+   "eth_reg4": 0,
+   "btc_ret_1h": -0.06445676604350803,
+   "btc_ret_4h": -0.8094542159519658,
+   "eth_ret_1h": -0.24622539214035344,
+   "eth_ret_4h": -0.908369756264471,
+   "btc_ret_24h": 0.4650300083467007,
+   "eth_ret_24h": 1.891666033578998,
+   "breadth_up_1h": 0.5185185185185185,
+   "breadth_up_4h": 0.07407407407407407,
+   "breadth_up_24h": 0.8148148148148148,
+   "btc_vol_regime": 0.5473251028806584,
+   "median_alt_ret_4h": -1.1988716502115526,
+   "median_vol_regime": 0.448559670781893,
+   "median_alt_ret_24h": 2.040368582711727
+  },
+  "relative": {
+   "coin_ret_1h": 0.279218189070618,
+   "rs_vs_btc_1h": 0.34367495511412605,
+   "rs_vs_btc_4h": -0.13617226158940676,
+   "rs_vs_eth_4h": -0.037256721276901494,
+   "rs_vs_alts_4h": 0.2532451726701801,
+   "rs_vs_btc_24h": 1.6470739721569538
+  }
+ },
+ "alignment_summary": {
+  "for": 1,
+  "against": 1,
+  "neutral": 3
+ },
+ "valid_until_ts": 1791858600
+}

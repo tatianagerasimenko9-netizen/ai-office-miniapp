@@ -176,6 +176,12 @@ def signal_item(db: str, row: tuple, focus: bool) -> Dict[str, Any]:
         from office2 import levels as LVL
 
         item["levels"] = LVL.view_from_thesis(th)
+        try:
+            from office2 import daria_steps as DS
+
+            item["daria"] = DS.build(snap, valid_until_ts=vu, price_now=(ns or {}).get("price"))      # з заморожених фактів знімка; «ціна зараз» лише для стану входу
+        except Exception as exc:  # noqa: BLE001
+            item["daria"] = {"error": f"{type(exc).__name__}: {str(exc)[:80]}"}
         item["market_now"] = ({"ts_epoch": ns.get("ts_epoch"), "price": ns.get("price"), "market": ns.get("market"), "ret_1h": ns.get("ret_1h"), "rs_vs_btc_1h": ns.get("rs_vs_btc_1h")} if ns else None)
         item["changed"] = what_changed(snap, ns, miles)
         item["lifecycle"] = [{"level": m.get("level"), "touched_ts": m.get("touched_ts"), "sent_ts": m.get("sent_ts"), "price": m.get("price")} for m in miles]

@@ -44,13 +44,42 @@ def _ts(v: Any) -> Optional[float]:
 
 def record_plan(db: str, *, scenario_id: str, symbol: str, direction: str, tf: str, entry: Any, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
                 max_entry: Any = None, confirmed_ts: float, valid_until_ts: float, rejected: bool = False, reason: str = "",
-                confirm_msg_id: Any = None, gate: Optional[Dict[str, Any]] = None) -> None:
+                confirm_msg_id: Any = None, gate: Optional[Dict[str, Any]] = None, inval_px: Any = None) -> None:
     from office_bridge import log_event
 
     log_event(db, EV_PLAN, {"scenario_id": scenario_id, "symbol": str(symbol).upper(), "direction": str(direction).upper(), "tf": tf,
                             "entry": _f(entry), "sl": _f(sl), "tp1": _f(tp1), "tp2": _f(tp2), "tp3": _f(tp3), "max_entry": _f(max_entry),
                             "confirmed_ts": float(confirmed_ts), "valid_until_ts": float(valid_until_ts), "rejected": bool(rejected),
-                            "reason": reason, "confirm_msg_id": confirm_msg_id, "gate": gate or None}, scenario_id)
+                            "reason": reason, "confirm_msg_id": confirm_msg_id, "gate": gate or None, "inval_px": _f(inval_px)}, scenario_id)
+
+
+def first_m15_close_beyond(plan: Dict[str, Any], candles: Any, now: float, tf_sec: float = TF_SEC) -> Optional[float]:
+    """Момент (закриття M15), коли власна умова скасування сценарію виконана: ЗАКРИТТЯ закритої M15-свічки за рівнем inval_px (LONG — нижче, SHORT — вище).
+    Бари, що відкрились до підтвердження плану, не рахуються; прокол тінню без закриття скасуванням не є; M15 складається з молодших свічок лише коли всі вони закрились. Без inval_px — None."""
+    px = _f(plan.get("inval_px"))
+    if px is None or not isinstance(candles, list):
+        return None
+    long_ = str(plan.get("direction") or "LONG").upper() != "SHORT"
+    t_conf = float(plan["confirmed_ts"])
+    buckets: Dict[float, list] = {}
+    for c in candles:
+        if not isinstance(c, dict):
+            continue
+        t0, cl = _ts(c.get("ts")), _f(c.get("close"))
+        if t0 is None or cl is None:
+            continue
+        buckets.setdefault((t0 // TF_SEC) * TF_SEC, []).append((t0, cl))
+    for b in sorted(buckets):
+        if b < t_conf - 1e-6:
+            continue
+        if b + TF_SEC > now + 1e-6:
+            break
+        last = max(buckets[b])
+        if last[0] + tf_sec < b + TF_SEC - 1e-6:
+            continue      # M15-бар зібрано не повністю
+        if (last[1] < px) if long_ else (last[1] > px):
+            return b + TF_SEC
+    return None
 
 
 def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None, tf_sec: float = TF_SEC, live_tail: bool = False) -> Dict[str, Any]:
@@ -84,6 +113,7 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
     full_entry_coverage = (observed_start is not None and observed_start <= t_conf + tf_sec
                            and observed_end is not None and observed_end + tf_sec >= t_valid
                            and not coverage_gap)
+    inval_ts = first_m15_close_beyond(plan, candles, now, tf_sec)
     for c in candles if isinstance(candles, list) else []:
         t0 = _ts((c or {}).get("ts"))
         hi, lo = _f(c.get("high")), _f(c.get("low"))
@@ -92,6 +122,9 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
         if t0 + tf_sec > now and not (live_tail and filled):   # свічка ще формується: для вже відкритого входу її high/low (торкання TP/SL) беремо одразу — торкання не скасовується
             continue   # до підтвердження або свічка ще не закрита
         if not filled:
+            if inval_ts is not None and t0 >= inval_ts - 1e-6:      # сценарій скасовано закриттям M15 ДО входу: вхід, цілі й PnL після цього неможливі
+                out["at"]["INVALIDATED"] = inval_ts
+                return {**out, "status": "INVALIDATED", "result_at": inval_ts}
             if t0 >= t_valid:
                 return {**out, "status": "NOT_FILLED", "result_at": t_valid} if full_entry_coverage else out
             if lo <= e <= hi:
@@ -121,6 +154,9 @@ def simulate(plan: Dict[str, Any], candles: Any, now_ts: Optional[float] = None,
         if now - float(out["filled_at"]) > MAX_TRACK_SEC:
             return {**out, "status": out["reached"][-1] if out["reached"] else "OPEN_TIMEOUT", "result_at": now,
                     "mfe_pct": round(mfe, 3), "mae_pct": round(mae, 3)}
+    if not filled and inval_ts is not None:
+        out["at"]["INVALIDATED"] = inval_ts
+        return {**out, "status": "INVALIDATED", "result_at": inval_ts}
     if not filled and now > t_valid + tf_sec and full_entry_coverage:
         return {**out, "status": "NOT_FILLED", "result_at": t_valid}
     out.update(mfe_pct=round(mfe, 3) if filled else None, mae_pct=round(mae, 3) if filled else None)
@@ -277,6 +313,8 @@ def _levels_of(res: Dict[str, Any]) -> List[str]:
         lv.append("SL")
     if res.get("status") == "NOT_FILLED":
         lv.append("EXPIRED")
+    if res.get("status") == "INVALIDATED":
+        lv.append("INVALIDATED")
     return lv
 
 
@@ -348,7 +386,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         for lv in levels:
             if (sid, ct, lv) in seen:
                 continue
-            price = p.get({"ENTRY": "entry", "TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl", "EXPIRED": "entry"}[lv])
+            price = p.get({"ENTRY": "entry", "TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl", "EXPIRED": "entry", "INVALIDATED": "inval_px"}[lv])
             out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv,
                         "price": price, "confirm_msg_id": p.get("confirm_msg_id"), "silent": lv in SILENT_LEVELS,
                         "touched_ts": (res.get("at") or {}).get(lv), "src": src, "tf": tf})
