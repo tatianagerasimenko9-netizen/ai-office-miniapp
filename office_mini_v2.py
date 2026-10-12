@@ -973,12 +973,13 @@ def candles_payload(symbol: str, tf: str, limit: int = 180, end: Optional[int] =
         status = "DATA_OK"
         quote_mode = "polling_fixture"
     else:
-        from office_market_data import fetch_candles, fetch_candles_history
+        from office_market_data import fetch_candles, fetch_candles_history, priority
 
-        if end:
-            raw = fetch_candles_history(symbol, interval, lim, end_ms=int(end) * 1000 - 1)
-        else:
-            raw = fetch_candles(symbol, interval, lim, allow_fallback=True)
+        with priority():      # запит користувача (малий): не чекає на власну м'яку паузу ваги, яку з'їли скани Worker після рестарту; справжня пауза 429/418 діє
+            if end:
+                raw = fetch_candles_history(symbol, interval, lim, end_ms=int(end) * 1000 - 1)
+            else:
+                raw = fetch_candles(symbol, interval, lim)      # лише ф'ючерси Binance: без спота/Bybit — немає даних → явна помилка графіка з «Повторити»
         if isinstance(raw, list) and raw:
             for r in raw:
                 ts = r.get("ts")

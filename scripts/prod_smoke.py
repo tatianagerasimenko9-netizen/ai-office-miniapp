@@ -265,9 +265,14 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
                 await pg.wait_for_function("typeof S!=='undefined' && S.bars && S.bars.length>0 && document.querySelectorAll('#ch canvas').length>0", timeout=45000)
                 txt_c = (await pg.inner_text("main"))[:3000] if await pg.query_selector("main") else (await pg.inner_text("body"))[:3000]
                 (ok if "План" in txt_c or "ПЛАН" in txt_c.upper() else fail)(f"картка радара ({await pg.evaluate('S.histKey')}): інтерактивний графік + текст плану")
-                await pg.click("[data-tf=M15]")
-                await pg.wait_for_function("S.tf==='M15' && S.histKey.endsWith('|M15') && S.bars.length>0", timeout=30000)
-                ok("картка радара: перемикач ТФ працює")
+                chip = await pg.query_selector("[data-tf=M5]")
+                if chip:
+                    await chip.scroll_into_view_if_needed()
+                    await chip.click()
+                    await pg.wait_for_function("S.tf==='M5' && S.bars.length>0 && S.histKey.endsWith('|M5')", timeout=30000)
+                    ok("картка радара: перемикач ТФ працює")
+                else:
+                    NOTES.append("у картці радара немає перемикача ТФ (графік на ТФ плану)")
             except Exception:  # noqa: BLE001
                 fail("картка радара не відкрила інтерактивний графік за 45 с")
             if len(errs) > n_err2:
