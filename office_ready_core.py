@@ -130,14 +130,15 @@ def unfinished_ready(db: str, *, now: Optional[float] = None) -> List[Dict[str, 
     import office_signal_track as trk
 
     now = time.time() if now is None else now
-    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in trk._events(db, trk.EV_RESULT)}
+    horizon = now - (MAX_OPEN_SEC + 2 * 86400)      # план старший за вікно (строк дії + MAX_OPEN_SEC) нижче все одно відкидається: не читаємо й не розбираємо всю історію журналу
+    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in trk._events(db, trk.EV_RESULT, horizon)}
     # Lifecycle 1m (SCENARIO_MILESTONE) — друге джерело правди: 15m-симулятор SIGNAL_RESULT може оголосити результат РАНІШЕ, ніж 1m бачить вхід
     # (KAITO 05.10: «результат» 04.10 22:38, а ENTRY 00:16, SL 04:33). Якщо ENTRY є, а SL/TP/EXPIRED ще немає — ідея ще в позиції, не завершена.
     lc: Dict[Tuple[Any, Any], set] = {}
-    for e in trk._events(db, trk.EV_MILESTONE):
+    for e in trk._events(db, trk.EV_MILESTONE, horizon):
         lc.setdefault((e["p"].get("scenario_id"), e["p"].get("confirmed_ts")), set()).add(str(e["p"].get("level") or ""))
     out = []
-    for ev in trk._events(db, trk.EV_PLAN):
+    for ev in trk._events(db, trk.EV_PLAN, horizon):
         p = ev["p"]
         k = (p.get("scenario_id"), p.get("confirmed_ts"))
         lv = lc.get(k, set())

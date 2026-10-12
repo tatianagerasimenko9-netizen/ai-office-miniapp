@@ -694,6 +694,8 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
                     """
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_type_id ON office_events(event_type, id)")      # без нього кожен запит за event_type сканував 177 МБ (4–5 с)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_office_events_type_ts ON office_events(event_type, ts_utc)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
@@ -888,6 +890,8 @@ def init_office_db(db_path: str = "office_bridge.db") -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_signal ON office_events(signal_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_type_id ON office_events(event_type, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_office_events_type_ts ON office_events(event_type, ts_utc)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_decisions_signal ON office_decisions(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_office_messages_signal ON office_messages(signal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol ON trade_journal(symbol)")
