@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: ['claude/eager-pascal-t9e1ac']
-    paths: ['.github/workflows/replay-context.yml']
+    paths: ['.github/workflows/replay-context.yml', 'office2/learning/counterfactual.py']
 
 permissions:
   contents: read
@@ -85,3 +85,52 @@ jobs:
           path: |
             aggregate.json
             replay_context.json
+  pooled:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-A-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-B-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-C-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-D-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-E-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-F-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-G-*
+          path: parts
+      - name: Pooled study A–G
+        run: |
+          set -o pipefail
+          python -u scripts/replay_pooled_study.py parts replay_pooled.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-pooled-all
+          path: replay_pooled.json

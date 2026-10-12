@@ -23,7 +23,7 @@ SWING_BUFFER_ATR = 0.25
 BOS_TTL_BARS = 4
 FEE_RT_PCT = RP.DEFAULT_FEE_RT_PCT
 SLIP_BPS = RP.DEFAULT_SLIPPAGE_RT_BPS
-VARIANTS = ["V0_current", "V1_delay_15m", "V2_delay_30m", "V3_delay_60m", "V4_sl_plus_0.5atr", "V5_sl_plus_1.0atr", "V6_limit_retest", "V7_structural_sl", "V8_bos_confirm"]
+VARIANTS = ["V0_current", "V1_delay_15m", "V2_delay_30m", "V3_delay_60m", "V4_sl_plus_0.5atr", "V5_sl_plus_1.0atr", "V6_limit_retest", "V7_structural_sl", "V8_bos_confirm", "V9_be_after_1R", "V10_be_after_0.5R"]
 
 
 def _compact(s: Dict[str, Any]) -> Dict[str, Any]:
@@ -38,6 +38,40 @@ def _sim(m15, i, ev, *, sl=None, delay=0.0):
     rr = abs(ev["tp1"] - ev["entry"]) / risk
     return _compact(RP.simulate(m15, i, ev["dir"], ev["entry"], sl, ev["tp1"], rr, risk / ev["entry"] * 100.0,
                                 fee_rt_pct=FEE_RT_PCT, slippage_rt_bps=SLIP_BPS, entry_delay_sec=delay, entry_ttl_sec=4 * 3600))
+
+
+def _be(m15, i, ev, be_r):
+    """V9/V10 — супровід: після того як екстремум угоди пройшов +be_r·R, SL переноситься на вхід (діє з НАСТУПНОГО бару, SL перед TP в одному барі). Гіпотеза для shadow, не правило."""
+    sg = 1.0 if ev["dir"] == "LONG" else -1.0
+    fill_i = i + 1
+    n = len(m15["t"])
+    if fill_i >= n:
+        return {"outcome": "NO_DATA", "r_net": None, "bars": 0}
+    entry, sl, tp1 = float(ev["entry"]), float(ev["sl"]), float(ev["tp1"])
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return {"outcome": "NO_DATA", "r_net": None, "bars": 0}
+    r_tp = abs(tp1 - entry) / risk
+    cur, k = sl, 0
+    h, l, c = m15["h"], m15["l"], m15["c"]
+    end = min(n, fill_i + RP.HORIZON_BARS)
+    out, rg = "OPEN", None
+    for j in range(fill_i, end):
+        k = j - fill_i + 1
+        if (sg > 0 and l[j] <= cur) or (sg < 0 and h[j] >= cur):
+            rg = (cur - entry) * sg / risk
+            out = "SL" if rg < -1e-9 else "BE"
+            break
+        if (sg > 0 and h[j] >= tp1) or (sg < 0 and l[j] <= tp1):
+            rg, out = r_tp, "TP1"
+            break
+        fav = ((h[j] - entry) if sg > 0 else (entry - l[j])) / risk
+        if fav >= be_r:
+            cur = entry
+    if rg is None:
+        rg = float(sg * (c[end - 1] - entry) / risk)
+    costs = FEE_RT_PCT + SLIP_BPS / 100.0
+    return {"outcome": out, "r_net": RP.SIM.net_r(rg, risk / entry * 100.0, costs), "bars": k}
 
 
 def _limit(m15, i, ev):
@@ -91,7 +125,8 @@ def per_event(events: List[Dict[str, Any]], m15) -> List[Dict[str, Any]]:
         v = {"V0_current": _compact(RP.simulate(m15, i, ev["dir"], ev["entry"], ev["sl"], ev["tp1"], ev["r_tp1"], ev["risk_pct"], fee_rt_pct=FEE_RT_PCT, slippage_rt_bps=SLIP_BPS)),
              "V1_delay_15m": _sim(m15, i, ev, delay=900.0), "V2_delay_30m": _sim(m15, i, ev, delay=1800.0), "V3_delay_60m": _sim(m15, i, ev, delay=3600.0),
              "V4_sl_plus_0.5atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 0.5 * a), "V5_sl_plus_1.0atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 1.0 * a),
-             "V6_limit_retest": _limit(m15, i, ev), "V7_structural_sl": _sim(m15, i, ev, sl=_structural_sl(m15, i, ev, a)), "V8_bos_confirm": _bos(m15, i, ev)}
+             "V6_limit_retest": _limit(m15, i, ev), "V7_structural_sl": _sim(m15, i, ev, sl=_structural_sl(m15, i, ev, a)), "V8_bos_confirm": _bos(m15, i, ev),
+             "V9_be_after_1R": _be(m15, i, ev, 1.0), "V10_be_after_0.5R": _be(m15, i, ev, 0.5)}
         out.append({"symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
                     "late": bool(ev.get("late")), "f": ev.get("f"), "atr_pct": round(a / max(ev["entry"], 1e-9) * 100, 3), "risk_pct": ev["risk_pct"], "r_tp1": ev["r_tp1"],
                     **SS.session_of(float(ev["ts_bar"])), "variants": v})

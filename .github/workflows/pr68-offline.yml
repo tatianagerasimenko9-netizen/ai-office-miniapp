@@ -174,6 +174,7 @@ jobs:
           python scripts/test_data_provenance.py
           python scripts/test_daria_steps.py
           python scripts/test_events_perf.py
+          python scripts/test_counterfactual_be.py
 
   mini-app-ui-smoke:
     runs-on: ubuntu-latest

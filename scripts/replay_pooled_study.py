@@ -37,7 +37,8 @@ def load(root):
                 if v.get("r_net") is None or not r.get("risk_pct"):
                     continue
                 cr = COST_PCT / float(r["risk_pct"])
-                rows.append({"per": per, "sym": r.get("symbol") or j["symbol"], "dir": r["dir"], "ts": float(r["ts_bar"]), "net": float(v["r_net"]), "gross": float(v["r_net"]) + cr, "cost_r": cr,
+                vv = r["variants"]
+                rows.append({"v9": (vv.get("V9_be_after_1R") or {}).get("r_net"), "v10": (vv.get("V10_be_after_0.5R") or {}).get("r_net"), "per": per, "sym": r.get("symbol") or j["symbol"], "dir": r["dir"], "ts": float(r["ts_bar"]), "net": float(v["r_net"]), "gross": float(v["r_net"]) + cr, "cost_r": cr,
                              "risk_pct": float(r["risk_pct"]), "out": v.get("outcome"), "session": r.get("session"), "late": bool(r.get("late")), "r_tp1": r.get("r_tp1")})
     return rows
 
@@ -160,6 +161,21 @@ def main(root, out="replay_pooled.json"):
     P("\n## 7. LATE_SWEEP (рівень уже приймався) vs решта")
     P(st([r for r in rows if r["late"]], "net", "late=True"))
     P(st([r for r in rows if not r["late"]], "net", "late=False"))
+    P("\n## 8. Супровід (shadow): беззбитковість після +1R / +0,5R проти V0 на ТИХ САМИХ подіях (парна різниця)")
+    for key, lab in (("v9", "V9 BE після +1R"), ("v10", "V10 BE після +0,5R")):
+        sub = [r for r in rows if r.get(key) is not None]
+        if not sub:
+            P(f"{lab}: даних немає (артефакти без цього варіанту)")
+            continue
+        for nm, grp in (("усі", None), ("A–C", DISCOVERY), ("D–G", HOLDOUT)):
+            g = [r for r in sub if grp is None or r["per"] in grp]
+            by = defaultdict(list)
+            for r in g:
+                by[(r["per"], r["ts"])].append(r[key] - r["net"])
+            d = [r[key] - r["net"] for r in g]
+            c = ci(by)
+            P(f"{lab} · {nm}: n={len(g)} E[R] варіанта={statistics.mean(r[key] for r in g):+.3f} V0={statistics.mean(r['net'] for r in g):+.3f} Δ={statistics.mean(d):+.3f}" + (f" CI[{c[0]:+.3f};{c[1]:+.3f}]" if c else ""))
+        P("  Δ за вікнами: " + ", ".join(f"{per}:{statistics.mean([r[key] - r['net'] for r in sub if r['per'] == per]):+.3f}" for per in sorted(WIN) if any(r['per'] == per for r in sub)))
     txt = "\n".join(L)
     print(txt)
     Path(out).write_text(json.dumps({"report": txt}, ensure_ascii=False, default=float))
