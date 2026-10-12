@@ -1,0 +1,38 @@
+name: Quality study (independent 1m recompute, read-only)
+
+# Незалежний перерахунок paper-угод на свічках Binance Futures (data.binance.vision): контекст без майбутнього, контрфактуальні варіанти, випадкова нульова модель.
+# Нічого не пише в БД/Render/Telegram. Результат — у логах кроку та у summary.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/quality-study.yml', 'scripts/quality_study.py', 'scripts/fixtures/paper_rows_*.json']
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Доступність fapi (діагностика)
+        run: curl -sS -m 15 -o /dev/null -w "fapi http=%{http_code}\n" "https://fapi.binance.com/fapi/v1/ping" || true
+      - name: Study
+        run: |
+          set -o pipefail
+          F=$(ls scripts/fixtures/paper_rows_*.json | sort | tail -1)
+          python -u scripts/quality_study.py "$F" quality_study.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-study
+          path: quality_study.json
+          if-no-files-found: ignore
