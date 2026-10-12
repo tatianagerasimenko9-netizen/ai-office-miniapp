@@ -130,3 +130,22 @@ def evaluate(card: Dict[str, Any], bars: List[Dict[str, Any]], now: float, cost_
                 r["delay_min_vs_touch"] = None if ev.get("touch") is None else round((r["entry_ts"] - bs[ev["touch"]]["ts"]) / 60.0, 1)
             out[name] = r
     return out
+
+
+def invalidation_guard(card: Dict[str, Any], bars: List[Dict[str, Any]], fill_ts: Optional[float], now: float) -> Dict[str, Any]:
+    """V3 (дослідницька гіпотеза): чинний ліміт від дотику, але БЕЗ входу, якщо стоп картки вже торкнувся ціни ДО бару заповнення (інвалідація сценарію до входу).
+    Джерело ідеї: кадри 225–226 («де інвалідація сценарію», стоп/інвалідація за точкою виносу) — що саме вважати інвалідацією до входу (дотик чи закриття), джерело не каже: НЕ ПІДТВЕРДЖЕНО.
+    Тут: low ≤ SL (LONG) / high ≥ SL (SHORT) у закритому барі, що починається не раніше бару сигналу і строго раніше бару заповнення."""
+    if fill_ts is None:
+        return {"blocked": False, "why": "заповнення не було"}
+    long_ = _long(card)
+    sl = float(card["sl"])
+    t0 = signal_bar_start(card)
+    for b in sorted(bars, key=lambda x: x["ts"]):
+        if b["ts"] < t0 or b["ts"] + M15 > now:
+            continue
+        if b["ts"] >= float(fill_ts):
+            break
+        if (b["low"] <= sl) if long_ else (b["high"] >= sl):
+            return {"blocked": True, "first_sl_touch_bar": b["ts"], "why": "стоп торкнувся ціни до заповнення"}
+    return {"blocked": False}

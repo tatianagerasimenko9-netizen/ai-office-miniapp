@@ -77,6 +77,15 @@ late_card = dict(card, sent_ts=T0 + 2 * M + 60)       # доставлено н�
 evl = RS.find_events(late_card, bars, now)
 check("доставка в барі 2: touch (бар 1) ігнорується до доставки; бар 2 формувався на момент сигналу і доступний", RS.signal_bar_start(late_card) == T0 + 2 * M and evl["touch"] is not None and evl["touch"] == 0, evl)
 
+# V3: стоп торкнувся ціни до бару заповнення → вхід заблоковано; після заповнення — ні
+g1 = RS.invalidation_guard(card, bad, T0 + 2 * M, now)
+check("V3: SL торкнувся до заповнення → blocked", g1["blocked"] is True and g1["first_sl_touch_bar"] == T0 + 1 * M, g1)
+g2 = RS.invalidation_guard(card, bars, T0 + 4 * M, now)
+check("V3: SL не торкався → не blocked", g2["blocked"] is False, g2)
+g3 = RS.invalidation_guard(card, bad, T0 + 1 * M, now)
+check("V3: SL у самому барі заповнення не блокує (це вже супровід угоди)", g3["blocked"] is False, g3)
+check("V3: заповнення не було → не blocked", RS.invalidation_guard(card, bars, None, now)["blocked"] is False)
+
 # позначка гіпотези
 check("результат маркований RESEARCH_HYPOTHESIS", r["label"] == "RESEARCH_HYPOTHESIS")
 

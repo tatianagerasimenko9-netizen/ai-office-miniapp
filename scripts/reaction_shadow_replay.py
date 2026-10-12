@@ -81,6 +81,7 @@ def run(cards, fetch, now):
         v0 = RW.evaluate_card(dict(c), closed, now)
         row["V0_actual_on_futures"] = {"status": v0["paper_status"], "r_net": v0["r_net"], "entry_ts": v0["entry_ts"], "reached": v0["reached"]}
         row.update(RS.evaluate(c, bars, now, C.cost_r))
+        row["V3_guard"] = RS.invalidation_guard(c, closed, v0["entry_ts"], now)
         row["card_entry"], row["card_sl"], row["card_tp1"] = c["entry"], c["sl"], c["tp1"]
         row["created_ts"], row["sent_ts"] = c["created_ts"], c.get("sent_ts")
         row["signal_bar_start"] = RS.signal_bar_start(c)
@@ -140,6 +141,10 @@ def summarize(rows):
     out = {"cards_with_data": len(ok), "cards_without_data": len(rows) - len(ok)}
 
     def v(r, k):
+        if k == "V3":
+            if r["V3_guard"]["blocked"]:
+                return {"status": "НЕМАЄ_ВХОДУ", "r_net": None}
+            k = "V0"
         if k == "V0":
             x = r["V0_actual_on_futures"]
             if x["status"] in ("WAITING_ENTRY", "NO_ENTRY"):
@@ -147,7 +152,7 @@ def summarize(rows):
             return {"status": "SL" if x["status"] == "SL" else ("TP1" if x["r_net"] is not None else "ВІДКРИТА"), "r_net": x["r_net"]}
         return r["V1_react" if k == "V1" else "V2_react_confirm"]
 
-    for k in ("V0", "V1", "V2"):
+    for k in ("V0", "V1", "V2", "V3"):
         xs = [v(r, k) for r in ok]
         ent = [x for x in xs if x["status"] not in ("НЕМАЄ_ВХОДУ", "ПРОПУЩЕНО_ЦІНА_ПОЗА_ПЛАНОМ", "НЕМАЄ_ЦІЛІ")]
         closed = [x["r_net"] for x in ent if x.get("r_net") is not None]
@@ -155,7 +160,7 @@ def summarize(rows):
         out[k] = {"entered": len(ent), "no_entry": len(xs) - len(ent), "SL": sum(1 for x in ent if x["status"] == "SL"), "TP1": sum(1 for x in ent if x["status"] == "TP1"),
                   "open_at_data_end": sum(1 for x in ent if x["status"] == "ВІДКРИТА"), "closed_n": len(closed), "sum_R_closed": round(sum(closed), 3),
                   "mean_R_closed": round(sum(closed) / len(closed), 3) if closed else None, "mean_R_ci95": boot_ci(closed), "rr_to_tp1_below_2": sum(1 for q in rr if q < 2.0), "rr_known": len(rr)}
-    for k in ("V1", "V2"):
+    for k in ("V1", "V2", "V3"):
         mw = [r["name"] for r in ok if (v(r, "V0").get("r_net") or 0) > 0 and v(r, k)["status"] in ("НЕМАЄ_ВХОДУ",)]
         al = [r["name"] for r in ok if v(r, "V0")["status"] == "SL" and v(r, k)["status"] in ("НЕМАЄ_ВХОДУ",)]
         both_sl = [r["name"] for r in ok if v(r, "V0")["status"] == "SL" and v(r, k)["status"] == "SL"]
@@ -190,6 +195,7 @@ def main() -> int:
         print("   V0 фактичний (ліміт від дотику):", r["V0_actual_on_futures"], flush=True)
         print("   V1 реакція:", fmt(r["V1_react"]), flush=True)
         print("   V2 реакція+підтвердження:", fmt(r["V2_react_confirm"]), flush=True)
+        print("   V3 (V0 без входу, якщо стоп торкнувся до заповнення):", r["V3_guard"], flush=True)
     print(f"карток {len(rows)}, без ф'ючерсних даних {nodata}", flush=True)
     print("ПІДСУМОК:", json.dumps(summ, ensure_ascii=False, indent=1), flush=True)
     return 0                                          # частина карток може бути без даних — це видно в підсумку, а не збій
