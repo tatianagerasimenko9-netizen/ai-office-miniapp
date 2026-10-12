@@ -458,7 +458,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
 
         stop_pct = (th.get("sizing") or {}).get("stop_pct")
         cr = _LC.cost_r(stop_pct)
-        lf = [f for f, on in (("COST_HEAVY", cr is not None and cr >= 0.25), ("OFF_HOURS", bool(sess_tag and sess_tag.get("session") == "OFF_HOURS"))) if on]
+        lf = learning_flag_codes(cr, sess_tag, mc, th["dir"], stop_pct)
         learn_flags = {"mode": "annotate", "cost_r": round(cr, 3) if cr is not None else None, "flags": lf, "note": "кандидати з replay; READY не змінюють"}
     except Exception:  # noqa: BLE001
         learn_flags = None
@@ -497,3 +497,17 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         snap["daria_steps"] = {"version": "daria-steps-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
+
+
+def learning_flag_codes(cr, sess_tag, mc, direction, stop_pct):
+    """Shadow-мітки READY (annotate, READY не змінюють). COST_HEAVY/OFF_HOURS — з replay; AGAINST_BTC_24H і RISK_LT_1PCT — кандидати з docs/office2/TRADING_QUALITY_2026-10-12.md (не правила)."""
+    lf = [f for f, on in (("COST_HEAVY", cr is not None and cr >= 0.25), ("OFF_HOURS", bool(sess_tag and sess_tag.get("session") == "OFF_HOURS"))) if on]
+    try:
+        b24 = (mc or {}).get("btc_ret_24h")
+        if b24 is not None and (float(b24) > 0) != (direction == "LONG"):
+            lf.append("AGAINST_BTC_24H")
+        if stop_pct is not None and float(stop_pct) < 1.0:
+            lf.append("RISK_LT_1PCT")
+    except Exception:  # noqa: BLE001
+        pass
+    return lf
