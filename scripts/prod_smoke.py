@@ -257,14 +257,26 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
         # --- радар: картка спостереження з графіком (шлях paintChart для WATCH), якщо є
         await pg.click("nav button[data-r=radar]")
         await pg.wait_for_timeout(2500)
-        card = await pg.query_selector("[data-id], .card.tap")
-        if card:
+        cards = await pg.query_selector_all("[data-lrc]")
+        if cards:
+            n_err2 = len(errs)
             try:
-                await card.click()
-                await pg.wait_for_function("typeof S!=='undefined' && S.bars && S.bars.length>0 && document.querySelectorAll('#chart canvas, #ch canvas').length>0", timeout=40000)
-                ok(f"картка радара відкрила інтерактивний графік ({await pg.evaluate('S.histKey')})")
+                await cards[0].click()
+                await pg.wait_for_function("typeof S!=='undefined' && S.bars && S.bars.length>0 && document.querySelectorAll('#ch canvas').length>0", timeout=45000)
+                txt_c = (await pg.inner_text("main"))[:3000] if await pg.query_selector("main") else (await pg.inner_text("body"))[:3000]
+                (ok if "План" in txt_c or "ПЛАН" in txt_c.upper() else fail)(f"картка радара ({await pg.evaluate('S.histKey')}): інтерактивний графік + текст плану")
+                chip = await pg.query_selector("[data-tf=M5]")
+                if chip:
+                    await chip.scroll_into_view_if_needed()
+                    await chip.click()
+                    await pg.wait_for_function("S.tf==='M5' && S.bars.length>0 && S.histKey.endsWith('|M5')", timeout=30000)
+                    ok("картка радара: перемикач ТФ працює")
+                else:
+                    NOTES.append("у картці радара немає перемикача ТФ (графік на ТФ плану)")
             except Exception:  # noqa: BLE001
-                NOTES.append("картка радара не відкрила графік за 40 с (можливо, немає карток із графіком)")
+                fail("картка радара не відкрила інтерактивний графік за 45 с")
+            if len(errs) > n_err2:
+                fail(f"JS-помилки в картці радара: {errs[n_err2:][:3]}")
         else:
             NOTES.append("у радарі зараз немає карток для відкриття")
         # --- помилка + «Повторити», коли бібліотека недоступна
