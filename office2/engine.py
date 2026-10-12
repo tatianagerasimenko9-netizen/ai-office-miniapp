@@ -384,6 +384,12 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
                 res["no_trade"] += 1
                 continue
+            sg_deny = stage_gate_reason(th)
+            if sg_deny:
+                th = dict(th, state="NO_TRADE", reason="етапи сценарію: " + sg_deny)
+                save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
+                res["no_trade"] += 1
+                continue
             if conflict_mode() != "off":
                 try:
                     cf = opposite_lifecycle(db, sym, th["dir"], now)
@@ -458,7 +464,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
 
         stop_pct = (th.get("sizing") or {}).get("stop_pct")
         cr = _LC.cost_r(stop_pct)
-        lf = learning_flag_codes(cr, sess_tag, mc, th["dir"], stop_pct)
+        lf = learning_flag_codes(cr, sess_tag, mc, th["dir"], stop_pct, stage_codes((th or {})))
         learn_flags = {"mode": "annotate", "cost_r": round(cr, 3) if cr is not None else None, "flags": lf, "note": "кандидати з replay; READY не змінюють"}
     except Exception:  # noqa: BLE001
         learn_flags = None
@@ -492,6 +498,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     try:
         from office2 import daria_steps as _DS
 
+        snap["stage_check"] = _DS.stage_check(th)        # аудит етапів на момент рішення (D1/H4, H1, доказ H1); гейт OFFICE2_STAGE_GATE за замовчуванням вимкнено
         snap["daria_steps"] = _DS.build(snap, valid_until_ts=now + READY_VALID_SEC)      # покрокова перевірка зверху вниз, заморожена на момент рішення (лише відображення, READY не змінює)
     except Exception as exc:  # noqa: BLE001
         snap["daria_steps"] = {"version": "daria-steps-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
@@ -499,7 +506,40 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
 
 
-def learning_flag_codes(cr, sess_tag, mc, direction, stop_pct):
+def stage_gate_mode() -> str:
+    """OFFICE2_STAGE_GATE: off (за замовчуванням) | block. block: READY → NO_TRADE, якщо D1/H4 або H1 ПРОТИ напряму (вимога власниці «старший ТФ задає контекст, молодший не суперечить»). Вмикається лише за явним рішенням власниці; M5/M1 не вимагаються (джерело не задає)."""
+    v = os.getenv("OFFICE2_STAGE_GATE", "off").strip().lower()
+    return v if v in ("off", "block") else "off"
+
+
+def stage_codes(th):
+    try:
+        from office2 import daria_steps as _DS
+
+        return list(_DS.stage_check(th).get("codes") or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def stage_gate_reason(th):
+    """None, якщо гейт вимкнений або етапи не суперечать; інакше причина (для NO_TRADE)."""
+    if stage_gate_mode() != "block":
+        return None
+    try:
+        from office2 import daria_steps as _DS
+
+        sc = _DS.stage_check(th)
+    except Exception:  # noqa: BLE001
+        return None
+    parts = []
+    if sc["d1_h4"] == "AGAINST":
+        parts.append("D1/H4 проти напряму")
+    if sc["h1"] == "AGAINST":
+        parts.append("H1 проти напряму")
+    return "; ".join(parts) or None
+
+
+def learning_flag_codes(cr, sess_tag, mc, direction, stop_pct, stage=None):
     """Shadow-мітки READY (annotate, READY не змінюють). COST_HEAVY/OFF_HOURS — з replay; AGAINST_BTC_24H і RISK_LT_1PCT — кандидати з docs/office2/TRADING_QUALITY_2026-10-12.md (не правила)."""
     lf = [f for f, on in (("COST_HEAVY", cr is not None and cr >= 0.25), ("OFF_HOURS", bool(sess_tag and sess_tag.get("session") == "OFF_HOURS"))) if on]
     try:
@@ -510,4 +550,7 @@ def learning_flag_codes(cr, sess_tag, mc, direction, stop_pct):
             lf.append("RISK_LT_1PCT")
     except Exception:  # noqa: BLE001
         pass
+    for code in (stage or []):
+        if code not in lf:
+            lf.append(code)
     return lf

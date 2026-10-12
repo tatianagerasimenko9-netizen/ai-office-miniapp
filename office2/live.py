@@ -139,6 +139,25 @@ def _rows_to_arr(rows: list, drop_open_at: Optional[float] = None) -> Optional[D
     return {"t": a[:, 0], "o": a[:, 1], "h": a[:, 2], "l": a[:, 3], "c": a[:, 4], "v": a[:, 5], "tbv": a[:, 6]}
 
 
+_TF_SEC = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
+
+
+def next_bar_close_after(tf: str, arr: Optional[Dict[str, np.ndarray]]) -> float:
+    """Момент, коли закриється бар, що йде ПІСЛЯ останнього закритого бару в arr: з цього моменту кеш старших ТФ уже не містить усіх закритих барів і мусить бути перезавантажений.
+    Для 1M — перший день місяця через один після місяця останнього бару (календарні межі); невідомий ТФ → +inf (діє лише TTL)."""
+    if arr is None or len(arr["t"]) == 0:
+        return float("-inf")
+    t_last = float(arr["t"][-1])
+    if tf == "1M":
+        d = datetime.fromtimestamp(t_last, tz=timezone.utc)
+        y, m = d.year, d.month + 2
+        y += (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        return datetime(y, m, 1, tzinfo=timezone.utc).timestamp()
+    w = _TF_SEC.get(tf)
+    return t_last + 2.0 * w if w else float("inf")
+
+
 BACKOFF_WAIT_SEC = float(os.getenv("OFFICE2_BACKOFF_WAIT_SEC", "45") or 45)
 BAR_PROBE_START_SEC = float(os.getenv("OFFICE2_BAR_PROBE_START_SEC", "2") or 2)     # перший запит до біржі після закриття бару (було фіксовані +20 с)
 BAR_PROBE_MAX_SEC = float(os.getenv("OFFICE2_BAR_PROBE_MAX_SEC", "25") or 25)
@@ -170,8 +189,8 @@ class Feed:
         key = (sym, tf)
         ttl = TF_TTL.get(tf, 0)
         hit = self._cache.get(key)
-        if start_ms is None and end_ms is None and hit and ttl and now - hit[0] < ttl:
-            return hit[1]
+        if start_ms is None and end_ms is None and hit and ttl and now - hit[0] < ttl and now < next_bar_close_after(tf, hit[1]):
+            return hit[1]      # кеш дійсний лише ДО закриття наступного бару: інакше щойно закритий D1/H4/W1 бар (PDH/PDL/PWH, H4-свінги) не потрапив би в рішення до кінця TTL (до 6/24 год)
         params: Dict[str, Any] = {"symbol": sym, "interval": tf, "limit": limit or TF_LIMIT.get(tf, 500)}
         if start_ms is not None:
             params["startTime"] = int(start_ms)

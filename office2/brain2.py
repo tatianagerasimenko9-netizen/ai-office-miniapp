@@ -324,7 +324,7 @@ def build_map(ctx: Dict[str, Any], now: float, sg: int, entry: float, risk: floa
         lsh, lsl = r["last_swing_high"], r["last_swing_low"]
         stale = bool(lsh is not None and lsl is not None and (float(r.get("close") or 0) > 0) and (entry > lsh or entry < lsl))   # ціна вже поза останніми підтвердженими swing: вони описують старіший діапазон
         rows.append({"tf": tf, "status": "USED", "trend": r["trend"], "trend_eff": r["trend_eff"], "broken": r["broken"], "zone": r["zone"], "range_pos": r["range_pos"], "outside_range": r["outside_range"],
-                     "range": r["range"], "last_swing_high": lsh, "last_swing_low": lsl, "swing_stale": stale, "with_trade": bool(r["trend_eff"] == sg), "against_trade": bool(r["trend_eff"] == -sg), "note": r.get("note")})
+                     "range": r["range"], "closed_ts": r.get("closed_ts"), "last_swing_high": lsh, "last_swing_low": lsl, "swing_stale": stale, "with_trade": bool(r["trend_eff"] == sg), "against_trade": bool(r["trend_eff"] == -sg), "note": r.get("note")})
     for tf_, why_ in (("M5", "структура M5 не рахується; M5 використовується лише як підтвердження тригера (див. докази)"), ("M1", "структура M1 не рахується; M1 — лише для відстеження входу/TP/SL")):
         rows.append({"tf": tf_, "status": "NOT_CHECKED", "note": why_})
 

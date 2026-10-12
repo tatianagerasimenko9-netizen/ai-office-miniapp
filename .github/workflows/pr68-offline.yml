@@ -176,6 +176,8 @@ jobs:
           python scripts/test_events_perf.py
           python scripts/test_counterfactual_be.py
           python scripts/test_learning_flags_shadow.py
+          python scripts/test_stage_gate.py
+          python scripts/test_feed_htf_freshness.py
 
   mini-app-ui-smoke:
     runs-on: ubuntu-latest
