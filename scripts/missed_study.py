@@ -166,10 +166,31 @@ def main(cards_path, out="missed_study.json"):
             if mv["t0"] - PRE <= c["ts"] <= mv["t0"] + POST:
                 return True
         return False
+    T_END = datetime(2026, 10, 11, 16, tzinfo=timezone.utc).timestamp()
+
+    def base_prob(c, t_a, t_b):
+        """Імовірність випадкового збігу: частка часу [t_a,t_b], коли для (символ,напрям) діє вікно руху K=3 (об'єднання вікон)."""
+        wins = sorted((mv["t0"] - PRE, mv["t0"] + POST) for mv in mv3.get((c["sym"], c["dir"]), []))
+        tot, cur_a, cur_b = 0.0, None, None
+        for a_, b_ in wins:
+            a_, b_ = max(a_, t_a), min(b_, t_b)
+            if b_ <= a_:
+                continue
+            if cur_b is None or a_ > cur_b:
+                if cur_b is not None:
+                    tot += cur_b - cur_a
+                cur_a, cur_b = a_, b_
+            else:
+                cur_b = max(cur_b, b_)
+        if cur_b is not None:
+            tot += cur_b - cur_a
+        return tot / max(1.0, t_b - t_a)
     for lab, cards in (("WATCH", [c for c in radar if c["kind"] == "W"]), ("BLOCKED лімiт 3 SL", [c for c in radar if c["kind"] == "L"]), ("BLOCKED кластер ALT", [c for c in radar if c["kind"] == "C"]), ("READY", ready)):
         sub = [c for c in cards if c["ts"] <= datetime(2026, 10, 11, 16, tzinfo=timezone.utc).timestamp()]
         if sub:
-            P(f"{lab:<22} карток {len(sub):<4} зі збігом з рухом K=3: {sum(1 for c in sub if hit(c))} ({100.0 * sum(1 for c in sub if hit(c)) / len(sub):.0f}%)")
+            t_a = t_ready0 if lab == "READY" else t_radar0
+            exp = sum(base_prob(c, t_a, T_END) for c in sub)
+            P(f"{lab:<22} карток {len(sub):<4} зі збігом з рухом K=3: {sum(1 for c in sub if hit(c))} ({100.0 * sum(1 for c in sub if hit(c)) / len(sub):.0f}%); очікувано за ВИПАДКОВОГО часу: {exp:.1f} ({100.0 * exp / len(sub):.0f}%)")
     txt = "\n".join(L)
     print(txt)
     Path(out).write_text(json.dumps({"report": txt, "summary": res}, ensure_ascii=False, default=float))
