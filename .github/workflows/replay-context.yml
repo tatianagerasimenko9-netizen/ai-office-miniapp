@@ -1,15 +1,12 @@
 name: Replay context study (isolated, read-only)
 
 # Ізольований replay Brain v2.1 (29 монет CORE) на архіві data.binance.vision + розріз за контекстом BTC. Нічого не пише в БД/Render/Telegram.
+# Періоди (фіксовані наперед): A 11–25.09, B 25.09–09.10 (як у BINANCE_REPLAY_2026-10.md), C 09–11.10 (новий, не перетинається з A/B).
 on:
-  workflow_dispatch:
-    inputs:
-      end_date:
-        description: 'Кінець вікна рішень, YYYY-MM-DD (00:00 UTC)'
-        required: true
-      days:
-        description: 'Днів рішень (1–30)'
-        default: '14'
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/replay-context.yml', 'scripts/replay_context_study.py']
 
 permissions:
   contents: read
@@ -21,6 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        period: [A, B, C]
         symbol: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, DOTUSDT, LTCUSDT, NEARUSDT, OPUSDT, SUIUSDT, UNIUSDT, ETCUSDT, FILUSDT, HBARUSDT, TIAUSDT, SEIUSDT, 1000PEPEUSDT, 1000SHIBUSDT, FETUSDT, RUNEUSDT, ALGOUSDT, MKRUSDT, WLDUSDT, ONDOUSDT, JUPUSDT]
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -31,15 +29,25 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install numpy tzdata
-      - name: Replay ${{ matrix.symbol }}
-        run: python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "${{ inputs.end_date }}" "${{ inputs.days }}" "out_${{ matrix.symbol }}.json"
+      - name: Replay ${{ matrix.period }} ${{ matrix.symbol }}
+        run: |
+          case "${{ matrix.period }}" in
+            A) E=2026-09-25; D=14;;
+            B) E=2026-10-09; D=14;;
+            C) E=2026-10-11; D=2;;
+          esac
+          python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "$E" "$D" "out_${{ matrix.symbol }}.json"
       - uses: actions/upload-artifact@v4
         with:
-          name: replay-${{ matrix.symbol }}
+          name: replay-${{ matrix.period }}-${{ matrix.symbol }}
           path: out_${{ matrix.symbol }}.json
   context:
     needs: replay
     if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        period: [A, B, C]
     runs-on: ubuntu-latest
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -52,14 +60,20 @@ jobs:
       - run: pip install numpy tzdata
       - uses: actions/download-artifact@v4
         with:
+          pattern: replay-${{ matrix.period }}-*
           path: parts
       - name: Aggregate + BTC context
         run: |
-          python scripts/learning_aggregate.py parts aggregate.json | head -c 6000
-          python -u scripts/replay_context_study.py parts "${{ inputs.end_date }}" "${{ inputs.days }}" replay_context.json | tee "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.period }}" in
+            A) E=2026-09-25; D=14;;
+            B) E=2026-10-09; D=14;;
+            C) E=2026-10-11; D=2;;
+          esac
+          python scripts/learning_aggregate.py parts aggregate.json | head -c 3500
+          python -u scripts/replay_context_study.py parts "$E" "$D" replay_context.json | tee "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: replay-context
+          name: replay-context-${{ matrix.period }}
           path: |
             aggregate.json
             replay_context.json
