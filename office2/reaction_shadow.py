@@ -27,11 +27,18 @@ def _bull(b: Dict[str, Any], long_: bool) -> bool:
     return b["close"] > b["open"] if long_ else b["close"] < b["open"]
 
 
+def signal_bar_start(card: Dict[str, Any]) -> float:
+    """Початок M15-бару, у якому картка стала відомою (момент доставки/створення). Бари, що закрились ДО цього моменту, не використовуються;
+    бар, який формувався на момент сигналу, — використовується, але лише після свого закриття (рішення на закритті, вхід на відкритті наступного бару)."""
+    sig = max(float(card["created_ts"]), float(card.get("sent_ts") or 0.0))
+    return (sig // M15) * M15
+
+
 def find_events(card: Dict[str, Any], bars: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
     """TOUCH/REACT/CONFIRM за закритими барами. Повертає індекси та часи; None — подія не настала до now/expires/SL."""
     long_ = _long(card)
     zhi, zlo, sl = float(card["zone_hi"]), float(card["zone_lo"]), float(card["sl"])
-    t0, tx = float(card["created_ts"]), float(card["expires_ts"])
+    t0, tx = signal_bar_start(card), float(card["expires_ts"])
     bs = [b for b in sorted(bars, key=lambda x: x["ts"]) if b["ts"] + M15 <= now and b["ts"] >= t0 and b["ts"] < tx]
     out: Dict[str, Any] = {"touch": None, "react": None, "confirm": None, "cancelled": None, "bars": len(bs)}
     st = 0                                           # 0 чекаємо TOUCH, 1 — REACT, 2 — CONFIRM
@@ -102,7 +109,7 @@ def evaluate(card: Dict[str, Any], bars: List[Dict[str, Any]], now: float, cost_
     Фактичний V0 береться окремо (radar_watch.evaluate_card) у скрипті replay."""
     ev = find_events(card, bars, now)
     bs = ev.pop("_bars")
-    t0, tx = float(card["created_ts"]), float(card["expires_ts"])
+    t0, tx = signal_bar_start(card), float(card["expires_ts"])
     full = [b for b in sorted(bars, key=lambda x: x["ts"]) if b["ts"] + M15 <= now and b["ts"] >= t0]      # bs — префікс full (обрізаний за expires_ts)
     ohlc = lambda i: None if i is None else {k: bs[i][k] for k in ("ts", "open", "high", "low", "close")}  # noqa: E731
     out: Dict[str, Any] = {"events": {**{k: (bs[ev[k]]["ts"] if ev.get(k) is not None else None) for k in ("touch", "react", "confirm")}, "cancelled": ev.get("cancelled")}, "label": LABEL,

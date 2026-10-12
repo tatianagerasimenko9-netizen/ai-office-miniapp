@@ -72,6 +72,11 @@ check("вхід до expires_ts, TP1 після expires_ts зараховуєт�
 c_exp2 = dict(card, expires_ts=T0 + 3 * M)
 check("бар входу після expires_ts → строк картки минув", RS.evaluate(c_exp2, bars_long, now)["V1_react"]["status"] == "НЕМАЄ_ВХОДУ")
 
+# картка стала відомою пізно: бари, що закрились до доставки, не використовуються; бар, що формувався на момент сигналу, — використовується
+late_card = dict(card, sent_ts=T0 + 2 * M + 60)       # доставлено на 2-й хвилині бару 2
+evl = RS.find_events(late_card, bars, now)
+check("доставка в барі 2: touch (бар 1) ігнорується до доставки; бар 2 формувався на момент сигналу і доступний", RS.signal_bar_start(late_card) == T0 + 2 * M and evl["touch"] is not None and evl["touch"] == 0, evl)
+
 # позначка гіпотези
 check("результат маркований RESEARCH_HYPOTHESIS", r["label"] == "RESEARCH_HYPOTHESIS")
 
