@@ -172,6 +172,7 @@ jobs:
           python scripts/test_data_stability.py
           python scripts/test_launch_once.py
           python scripts/test_data_provenance.py
+          python scripts/test_daria_steps.py
 
   mini-app-ui-smoke:
     runs-on: ubuntu-latest

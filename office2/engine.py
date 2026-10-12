@@ -146,7 +146,7 @@ def open_signals(db: str, now: float) -> List[Dict[str, Any]]:
                          "WHERE valid_until_ts > ? AND (status = 'DELIVERED' OR (status = 'PENDING' AND created_ts > ?))", (now, now - STALE_PENDING_SEC))
     done = set()
     try:
-        for (sid,) in _fetchall(db, "SELECT DISTINCT signal_id FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' AND (payload_json LIKE '%\"level\": \"SL\"%' OR payload_json LIKE '%\"level\": \"TP3\"%' OR payload_json LIKE '%\"level\": \"EXPIRED\"%')"):
+        for (sid,) in _fetchall(db, "SELECT DISTINCT signal_id FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' AND (payload_json LIKE '%\"level\": \"SL\"%' OR payload_json LIKE '%\"level\": \"TP3\"%' OR payload_json LIKE '%\"level\": \"EXPIRED\"%' OR payload_json LIKE '%\"level\": \"INVALIDATED\"%')"):
             done.add(sid)
     except Exception:  # noqa: BLE001
         pass
@@ -187,7 +187,7 @@ def opposite_lifecycle(db: str, sym: str, direction: str, now: float) -> List[Di
                 lv.add(json.loads(pj or "{}").get("level"))
             except Exception:  # noqa: BLE001
                 pass
-        if lv & {"SL", "TP3", "EXPIRED"}:
+        if lv & {"SL", "TP3", "EXPIRED", "INVALIDATED"}:
             continue
         sn = json.loads(sj or "{}")
         th = sn.get("thesis") or {}
@@ -489,5 +489,11 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "перевірки якості (стоп vs шум M15, запас до першої реальної цілі)", "value": th.get("quality")},
                 {"step": "risk", "value": th.get("sizing")},
                 {"step": "decision", "value": "READY (LIVE BETA, UNPROVEN)"}]}
+    try:
+        from office2 import daria_steps as _DS
+
+        snap["daria_steps"] = _DS.build(snap, valid_until_ts=now + READY_VALID_SEC)      # покрокова перевірка зверху вниз, заморожена на момент рішення (лише відображення, READY не змінює)
+    except Exception as exc:  # noqa: BLE001
+        snap["daria_steps"] = {"version": "daria-steps-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))

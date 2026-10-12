@@ -11,7 +11,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-LABEL = "OFFICE2 · LIVE BETA"
+LABEL = "OFFICE2 · LIVE BETA"      # внутрішня позначка в знімках і gate
+BRAND = "AI Office"                # назва продукту для користувачки (Telegram, Mini App)
 # Окремий пул потоків: загальний пул asyncio.to_thread у worker зайнятий хвилинними запитами старого трекера до Binance,
 # і доставка Office2 стояла в черзі 10–14 хв (рішення о 14:32, відправка о 14:53). Власний пул не залежить від чужих задач.
 import concurrent.futures as _cf
@@ -54,10 +55,12 @@ def delivery_enabled() -> bool:
 
 
 def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
-    """Telegram: за 3–5 секунд. Лише числа з рішення; без «ринок сильний». Рівні — з office2.levels (та сама математика, що в Mini App)."""
+    """Telegram: коротка картка AI Office. Лише числа з рішення; повна аргументація (кроки D1/H4 → H1 → M15, чому ще/вже не входити) — у Mini App.
+    Скасування (ЗАКРИТТЯ M15) і захисний SL (дотик) — різні речі й показані окремо. Рівні — з office2.levels (та сама математика, що в Mini App)."""
     import office_ready_card as card
     import office_ready_core as rc
     from office_user_messages import ticker
+    from office2 import daria_steps as DS
     from office2 import levels as LVL
 
     th = snap["thesis"]
@@ -66,27 +69,47 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     if not v:
         raise ValueError("немає рівнів тези")
     n = lambda x: card._num(x, sym)  # noqa: E731
-    L = [LABEL, f"{'🟢 LONG' if snap['direction'] == 'LONG' else '🔴 SHORT'} · {ticker(sym)}"]
-    if snap.get("why"):
-        L.append(f"Чому: {snap['why']}")
-    L.append("")
+    long_ = snap["direction"] == "LONG"
+    L = [BRAND, f"{'🟢' if long_ else '🔴'} READY · {snap['direction']}", f"{ticker(sym)} · Binance Futures", ""]
     entry, sl = float(v["ready_price"]), float(v["sl"])
     risk = abs(entry - sl)
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"    # noqa: E731
-    L.append(f"READY: {n(entry)}")
     if v["zone"]:
-        L.append(f"Зона входу: {n(v['zone'][0])}–{n(v['zone'][1])}")
-    L.append(f"SL: {n(sl)} (−{pc(sl)}%)")
+        L.append(f"Вхід: {n(v['zone'][0])}–{n(v['zone'][1])} (план {n(entry)})")
+    else:
+        L.append(f"Вхід: {n(entry)}")
+    L.append(f"SL: {n(sl)} (−{pc(sl)}%) · захисний, спрацьовує дотиком")
     for i, t in enumerate(v["targets"][:3], 1):
         L.append(f"TP{i}: {n(t['p'])} (+{pc(t['p'])}%; {rr(t['p'])}R)")
+    if len(v["targets"]) < 3:
+        k = len(v["targets"]) + 1
+        L.append(f"{'TP3' if k == 3 else f'TP{k}–TP3'}: немає наступної реальної цілі")
+    inv = _inv_price(th)
+    if inv is not None:
+        L.append(f"Скасування: закриття M15 {'нижче' if long_ else 'вище'} {n(inv)}")
+    try:
+        conf = DS.telegram_confirmation(snap, fmt=n, stamp=rc.kyiv_stamp)
+    except Exception:  # noqa: BLE001
+        conf = []
+    if conf:
+        L.append("Підтвердження: " + " · ".join(conf))
     if (th.get("sizing") or {}).get("risk_usd"):
         L.append(f"Ризик моделі: {float(th['sizing']['risk_usd']):.0f} $")
     decided = float(snap.get("decided_ts") or 0.0)
     if now and decided and now - decided >= LATE_NOTE_SEC:      # чесно про запізнення доставки (сигнал не подається як свіжий)
         L.append(f"⏱ Рішення було о {rc.kyiv_stamp(decided)}; доставлено через {int((now - decided) // 60)} хв")
-    L.append(f"⏳ до {rc.kyiv_stamp(snap['valid_until_ts'])}")
+    L.append(f"⏳ до {rc.kyiv_stamp(snap['valid_until_ts'])} (Київ)")
+    L.append("Повний аналіз і «чому ще не / вже не входити» — у Mini App.")
     return "\n".join(L)
+
+
+def _inv_price(th: Dict[str, Any]) -> Optional[float]:
+    try:
+        p = (th.get("invalidation") or {}).get("price")
+        return None if p is None else float(p)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_gate(snap: Dict[str, Any]) -> Dict[str, Any]:
@@ -295,7 +318,7 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             tf = "M15"
             await run_o2(trk.record_plan, db, scenario_id=sid, symbol=sym, direction=d, tf=tf, entry=th["entry"], sl=th["sl"], tp1=(tg[0]["p"] if tg else None),
                                     tp2=(tg[1]["p"] if len(tg) > 1 else None), tp3=(tg[2]["p"] if len(tg) > 2 else None), max_entry=None, confirmed_ts=float(created),
-                                    valid_until_ts=float(valid), rejected=False, confirm_msg_id=mid, gate=gate)
+                                    valid_until_ts=float(valid), rejected=False, confirm_msg_id=mid, gate=gate, inval_px=_inv_price(th))
             await run_o2(_execute, db, "UPDATE office2_live_signal SET status = 'DELIVERED', msg_id = ?, delivered_ts = ?, last_error = NULL WHERE scenario_id = ?", (int(mid), t_sent, sid))
             await run_o2(log_event, db, "OFFICE2_READY_SENT", {"scenario_id": sid, "symbol": sym, "direction": d, "text": cap, "telegram_msg_id": mid, "image_ok": bool(img.get("ok")),
                                                                          "image_error": None if img.get("ok") else img.get("reason"), "chart_sha256": chart.get("sha256"), "timing": tm}, sid)
