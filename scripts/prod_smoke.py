@@ -64,10 +64,15 @@ def api_checks(allow_fixture: bool) -> str:
     # --- ключові API Mini App (регресії функціоналу): 200 і ok
     for path in ("/api/v2/home", "/api/v2/market", "/api/v2/scenarios", "/api/v2/radar", "/api/v2/live_radar", "/api/v2/office2", "/api/v2/paper", "/api/v2/journal", "/api/v2/risk", "/api/v2/overview"):
         try:
+            t_req = time.time()
             st, b = get(path)
+            dt = time.time() - t_req
+            t2 = time.time()
+            get(path)
+            dt2 = time.time() - t2
             d = json.loads(b.decode("utf-8"))
-            bad = st != 200 or d.get("ok") is False
-            (fail if bad else ok)(f"{path}: HTTP {st}, ok={d.get('ok')}, data_status={d.get('data_status')}")
+            bad = st != 200 or d.get("ok") is False or dt2 > 8.0
+            (fail if bad else ok)(f"{path}: HTTP {st}, ok={d.get('ok')}, data_status={d.get('data_status')}, 1-й запит {dt:.1f} с, 2-й {dt2:.1f} с, {len(b) // 1024} КБ" + (" — ПОВІЛЬНО (>8 с)" if dt2 > 8.0 else ""))
         except Exception as exc:  # noqa: BLE001
             fail(f"{path}: {type(exc).__name__}")
     # --- свічки: TIA і BTC, усі ТФ
@@ -219,8 +224,14 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
         await pg.wait_for_selector("nav button[data-r]", timeout=40000)
         n_err = len(errs)
         for tab in ("office", "radar", "scenarios", "journal", "risk"):
+            t_tab = time.time()
             await pg.click(f"nav button[data-r={tab}]")
-            await pg.wait_for_timeout(2500)
+            body_len = "(document.querySelector('main')||document.body).innerText.trim().length"
+            try:
+                await pg.wait_for_function(f"{body_len} > 40 && !document.querySelector('.sk')", timeout=45000)
+            except Exception:  # noqa: BLE001
+                pass
+            dt = time.time() - t_tab
             txt = (await pg.inner_text("main"))[:4000] if await pg.query_selector("main") else (await pg.inner_text("body"))[:4000]
             sw_t = await pg.evaluate("document.documentElement.scrollWidth")
             problems = []
@@ -228,7 +239,9 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
                 problems.append("порожній екран")
             if sw_t > 391:
                 problems.append(f"горизонтальний скрол {sw_t}")
-            (fail if problems else ok)(f"вкладка {tab}: {len(txt)} симв." + (f" — {'; '.join(problems)}" if problems else ""))
+            if dt > 15:
+                problems.append(f"повільне відкриття {dt:.0f} с")
+            (fail if problems else ok)(f"вкладка {tab}: {len(txt)} симв., готова за {dt:.1f} с" + (f" — {'; '.join(problems)}" if problems else ""))
         if len(errs) > n_err:
             fail(f"JS-помилки на вкладках: {errs[n_err:][:3]}")
         # --- радар: картка спостереження з графіком (шлях paintChart для WATCH), якщо є
