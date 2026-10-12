@@ -3,6 +3,9 @@ name: Reaction shadow replay (isolated, read-only)
 # Ручний запуск. Ф'ючерсні M15 Binance USDT-M → V0 (поточний ліміт) vs V1/V2 (вхід після реакції в зоні, RESEARCH_HYPOTHESIS). Нічого не пише в БД/Render/Telegram.
 on:
   workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/reaction-shadow-replay.yml']
 
 permissions:
   contents: read
