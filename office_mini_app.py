@@ -1408,6 +1408,18 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path == "/static/lightweight-charts-4.2.3.js":      # локальна копія бібліотеки графіка (Apache-2.0): графік не залежить від CDN у Telegram WebView
+            from pathlib import Path as _P
+
+            f = _P(__file__).resolve().parent / "office_web" / "vendor" / "lightweight-charts-4.2.3.js"
+            body = f.read_bytes() if f.is_file() else b""
+            self.send_response(200 if body else 404)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path in ("/v1", "/v2", "/mini"):
             from office_mini_v2 import html_v2
 
@@ -1469,7 +1481,11 @@ class Handler(BaseHTTPRequestHandler):
                     lim = int(_q("limit") or "180")
                 except ValueError:
                     lim = 180
-                data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim)
+                try:
+                    end_q = int(_q("end") or "0") or None
+                except ValueError:
+                    end_q = None
+                data = candles_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1", lim, end_q)
             elif u.path == "/api/v2/channel":
                 data = channel_payload(_q("symbol") or "BTCUSDT", _q("tf") or "H1")
             elif u.path == "/api/v2/chart_context":

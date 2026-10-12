@@ -506,6 +506,24 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3, allow_fallback: bool = F
         return {}
 
 
+def fetch_candles_history(symbol: str, tf: str, limit: int = 500, end_ms: Optional[int] = None) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    """Історичні свічки ф'ючерсів Binance USDⓈ-M для графіка (прокрутка назад): один прямий запит з endTime (свічки, що відкрились не пізніше end_ms).
+    Без кешу й без резервних джерел: немає ф'ючерсних даних → {} (графік скаже «історія недоступна», а не підставить спот/Bybit)."""
+    try:
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return {}
+        if not sym.endswith("USDT"):
+            sym = f"{sym}USDT"
+        params: Dict[str, Any] = {"symbol": sym, "interval": tf, "limit": max(1, min(int(limit), 1000))}
+        if end_ms is not None:
+            params["endTime"] = int(end_ms)
+        rows = _tag(_parse_klines(_http_get_json("https://fapi.binance.com/fapi/v1/klines", params)), FUTURES_SRC)
+        return rows or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 _DECISION_REJECT_LOG: Dict[str, float] = {}
 _TF_SEC = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400, "1w": 604800, "1M": 2678400}
 
