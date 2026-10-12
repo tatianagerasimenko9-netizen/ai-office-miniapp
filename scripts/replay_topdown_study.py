@@ -29,6 +29,8 @@ def load(root):
                     continue
                 cr = P.COST_PCT / float(r["risk_pct"])
                 td = r.get("td") or {}
+                if isinstance(td.get("type"), dict):           # перші прогони зберігали scenario_type як об'єкт
+                    td = dict(td, type=td["type"].get("type"))
                 rows.append({"per": per, "sym": r.get("symbol") or j["symbol"], "dir": r["dir"], "ts": float(r["ts_bar"]), "net": float(v["r_net"]), "gross": float(v["r_net"]) + cr,
                              "out": v.get("outcome"), "ltf": td.get("ltf") or "NO_TD", "type": td.get("type") or "NO_TD", "warn": int(td.get("conflicts_warn") or 0),
                              "td_err": td.get("error"), "ltf_data": bool(q.get("m5_bars")) and bool(q.get("m1_bars"))})

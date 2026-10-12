@@ -108,6 +108,12 @@ def main():
             rt = page.inner_text("body")
             assert "Єдиний Radar Brain v2.1" in rt and "Ціна зараз" in rt and ("Діє до" in rt or "Строк:" in rt), rt[:400]
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), "горизонтальний скрол (Radar)"
+            html = page.evaluate("""() => o2DariaHtml({steps:[{tf:'D1',title:'Контекст',status:'CONFIRMED',checked:'x',result:'y',sources:[],unknown:[]}],
+              scenario_type:{type:'REVERSAL',label:'розворот',why:'проти H4'},
+              conflicts:[{tf:'H4',severity:'warn',text:'H4 проти',why_allowed:'розворот від ліквідності'}],
+              topdown_stages:[{tf:'H4',role:'контекст',state:'CONFLICTS',text:'H4: вниз'}],
+              ltf:{status:'PENDING',form:'STRUCT_BREAK_V0',text:'чекаємо M5'}})""")
+            assert "[object" not in html and "розворот" in html and "розворот від ліквідності" in html and "чекаємо M5" in html, html[:400]
             br.close()
         assert not errors, errors
     print("OK ui main app brain v2.1 card + radar")
