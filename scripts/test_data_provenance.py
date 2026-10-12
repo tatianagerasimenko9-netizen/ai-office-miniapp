@@ -55,6 +55,17 @@ check("fetch_candles за замовчуванням не бере спот/Bybi
 h = MD.source_health()
 check("лічильники рішень у source_health", h.get("decision_ok", 0) >= 1 and h.get("decision_rejected_nonfutures", 0) >= 3 and "decision_no_data" in h, str({k: v for k, v in h.items() if k.startswith("decision")}))
 
+# історія для графіка: прямий запит ф'ючерсів з endTime, без резервних джерел
+_calls = []
+_orig_get = MD._http_get_json
+MD._http_get_json = lambda url, params=None, *a, **k: (_calls.append((url, dict(params or {}))) or [[1700000000000 + i * 900000, "1", "2", "0.5", "1.5", "10"] for i in range(3)])
+hist = MD.fetch_candles_history("ADA", "15m", 500, end_ms=1700000900000)
+MD._http_get_json = _orig_get
+check("історія графіка: лише fapi з endTime, свічки позначені binance_futures", _calls and "fapi.binance.com" in _calls[0][0] and _calls[0][1].get("endTime") == 1700000900000 and _calls[0][1]["symbol"] == "ADAUSDT" and all(r["src"] == "binance_futures" for r in hist))
+MD._http_get_json = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))
+check("історія при збої Binance — порожньо, без підміни спот/Bybit", MD.fetch_candles_history("ADA", "15m", 10, end_ms=1) == {})
+MD._http_get_json = _orig_get
+
 live = (ROOT / "office2" / "live.py").read_text(encoding="utf-8")
 check("Brain (Feed) читає свічки напряму з fapi.binance.com, без резервних джерел", 'KL_URL = "https://fapi.binance.com/fapi/v1/klines"' in live and "_fallback_klines" not in live and "fetch_candles(" not in re.sub(r"fetch_candles_futures", "", live.split("class Feed")[1].split("def ")[0]))
 check("paper/radar/shadow-цикли в live.py використовують ф'ючерсну обгортку", live.count("fetch_candles_futures as fetch_candles") == 4 and "import fetch_candles\n" not in live)

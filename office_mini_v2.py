@@ -912,11 +912,11 @@ def scenario_events(sid: str) -> List[Dict[str, Any]]:
     return out
 
 
-def synth_candles(symbol: str, tf: str, limit: int = 120) -> List[Dict[str, Any]]:
-    """Явно позначений fixture — не Live Binance."""
-    n = max(30, min(int(limit or 120), 300))
+def synth_candles(symbol: str, tf: str, limit: int = 120, end_ts: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Явно позначений fixture — не Live Binance. end_ts — відкриття останньої свічки (для прокрутки історії у фікстурі)."""
+    n = max(30, min(int(limit or 120), 1000))
     interval = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}.get(tf, 900)
-    now = int(time.time())
+    now = int(time.time()) if end_ts is None else int(end_ts)
     now = now - (now % interval)
     base = 100.0
     su = str(symbol or "BTCUSDT").upper()
@@ -961,20 +961,24 @@ def synth_candles(symbol: str, tf: str, limit: int = 120) -> List[Dict[str, Any]
     return out
 
 
-def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
+def candles_payload(symbol: str, tf: str, limit: int = 180, end: Optional[int] = None) -> Dict[str, Any]:
+    """end — unix-секунди: віддати лише свічки, що відкрились ДО цього моменту (прокрутка історії назад). Історія — лише ф'ючерси Binance, без резервних джерел."""
     interval = TF_MAP.get(str(tf or "H1").upper(), TF_MAP.get(str(tf or "15m"), "15m"))
-    lim = max(20, min(int(limit or 180), 500))
+    lim = max(20, min(int(limit or 180), 1000))
     live_stream = False
     bars: List[Dict[str, Any]] = []
     source = "fixture" if _fixture_on() else "binance_futures"
     if _fixture_on():
-        bars = synth_candles(symbol, interval, lim)
+        bars = synth_candles(symbol, interval, lim, end_ts=(int(end) - 1) if end else None)
         status = "DATA_OK"
         quote_mode = "polling_fixture"
     else:
-        from office_market_data import fetch_candles
+        from office_market_data import fetch_candles, fetch_candles_history
 
-        raw = fetch_candles(symbol, interval, lim, allow_fallback=True)
+        if end:
+            raw = fetch_candles_history(symbol, interval, lim, end_ms=int(end) * 1000 - 1)
+        else:
+            raw = fetch_candles(symbol, interval, lim, allow_fallback=True)
         if isinstance(raw, list) and raw:
             for r in raw:
                 ts = r.get("ts")
@@ -996,7 +1000,7 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
                         "fixture": False,
                     }
                 )
-            if bars:
+            if bars and not end:
                 bars[-1]["forming"] = True
                 source = str((raw[-1] or {}).get("src") or "binance_futures")   # реальне джерело (резервний ринок більше не маскується під ф'ючерси)
             status = "DATA_OK"
@@ -1023,6 +1027,7 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
         "tf": interval,
         "as_of": last.get("ts") if last else None,
         "stale": status != "DATA_OK",
+        "history": bool(end),
         "candles": bars,
     }
 
