@@ -25,6 +25,7 @@
 | Паранормальний бар за Герчиком | — | `G-LVL-PARANORMAL`, `D-PARANORMAL-IMPULSE` | SHADOW (office2/source_shadow.py, src-shadow-1; не сигнал, не LIVE) | replay на Binance ще не запущено |
 | База після паранормального руху (2–7 днів, третини, 50%) | — | `D-POST-IMPULSE-BASE` | SHADOW (office2/source_shadow.py; краї бази й варіант B — НЕ ПІДТВЕРДЖЕНО) | replay ще не запущено |
 | `office_bulkowski.py`, `office_wyckoff.py` | — | у наданих джерелах правил немає | НЕ З ДЖЕРЕЛ | не називати авторською реалізацією |
+| Top-down D1→H4→H1→M15→M5→M1 (тип сценарію, суперечності ТФ, M5/M1-підтвердження входу) | `office2/topdown.py` (`topdown-v1`) | Послідовність «старший ТФ → зона → молодші → M5/M1» — вимога власниці (USER_REQUIREMENT, 12.10); умов входу на M5/M1 у наданих текстах немає (`D-HTF-STRONG-CANDLE-PULLBACK`, `unresolved.md` B.1) | ГІПОТЕЗА (`STRUCT_BREAK_V0`), режим `annotate`; replay A–G: ефект не доведений (див. `DARIA_TOPDOWN_SEQUENCE.md` п. 5) | потрібні умови входу з відео/docx; до того READY не змінюється |
 
 ## Висновки
 1. **Збігаються з джерелами**: вето 80% ATR, рівні Fibonacci, FVG/MT, ідея «стоп не під очевидним місцем».
