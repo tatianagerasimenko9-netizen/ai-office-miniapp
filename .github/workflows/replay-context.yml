@@ -1,0 +1,65 @@
+name: Replay context study (isolated, read-only)
+
+# Ізольований replay Brain v2.1 (29 монет CORE) на архіві data.binance.vision + розріз за контекстом BTC. Нічого не пише в БД/Render/Telegram.
+on:
+  workflow_dispatch:
+    inputs:
+      end_date:
+        description: 'Кінець вікна рішень, YYYY-MM-DD (00:00 UTC)'
+        required: true
+      days:
+        description: 'Днів рішень (1–30)'
+        default: '14'
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, DOTUSDT, LTCUSDT, NEARUSDT, OPUSDT, SUIUSDT, UNIUSDT, ETCUSDT, FILUSDT, HBARUSDT, TIAUSDT, SEIUSDT, 1000PEPEUSDT, 1000SHIBUSDT, FETUSDT, RUNEUSDT, ALGOUSDT, MKRUSDT, WLDUSDT, ONDOUSDT, JUPUSDT]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay ${{ matrix.symbol }}
+        run: python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "${{ inputs.end_date }}" "${{ inputs.days }}" "out_${{ matrix.symbol }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-${{ matrix.symbol }}
+          path: out_${{ matrix.symbol }}.json
+  context:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Aggregate + BTC context
+        run: |
+          python scripts/learning_aggregate.py parts aggregate.json | head -c 6000
+          python -u scripts/replay_context_study.py parts "${{ inputs.end_date }}" "${{ inputs.days }}" replay_context.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-context
+          path: |
+            aggregate.json
+            replay_context.json
