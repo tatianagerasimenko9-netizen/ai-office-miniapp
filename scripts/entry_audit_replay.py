@@ -93,10 +93,14 @@ def main() -> int:
         cards = [c for c in cards if c["symbol"] in keep]
     rows = run(cards, fetch_m15, time.time())
     summ = summarize(rows)
+    summ["cards_without_candles"] = sum(1 for r in rows if r["verdict"] == "НЕМАЄ_СВІЧОК")
     Path(a.out).write_text(json.dumps({"summary": summ, "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
     for r in rows:
         print(r["card_id"], r["symbol"], r["stage"], r["verdict"], "actual:", r["paper_actual"], "variant:", r["variant_confirmed_entry"], flush=True)
     print(json.dumps(summ, ensure_ascii=False, indent=1))
+    if summ["cards_without_candles"]:
+        print("ПОМИЛКА: для частини карток немає реальних свічок — результат неповний, висновків не робимо", flush=True)
+        return 2
     return 0
 
 

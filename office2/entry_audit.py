@@ -64,6 +64,9 @@ def audit_card(card: Dict[str, Any], m15: List[Dict[str, Any]]) -> Dict[str, Any
     if not trig:
         out["verdict"] = "ТРИГЕР_НЕ_РОЗПІЗНАНО"
         return out
+    if trig["kind"] != "CLOSE_VS_ZONE_MID" and not m15:
+        out["verdict"] = "НЕМАЄ_СВІЧОК"           # без реальних свічок «тригер не виконано» не стверджуємо
+        return out
     ct = first_confirm_ts(card, trig, m15)
     out["confirm_close_ts"] = ct
     ft = card.get("entry_ts")
@@ -86,7 +89,7 @@ def confirmed_variant(card: Dict[str, Any], m15: List[Dict[str, Any]], now: floa
     from office2 import radar_watch as RW
 
     trig = trigger_of(card)
-    if not trig or trig["kind"] == "CLOSE_VS_ZONE_MID":
+    if not trig or trig["kind"] == "CLOSE_VS_ZONE_MID" or not m15:
         return None
     ct = first_confirm_ts(card, trig, closed_m15(m15, now))
     if ct is None:

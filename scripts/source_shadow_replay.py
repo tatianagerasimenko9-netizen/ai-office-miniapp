@@ -175,7 +175,7 @@ def main() -> int:
     summ["provenance"] = {"source": "data.binance.vision futures/um monthly 1d", "split_ts": SPLIT, "symbols": prov, "version": S.VERSION,
                           "caveats": ["подія без входу/стопа: джерело їх не задає", "база вимірюється через діапазон одного паранормального бару (ГІПОТЕЗА)", "ATR Герчика на 5 D1 без паранормальних (ГІПОТЕЗА щодо першої оцінки й гепів)", "кілька подій на день між монетами корельовані"]}
     Path(a.out).write_text(json.dumps(summ, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(json.dumps({"events": summ["events_total"], "verdict": summ["verdict"]}, ensure_ascii=False, indent=1))
+    print(json.dumps({"events": summ["events_total"], "verdict": summ["verdict"], "by_period": summ["by_period"]}, ensure_ascii=False, indent=1))
     return 0
 
 
