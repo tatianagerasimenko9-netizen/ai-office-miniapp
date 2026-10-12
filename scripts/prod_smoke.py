@@ -168,6 +168,16 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
         (ok if n0 >= 300 and n_can else fail)(f"стартово {n0} свічок, canvas {n_can}")
         sym = await pg.evaluate("(document.querySelector('#chart')&&S.histKey)||''")
         ok(f"монета/ТФ графіка: {sym}")
+        # --- швидке «пролистування» ТФ без пауз: підсумковий графік має відповідати останньому вибору (без гонки відповідей)
+        for tf in ("M1", "M5", "M15", "H4", "D1", "H1", "M15"):
+            await pg.click(f"[data-tf={tf}]")
+        try:
+            await pg.wait_for_function("S.tf==='M15' && S.histKey.endsWith('|M15') && S.bars.length>0", timeout=30000)
+            await pg.wait_for_timeout(2500)
+            last_key = await pg.evaluate("S.histKey")
+            (ok if last_key.endswith("|M15") and await pg.evaluate("S.tf") == "M15" else fail)(f"швидкі кліки ТФ: графік відповідає останньому вибору ({last_key})")
+        except Exception:  # noqa: BLE001
+            fail("швидкі кліки ТФ: графік не відповідає останньому вибору")
         # --- ТФ
         for tf in ("M1", "M5", "M15", "H1", "H4", "D1"):
             await pg.click(f"[data-tf={tf}]")
@@ -177,7 +187,7 @@ async def browser_checks(sid: str, shots: str, allow_fixture: bool) -> None:
             except Exception:  # noqa: BLE001
                 fail(f"перемикач {tf}: графік не оновився")
         await pg.click("[data-tf=H1]")
-        await pg.wait_for_function("S.tf==='H1' && S.bars.length>0", timeout=20000)
+        await pg.wait_for_function("S.tf==='H1' && S.histKey.endsWith('|H1') && S.bars.length>0 && document.querySelectorAll('#chart canvas').length>0", timeout=20000)
         await pg.wait_for_timeout(1500)
         # --- історія назад (свайп/прогортання)
         n1 = await pg.evaluate("S.bars.length")

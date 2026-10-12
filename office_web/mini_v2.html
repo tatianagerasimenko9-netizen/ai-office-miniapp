@@ -878,6 +878,7 @@ async function loadOlder(symbol, tf){
 async function paintChart(el, s){
   const symbol=s.symbol, tf=S.tf, lv=chartLevels(s);
   const vkey=symbol+'|'+tf;
+  const my=(S.paintSeq=(S.paintSeq||0)+1);      // швидкі натискання ТФ/шарів: застарілі відповіді не перемальовують графік поверх останнього вибору
   if(S.histKey!==vkey){ S.hist=[]; S.histKey=vkey; S.noMoreOld=false; S.view=null; }
   else if(chart){ try{ S.view={key:vkey, range:chart.timeScale().getVisibleRange()}; }catch(e){ S.view=null; } }   // перемалювання (новий бар, перемикач шару) не скидає масштаб і позицію
   let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=500`);}
@@ -886,6 +887,7 @@ async function paintChart(el, s){
   setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad',
     pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
   if(stamp && pack.data_status==='STALE') stamp.textContent+=' · фід застарів — рівні не підтверджують вхід';
+  if(my!==S.paintSeq) return null;
   const fresh=(pack.candles||[]).filter(c=>c.time);
   const candles=fresh.length?S.hist.filter(c=>c.time<fresh[0].time).concat(fresh):fresh;      // раніше підвантажена історія зберігається при оновленні
   S.bars=candles;
@@ -922,6 +924,7 @@ async function paintChart(el, s){
         cx=await j('/api/v2/chart_context?'+q.toString());
       }catch(e){ if(e&&e.stale) return null; cx=null; }
     }
+    if(my!==S.paintSeq) return null;      // новіший вибір ТФ/шару вже перемалював графік: цей (застарілий) прохід нічого не чіпає
     const lastT=candles[candles.length-1].time;
     const seg=(t0,v0,t1,v1,o)=>{const ln=chart.addLineSeries(Object.assign({color:'#8392A5',lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false},o));
       ln.setData(t0===t1?[{time:t0,value:v0}]:[{time:t0,value:v0},{time:t1,value:v1}]); return ln;};
