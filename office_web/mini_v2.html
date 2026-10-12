@@ -842,6 +842,20 @@ function chartLevels(s){
   if(L.tp&&s.entry_px!=null) o.entry=s.entry_px;
   return o;
 }
+function loadChartLib(){
+  return new Promise(res=>{
+    if(window.LightweightCharts) return res(true);
+    const urls=['/static/lightweight-charts-4.2.3.js?r='+Date.now(),'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js'];
+    const next=i=>{ if(i>=urls.length) return res(!!window.LightweightCharts); const sc=document.createElement('script'); sc.src=urls[i]; sc.onload=()=>res(!!window.LightweightCharts); sc.onerror=()=>next(i+1); document.head.appendChild(sc); };
+    next(0);
+  });
+}
+/* Явна помилка замість тихої підміни графіка картинкою: що сталося + кнопка «Повторити» */
+function chartError(el,s,msg){
+  if(chart){ try{chart.remove();}catch(e){} chart=null; series=null; }
+  el.innerHTML=`<div class="empty" role="alert">${esc(msg)}<br><button class="btn" id="chretry" style="margin-top:10px">↻ Повторити</button></div>`;
+  const b=el.querySelector('#chretry'); if(b) b.onclick=async()=>{ b.disabled=true; b.textContent='Завантажую…'; await loadChartLib(); await paintChart(el,s); };
+}
 async function loadOlder(symbol, tf){
   if(S.loadingOld||S.noMoreOld||!chart||!series||!S.bars.length||S.histKey!==symbol+'|'+tf||S.bars.length>=8000) return;
   S.loadingOld=true;
@@ -867,7 +881,7 @@ async function paintChart(el, s){
   if(S.histKey!==vkey){ S.hist=[]; S.histKey=vkey; S.noMoreOld=false; S.view=null; }
   else if(chart){ try{ S.view={key:vkey, range:chart.timeScale().getVisibleRange()}; }catch(e){ S.view=null; } }   // перемалювання (новий бар, перемикач шару) не скидає масштаб і позицію
   let pack; try{pack=await j(`/api/v2/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=500`);}
-  catch(e){if(e.stale) return null; el.innerHTML='<div class="empty">Свічки недоступні — графік не показуємо</div>'; setHealth('bad','немає свічок'); return null;}
+  catch(e){if(e.stale) return null; setHealth('bad','немає свічок'); chartError(el,s,'Свічки Binance Futures недоступні — графік не показуємо.'); return null;}
   const stamp=$('asof'); if(stamp) stamp.textContent=pack.as_of?`Остання свічка: ${hhmm(pack.as_of)} · ${pack.fixture?'FIXTURE, не ринок':pack.source}`:'';
   setHealth(pack.data_status==='DATA_OK'?(pack.fixture?'warn':'ok'):'bad',
     pack.data_status==='DATA_OK'?(pack.fixture?'fixture':'оновлення '+pack.quote_mode):(pack.data_status==='STALE'?'дані застарілі':'дані недоступні'));
@@ -878,7 +892,7 @@ async function paintChart(el, s){
   S.lastBar=candles.length?candles[candles.length-1].time:0;
   if(chart){try{chart.remove();}catch(e){} chart=null; series=null;}
   el.innerHTML='';
-  if(!candles.length){ el.innerHTML='<div class="empty">Свічки недоступні — графік не live</div>'; return pack; }
+  if(!candles.length){ chartError(el,s,'Свічки недоступні — графік не live.'); return pack; }
   if(window.LightweightCharts){
     usingLW=true;
     chart=LightweightCharts.createChart(el,{layout:{background:{color:'#0E141D'},textColor:'#94A3B8'},
@@ -961,7 +975,7 @@ async function paintChart(el, s){
     else if(candles.length>140){ ts.setVisibleLogicalRange({from:candles.length-120,to:candles.length+6}); }    // стартовий вигляд — останні ~120 свічок; решта історії лишається ліворуч
     else ts.fitContent();
     ts.subscribeVisibleLogicalRangeChange(r=>{ if(r&&r.from<12) loadOlder(symbol,tf); });
-  } else { usingLW=false; let cx=null; if(S.layers.ch){ try{ const q=new URLSearchParams({symbol,tf}); cx=await j('/api/v2/chart_context?'+q.toString()); }catch(e){ if(e&&e.stale) return null; } } drawFallback(el,candles,lv,cx); window.__chartLayers=['зона','SL','TP'].concat(cx&&cx.channel?['канал']:[]); }
+  } else { usingLW=false; window.__chartLayers=[]; chartError(el,s,'Інтерактивний графік не завантажився (бібліотека графіка недоступна).'); }
   return pack;
 }
 

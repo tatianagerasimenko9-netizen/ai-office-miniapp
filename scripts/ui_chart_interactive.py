@@ -109,6 +109,27 @@ async def _run(port: int, sid: str, problems: list) -> None:
             problems.append(f"горизонтальний скрол {sw}")
         if errs:
             problems.append(f"JS-помилки: {errs[:3]}")
+        # --- бібліотека графіка недоступна: явна помилка + «Повторити», без тихої підміни картинкою
+        pg2 = await ctx.new_page()
+        blocked = {"on": True}
+
+        async def route(r):
+            if blocked["on"] and ("lightweight-charts" in r.request.url):
+                await r.abort()
+            else:
+                await r.continue_()
+
+        await pg2.route("**/*", route)
+        await pg2.goto(f"http://127.0.0.1:{port}/v2?scenario={sid}")
+        await pg2.wait_for_selector("#chretry", timeout=15000)
+        txt = await pg2.inner_text("#chart")
+        if "не завантажився" not in txt:
+            problems.append(f"немає явної помилки при недоступній бібліотеці: {txt!r}")
+        if await pg2.evaluate("document.querySelectorAll('#chart canvas').length"):
+            problems.append("при недоступній бібліотеці показано canvas-картинку замість помилки")
+        blocked["on"] = False
+        await pg2.click("#chretry")
+        await pg2.wait_for_function("typeof usingLW!=='undefined' && usingLW && S.bars.length>0 && document.querySelectorAll('#chart canvas').length>0", timeout=10000)
         await br.close()
 
 
