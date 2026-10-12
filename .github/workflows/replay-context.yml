@@ -1,12 +1,12 @@
 name: Replay context study (isolated, read-only)
 
 # Ізольований replay Brain v2.1 (29 монет CORE) на архіві data.binance.vision + розріз за контекстом BTC. Нічого не пише в БД/Render/Telegram.
-# Періоди (фіксовані наперед): A 11–25.09, B 25.09–09.10 (як у BINANCE_REPLAY_2026-10.md), C 09–11.10 (новий, не перетинається з A/B).
+# Періоди (фіксовані механічно, не за результатом): A 11–25.09, B 25.09–09.10 (як у BINANCE_REPLAY_2026-10.md), C 09–11.10, D–G — 14-денні вікна назад із кроком 14 діб (до 17.07).
 on:
   workflow_dispatch: {}
   push:
     branches: ['claude/eager-pascal-t9e1ac']
-    paths: ['.github/workflows/replay-context.yml', 'scripts/replay_context_study.py']
+    paths: ['.github/workflows/replay-context.yml']
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        period: [A, B, C]
+        period: [A, B, C, D, E, F, G]
         symbol: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, DOTUSDT, LTCUSDT, NEARUSDT, OPUSDT, SUIUSDT, UNIUSDT, ETCUSDT, FILUSDT, HBARUSDT, TIAUSDT, SEIUSDT, 1000PEPEUSDT, 1000SHIBUSDT, FETUSDT, RUNEUSDT, ALGOUSDT, MKRUSDT, WLDUSDT, ONDOUSDT, JUPUSDT]
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -35,6 +35,10 @@ jobs:
             A) E=2026-09-25; D=14;;
             B) E=2026-10-09; D=14;;
             C) E=2026-10-11; D=2;;
+            D) E=2026-08-28; D=14;;
+            E) E=2026-08-14; D=14;;
+            F) E=2026-07-31; D=14;;
+            G) E=2026-07-17; D=14;;
           esac
           python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "$E" "$D" "out_${{ matrix.symbol }}.json"
       - uses: actions/upload-artifact@v4
@@ -47,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        period: [A, B, C]
+        period: [A, B, C, D, E, F, G]
     runs-on: ubuntu-latest
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -68,6 +72,10 @@ jobs:
             A) E=2026-09-25; D=14;;
             B) E=2026-10-09; D=14;;
             C) E=2026-10-11; D=2;;
+            D) E=2026-08-28; D=14;;
+            E) E=2026-08-14; D=14;;
+            F) E=2026-07-31; D=14;;
+            G) E=2026-07-17; D=14;;
           esac
           python scripts/learning_aggregate.py parts aggregate.json | head -c 3500
           python -u scripts/replay_context_study.py parts "$E" "$D" replay_context.json | tee "$GITHUB_STEP_SUMMARY"

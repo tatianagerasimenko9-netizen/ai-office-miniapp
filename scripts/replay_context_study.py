@@ -96,6 +96,13 @@ def main(src, end, days, out="replay_context.json"):
     rows = [r for r in rows if r["ctx"]]
     L = [f"# Replay Brain v2.1 · вікно рішень {end_d - timedelta(days=days)}…{end_d} · подій з контекстом BTC: {len(rows)}"]
     P = L.append
+    try:
+        w0 = float(btc["t"][np.searchsorted(btc["t"], (end_d - timedelta(days=days)).toordinal() * 86400.0 - 62135596800.0)])
+        i0 = int(np.searchsorted(btc["t"], w0))
+        i1 = int(np.searchsorted(btc["t"], (end_d.toordinal() * 86400.0 - 62135596800.0))) - 1
+        P(f"BTC за вікно рішень: {(btc['c'][i1] / btc['c'][i0] - 1) * 100:+.2f}% (від {btc['c'][i0]:.0f} до {btc['c'][i1]:.0f})")
+    except Exception:  # noqa: BLE001
+        pass
     P(line(rows, "усі"))
     for d in ("LONG", "SHORT"):
         P(line([r for r in rows if r["dir"] == d], d))
