@@ -105,12 +105,14 @@ def main() -> int:
         if r.get("status") == "ДАНИХ_НЕМАЄ":
             print("   ДАНИХ_НЕМАЄ (ф'ючерсних свічок не отримано; спот/Bybit не підставляємо)", flush=True)
             continue
-        print("   події:", r["events"], flush=True)
+        print("   події:", r["events"], "кінець даних:", r.get("data_end_ts"), flush=True)
+        if r["focus"]:
+            print("   OHLC подій:", r.get("events_ohlc"), "бар скасування:", r.get("cancel_bar"), flush=True)
         print("   V0 фактичний (ліміт від дотику):", r["V0_actual_on_futures"], flush=True)
         print("   V1 реакція:", fmt(r["V1_react"]), flush=True)
         print("   V2 реакція+підтвердження:", fmt(r["V2_react_confirm"]), flush=True)
     print(f"карток {len(rows)}, без ф'ючерсних даних {nodata}", flush=True)
-    return 2 if nodata else 0
+    return 0                                          # частина карток може бути без даних — це видно в підсумку, а не збій
 
 
 if __name__ == "__main__":

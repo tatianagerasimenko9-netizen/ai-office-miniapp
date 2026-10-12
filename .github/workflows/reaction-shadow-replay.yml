@@ -5,7 +5,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: ['claude/eager-pascal-t9e1ac']
-    paths: ['.github/workflows/reaction-shadow-replay.yml']
+    paths: ['.github/workflows/reaction-shadow-replay.yml', 'office2/reaction_shadow.py', 'scripts/reaction_shadow_replay.py']
 
 permissions:
   contents: read
@@ -26,7 +26,8 @@ jobs:
         run: |
           set -o pipefail
           python -u scripts/reaction_shadow_replay.py | tee "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: reaction-shadow-replay
           path: reaction_shadow_replay.json

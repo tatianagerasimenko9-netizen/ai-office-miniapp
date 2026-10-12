@@ -64,6 +64,14 @@ evs = RS.find_events(sc, sb, now)
 check("SHORT: TOUCH 1, REACT 2, CONFIRM 3", (evs["touch"], evs["react"], evs["confirm"]) == (1, 2, 3), evs)
 check("SHORT: V1 вхід на open бару 3, TP1", RS.evaluate(sc, sb, now)["V1_react"]["status"] == "TP1")
 
+# супровід угоди триває після expires_ts, вхід — лише до нього
+c_exp = dict(card, expires_ts=T0 + 6 * M)
+bars_long = bars + [bar(6, 106.5, 107, 106.0, 106.8)]
+rx = RS.evaluate(c_exp, bars_long, now)
+check("вхід до expires_ts, TP1 після expires_ts зараховується", rx["V1_react"]["status"] == "TP1", rx["V1_react"])
+c_exp2 = dict(card, expires_ts=T0 + 3 * M)
+check("бар входу після expires_ts → строк картки минув", RS.evaluate(c_exp2, bars_long, now)["V1_react"]["status"] == "НЕМАЄ_ВХОДУ")
+
 # позначка гіпотези
 check("результат маркований RESEARCH_HYPOTHESIS", r["label"] == "RESEARCH_HYPOTHESIS")
 

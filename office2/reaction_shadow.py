@@ -98,16 +98,27 @@ def simulate_entry(card: Dict[str, Any], bars: List[Dict[str, Any]], entry_idx: 
 
 
 def evaluate(card: Dict[str, Any], bars: List[Dict[str, Any]], now: float, cost_r_fn=None) -> Dict[str, Any]:
-    """V1/V2 для однієї картки. Фактичний V0 береться окремо (radar_watch.evaluate_card) у скрипті replay."""
+    """V1/V2 для однієї картки. Вхід шукається лише до expires_ts картки, але супровід угоди (SL/TP1) триває на всіх закритих барах після входу — як у фактичному paper.
+    Фактичний V0 береться окремо (radar_watch.evaluate_card) у скрипті replay."""
     ev = find_events(card, bars, now)
     bs = ev.pop("_bars")
-    out: Dict[str, Any] = {"events": {**{k: (bs[ev[k]]["ts"] if ev.get(k) is not None else None) for k in ("touch", "react", "confirm")}, "cancelled": ev.get("cancelled")}, "label": LABEL}
+    t0, tx = float(card["created_ts"]), float(card["expires_ts"])
+    full = [b for b in sorted(bars, key=lambda x: x["ts"]) if b["ts"] + M15 <= now and b["ts"] >= t0]      # bs — префікс full (обрізаний за expires_ts)
+    ohlc = lambda i: None if i is None else {k: bs[i][k] for k in ("ts", "open", "high", "low", "close")}  # noqa: E731
+    out: Dict[str, Any] = {"events": {**{k: (bs[ev[k]]["ts"] if ev.get(k) is not None else None) for k in ("touch", "react", "confirm")}, "cancelled": ev.get("cancelled")}, "label": LABEL,
+                           "events_ohlc": {k: ohlc(ev.get(k)) for k in ("touch", "react", "confirm")}, "data_end_ts": (full[-1]["ts"] + M15) if full else None}
+    if ev.get("cancelled") is not None:
+        out["cancel_bar"] = next(({k: b[k] for k in ("ts", "open", "high", "low", "close")} for b in bs if b["ts"] == ev["cancelled"]), None)
     for name, key in (("V1_react", "react"), ("V2_react_confirm", "confirm")):
         i = ev.get(key)
         if i is None:
-            out[name] = {"status": "НЕМАЄ_ВХОДУ", "why": "скасовано" if ev.get("cancelled") else "реакції ще не було"}
+            out[name] = {"status": "НЕМАЄ_ВХОДУ", "why": "скасовано до реакції (low досяг SL)" if ev.get("cancelled") else "реакції ще не було"}
+        elif i + 1 >= len(full):
+            out[name] = {"status": "НЕМАЄ_ВХОДУ", "why": "бар входу ще не закрито"}
+        elif full[i + 1]["ts"] >= tx:
+            out[name] = {"status": "НЕМАЄ_ВХОДУ", "why": "строк картки минув до входу"}
         else:
-            r = simulate_entry(card, bs, i + 1, cost_r_fn)
+            r = simulate_entry(card, full, i + 1, cost_r_fn)
             if r.get("entry_ts"):
                 r["delay_min_vs_touch"] = None if ev.get("touch") is None else round((r["entry_ts"] - bs[ev["touch"]]["ts"]) / 60.0, 1)
             out[name] = r
