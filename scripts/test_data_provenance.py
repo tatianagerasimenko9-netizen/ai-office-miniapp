@@ -17,7 +17,7 @@ def check(n, ok, info=""):
         FAILS.append(n)
 
 
-bar = {"open": 1.0, "high": 2.0, "low": 1.0, "close": 1.5, "volume": 1.0, "ts": "2026-10-11T21:00:00+00:00"}
+bar = {"open": 1.0, "high": 2.0, "low": 1.0, "close": 1.5, "volume": 1.0, "ts": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
 orig = MD.fetch_candles
 
 
@@ -35,6 +35,9 @@ check("Bybit відхиляється", with_rows([dict(bar, src="bybit_linear")
 check("свічки без позначки джерела відхиляються (невідоме походження)", with_rows([dict(bar)]) == {})
 check("змішаний набір (частина резервна) відхиляється повністю", with_rows([dict(bar, src="binance_futures"), dict(bar, src="binance_spot_vision")]) == {})
 check("порожня відповідь → {}", with_rows({}) == {})
+check("протухла ф'ючерсна свічка (кеш при збої) не є підставою для рішення", with_rows([dict(bar, src="binance_futures", ts="2026-01-01T00:00:00+00:00")]) == {})
+import inspect
+check("fetch_candles за замовчуванням не бере спот/Bybit (allow_fallback=False)", inspect.signature(orig).parameters["allow_fallback"].default is False)
 h = MD.source_health()
 check("лічильники рішень у source_health", h.get("decision_ok", 0) >= 1 and h.get("decision_rejected_nonfutures", 0) >= 3 and "decision_no_data" in h, str({k: v for k, v in h.items() if k.startswith("decision")}))
 

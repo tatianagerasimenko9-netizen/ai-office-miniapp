@@ -427,7 +427,7 @@ def _office_db_target() -> str:
     return (os.getenv("OFFICE_DB_PATH") or "").strip() or "office_bridge.db"
 
 
-def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+def fetch_candles(symbol: str, tf: str, limit: int = 3, allow_fallback: bool = False) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Futures-свічки Binance для будь-якої USDT-пари. Список свічок або {} при збої.
 
@@ -483,7 +483,8 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
                 _FALLBACK_AT.pop(sym, None)  # ф'ючерси відновились; старі резервні свічки в кеші самі знову позначать себе при читанні
             except Exception:  # noqa: BLE001
                 _HEALTH["errors"] += 1
-                rows = _fallback_klines(sym, str(tf), want)
+                # спот/Bybit — лише за явним allow_fallback=True (відображення графіка з позначкою src); рішення й супровід їх не отримують
+                rows = _fallback_klines(sym, str(tf), want) if allow_fallback else []
                 if not rows:
                     raise
         except Exception:  # noqa: BLE001
@@ -506,6 +507,17 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
 
 
 _DECISION_REJECT_LOG: Dict[str, float] = {}
+_TF_SEC = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400, "1w": 604800, "1M": 2678400}
+
+
+def _fresh_enough(bar: Dict[str, Any], tf: str) -> bool:
+    """Остання свічка не старіша за два періоди ТФ (+ запас 120 с): кеш «stale_served» при збої Binance не стає підставою для рішення."""
+    try:
+        ts = bar.get("ts")
+        o = float(ts) if isinstance(ts, (int, float)) else datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+        return time.time() - o <= 2 * _TF_SEC.get(tf, 900) + 120
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def fetch_candles_futures(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
@@ -513,10 +525,12 @@ def fetch_candles_futures(symbol: str, tf: str, limit: int = 3) -> Union[List[Di
     Резервні (спот Binance, Bybit) та свічки без позначки джерела відхиляються: повертається {} — споживач пропускає цикл і повторює пізніше, рішення на чужих свічках не приймається.
     Лічильники — у source_health(): decision_ok / decision_rejected_nonfutures."""
     rows = fetch_candles(symbol, tf, limit)
-    if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows):
+    if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows) and _fresh_enough(rows[-1], str(tf)):
         _HEALTH["decision_ok"] = _HEALTH.get("decision_ok", 0) + 1
         return rows
-    if isinstance(rows, list) and rows:
+    if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows):
+        _HEALTH["decision_rejected_stale"] = _HEALTH.get("decision_rejected_stale", 0) + 1
+    elif isinstance(rows, list) and rows:
         _HEALTH["decision_rejected_nonfutures"] = _HEALTH.get("decision_rejected_nonfutures", 0) + 1
         srcs = sorted({str((r or {}).get("src") or "?") for r in rows})
         key = f"{str(symbol).upper()}|{tf}"
