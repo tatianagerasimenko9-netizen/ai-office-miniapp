@@ -173,6 +173,8 @@ jobs:
           python scripts/test_launch_once.py
           python scripts/test_data_provenance.py
           python scripts/test_daria_steps.py
+          python scripts/test_topdown.py
+          python scripts/test_topdown_brain.py
           python scripts/test_events_perf.py
           python scripts/test_counterfactual_be.py
           python scripts/test_learning_flags_shadow.py

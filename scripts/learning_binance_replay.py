@@ -3,6 +3,7 @@
 Використання: python scripts/learning_binance_replay.py <SYMBOL> <END_DATE YYYY-MM-DD> <DAYS> <OUT.json>
 Рішення приймаються на барах у (END−DAYS, END 00:00Z]; результати рахуються по наступних барах (до +2 діб даних). Нічого не пише в БД і не торкається production."""
 import json
+import os
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -26,6 +27,12 @@ def main(sym, end, days, out):
         return
     btc = arrs["m15"] if sym == "BTCUSDT" else BV.fetch("BTCUSDT", "15m", end_day.fromordinal(end_day.toordinal() - days - 55), end_day.fromordinal(end_day.toordinal() + 2))
     q = arrs.pop("quality")
+    if os.environ.get("REPLAY_LTF") == "1":          # M5/M1 для top-down (Brain обрізає їх до барів, закритих до now)
+        d0, d1 = end_day.fromordinal(end_day.toordinal() - days - 1), end_day
+        for key, iv in (("m5", "5m"), ("m1", "1m")):
+            a = BV.fetch(sym, iv, d0, d1)
+            arrs[key] = a or None
+            q[f"{key}_bars"] = int(len(a["t"])) if a else 0
     print("[replay] старт", sym, q, flush=True)
     t0 = time.time()
     run = RP.replay_arrays(sym, arrs, t_from, t_to, btc=btc, outcome_end=None)
