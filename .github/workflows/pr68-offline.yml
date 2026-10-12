@@ -171,6 +171,7 @@ jobs:
           python scripts/test_liq_map.py
           python scripts/test_data_stability.py
           python scripts/test_launch_once.py
+          python scripts/test_data_provenance.py
 
   mini-app-ui-smoke:
     runs-on: ubuntu-latest

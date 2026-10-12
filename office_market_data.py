@@ -505,6 +505,30 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, 
         return {}
 
 
+_DECISION_REJECT_LOG: Dict[str, float] = {}
+
+
+def fetch_candles_futures(symbol: str, tf: str, limit: int = 3) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    """Свічки ЛИШЕ з ф'ючерсів Binance USDⓈ-M для торгових рішень, paper/супроводу сигналів і журналів.
+    Резервні (спот Binance, Bybit) та свічки без позначки джерела відхиляються: повертається {} — споживач пропускає цикл і повторює пізніше, рішення на чужих свічках не приймається.
+    Лічильники — у source_health(): decision_ok / decision_rejected_nonfutures."""
+    rows = fetch_candles(symbol, tf, limit)
+    if isinstance(rows, list) and rows and all((r or {}).get("src") == FUTURES_SRC for r in rows):
+        _HEALTH["decision_ok"] = _HEALTH.get("decision_ok", 0) + 1
+        return rows
+    if isinstance(rows, list) and rows:
+        _HEALTH["decision_rejected_nonfutures"] = _HEALTH.get("decision_rejected_nonfutures", 0) + 1
+        srcs = sorted({str((r or {}).get("src") or "?") for r in rows})
+        key = f"{str(symbol).upper()}|{tf}"
+        now = time.time()
+        if now - _DECISION_REJECT_LOG.get(key, 0.0) > 600.0:      # один рядок на монету/ТФ на 10 хв: журнал не забивається
+            _DECISION_REJECT_LOG[key] = now
+            print(f"[data] рішення: свічки {key} відхилено — джерело {','.join(srcs)}, не ф'ючерси Binance; цикл пропущено", flush=True)
+    else:
+        _HEALTH["decision_no_data"] = _HEALTH.get("decision_no_data", 0) + 1
+    return {}
+
+
 def fetch_session_levels(symbol: str) -> Dict[str, Any]:
     """
     High/low сесій Asia / London / NY за останні ~24 год (15m, UTC),
