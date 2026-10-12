@@ -16,7 +16,9 @@ def fake(url, params):
 m._http_get_json_orig = m._http_get_json
 m._http_get_json = fake
 m.reset_market_cache()
-c = m.fetch_candles("BTC", "15m", 3)
+assert m.fetch_candles("BTC", "15m", 3) == {}, "без allow_fallback спот/Bybit не віддаються"
+m._CANDLE_CACHE.clear()
+c = m.fetch_candles("BTC", "15m", 3, allow_fallback=True)
 assert isinstance(c, list) and len(c) == 3 and c[-1]["close"] == 1.5, c
 assert m._HEALTH["fallback_src"] == "binance_spot_vision" and m._HEALTH["fallback_used"] == 1
 
@@ -26,12 +28,12 @@ def fake2(url, params):
     return {"result": {"list": [["1700000900000", "1", "2", "0.5", "1.6", "7", "0"], ["1700000000000", "1", "2", "0.5", "1.4", "8", "0"]]}}
 m._http_get_json = fake2
 m.reset_market_cache()
-c = m.fetch_candles("ETH", "1h", 5)
+c = m.fetch_candles("ETH", "1h", 5, allow_fallback=True)
 assert [x["close"] for x in c] == [1.4, 1.6] and m._HEALTH["fallback_src"] == "bybit_linear", c
 
 os.environ["OFFICE_CANDLE_FALLBACK"] = "0"
 m.reset_market_cache()
-assert m.fetch_candles("SOL", "1h", 5) == {}
+assert m.fetch_candles("SOL", "1h", 5, allow_fallback=True) == {}
 del os.environ["OFFICE_CANDLE_FALLBACK"]
 
 # реальна _http_get_json: пауза лише для fapi
@@ -57,7 +59,7 @@ def fake_fresh(url, params):
         raise m.RateLimited(30)
     return [[now_ms - (4 - i) * 900000, "1", "2", "0.5", "1.5", "10"] for i in range(5)]
 m._http_get_json = fake_fresh
-c = m.fetch_candles("BTCUSDT", "15m", 5)
+c = m.fetch_candles("BTCUSDT", "15m", 5, allow_fallback=True)
 assert c and all(x["src"] == "binance_spot_vision" for x in c)
 assert m.fallback_recent("BTC") == "binance_spot_vision"
 cyc = {"send": True, "action": "SEND", "symbol": "BTCUSDT"}

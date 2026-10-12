@@ -974,7 +974,7 @@ def candles_payload(symbol: str, tf: str, limit: int = 180) -> Dict[str, Any]:
     else:
         from office_market_data import fetch_candles
 
-        raw = fetch_candles(symbol, interval, lim)
+        raw = fetch_candles(symbol, interval, lim, allow_fallback=True)
         if isinstance(raw, list) and raw:
             for r in raw:
                 ts = r.get("ts")
