@@ -61,7 +61,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LUFT-FILL":
+    if rule_id == "G-STOP-CRYPTO":
+        distance = _number(data, "stop_distance")
+        price = _number(data, "entry_price")
+        if distance is None or price is None or price <= 0:
+            return {"status": "UNKNOWN"}
+        passed = distance <= .02 * price and distance > 0
+    elif rule_id == "G-LUFT-FILL":
         offset = _number(data, "offset")
         stop = _number(data, "calculated_stop")
         if offset is None or stop is None or stop <= 0:
