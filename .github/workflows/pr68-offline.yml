@@ -90,6 +90,8 @@ jobs:
         run: python scripts/test_ready_seq.py
       - name: Продуктивність критичного циклу (кеш карток, бюджет, RSS-ліміт, scout у потоках)
         run: PYTHONPATH=. python scripts/test_perf_guards.py
+      - name: Наскрізний шлях рішення (картки → гіпотези → аналітик → READY → Telegram → Mini App → навчання)
+        run: PYTHONPATH=. python scripts/test_e2e_decision_path.py
       - name: Тактики відносно перешкоди (T0–T4, контролі, рекомендація)
         run: PYTHONPATH=. python scripts/test_tactic.py
       - name: Аналітик READY (12 пунктів, картки/зв'язки, критичні дефекти, тижневий розбір)
