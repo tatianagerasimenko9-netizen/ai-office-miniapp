@@ -59,7 +59,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-STOP-CALC":
+    if rule_id == "G-STOP-ATR":
+        distance = _number(data, "stop_distance")
+        atr = _number(data, "daily_atr")
+        if distance is None or atr is None or atr <= 0:
+            return {"status": "UNKNOWN"}
+        passed = .06 * atr <= distance <= .15 * atr
+    elif rule_id == "G-STOP-CALC":
         price = _number(data, "entry_price")
         stop = _number(data, "stop_distance")
         if price is None or stop is None or price <= 0:
