@@ -94,6 +94,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-KAVYA-CONCEPTS": ("body_size", "bar_range", "close", "high", "low"),
         "X-QA-RUNE": ("stop_candidates_valid",),
         "G-INDICATORS-NOT-USED": ("uses_oscillator_as_entry_trigger",),
+        "D-WYCKOFF-CONTEXT": ("prior_trend", "range_position", "supply_demand"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -101,7 +102,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-INDICATORS-NOT-USED":
+    if rule_id == "D-WYCKOFF-CONTEXT":
+        trend, position, balance = (data[k] for k in ("prior_trend", "range_position", "supply_demand"))
+        if trend not in ("UP", "DOWN", "RANGE") or position not in ("UPPER", "LOWER", "MIDDLE") or balance not in ("BUYERS", "SELLERS", "BALANCED"):
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "prior_trend": trend, "range_position": position,
+                "supply_demand": balance, "note": "context only, no phase prediction"}
+    elif rule_id == "G-INDICATORS-NOT-USED":
         uses_indicator = data["uses_oscillator_as_entry_trigger"]
         if not isinstance(uses_indicator, bool):
             return {"status": "UNKNOWN"}
