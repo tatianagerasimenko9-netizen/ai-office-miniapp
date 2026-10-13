@@ -43,7 +43,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-STOP-STRUCTURE":
+    if rule_id == "G-NO-CHASE":
+        entry = _number(data, "entry")
+        last = _number(data, "last_price")
+        limit = _number(data, "max_chase_distance")
+        if entry is None or last is None or limit is None:
+            return {"status": "UNKNOWN", "reason": "missing price"}
+        passed = abs(last - entry) <= limit if limit >= 0 else False
+    elif rule_id == "D-STOP-STRUCTURE":
         stop = _number(data, "stop")
         invalidation = _number(data, "invalidation")
         direction = data["direction"]
