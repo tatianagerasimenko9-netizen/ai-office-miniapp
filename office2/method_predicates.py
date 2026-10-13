@@ -84,7 +84,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-BREAKOUT":
+    if rule_id == "D-POST-IMPULSE-BASE":
+        in_third = data["base_in_expected_third"]
+        retraced = data["retracement_complete"]
+        if not isinstance(in_third, bool) or not isinstance(retraced, bool):
+            return {"status": "UNKNOWN"}
+        passed = in_third and not retraced
+    elif rule_id == "G-BREAKOUT":
         closed, retest = data["closed_beyond"], data["held_retest"]
         if not isinstance(closed, bool) or not isinstance(retest, bool):
             return {"status": "UNKNOWN"}
