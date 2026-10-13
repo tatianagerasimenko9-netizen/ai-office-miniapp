@@ -63,7 +63,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-STOP-TECH":
+    if rule_id == "G-STOP-CRYPTO-TECHNICAL":
+        stop = _number(data, "stop")
+        level = _number(data, "level")
+        direction = data["direction"]
+        if stop is None or level is None or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN"}
+        passed = stop < level if direction == "LONG" else stop > level
+    elif rule_id == "G-STOP-TECH":
         stop = _number(data, "stop")
         level = _number(data, "level")
         direction = data["direction"]
