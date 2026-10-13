@@ -298,10 +298,15 @@ def telegram_confirmation(snap: Dict[str, Any], fmt=None, stamp=None) -> List[st
     by = {s["id"]: s for s in d["steps"]}
     ua = {"CONFIRMED": "підтверджує", "NEUTRAL": "діапазон (без підтвердження)", "AGAINST": "проти", "UNAVAILABLE": "немає даних"}
     out = []
+    st_by = {x.get("tf"): x for x in (d.get("topdown_stages") or [])}
+    rel_ua = {"CONFIRMS": "за", "CONFLICTS": "проти", "NEUTRAL": "нейтрально"}
     for key, label in (("HTF", "D1/H4"), ("H1", "H1")):
         s = by.get(key)
         if s:
-            out.append(f"{label} — {ua.get(s['status'], s['status'])}")
+            if key == "HTF" and s["status"] != "CONFIRMED" and st_by.get("D1") and st_by.get("H4") and st_by["D1"].get("state") in rel_ua and st_by["H4"].get("state") in rel_ua:
+                out.append(f"D1 — {rel_ua[st_by['D1']['state']]} · H4 — {rel_ua[st_by['H4']['state']]}")     # розбіжність між D1 і H4 видно в картці, а не ховається під «D1/H4 — проти»
+            else:
+                out.append(f"{label} — {ua.get(s['status'], s['status'])}")
     m = by.get("M15")
     c = (m or {}).get("condition") or {}
     m5s = by.get("M5")

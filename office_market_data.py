@@ -82,6 +82,22 @@ def _candle_cache_put(key: tuple, now: float, want: int, rows: List[Dict[str, An
                     break
 
 
+def candle_cache_relieve(keep_fraction: float = 0.5) -> Dict[str, int]:
+    """Тиск пам'яті: лишає лише найсвіжіші за записом keep_fraction свічок кешу (активні ключі оновлюються щоциклу й виживають; решта підтягнеться з Binance при потребі)."""
+    with _CACHE_LOCK:
+        total = sum(len(v[2]) for v in _CANDLE_CACHE.values())
+        target = int(total * keep_fraction)
+        dropped = 0
+        for k, v in sorted(_CANDLE_CACHE.items(), key=lambda kv: kv[1][0]):
+            if total <= target:
+                break
+            total -= len(v[2])
+            del _CANDLE_CACHE[k]
+            dropped += 1
+        _CANDLE_CACHE_STATS["evicted_budget"] += dropped
+        return {"dropped_keys": dropped, "rows_left": total}
+
+
 def candle_cache_stats() -> Dict[str, Any]:
     with _CACHE_LOCK:
         rows = sum(len(v[2]) for v in _CANDLE_CACHE.values())
@@ -2550,6 +2566,7 @@ def _register_memory_probes() -> None:
         import office_runtime_guard as _rg
 
         _rg.register_probe("candle_cache", lambda: candle_cache_stats())
+        _rg.register_relief("candle_cache", lambda: candle_cache_relieve())
         _rg.register_probe("ws_klines", lambda: _ws.memory_stats())
     except Exception:  # noqa: BLE001
         pass

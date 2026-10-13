@@ -85,6 +85,31 @@ def stage_report(reset: bool = True) -> str:
     return txt
 
 
+_RELIEFS: Dict[str, Callable[[], Any]] = {}
+
+
+def register_relief(name: str, fn: Callable[[], Any]) -> None:
+    """Функція «скинути зайве» для кешу, який можна безпечно відновити з Binance. Викликається лише коли RSS після gc ≥ relief_mb."""
+    _RELIEFS[name] = fn
+
+
+def relief_mb() -> float:
+    try:
+        return float(os.getenv("OFFICE_MEM_RELIEF_MB", "450") or 450)
+    except ValueError:
+        return 450.0
+
+
+def run_reliefs() -> str:
+    out = []
+    for name, fn in sorted(_RELIEFS.items()):
+        try:
+            out.append(f"{name}={fn()}")
+        except Exception as exc:  # noqa: BLE001
+            out.append(f"{name}=ERR:{type(exc).__name__}")
+    return "; ".join(out)
+
+
 def register_default_probes() -> None:
     """Розміри відомих module-level структур, які можуть рости (кількість записів). Імпорти ліниві: відсутній модуль просто пропускається."""
     def _len(mod: str, attr: str) -> Callable[[], Any]:
@@ -133,6 +158,12 @@ def start_memory_guard(log: Callable[[str], None] = print, period_sec: float = 6
                 gc.collect()
                 trim_memory()
                 after = rss_mb()
+                if after is not None and after >= relief_mb() and _RELIEFS:
+                    freed = run_reliefs()
+                    gc.collect()
+                    trim_memory()
+                    log(f"[mem][relief] rss {after:.0f}→{(rss_mb() or 0):.0f} МБ (поріг {relief_mb():.0f}): {freed}")
+                    after = rss_mb()
                 now = time.time()
                 if (after is not None and after >= warn_mb) or now - last_line >= 300:
                     last_line = now

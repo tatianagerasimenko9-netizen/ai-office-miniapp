@@ -67,7 +67,33 @@ def main():
     assert "t=7" in RG.probe_report() and "t.stage" in RG.stage_report(reset=True)
     RG.register_default_probes()
     assert "gc_objects=" in RG.probe_report()
+    # 6) клапан тиску: лишає свіжіші, скидає старіші
+    MD._CANDLE_CACHE.clear()
+    for i in range(10):
+        MD._candle_cache_put((f"R{i}USDT", "1h"), now - 50 + i, 100, rows(100))
+    r = MD.candle_cache_relieve(0.5)
+    assert r["dropped_keys"] == 5 and ("R9USDT", "1h") in MD._CANDLE_CACHE and ("R0USDT", "1h") not in MD._CANDLE_CACHE, r
+    assert "candle_cache" in RG._RELIEFS and "candle_cache=" in RG.run_reliefs()
     print("ok memory budget")
 
 
 main()
+
+
+def test_telegram_confirmation_shows_d1_h4_split():
+    from office2 import daria_steps as DS
+
+    orig = DS.build
+    try:
+        DS.build = lambda snap: {"direction": "SHORT", "steps": [{"id": "HTF", "status": "AGAINST"}, {"id": "H1", "status": "CONFIRMED"}],
+                                 "topdown_stages": [{"tf": "D1", "state": "CONFIRMS"}, {"tf": "H4", "state": "CONFLICTS"}]}
+        out = DS.telegram_confirmation({})
+        assert out[0] == "D1 — за · H4 — проти" and out[1] == "H1 — підтверджує", out
+        DS.build = lambda snap: {"direction": "SHORT", "steps": [{"id": "HTF", "status": "CONFIRMED"}, {"id": "H1", "status": "CONFIRMED"}], "topdown_stages": []}
+        assert DS.telegram_confirmation({})[0] == "D1/H4 — підтверджує"
+    finally:
+        DS.build = orig
+    print("ok telegram D1/H4 split")
+
+
+test_telegram_confirmation_shows_d1_h4_split()
