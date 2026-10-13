@@ -108,6 +108,8 @@ def compact_method_trace(thesis: Mapping[str, Any], now: float) -> dict[str, Any
     from datetime import datetime, timezone
 
     rules = load_rules()
+    from office2.method_stages import staged_registry
+    stages = staged_registry(rules)
     by_id = {r["rule_id"]: r for r in rules}
     observed = []
     for group, ids, fact in (
@@ -131,6 +133,7 @@ def compact_method_trace(thesis: Mapping[str, Any], now: float) -> dict[str, Any
         "asof_utc": datetime.fromtimestamp(now, timezone.utc).isoformat(),
         "decision_role": "SHADOW",
         "registered_rule_count": len(rules),
+        "stages": stages,
         "evaluations": observed,
         "methodology_coverage": "PARTIAL",
         "note": "Observation is not source-rule confirmation; Brain gates unchanged.",
