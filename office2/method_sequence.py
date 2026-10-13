@@ -36,3 +36,26 @@ def decision_trace(rules):
         {"rule_id": rid, "status": "UNKNOWN", "implementation_status": lookup[rid].get("implementation_status", "UNKNOWN")}
         for rid in ids
     ]} for phase, ids in PHASES]
+
+
+def evaluate_chain(rules, evidence_by_rule=None):
+    """Run the complete ordered registry with explicit unknown evidence."""
+    validate_sequence(rules)
+    from office2.method_predicates import evaluate
+    evidence_by_rule = evidence_by_rule or {}
+    registry = {r["rule_id"]: r for r in rules}
+    phases = []
+    counts = {"PASS": 0, "FAIL": 0, "UNKNOWN": 0, "NOT_APPLICABLE": 0}
+    for phase, ids in PHASES:
+        items = []
+        for rid in ids:
+            inputs = evidence_by_rule.get(rid, {})
+            result = evaluate(rid, inputs)
+            state = result["status"]
+            counts[state] += 1
+            items.append({"rule_id": rid, "status": state,
+                          "source_class": registry[rid].get("evidence_class"),
+                          "details": result})
+        phases.append({"phase": phase, "rules": items})
+    return {"phases": phases, "counts": counts, "evaluated": sum(counts.values()),
+            "role": "SHADOW", "decision": "UNDETERMINED"}
