@@ -36,7 +36,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-LIMIT":
+    if rule_id == "D-NO-CONFIRMATION-NO-TRADE":
+        confirmed = data["confirmed"]
+        if not isinstance(confirmed, bool):
+            return {"status": "UNKNOWN", "reason": "invalid confirmation"}
+        passed = confirmed
+    elif rule_id == "G-LVL-LIMIT":
         touches = _number(data, "touches")
         broken = data["broken"]
         if touches is None or not isinstance(broken, bool):
