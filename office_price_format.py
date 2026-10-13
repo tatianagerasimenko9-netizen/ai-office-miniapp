@@ -52,6 +52,10 @@ def tick_size_for(symbol: str = "", price: Any = None) -> Decimal:
         return Decimal("0.0001")
     if p >= Decimal("0.1"):
         return Decimal("0.0001")
+    if p < Decimal("0.001"):
+        # Дуже дешеві монети (без біржового tickSize): ≥4 значущі цифри, інакше SL/вхід/TP зливаються в одне число (0,000012 / 0,000012).
+        exp = p.adjusted()                      # порядок числа: 0.00001234 -> -5
+        return Decimal(1).scaleb(exp - 3)       # -> 1E-8
     # Альти на кшталт MANTA (~0.07): 6 знаків, як tickSize-відображення 0.070471.
     return Decimal("0.000001")
 

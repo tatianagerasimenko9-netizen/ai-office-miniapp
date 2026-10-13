@@ -431,8 +431,8 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     if not learning:
         try:
             _compose_telegram_card(path, symbol, direction, e, zlo, zhi, sl_, t1, t2, t3)
-        except Exception:
-            pass  # Chart delivery remains available if decorative composition fails.
+        except Exception as exc:
+            return {"ok": False, "reason": f"telegram_card_compose_failed: {type(exc).__name__}: {exc}"}
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
             "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}
@@ -481,13 +481,25 @@ def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp
     label(52, 822, "ЗОНА ВХОДУ", 24, "#a8c4e4", True)
     label(52, 858, fmt(zlo) + (" – " + fmt(zhi) if zlo != zhi else ""), 37, "#ffffff", True)
     label(52, 909, "План " + fmt(entry), 22, "#b0bdd1")
-    box(28, 961, 483, 1080, "#103729", "#147b52")
-    label(51, 973, "TP1  /  TAKE PROFIT", 23, "#64e6a7", True)
-    label(51, 1011, fmt(tp1) if tp1 is not None else "Немає цілі", 37, "#ffffff", True)
-    box(499, 961, 972, 1080, "#3b1b27", "#a23c4d")
-    label(524, 973, "SL  /  STOP LOSS", 23, "#ff999f", True)
-    label(524, 1011, fmt(sl), 37, "#ffffff", True)
+    # Display all available take-profit levels in the image, not only TP1.
+    targets = [("TP1", tp1), ("TP2", tp2), ("TP3", tp3)]
+    visible = [(name, value) for name, value in targets if value is not None]
+    if not visible:
+        raise ValueError("READY card requires at least one take-profit target")
+    gap = 12
+    panel_width = (944 - gap * (len(visible) - 1)) // len(visible)
+    for idx, (name, value) in enumerate(visible):
+        x0 = 28 + idx * (panel_width + gap)
+        x1 = x0 + panel_width
+        box(x0, 961, x1, 1074, "#103729", "#147b52")
+        label(x0 + 16, 975, name + " / TAKE PROFIT", 20 if len(visible) < 3 else 17, "#64e6a7", True)
+        label(x0 + 16, 1011, fmt(value), 31 if len(visible) < 3 else 25, "#ffffff", True)
+    box(28, 1090, 604, 1181, "#3b1b27", "#a23c4d")
+    label(48, 1102, "SL / STOP LOSS", 21, "#ff999f", True)
+    label(48, 1135, fmt(sl), 30, "#ffffff", True)
     rr = abs(tp1-entry)/abs(entry-sl) if tp1 is not None and entry != sl else None
-    label(37, 1104, "R/R  1:" + (f"{rr:.2f}" if rr is not None else "—"), 29, "#ffcb68", True)
-    label(37, 1158, "Повний аналіз — кнопка під повідомленням", 21, "#9aaec9")
+    box(620, 1090, 972, 1181, "#152235", "#3c526d")
+    label(642, 1102, "R/R ДО TP1", 21, "#a8c4e4", True)
+    label(642, 1135, "1:" + (f"{rr:.2f}" if rr is not None else "—"), 30, "#ffcb68", True)
+    label(37, 1192, "Деталі та супровід — у Telegram / Mini App", 18, "#9aaec9")
     out.save(path, format="PNG", optimize=True)

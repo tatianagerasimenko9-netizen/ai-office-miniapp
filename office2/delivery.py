@@ -76,7 +76,15 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
 
-    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY",
+    # Telegram hashtag is searchable and clickable. Futures symbol is normalized
+    # to a single token (e.g. BTCUSDT -> #BTCUSDT), without punctuation.
+    import re
+    hashtag = "#" + re.sub(r"[^A-Za-z0-9_]", "", str(sym).upper())
+    from office_ready_seq import label as _seq_label
+
+    no = _seq_label(snap.get("ready_no"))
+    L = [f"AI Office · {no}" if no else "AI Office",
+         f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}",
          "━━━━━━━━━━━━━━━━"]
     if v["zone"]:
         L.append(f"🟡 ВХІД  {n(v['zone'][0])}–{n(v['zone'][1])}")
@@ -293,7 +301,32 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             except asyncio.TimeoutError:
                 img = {"ok": False, "reason": "chart_render_timeout_8s"}
                 tm["render_timeout"] = True
-            cap = build_caption(snap, now=clk())
+            # Only a validated 1000x1230 image is allowed for a new actionable READY.
+            # A text-only fallback silently breaks the user-facing signal contract.
+            if not img.get("ok") or not img.get("path"):
+                why_image = str(img.get("reason") or "chart_missing")
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"IMAGE_REQUIRED: {why_image}"[:300], sid))
+                log(f"[office2] image required; READY remains pending {sid}: {why_image}")
+                return 0
+            try:
+                from PIL import Image as _ReadyImage
+                with _ReadyImage.open(str(img["path"])) as _image:
+                    if _image.format != "PNG" or _image.size != (1000, 1230):
+                        raise ValueError(f"unexpected READY image format/size: {_image.format} {_image.size}")
+            except (OSError, ValueError, KeyError) as exc_image:
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"IMAGE_REQUIRED: {exc_image}"[:300], sid))
+                log(f"[office2] invalid READY image; remains pending {sid}: {exc_image}")
+                return 0
+            # Sequential READY number (№0001…): atomic in the DB, idempotent per scenario (a retry reuses it). Not the Telegram message_id.
+            try:
+                from office_ready_seq import assign as _assign_no
+
+                ready_no = await run_o2(_assign_no, db, sid)
+            except Exception as exc_no:  # noqa: BLE001
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"READY_NUMBER: {type(exc_no).__name__}: {exc_no}"[:300], sid))
+                log(f"[office2] READY number unavailable; stays pending {sid}: {type(exc_no).__name__}")
+                return 0
+            cap = build_caption(dict(snap, ready_no=ready_no), now=clk())
             t_a = time.time()
             mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
             t_sent = time.time()

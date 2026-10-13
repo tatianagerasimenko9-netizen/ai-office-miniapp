@@ -138,7 +138,7 @@ fetch = lambda s, tf, n: candles  # noqa: E731
 got = T.pending_milestones(db2, fetch, now_ts=c0 + 900 * 6)
 lv = [(m["symbol"], m["level"], m["confirm_msg_id"]) for m in got if m["symbol"] == "MSUSDT"]
 assert lv == [("MSUSDT", "ENTRY", 556), ("MSUSDT", "TP1", 556), ("MSUSDT", "TP2", 556), ("MSUSDT", "SL", 556)], lv
-assert [m["silent"] for m in got if m["symbol"] == "MSUSDT"] == [True, False, False, False]   # ENTRY лише в БД
+assert [m["silent"] for m in got if m["symbol"] == "MSUSDT"] == [False, False, False, False]   # ENTRY — відповідь у гілку READY (OFFICE_TG_ENTRY_REPLY=0 → лише БД)
 assert not [m for m in got if m["symbol"] == "HISTUSDT"] and {m["symbol"] for m in got} <= {"MSUSDT", "GRUSDT"}
 for m in got:
     T.record_milestone(db2, m, 1)
