@@ -116,6 +116,7 @@ def from_closed_bars(bars, cutoff):
             else:
                 break
         evidence["G-FB-COMPLEX"] = {"inside_bars": inside}
+    evidence["G-LVL-LIMIT"] = {"touches": sum(x["high"] >= max(y["high"] for y in past[:max(1, len(past)-3)]) for x in past[-3:]), "broken": current["close"] > max(x["high"] for x in past)}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
