@@ -72,6 +72,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-LVL-TRENDBREAK": ("trend_reversed", "reversal_bar_confirmed"),
         "D-PARANORMAL-IMPULSE": ("range", "average_range"),
         "G-LVL-CONFIRM-SIGNS": ("touches", "false_break", "long_wick"),
+        "G-FB-1BAR": ("swept_level", "returned_inside", "bars"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
