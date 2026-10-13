@@ -69,10 +69,10 @@ for i, (s, d, e, me, sl, a, b, c) in enumerate(cases):
             from PIL import Image
 
             im = Image.open(path)
-            check(im.size == (1000, 800), "розмір 1000x800")
+            check(im.size == (1000, 1230), "розмір 1000x1230 (компактна картка #242)")
             px = im.convert("RGB")
             # правий край (останні 6 px) не має мати тексту: усі пікселі — фон
-            edge = {px.getpixel((x, y)) for x in range(im.size[0] - 6, im.size[0]) for y in range(100, 700, 3)}
+            edge = {px.getpixel((x, y)) for x in range(im.size[0] - 6, im.size[0]) for y in range(170, 780, 3)}
             check(len(edge) == 1, f"текст не впирається у правий край ({s} {d})")
         except ImportError:
             pass
