@@ -53,7 +53,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-BE-2R":
+    if rule_id == "G-CRYPTO-SCORE":
+        score = _number(data, "score")
+        if score is None or score < 0 or score > 10:
+            return {"status": "UNKNOWN"}
+        passed = score >= 5
+    elif rule_id == "G-BE-2R":
         profit = _number(data, "profit_r")
         breakeven = data["stop_at_entry"]
         if profit is None or not isinstance(breakeven, bool):
