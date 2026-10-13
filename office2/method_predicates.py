@@ -86,6 +86,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-VOLUME-PRICE": ("current_volume", "average_volume", "price_change"),
         "G-PROGNOSTIC": ("bar_range", "average_range", "close", "high", "low"),
         "G-TP-TRAIL": ("profit_r", "trend_confirmed", "stop_behind_extremum"),
+        "S-OB": ("body_open", "body_close", "latest_body_close", "direction"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -93,7 +94,16 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-TP-TRAIL":
+    if rule_id == "S-OB":
+        op, cl, latest = (_number(data, k) for k in ("body_open", "body_close", "latest_body_close"))
+        direction = data["direction"]
+        if any(v is None for v in (op, cl, latest)) or op == cl or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN"}
+        midpoint = (op + cl) / 2
+        invalidated = latest < midpoint if direction == "LONG" else latest > midpoint
+        return {"status": "FAIL" if invalidated else "PASS", "mean_threshold": midpoint,
+                "note": "body-close threshold only; block detection upstream"}
+    elif rule_id == "G-TP-TRAIL":
         profit = _number(data, "profit_r")
         trend = data["trend_confirmed"]
         stop = data["stop_behind_extremum"]
