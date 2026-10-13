@@ -80,7 +80,11 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     # to a single token (e.g. BTCUSDT -> #BTCUSDT), without punctuation.
     import re
     hashtag = "#" + re.sub(r"[^A-Za-z0-9_]", "", str(sym).upper())
-    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}",
+    from office_ready_seq import label as _seq_label
+
+    no = _seq_label(snap.get("ready_no"))
+    L = [f"AI Office · {no}" if no else "AI Office",
+         f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}",
          "━━━━━━━━━━━━━━━━"]
     if v["zone"]:
         L.append(f"🟡 ВХІД  {n(v['zone'][0])}–{n(v['zone'][1])}")
@@ -313,7 +317,16 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"IMAGE_REQUIRED: {exc_image}"[:300], sid))
                 log(f"[office2] invalid READY image; remains pending {sid}: {exc_image}")
                 return 0
-            cap = build_caption(snap, now=clk())
+            # Sequential READY number (№0001…): atomic in the DB, idempotent per scenario (a retry reuses it). Not the Telegram message_id.
+            try:
+                from office_ready_seq import assign as _assign_no
+
+                ready_no = await run_o2(_assign_no, db, sid)
+            except Exception as exc_no:  # noqa: BLE001
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"READY_NUMBER: {type(exc_no).__name__}: {exc_no}"[:300], sid))
+                log(f"[office2] READY number unavailable; stays pending {sid}: {type(exc_no).__name__}")
+                return 0
+            cap = build_caption(dict(snap, ready_no=ready_no), now=clk())
             t_a = time.time()
             mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
             t_sent = time.time()

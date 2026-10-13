@@ -243,14 +243,24 @@ def ready_signal(*, symbol: str, direction: str, entry: Any, sl: Any, tp1: Any, 
     return "\n".join(L)
 
 
-def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None) -> str:
-    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП): без пояснень про стан угоди, лише факт і рівень."""
+def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None, number: Any = None) -> str:
+    """Коротка подія сценарію за ринковою ціною (TP1/TP2/TP3/СТОП): без пояснень про стан угоди, лише факт і рівень. `number` — наскрізний №READY."""
+    text = _scenario_event(symbol=symbol, direction=direction, level=level, price=price)
+    if number:
+        head, _, rest = text.partition("\n")
+        text = f"{head} · №{int(number):04d}" + (("\n" + rest) if rest else "")
+    return text
+
+
+def _scenario_event(*, symbol: str, direction: str, level: str, price: Any = None) -> str:
     lv = str(level or "").upper()
     px_ = f"Ціна досягла {_px(price, symbol)}." if price is not None else "Ціна досягла рівня плану."
     if lv == "INVALIDATED":
         side = "нижче" if str(direction or "").upper() != "SHORT" else "вище"
         lvl = f" {_px(price, symbol)}" if price is not None else ""
         return f"⚪ {ticker(symbol)} · СЦЕНАРІЙ СКАСОВАНО\nM15 закрилась {side} рівня скасування{lvl} ще до входу. Входити не треба: вхід більше не діє."
+    if lv == "ENTRY":
+        return f"🟡 {ticker(symbol)} · ВХІД ТОРКНУТО\nЦіна увійшла в зону входу плану ({_px(price, symbol)}). Це рух ринку, не підтверджене виконання ордера."
     if lv == "SL":
         return f"❌ {ticker(symbol)} · СТОП\n{px_}\nСценарій завершено по SL."
     return f"🎯 {ticker(symbol)} · {lv}\n{px_}"
