@@ -89,6 +89,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-OB": ("body_open", "body_close", "latest_body_close", "direction"),
         "G-LVL-CONSTRUCTION": ("higher_timeframe", "level_confirmed", "touches"),
         "S-PO3": ("accumulation", "manipulation", "distribution"),
+        "D-LEVEL-TYPES": ("level_type",),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -96,7 +97,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-PO3":
+    if rule_id == "D-LEVEL-TYPES":
+        level_type = data["level_type"]
+        allowed = ("trend_break", "limit_player", "paranormal_bar", "consolidation", "gap_false_break")
+        if not isinstance(level_type, str) or level_type not in allowed:
+            return {"status": "UNKNOWN", "reason": "unknown level classification"}
+        return {"status": "PASS", "level_type": level_type, "note": "classification only"}
+    elif rule_id == "S-PO3":
         stages = [data[k] for k in ("accumulation", "manipulation", "distribution")]
         if not all(isinstance(v, bool) for v in stages):
             return {"status": "UNKNOWN"}
