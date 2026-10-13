@@ -41,7 +41,8 @@ def _run(smc_on: bool):
 
 def _norm(snap):
     s = dict(snap)
-    for k in ("smc", "latency", "emitted_wall_ts"):
+    # method_82_reasoning is a SHADOW trace; its S-* rules legitimately use SMC output when SMC is enabled.
+    for k in ("smc", "latency", "emitted_wall_ts", "method_82_reasoning"):
         s.pop(k, None)
     return json.dumps(s, sort_keys=True, default=str)
 

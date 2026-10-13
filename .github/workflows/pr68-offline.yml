@@ -88,6 +88,8 @@ jobs:
         run: python scripts/test_office2_live.py
       - name: Наскрізний №READY (атомарно, ідемпотентно, рестарт/паралельність) + номер у відповідях
         run: python scripts/test_ready_seq.py
+      - name: Аналітик READY (12 пунктів, картки/зв'язки, критичні дефекти, тижневий розбір)
+        run: PYTHONPATH=. python scripts/test_analyst.py
       - name: Одноразовий тест дизайну Telegram (інертний без прапорця, одна спроба, нова картка 1000×1230)
         run: python scripts/test_design_test.py
       - name: PNG-картки READY (LONG/SHORT, 1–3 TP, дешеві монети) — розмір 1000×1230
@@ -214,6 +216,9 @@ jobs:
         run: python scripts/ui_office2_card.py
       - name: Інтерактивний графік (локальна бібліотека, історія, масштаб, ТФ, шар ліквідності)
         run: python scripts/ui_chart_interactive.py
+      - name: Методологія 82 + рушій гіпотез (SHADOW, вимкнено за замовчуванням)
+        run: |
+          for t in scripts/test_method_*.py scripts/test_hypothesis.py; do PYTHONPATH=. python "$t"; done
 
   postgres-integration:
     runs-on: ubuntu-latest

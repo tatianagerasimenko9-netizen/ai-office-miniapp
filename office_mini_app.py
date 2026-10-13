@@ -1420,6 +1420,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path in ("/v2/hypotheses", "/hypotheses"):
+            from pathlib import Path as _PP
+            _hp = _PP(__file__).resolve().parent / "office_web" / "hypotheses.html"
+            body = (_hp.read_text(encoding="utf-8") if _hp.is_file() else "<!doctype html><p>hypotheses.html відсутній</p>").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path in ("/v1", "/v2", "/mini"):
             from office_mini_v2 import html_v2
 
@@ -1573,6 +1584,27 @@ class Handler(BaseHTTPRequestHandler):
                 from office2.webview import payload as _o2_payload
 
                 data = _o2_payload(_db_target_for_identity(), focus=_q("id"))
+            elif u.path == "/api/v2/hypotheses":
+                from office2 import hypothesis as _HY
+
+                st = (_q("state") or "ACTIVE").upper()
+                try:
+                    items = _HY.list_hypotheses(_db_target_for_identity(), st if st in ("ACTIVE", "CONFIRMED", "REFUTED", "EXPIRED") else "ACTIVE", 50)
+                    data = {"ok": True, "state": st, "count": len(items), "role": "SHADOW", "version": _HY.VERSION, "hypotheses": items,
+                            "note": "Гіпотеза не є READY і не дозвіл на угоду; ENTRY/SL/TP — лише з READY-плану."}
+                except Exception as exc:  # table absent until the first hypothesis is stored
+                    data = {"ok": True, "state": st, "count": 0, "hypotheses": [], "role": "SHADOW", "note": f"немає даних: {type(exc).__name__}"}
+            elif u.path == "/api/v2/analyst":
+                from office2 import analyst as _AN
+
+                try:
+                    if (_q("view") or "") == "weekly":
+                        data = {"ok": True, "weekly": _AN.weekly_review(_db_target_for_identity(), time.time(), float(_q("days") or 7))}
+                    else:
+                        items = _AN.list_records(_db_target_for_identity(), 50)
+                        data = {"ok": True, "count": len(items), "version": _AN.VERSION, "mode": _AN.mode(), "items": items}
+                except Exception as exc:  # table absent until the first analysed READY
+                    data = {"ok": True, "count": 0, "items": [], "note": f"немає даних: {type(exc).__name__}"}
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
