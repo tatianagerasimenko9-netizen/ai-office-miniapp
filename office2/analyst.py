@@ -315,6 +315,12 @@ def weekly_review(db: str, now: float, days: float = 7.0) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
     _ensure(db)
+    try:
+        from office2 import paper as _PP
+
+        _PP._ensure(db)      # LEFT JOIN потребує таблиці paper-позицій навіть у порожній БД
+    except Exception:  # noqa: BLE001
+        pass
     since = now - days * 86400
     rows = _fetchall(db, """SELECT a.scenario_id, a.symbol, a.direction, a.grade, a.verdict, a.flags, a.cards_json,
         p.status, p.close_reason, p.r_a, p.mfe_r, p.mae_r, p.btc, p.session, p.postmortem_json

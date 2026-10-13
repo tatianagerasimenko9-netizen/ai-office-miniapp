@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Office — розбір аналітика</title>
+<style>
+:root{--bg:#0c1422;--card:#152235;--line:#3c526d;--tx:#e8eef7;--mut:#9aaec9;--g:#64e6a7;--r:#ff949e;--y:#ffcb68}
+@media (prefers-color-scheme:light){:root{--bg:#f4f6fa;--card:#fff;--line:#c9d3e0;--tx:#13213a;--mut:#51627d;--g:#0a7d4f;--r:#b3243a;--y:#8a6100}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,sans-serif;padding:12px 16px 40px}
+h1{font-size:19px;margin:6px 0 2px}.mut{color:var(--mut);font-size:13px}.warn{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:10px 0}
+.h{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 0}.h h2{font-size:16px;margin:0 0 4px}
+.L{color:var(--g)}.S{color:var(--r)}ul{margin:4px 0 8px 18px;padding:0}.sc{border-top:1px dashed var(--line);margin-top:8px;padding-top:6px}
+.tag{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:1px 7px;font-size:12px;color:var(--mut);margin:0 4px 4px 0}.tag.w{border-color:var(--y);color:var(--y)}
+</style></head><body>
+<h1>Розбір аналітика для READY</h1>
+<div class="warn mut">Рекомендація, а не наказ: тактика (вхід зараз / скальп до перешкоди / чекати пробою / кращий вхід) показує розрахунок R з рівнів сценарію. Блокує READY лише структурний дефект плану. Результат угоди в розбір не входить.</div>
+<div id="out" class="mut">Завантаження…</div>
+<script>
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const px=x=>x==null?'—':Number(x).toPrecision(6).replace(/\.?0+$/,'');
+const ts=t=>t?new Date(t*1000).toLocaleString('uk-UA',{hour12:false,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+const li=a=>(a&&a.length?'<ul>'+a.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'<div class="mut">—</div>');
+const TN={T0_enter_now:'Вхід зараз',T1_scalp_to_obstacle:'Скальп до перешкоди',T2_wait_break:'Чекати пробою',T3_limit_zone_mid:'Кращий вхід (ліміт)',T4_tight_structural_sl:'Коротший структурний SL'};
+function card(it){
+  const a=it.record||{},t=a.tactic||{},o=t.options||{};
+  const opts=Object.entries(o).map(([k,v])=>`<div class="mut">${esc(TN[k]||k)}: ${v.entry!=null?'вхід '+px(v.entry)+' · ':''}${v.sl!=null?'SL '+px(v.sl)+' · ':''}${v.tp!=null?'ціль '+px(v.tp)+' · ':''}${v.r_to_tp!=null?'<b>'+esc(v.r_to_tp)+'R</b>':''}${v.trigger?esc(v.trigger):''} ${esc(v.note||'')}</div>`).join('');
+  const h=a.hypotheses;
+  return `<div class="h"><h2><span class="${it.direction==='LONG'?'L':'S'}">${esc(it.direction)}</span> ${esc(it.symbol)} · ${ts(it.created_ts)} <span class="tag">оцінка ${esc(it.grade)}</span><span class="tag">${esc(it.verdict)}</span></h2>
+  <div class="mut">${esc((a.hypothesis||{}).primary)}</div>
+  ${((a.hypothesis||{}).alternative||[]).map(x=>`<div class="mut">Альтернатива: ${esc(x)}</div>`).join('')}
+  <b>За</b>${li(a.for)}<b>Проти</b>${li(a.against)}
+  <div class="sc"><b>Тактика: ${esc(TN[t.tactic]||t.tactic)}</b> <span class="mut">(${esc(t.reason||'')})</span>${opts}</div>
+  ${a.nearest_obstacle?`<div class="mut">Перша перешкода: ${px(a.nearest_obstacle.p)} (${esc(a.nearest_obstacle.r)}R)</div>`:''}
+  ${(a.not_confirmed||[]).length?`<b>Не підтверджено</b>${li(a.not_confirmed)}`:''}
+  ${h?`<div class="mut">Гіпотези рушія: ${esc(h.net)} ${esc((h.same||[]).join(', '))} ${esc((h.opposite||[]).join(', '))}</div>`:''}
+  <div>${(it.flags||[]).map(f=>`<span class="tag w">${esc(f)}</span>`).join('')}</div></div>`;
+}
+async function load(){
+  const out=document.getElementById('out');
+  try{const d=await (await fetch('/api/v2/analyst',{cache:'no-store'})).json();
+    out.innerHTML=d.count?d.items.map(card).join(''):'<div class="mut">Розборів поки немає: вони з\u2019являються разом із першим READY.'+(d.note?' '+esc(d.note):'')+'</div>';
+  }catch(e){out.textContent='Не вдалося завантажити.';}
+}
+load();setInterval(load,60000);
+</script></body></html>

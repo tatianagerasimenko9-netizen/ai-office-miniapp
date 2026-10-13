@@ -1420,6 +1420,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path in ("/v2/analyst", "/analyst"):
+            from pathlib import Path as _PP
+            _hp = _PP(__file__).resolve().parent / "office_web" / "analyst.html"
+            body = (_hp.read_text(encoding="utf-8") if _hp.is_file() else "<!doctype html><p>analyst.html відсутній</p>").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path in ("/v2/hypotheses", "/hypotheses"):
             from pathlib import Path as _PP
             _hp = _PP(__file__).resolve().parent / "office_web" / "hypotheses.html"
