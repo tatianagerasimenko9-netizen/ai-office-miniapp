@@ -92,6 +92,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-LEVEL-TYPES": ("level_type",),
         "D-ELLIOTT-RULES": ("wave_1", "wave_3", "wave_5", "wave_2_respects_start", "wave_4_no_overlap"),
         "S-KAVYA-CONCEPTS": ("body_size", "bar_range", "close", "high", "low"),
+        "X-QA-RUNE": ("stop_candidates_valid",),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -99,7 +100,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-KAVYA-CONCEPTS":
+    if rule_id == "X-QA-RUNE":
+        flags = data["stop_candidates_valid"]
+        if not isinstance(flags, (list, tuple)) or not flags or not all(isinstance(v, bool) for v in flags):
+            return {"status": "UNKNOWN"}
+        passed = any(flags)
+    elif rule_id == "S-KAVYA-CONCEPTS":
         body, span, close, high, low = (_number(data, k) for k in ("body_size", "bar_range", "close", "high", "low"))
         if any(v is None for v in (body, span, close, high, low)) or span <= 0 or body < 0 or body > span or high <= low or not low <= close <= high:
             return {"status": "UNKNOWN"}
