@@ -43,6 +43,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-ATR-CALC": ("previous_ranges",),
         "D-STOP-ATR-MARGIN": ("margin", "average_range"),
         "G-LUFT": ("offset", "calculated_stop"),
+        "G-CHANNEL": ("channel_width", "stop_distance", "distance_to_boundary"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
