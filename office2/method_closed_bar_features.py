@@ -104,13 +104,13 @@ def from_closed_bars(bars, cutoff):
         evidence["D-PRESSURE"] = {"rising_lows": rising, "shrinking_pullbacks": contracting, "near_level": tested}
     if len(past) >= 8:
         recent = past[-8:]
-        ceiling = max(x["high"] for x in recent)
-        floor = min(x["low"] for x in recent)
-        held = sum(1 for x in recent if floor <= x["close"] <= ceiling)
+        ceiling = max(x["high"] for x in recent[:5])
+        floor = min(x["low"] for x in recent[:5])
+        held = sum(1 for x in recent[5:] if floor <= x["close"] <= ceiling)
         evidence["G-LVL-CONSOLIDATION"] = {
             "bars_held": held, "level_broken": not (floor <= current["close"] <= ceiling)}
         inside = 0
-        for x in reversed(past):
+        for x in reversed(recent[5:]):
             if x["high"] <= ceiling and x["low"] >= floor:
                 inside += 1
             else:
