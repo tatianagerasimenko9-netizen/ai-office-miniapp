@@ -78,6 +78,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-BREAKOUT": ("closed_beyond", "held_retest"),
         "D-POST-IMPULSE-BASE": ("base_in_expected_third", "retracement_complete"),
         "S-STRUCTURE": ("previous_high", "current_high", "previous_low", "current_low"),
+        "D-FRACTAL-TF": ("htf_marked_first", "ltf_same_scale"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
