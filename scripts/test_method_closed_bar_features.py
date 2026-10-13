@@ -54,7 +54,7 @@ class ExtendedCausalFeaturesTest(unittest.TestCase):
         from office2.method_closed_bar_features import daily_atr_observation
         days = [{"high": 10 + i, "low": 5} for i in range(6)]
         evidence = daily_atr_observation(days, 5)
-        self.assertEqual(evidence["G-ATR-CALC"]["previous_ranges"], [6, 7, 8, 9, 10])
+        self.assertEqual(evidence["G-ATR-CALC"]["previous_ranges"], [5, 6, 7, 8, 9])
         days[5] = {"high": 100000, "low": 0}
         self.assertEqual(evidence, daily_atr_observation(days, 5))
 
