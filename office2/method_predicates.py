@@ -82,7 +82,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-FB-2BAR":
+    if rule_id == "G-BOUNCE":
+        tested, rejected = data["level_tested"], data["rejection_confirmed"]
+        if not isinstance(tested, bool) or not isinstance(rejected, bool):
+            return {"status": "UNKNOWN"}
+        passed = tested and rejected
+    elif rule_id == "G-FB-2BAR":
         first, second = data["first_closed_beyond"], data["second_rejected"]
         bars = _number(data, "bars")
         if not isinstance(first, bool) or not isinstance(second, bool) or bars is None:
