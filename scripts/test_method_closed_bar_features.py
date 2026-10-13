@@ -78,6 +78,18 @@ class NewCausalRulesTest(unittest.TestCase):
         self.assertTrue(evidence["G-FB-2BAR"]["second_rejected"])
 
 
+class CandlePatternTest(unittest.TestCase):
+    def test_engulfing_requires_closed_opposite_body(self):
+        from office2.method_closed_bar_features import from_closed_bars
+        bars = [bar(10, 12, 8, 11, 10),
+                bar(11, 12, 9, 10, 10),
+                bar(9, 13, 8, 12, 10)]
+        evidence = from_closed_bars(bars, 2)
+        self.assertEqual(evidence["O-CANDLE-PATTERNS"]["pattern_name"], "ENGULFING")
+        self.assertEqual(evidence, from_closed_bars(
+            bars + [bar(20, 40, 1, 30, 100)], 2))
+
+
 class ScenarioKeyboardTest(unittest.TestCase):
     def test_https_deep_link(self):
         from office2.delivery import scenario_keyboard
