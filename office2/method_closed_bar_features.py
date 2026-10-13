@@ -70,6 +70,16 @@ def from_closed_bars(bars, cutoff):
                 "level": level, "high": current["high"], "low": current["low"],
                 "close": current["close"], "direction": side}
             evidence["G-FALSE-BREAK-DEF"] = evidence["D-FALSE-BREAK"].copy()
+    if len(past) >= 6:
+        earlier = past[:-1]
+        upper = max(x["high"] for x in earlier[-20:])
+        lower = min(x["low"] for x in earlier[-20:])
+        # First bar closes beyond the previous range; second closes back inside.
+        rejected = ((previous["close"] > upper and current["close"] < upper)
+                    or (previous["close"] < lower and current["close"] > lower))
+        evidence["G-FB-2BAR"] = {
+            "first_closed_beyond": previous["close"] > upper or previous["close"] < lower,
+            "second_rejected": rejected, "bars": 2}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
