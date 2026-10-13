@@ -47,7 +47,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-ENTRY-CLOSE-WITHIN-HALF-ATR":
+    if rule_id == "S-SWING3":
+        values = [_number(data, k) for k in ("left_high", "center_high", "right_high", "left_low", "center_low", "right_low")]
+        if any(v is None for v in values):
+            return {"status": "UNKNOWN"}
+        lh, ch, rh, ll, cl, rl = values
+        passed = (ch > lh and ch > rh) or (cl < ll and cl < rl)
+    elif rule_id == "D-ENTRY-CLOSE-WITHIN-HALF-ATR":
         close, level, atr = (_number(data, k) for k in ("close", "level", "daily_atr"))
         direction = data["direction"]
         if close is None or level is None or atr is None or atr <= 0 or direction not in ("LONG", "SHORT"):
