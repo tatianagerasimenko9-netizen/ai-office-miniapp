@@ -54,6 +54,22 @@ def from_closed_bars(bars, cutoff):
         evidence["D-FIB-LEVELS"] = {
             "swing_low": min(x["low"] for x in past[-20:]),
             "swing_high": max(x["high"] for x in past[-20:])}
+    if len(past) >= 5:
+        ceiling = max(x["high"] for x in past[-20:])
+        floor = min(x["low"] for x in past[-20:])
+        side = ("LONG" if current["low"] < floor < current["close"]
+                else "SHORT" if current["high"] > ceiling > current["close"]
+                else None)
+        if side:
+            level = floor if side == "LONG" else ceiling
+            evidence["G-FB-1BAR"] = {
+                "swept_level": True, "returned_inside": True, "bars": 1}
+            evidence["S-LIQUIDITY-RAID"] = {
+                "swept_level": level, "close": current["close"], "direction": side}
+            evidence["D-FALSE-BREAK"] = {
+                "level": level, "high": current["high"], "low": current["low"],
+                "close": current["close"], "direction": side}
+            evidence["G-FALSE-BREAK-DEF"] = evidence["D-FALSE-BREAK"].copy()
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
