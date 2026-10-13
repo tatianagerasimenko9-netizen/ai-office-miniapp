@@ -38,6 +38,8 @@ check("гіпотези: протилежна активна → CONFLICTS + adv
 H2 = AN.analyze(cases["LINK_SHORT"], [{"family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED"}])
 check("гіпотези: однонапрямлена → SUPPORTS", H2["hypotheses"]["net"] == "SUPPORTS" and "HYP_SUPPORTS" in H2["flags"])
 check("гіпотези: без даних → поле None", L["hypotheses"] is None)
+check("тактика: рекомендація є, без таблиці = план як є", L["tactic"]["tactic"] == "T0_enter_now" and not L["tactic"]["table_used"] and "T1_scalp_to_obstacle" in L["tactic"]["options"])
+check("тактика: TIA — лімітний вхід дає більше R, ніж 1.22", T["tactic"]["options"]["T3_limit_zone_mid"]["r_to_tp"] > 1.22)
 d = tempfile.mkdtemp(); db = os.path.join(d, "t.db"); os.environ["OFFICE_DB_PATH"] = db
 import office_bridge  # noqa
 from office2 import paper

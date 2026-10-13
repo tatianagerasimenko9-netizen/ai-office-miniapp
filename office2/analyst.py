@@ -44,6 +44,19 @@ EDGES = [
 ]
 
 
+def load_tactic_table() -> dict:
+    """Таблиця «корзина перешкоди → тактика» з office2/tactic_table.json. Файл з'являється лише після того, як replay підтвердив перевагу (verdict ADOPT_TABLE) — інакше порожньо → T0."""
+    import json as _json
+    from pathlib import Path as _P
+
+    f = _P(__file__).with_name("tactic_table.json")
+    try:
+        j = _json.loads(f.read_text(encoding="utf-8"))
+        return j.get("table") if j.get("verdict") == "ADOPT_TABLE" else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def mode() -> str:
     v = os.environ.get("OFFICE2_ANALYST", "critical").strip().lower()
     return v if v in ("off", "annotate", "critical") else "critical"
@@ -235,7 +248,14 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
 
     follow = [f"TP{i + 1} {_px(t['p'])} ({t['r']}R)" for i, t in enumerate(tgt)]
     follow += [f"перешкода {o.get('kind')} {_px(o.get('p'))} на {round(_f(o.get('r')) or 0, 2)}R" for o in obst[:3]]
+    try:
+        from office2 import tactic as _TC
+
+        tactic = _TC.advise(th, load_tactic_table())
+    except Exception as exc:  # noqa: BLE001
+        tactic = {"tactic": "T0_enter_now", "reason": f"недоступно: {type(exc).__name__}", "table_used": False, "options": {}}
     return {
+        "tactic": tactic,
         "version": VERSION, "mode": mode(), "role": "ANALYST_ADVISORY",
         "hypothesis": {"primary": primary, "alternative": alt},
         "for": f_for, "against": f_against, "key_contradiction": key_contra,

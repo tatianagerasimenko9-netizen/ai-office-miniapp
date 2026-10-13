@@ -39,6 +39,10 @@ def load(root):
                 rows.append({"per": per, "sym": r.get("symbol") or j.get("symbol"), "ts": float(r["ts_bar"]), "bucket": r.get("bucket"), "dir": r["dir"],
                              "v": {k: (x.get("r_net") if x.get("r_net") is not None else 0.0) for k, x in t.items()},
                              "missed": {k: x.get("r_net") is None for k, x in t.items()}})
+                vv = r.get("variants") or {}
+                for k in ("V9_be_after_1R", "V10_be_after_0.5R"):
+                    x = vv.get(k) or {}
+                    rows[-1]["v"][k] = x.get("r_net") if x.get("r_net") is not None else 0.0
     return rows
 
 
@@ -139,6 +143,15 @@ def main(root, out="replay_tactics.json"):
     p("\n## 5. Контролі (абсолютний net R на тих самих подіях; MISSED/NO_DATA = 0R)")
     for k in ("T0_enter_now", "C1_mirror_direction", "C2_momentum_1atr"):
         p(fmt(rows, lambda r, k=k: r["v"][k], k))
+    p("\n## 5b. Супровід: перенесення SL на вхід після +0.5R / +1R (V10/V9; рекомендація, не автоматика) проти T0")
+    for k in ("V10_be_after_0.5R", "V9_be_after_1R"):
+        if all(k in r["v"] for r in rows):
+            f = (lambda r, k=k: r["v"][k] - r["v"]["T0_enter_now"])
+            p(fmt(rows, f, f"{k} Δ усі")); p(fmt(disc, f, "  discovery")); p(fmt(hold, f, "  holdout"))
+            for b in TC.BUCKETS:
+                sub = [r for r in rows if r["bucket"] == b]
+                if len(sub) >= MIN_N:
+                    p(fmt(sub, f, f"  {b}"))
     p("\n## 6. Висновок")
     verdict = "ADOPT_TABLE" if ok else "NOT_PROVEN_KEEP_T0"
     p(f"Адаптивна таблиця: {'ПЕРЕВАГА ПІДТВЕРДЖЕНА в обох напрямах навчання/тесту → можна вмикати як рекомендацію' if ok else 'перевага НЕ підтверджена (CI тесту містить 0 хоча б в одному напрямі) → тактика лишається рекомендацією, T0 за замовчуванням'}.")
