@@ -76,7 +76,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-PRESSURE":
+    if rule_id == "D-CANDLE-STRENGTH":
+        op, high, low, close = (_number(data, k) for k in ("open", "high", "low", "close"))
+        if any(v is None for v in (op, high, low, close)) or high <= low or not low <= op <= high or not low <= close <= high:
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "close_location": (close-low)/(high-low), "body_fraction": abs(close-op)/(high-low)}
+    elif rule_id == "D-PRESSURE":
         flags = [data[k] for k in ("rising_lows", "shrinking_pullbacks", "near_level")]
         if not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN"}
