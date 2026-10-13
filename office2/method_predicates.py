@@ -41,6 +41,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-ENTRY-CLOSE-WITHIN-HALF-ATR": ("close", "level", "daily_atr", "direction"),
         "S-SWING3": ("left_high", "center_high", "right_high", "left_low", "center_low", "right_low"),
         "G-ATR-CALC": ("previous_ranges",),
+        "D-STOP-ATR-MARGIN": ("margin", "average_range"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
