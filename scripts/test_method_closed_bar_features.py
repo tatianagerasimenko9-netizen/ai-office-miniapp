@@ -58,6 +58,26 @@ class ExtendedCausalFeaturesTest(unittest.TestCase):
         days[5] = {"high": 100000, "low": 0}
         self.assertEqual(evidence, daily_atr_observation(days, 5))
 
+class NewCausalRulesTest(unittest.TestCase):
+    def test_sweep_only_after_closed_candle(self):
+        from office2.method_closed_bar_features import from_closed_bars
+        bars = [bar(10, 12, 9, 11, 100) for _ in range(6)]
+        bars.append(bar(10, 11, 8, 10, 100))
+        evidence = from_closed_bars(bars, 6)
+        for rule in ("G-FB-1BAR", "S-LIQUIDITY-RAID",
+                     "D-FALSE-BREAK", "G-FALSE-BREAK-DEF"):
+            self.assertIn(rule, evidence)
+        self.assertEqual(evidence, from_closed_bars(
+            bars + [bar(20, 100, 1, 80, 10000)], 6))
+
+    def test_two_bar_rejection(self):
+        from office2.method_closed_bar_features import from_closed_bars
+        bars = [bar(10, 12, 9, 11, 100) for _ in range(6)]
+        bars += [bar(11, 14, 10, 13, 100), bar(13, 14, 10, 11, 100)]
+        evidence = from_closed_bars(bars, 7)
+        self.assertTrue(evidence["G-FB-2BAR"]["second_rejected"])
+
+
 class ScenarioKeyboardTest(unittest.TestCase):
     def test_https_deep_link(self):
         from office2.delivery import scenario_keyboard
