@@ -571,6 +571,15 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "перевірки якості (стоп vs шум M15, запас до першої реальної цілі)", "value": th.get("quality")},
                 {"step": "risk", "value": th.get("sizing")},
                 {"step": "decision", "value": "READY (LIVE BETA, UNPROVEN)"}]}
+    # Freeze the same closed-bar 82-rule reasoning alongside this READY.
+    # Source remains SHADOW until separately validated; no gate change.
+    try:
+        from office_bridge import _fetchall
+        bar_ts = float(ctx["m15"]["t"][-1])
+        rows = _fetchall(db, "SELECT trace_json FROM office2_method_reasoning WHERE symbol = ? AND closed_bar_ts = ? AND version = ? LIMIT 1", (sym, bar_ts, VERSION))
+        snap["method_82_reasoning"] = json.loads(rows[0][0]) if rows else {"role": "SHADOW", "status": "NOT_RECORDED"}
+    except Exception as exc:
+        snap["method_82_reasoning"] = {"role": "SHADOW", "status": "UNAVAILABLE", "error": type(exc).__name__}
     try:
         from office2 import daria_steps as _DS
 
