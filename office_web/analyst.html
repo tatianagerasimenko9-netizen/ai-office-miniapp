@@ -12,6 +12,7 @@ h1{font-size:19px;margin:6px 0 2px}.mut{color:var(--mut);font-size:13px}.warn{ba
 </style></head><body>
 <h1>Розбір аналітика для READY</h1>
 <div class="warn mut">Рекомендація, а не наказ: тактика (вхід зараз / скальп до перешкоди / чекати пробою / кращий вхід) показує розрахунок R з рівнів сценарію. Блокує READY лише структурний дефект плану. Результат угоди в розбір не входить.</div>
+<div id="learn" class="h mut">Навчання: завантаження…</div>
 <div id="out" class="mut">Завантаження…</div>
 <script>
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -30,8 +31,19 @@ function card(it){
   <div class="sc"><b>Тактика: ${esc(TN[t.tactic]||t.tactic)}</b> <span class="mut">(${esc(t.reason||'')})</span>${opts}</div>
   ${a.nearest_obstacle?`<div class="mut">Перша перешкода: ${px(a.nearest_obstacle.p)} (${esc(a.nearest_obstacle.r)}R)</div>`:''}
   ${(a.not_confirmed||[]).length?`<b>Не підтверджено</b>${li(a.not_confirmed)}`:''}
+  ${a.chain82?`<div class="mut">Ланцюг 82 карток: активовано ${esc(a.chain82.activated)} із ${esc(a.chain82.total)} · розрив: ${esc(a.chain82.first_break||'немає порушень')} · ${(a.chain82.phases||[]).filter(p=>p.fail.length).map(p=>esc(p.phase)+': '+esc(p.fail.join(', '))).join(' | ')}</div>`:''}
   ${h?`<div class="mut">Гіпотези рушія: ${esc(h.net)} ${esc((h.same||[]).join(', '))} ${esc((h.opposite||[]).join(', '))}</div>`:''}
   <div>${(it.flags||[]).map(f=>`<span class="tag w">${esc(f)}</span>`).join('')}</div></div>`;
+}
+const st=a=>a&&a.closed?`${a.closed} закр. · середній R ${a.mean_r==null?'—':a.mean_r} · частка +R ${a.tp_share==null?'—':a.tp_share}`:`${(a&&a.n)||0} сигн. · результатів ще немає`;
+async function learn(){
+  const el=document.getElementById('learn');
+  try{const w=(await (await fetch('/api/v2/analyst?view=weekly&days=7',{cache:'no-store'})).json()).weekly;
+    if(!w){el.textContent='Навчання: даних ще немає.';return;}
+    const g=Object.entries(w.by_grade||{}).map(([k,v])=>`<div class="mut">Оцінка ${esc(k)}: ${esc(st(v))}</div>`).join('');
+    const f=Object.entries(w.by_flag||{}).map(([k,v])=>`<div class="mut">${esc(k)}: з прапором — ${esc(st(v.with))}; без — ${esc(st(v.without))}</div>`).join('');
+    el.innerHTML=`<b>Навчання за 7 днів</b><div class="mut">Сигналів ${esc(w.signals)}, закритих ${esc(w.closed)}. ${esc(w.caveat||'')}</div>${g}${f}`;
+  }catch(e){el.textContent='Навчання: не вдалося завантажити.';}
 }
 async function load(){
   const out=document.getElementById('out');
@@ -39,5 +51,5 @@ async function load(){
     out.innerHTML=d.count?d.items.map(card).join(''):'<div class="mut">Розборів поки немає: вони з\u2019являються разом із першим READY.'+(d.note?' '+esc(d.note):'')+'</div>';
   }catch(e){out.textContent='Не вдалося завантажити.';}
 }
-load();setInterval(load,60000);
+load();learn();setInterval(()=>{load();learn();},60000);
 </script></body></html>
