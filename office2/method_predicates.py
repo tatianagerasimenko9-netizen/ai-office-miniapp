@@ -74,7 +74,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-CONSOLIDATION":
+    if rule_id == "D-LEVEL-STICKING":
+        retests = _number(data, "retests")
+        pullback = data["normal_pullback"]
+        if retests is None or not isinstance(pullback, bool):
+            return {"status": "UNKNOWN"}
+        passed = retests >= 2 and not pullback
+    elif rule_id == "G-LVL-CONSOLIDATION":
         bars = _number(data, "bars_held")
         broken = data["level_broken"]
         if bars is None or not isinstance(broken, bool):
