@@ -29,6 +29,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-RR-MIN3": ("reward", "risk"),
         "G-LVL-LIMIT": ("touches", "broken"),
         "D-NO-CONFIRMATION-NO-TRADE": ("confirmed",),
+        "D-HTF-LTF-CONFIRM": ("htf_agrees", "ltf_confirms"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
