@@ -94,7 +94,7 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
         L.append(f"Вхід: {n(v['zone'][0])}–{n(v['zone'][1])} (план {n(entry)})")
     else:
         L.append(f"Вхід: {n(entry)}")
-    L.append(f"SL: {n(sl)} (−{pc(sl)}%) · захисний, спрацьовує дотиком")
+    L.append(f"🛑 SL: {n(sl)} (−{pc(sl)}%) · захисний стоп, за дотиком")
     for i, t in enumerate(v["targets"][:3], 1):
         L.append(f"TP{i}: {n(t['p'])} (+{pc(t['p'])}%; {rr(t['p'])}R)")
     if len(v["targets"]) < 3:
