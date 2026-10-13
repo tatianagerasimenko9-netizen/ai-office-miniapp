@@ -41,6 +41,23 @@ class ClosedBarFeaturesTest(unittest.TestCase):
 
 
 
+class ExtendedCausalFeaturesTest(unittest.TestCase):
+    def test_pivot_uses_closed_right_candle(self):
+        from office2.method_closed_bar_features import from_closed_bars
+        bars = [bar(10, 12, 9, 11, 10), bar(11, 17, 10, 16, 10),
+                bar(16, 15, 11, 12, 10), bar(12, 50, 1, 30, 1000)]
+        evidence = from_closed_bars(bars, 2)
+        self.assertEqual(evidence["S-SWING3"]["center_high"], 17)
+        self.assertEqual(evidence, from_closed_bars(bars[:3], 2))
+
+    def test_daily_range_excludes_current_day(self):
+        from office2.method_closed_bar_features import daily_atr_observation
+        days = [{"high": 10 + i, "low": 5} for i in range(6)]
+        evidence = daily_atr_observation(days, 5)
+        self.assertEqual(evidence["G-ATR-CALC"]["previous_ranges"], [6, 7, 8, 9, 10])
+        days[5] = {"high": 100000, "low": 0}
+        self.assertEqual(evidence, daily_atr_observation(days, 5))
+
 class ScenarioKeyboardTest(unittest.TestCase):
     def test_https_deep_link(self):
         from office2.delivery import scenario_keyboard
