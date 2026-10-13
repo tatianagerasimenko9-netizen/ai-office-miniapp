@@ -76,7 +76,11 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
 
-    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY",
+    # Telegram hashtag is searchable and clickable. Futures symbol is normalized
+    # to a single token (e.g. BTCUSDT -> #BTCUSDT), without punctuation.
+    import re
+    hashtag = "#" + re.sub(r"[^A-Za-z0-9_]", "", str(sym).upper())
+    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}",
          "━━━━━━━━━━━━━━━━"]
     if v["zone"]:
         L.append(f"🟡 ВХІД  {n(v['zone'][0])}–{n(v['zone'][1])}")
