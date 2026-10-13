@@ -343,6 +343,10 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
             if direction in candidates:
                 candidates[direction] = candidate
         direction_shadow = compare_candidates(candidates["LONG"], candidates["SHORT"])
+        from office2.method_sequence import evaluate_chain
+        from office2.method_evidence import load_rules
+        method_chain = evaluate_chain(load_rules())
+        print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
         print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
     except Exception as exc:
         print(f"[method_direction_shadow] {sym}: {type(exc).__name__}", flush=True)
