@@ -41,6 +41,7 @@ H3 = AN.analyze(cases["LINK_SHORT"], [{"id": "a", "family": "FALSE_BREAK_RECLAIM
 check("порівняння: протилежна гіпотеза строго сильніша → HYP_LEAD_OPPOSITE і CAUTION (радить, не блокує)", "HYP_LEAD_OPPOSITE" in H3["flags"] and H3["verdict"] == "CAUTION" and H3["critical"] == [])
 H4 = AN.analyze(cases["LINK_SHORT"], [{"id": "b", "family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED", "n_sup": 3, "n_con": 0, "n_miss": 0},
                                       {"id": "a", "family": "FALSE_BREAK_RECLAIM", "direction": "LONG", "stage": "RETURNED", "n_sup": 2, "n_con": 0, "n_miss": 1}])
+check("розбіжність записує обидві сторони (Brain: причина/ЗА/ПРОТИ; переважна гіпотеза)", H3["divergence"] and H3["divergence"]["lead_hypothesis"]["id"] == "a" and H3["divergence"]["brain_against"] and H3["divergence"]["brain_reason"])
 check("порівняння: однонапрямлена сильніша → без HYP_LEAD_OPPOSITE", "HYP_LEAD_OPPOSITE" not in H4["flags"])
 from office2 import hypothesis as HYP
 rk = HYP.rank([{"id": "x", "n_sup": 1, "n_con": 1, "n_miss": 0}, {"id": "y", "n_sup": 3, "n_con": 1, "n_miss": 1}, {"id": "z", "n_sup": 2, "n_con": 0, "n_miss": 0}])
@@ -57,6 +58,8 @@ cc = AN.compact_chain(mc)
 check("ланцюг 82: 9 фаз, усього 82 картки", len(cc["phases"]) == 9 and cc["total"] == 82)
 check("ланцюг: розрив у фазі ризику (R:R<3), PASS у вході", cc["first_break"] == "07_RISK" and "G-SIGNAL-CLOSE" in next(p for p in cc["phases"] if p["phase"] == "06_ENTRY")["pass"])
 Z = AN.analyze(cases["TIA_LONG"], None, cc)
+check("картки дають конкретні факти ЗА/ПРОТИ (текст картки + виміряні входи)", Z["card_facts"] and any("G-RR-MIN3" in x and "reward=1.2" in x for x in Z["card_facts"]["against"]) and any("G-SIGNAL-CLOSE" in x for x in Z["card_facts"]["for"]))
+check("розбіжність: без протилежної переваги поле порожнє", Z["divergence"] is None)
 check("розбір: chain82 і картки ланцюга потрапили в cards", Z["chain82"]["first_break"] == "07_RISK" and Z["cards"].get("G-RR-MIN3") == -1)
 d = tempfile.mkdtemp(); db = os.path.join(d, "t.db"); os.environ["OFFICE_DB_PATH"] = db
 import office_bridge  # noqa

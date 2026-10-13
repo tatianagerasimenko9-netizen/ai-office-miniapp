@@ -147,11 +147,11 @@ def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel, ltf
                         "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone"),
                         "obst": [{"p": float(o["p"]), "r": float(o["r"])} for o in (th.get("obstacles_before_tp1") or [])[:3] if o.get("p") is not None and o.get("r") is not None],
                         "tgts": [{"p": float(t["p"]), "r": float(t["r"])} for t in tg[:3]], "sl_v2": ((th.get("stops") or {}).get("v2") or {}).get("sl"),
-                        "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown")), "mt": _method_compact(th, ctx, now)})
+                        "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown")), "mt": _method_compact(th, ctx, now, sym)})
     return out
 
 
-def _method_compact(th: Dict[str, Any], ctx: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
+def _method_compact(th: Dict[str, Any], ctx: Dict[str, Any], now: float, sym: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Methodology SHADOW at this READY: {rule: 'P'|'F'|'U'} for rules with inputs (closed bars <= now only) + hypothesis-basis rule ids.
     Equity, paper journal, calendar and SMC are unavailable historically -> those rules stay absent (never invented)."""
     try:
@@ -165,7 +165,18 @@ def _method_compact(th: Dict[str, Any], ctx: Dict[str, Any], now: float) -> Opti
             s[rid] = {"PASS": "P", "FAIL": "F"}.get(r, "U")
             if (vals.get("_provenance") or {}).get("basis") == "HYPOTHESIS":
                 hyp.append(rid)
-        return {"s": s, "hyp": hyp}
+        hl = None
+        try:      # конкуруючі гіпотези, видимі на цьому закритому барі (без SMC): чи протилежна строго сильніша за найкращу однонапрямлену
+            from office2 import hypothesis as HY
+
+            hs = HY.build(str(sym or th.get("symbol") or "X"), ctx, now, inputs, plan_th=th)
+            same = [HY.net_of(h) for h in hs if h["direction"] == th.get("dir")]
+            opp = [HY.net_of(h) for h in hs if h["direction"] != th.get("dir")]
+            bs, bo = (max(same) if same else None), (max(opp) if opp else None)
+            hl = {"n": len(hs), "same_best": bs, "opp_best": bo, "opp_leads": bool(bo is not None and (bs is None or bo > bs))}
+        except Exception as hexc:  # noqa: BLE001
+            hl = {"error": f"{type(hexc).__name__}: {str(hexc)[:60]}"}
+        return {"s": s, "hyp": hyp, "hl": hl}
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{type(exc).__name__}: {str(exc)[:80]}"}
 

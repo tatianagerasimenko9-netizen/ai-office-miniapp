@@ -36,7 +36,8 @@ def load(root):
                 t = r["tactics"]
                 if t["T0_enter_now"].get("r_net") is None:
                     continue
-                rows.append({"per": per, "sym": r.get("symbol") or j.get("symbol"), "ts": float(r["ts_bar"]), "bucket": r.get("bucket"), "dir": r["dir"],
+                hl = ((r.get("mt") or {}).get("hl")) or {}
+                rows.append({"opp": bool(hl.get("opp_leads")), "has_hl": "opp_leads" in hl, "per": per, "sym": r.get("symbol") or j.get("symbol"), "ts": float(r["ts_bar"]), "bucket": r.get("bucket"), "dir": r["dir"],
                              "v": {k: (x.get("r_net") if x.get("r_net") is not None else 0.0) for k, x in t.items()},
                              "missed": {k: x.get("r_net") is None for k, x in t.items()}})
                 vv = r.get("variants") or {}
@@ -67,6 +68,30 @@ def ci(rows, f, B=1500):
             out.append(statistics.mean(flat))
     out.sort()
     return (round(out[int(0.025 * len(out))], 3), round(out[int(0.975 * len(out)) - 1], 3)) if len(out) > 100 else None
+
+
+def diff_ci(a, b, B=1500):
+    """Кластерний bootstrap різниці середніх T0 між групами a і b (кластер = період+бар)."""
+    ca, cb = defaultdict(list), defaultdict(list)
+    for r in a:
+        ca[(r["per"], r["ts"])].append(r["v"]["T0_enter_now"])
+    for r in b:
+        cb[(r["per"], r["ts"])].append(r["v"]["T0_enter_now"])
+    keys = sorted(set(ca) | set(cb))
+    if len(keys) < 10:
+        return None
+    rng = random.Random(SEED)
+    out = []
+    for _ in range(B):
+        pick = [rng.choice(keys) for _ in keys]
+        xa = [v for k in pick for v in ca.get(k, ())]
+        xb = [v for k in pick for v in cb.get(k, ())]
+        if xa and xb:
+            out.append(statistics.mean(xa) - statistics.mean(xb))
+    if len(out) < B * 0.8:
+        return None
+    out.sort()
+    return round(out[int(0.025 * len(out))], 3), round(out[int(0.975 * len(out)) - 1], 3)
 
 
 def delta(rows, v):
@@ -152,6 +177,21 @@ def main(root, out="replay_tactics.json"):
                 sub = [r for r in rows if r["bucket"] == b]
                 if len(sub) >= MIN_N:
                     p(fmt(sub, f, f"  {b}"))
+    p("\n## 5c. Розбіжність Brain і гіпотез: протилежна гіпотеза строго сильніша (HYP_LEAD_OPPOSITE) — результат T0 з прапором і без")
+    hr = [r for r in rows if r["has_hl"]]
+    if len(hr) >= 100:
+        for lab, sub in (("усі", hr), ("discovery A–C", [r for r in hr if r["per"] in DISCOVERY]), ("holdout D–G", [r for r in hr if r["per"] in HOLDOUT])):
+            a = [r for r in sub if r["opp"]]; b = [r for r in sub if not r["opp"]]
+            if len(a) >= 10 and b:
+                d = mean([x["v"]["T0_enter_now"] for x in a]) - mean([x["v"]["T0_enter_now"] for x in b]); c = diff_ci(a, b)
+                p(f"{lab:<16} з прапором n={len(a):<4} E={mean([x['v']['T0_enter_now'] for x in a]):+.3f} · без n={len(b):<5} E={mean([x['v']['T0_enter_now'] for x in b]):+.3f} · Δ={d:+.3f}" + (f" CI[{c[0]:+.3f};{c[1]:+.3f}]" if c else "") + ("  ◀ CI без нуля" if c and (c[0] > 0 or c[1] < 0) else ""))
+            else:
+                p(f"{lab:<16} з прапором n={len(a)} — замало")
+        flagged = [r for r in hr if r["opp"]]
+        p(fmt(hr, lambda r: -r["v"]["T0_enter_now"] if r["opp"] else 0.0, "Δ якщо ПРОПУСКАТИ угоди з прапором (контрафакт)"))
+        p(f"частка подій з прапором: {len(flagged) / len(hr):.1%}")
+    else:
+        p("Подій з обчисленими гіпотезами замало (<100) — replay потрібно запускати з поточним кодом.")
     p("\n## 6. Висновок")
     verdict = "ADOPT_TABLE" if ok else "NOT_PROVEN_KEEP_T0"
     p(f"Адаптивна таблиця: {'ПЕРЕВАГА ПІДТВЕРДЖЕНА в обох напрямах навчання/тесту → можна вмикати як рекомендацію' if ok else 'перевага НЕ підтверджена (CI тесту містить 0 хоча б в одному напрямі) → тактика лишається рекомендацією, T0 за замовчуванням'}.")

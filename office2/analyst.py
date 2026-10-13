@@ -57,21 +57,50 @@ def load_tactic_table() -> dict:
         return {}
 
 
-def compact_chain(method_chain: Mapping[str, Any]) -> Dict[str, Any]:
-    """Ланцюг 82 карток (DATA → HTF → РІВНІ/ЛІКВІДНІСТЬ → ПОВЕДІНКА → СЦЕНАРІЙ → ВХІД → РИЗИК → СУПРОВІД) у стислому вигляді для розбору READY.
-    FAIL = умова картки порушена, PASS = виконана, UNKNOWN = немає даних (НЕ підтвердження), N/A = за межами застосування. Розрив ланцюга = перша фаза з порушеннями."""
-    phases = []
+def _first_sentence(t: str, n: int = 150) -> str:
+    t = (t or "").strip().replace("\n", " ")
+    cut = t.find(". ")
+    t = t[: cut + 1] if 0 < cut < n else t
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def _fmt_inputs(inp: Mapping[str, Any]) -> str:
+    out = []
+    for k, v in list((inp or {}).items())[:4]:
+        if isinstance(v, float):
+            v = round(v, 6)
+        if isinstance(v, (int, float, str, bool)) or v is None:
+            out.append(f"{k}={v}")
+    return ", ".join(out)
+
+
+def compact_chain(method_chain: Mapping[str, Any], rules: Optional[List[Mapping[str, Any]]] = None) -> Dict[str, Any]:
+    """Ланцюг 82 карток (DATA → HTF → РІВНІ/ЛІКВІДНІСТЬ → ПОВЕДІНКА → СЦЕНАРІЙ → ВХІД → РИЗИК → СУПРОВІД) для розбору READY.
+    PASS = умова картки виконана, FAIL = порушена, UNKNOWN = немає даних (НЕ підтвердження), N/A = за межами застосування. Розрив ланцюга = перша фаза з порушеннями.
+    Для кожної виконаної/порушеної картки зберігається КОНКРЕТНИЙ факт: що стверджує картка (з реєстру джерел) і на яких виміряних входах це перевірено."""
+    if rules is None:
+        try:
+            from office2.method_evidence import load_rules
+
+            rules = load_rules()
+        except Exception:  # noqa: BLE001
+            rules = []
+    para = {r["rule_id"]: _first_sentence(r.get("fragment_paraphrase") or "") for r in rules}
+    phases, facts = [], {"for": [], "against": []}
     for g in method_chain.get("phases") or []:
         c = {"PASS": [], "FAIL": [], "UNKNOWN": 0, "NOT_APPLICABLE": 0}
         for it in g.get("rules") or []:
             st = it.get("status")
             if st in ("PASS", "FAIL"):
                 c[st].append(it["rule_id"])
+                fact = {"rule_id": it["rule_id"], "phase": g.get("phase"), "text": para.get(it["rule_id"], ""), "inputs": _fmt_inputs(it.get("inputs") or {}),
+                        "basis": (it.get("provenance") or {}).get("basis")}
+                facts["for" if st == "PASS" else "against"].append(fact)
             elif st in c:
                 c[st] += 1
         phases.append({"phase": g.get("phase"), "pass": c["PASS"], "fail": c["FAIL"], "unknown": c["UNKNOWN"], "na": c["NOT_APPLICABLE"]})
     first_break = next((p["phase"] for p in phases if p["fail"]), None)
-    return {"phases": phases, "counts": method_chain.get("counts"), "first_break": first_break,
+    return {"phases": phases, "counts": method_chain.get("counts"), "first_break": first_break, "facts": {k: v[:16] for k, v in facts.items()},
             "activated": sum(len(p["pass"]) + len(p["fail"]) for p in phases), "total": sum(len(p["pass"]) + len(p["fail"]) + p["unknown"] + p["na"] for p in phases)}
 
 
@@ -284,6 +313,14 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
 
     follow = [f"TP{i + 1} {_px(t['p'])} ({t['r']}R)" for i, t in enumerate(tgt)]
     follow += [f"перешкода {o.get('kind')} {_px(o.get('p'))} на {round(_f(o.get('r')) or 0, 2)}R" for o in obst[:3]]
+    divergence = None
+    if "HYP_LEAD_OPPOSITE" in flags and hyps:
+        from office2.hypothesis import rank as _rank
+
+        lead = _rank(list(hyps))[0]
+        divergence = {"brain_direction": d, "brain_reason": th.get("reason"), "brain_for": f_for[:4], "brain_against": f_against[:4],
+                      "lead_hypothesis": {k: lead.get(k) for k in ("id", "family", "direction", "stage", "what_seen", "n_sup", "n_con", "n_miss", "net")},
+                      "note": "Brain обрав напрям за повною послідовністю сценарію; переважна гіпотеза рушія має протилежний напрям. Розбіжність записано для перевірки на історії та результатах; READY не змінено."}
     try:
         from office2 import tactic as _TC
 
@@ -301,6 +338,9 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         "follow_up": follow, "rr_source_check": rr_src, "flags": flags, "critical": critical,
         "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE", "HYP_LEAD_OPPOSITE") if f in flags], "hypotheses": hyp_al,
         "cards": cards, "links": links, "chain82": chain,
+        "card_facts": ({"for": [f"{x['rule_id']}: {x['text']} [{x['inputs']}]" + (" (ГІПОТЕЗА)" if x.get("basis") == "HYPOTHESIS" else "") for x in (chain.get("facts") or {}).get("for", [])],
+                        "against": [f"{x['rule_id']}: {x['text']} [{x['inputs']}]" + (" (ГІПОТЕЗА)" if x.get("basis") == "HYPOTHESIS" else "") for x in (chain.get("facts") or {}).get("against", [])]} if chain else None),
+        "divergence": divergence,
         "note": "Розбір складено лише з фактів сценарію на момент рішення; пороги не вигадувались; ГІПОТЕЗА позначена. Результат угоди сюди не потрапляє.",
     }
 
