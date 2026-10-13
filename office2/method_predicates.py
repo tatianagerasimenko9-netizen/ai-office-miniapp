@@ -48,7 +48,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-SWING3":
+    if rule_id == "G-ATR-CALC":
+        ranges = data["previous_ranges"]
+        if not isinstance(ranges, (tuple, list)) or not 3 <= len(ranges) <= 5:
+            return {"status": "UNKNOWN", "reason": "need 3-5 prior daily bars"}
+        if any(not isinstance(v, (int, float)) or not isfinite(v) or v <= 0 for v in ranges):
+            return {"status": "UNKNOWN", "reason": "invalid daily ranges"}
+        return {"status": "PASS", "atr": sum(ranges) / len(ranges), "note": "previous bars only"}
+    elif rule_id == "S-SWING3":
         values = [_number(data, k) for k in ("left_high", "center_high", "right_high", "left_low", "center_low", "right_low")]
         if any(v is None for v in values):
             return {"status": "UNKNOWN"}
