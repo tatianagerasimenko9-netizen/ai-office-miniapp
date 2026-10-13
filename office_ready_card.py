@@ -184,8 +184,14 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     n = len(cs)
     fig = plt.figure(figsize=(width_px / 100, height_px / 100), dpi=100, facecolor=BG)
     ax = fig.add_axes([0.02, 0.05, 0.55, 0.80], facecolor=BG)
-    ax.set_xlim(-1, n + 1)
+    # Preserve the full 96-candle history on the left and reserve a clearly
+    # separated right-side forecast area. No fabricated future candles.
+    forecast_bars = max(12, n // 5)
+    ax.set_xlim(-1, n + forecast_bars)
     ax.set_ylim(y0, y1)
+    ax.axvspan(n - 0.5, n + forecast_bars, color="#172338", alpha=0.55, zorder=0)
+    ax.axvline(n - 0.5, color="#7b8da5", linestyle=":", linewidth=1.5, alpha=0.8)
+    ax.text(n + forecast_bars / 2, y1 - rng * 0.035, "ПЛАН →", color="#8ca0bc", fontsize=11, ha="center", va="top")
     for s in ax.spines.values():
         s.set_visible(False)
     ax.set_xticks([])
