@@ -82,6 +82,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-HTF-STRONG-CANDLE-PULLBACK": ("strong_htf_candle", "pullback_into_range", "reaction_confirmed"),
         "S-REVERSAL-CONT": ("htf_poi", "liquidity_raid", "market_structure_shift"),
         "D-SCENARIO-CHECKLIST": ("level_context", "setup_confirmed", "risk_valid"),
+        "G-PRESS": ("higher_lows", "level_tested", "pullbacks_shrinking"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -89,7 +90,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-SCENARIO-CHECKLIST":
+    if rule_id == "G-PRESS":
+        flags = [data[k] for k in ("higher_lows", "level_tested", "pullbacks_shrinking")]
+        if not all(isinstance(v, bool) for v in flags):
+            return {"status": "UNKNOWN", "reason": "invalid pressure observations"}
+        passed = all(flags)
+    elif rule_id == "D-SCENARIO-CHECKLIST":
         flags = [data[k] for k in ("level_context", "setup_confirmed", "risk_valid")]
         if not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN"}
