@@ -121,6 +121,9 @@ def from_closed_bars(bars, cutoff):
     tested = current["high"] >= prior_resistance
     rejected = tested and current["close"] < prior_resistance
     evidence["G-BOUNCE"] = {"level_tested": tested, "rejection_confirmed": rejected}
+    wick = current["high"] - max(current["open"], current["close"])
+    body = abs(current["close"] - current["open"])
+    evidence["G-LVL-CONFIRM-SIGNS"] = {"touches": evidence["G-LVL-LIMIT"]["touches"], "false_break": rejected, "long_wick": wick > body}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
