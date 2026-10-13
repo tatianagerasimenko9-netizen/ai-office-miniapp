@@ -87,7 +87,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-FRACTAL-TF":
+    if rule_id == "D-HTF-STRONG-CANDLE-PULLBACK":
+        flags = [data[k] for k in ("strong_htf_candle", "pullback_into_range", "reaction_confirmed")]
+        if not all(isinstance(v, bool) for v in flags):
+            return {"status": "UNKNOWN"}
+        passed = all(flags)
+    elif rule_id == "D-FRACTAL-TF":
         first, scale = data["htf_marked_first"], data["ltf_same_scale"]
         if not isinstance(first, bool) or not isinstance(scale, bool):
             return {"status": "UNKNOWN"}
