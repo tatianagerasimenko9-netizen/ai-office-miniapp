@@ -83,6 +83,17 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
 
 
+def _keep_bars(e: Dict[str, Any]) -> int:
+    """Скільки барів тримати на потік: що просили споживачі (want) із запасом; не весь ліміт Binance 1500 (було до 1500 барів × ~100 потоків)."""
+    return min(_MAX_BARS, max(int(e.get("want") or 0) + 100, 600))
+
+
+def memory_stats() -> Dict[str, Any]:
+    with _LOCK:
+        bars = sum(len(e["bars"]) for e in _STORE.values())
+        return {"streams": len(_STORE), "bars": bars, "approx_mb": round(bars * 0.5 / 1024.0, 1)}
+
+
 def _new_entry(now: float, acked: bool = False) -> Dict[str, Any]:
     return {"bars": [], "seeded": False, "state": "acked" if acked else "new", "acked_at": now if acked else 0.0,
             "last_msg": 0.0, "seeded_at": 0.0, "last_read": now, "want": 0, "bad_until": 0.0, "solo": False, "first_ts": None}
@@ -172,13 +183,13 @@ def seed(symbol: str, tf: str, rows: List[Dict[str, Any]], started_at: float) ->
         same_bar = e["first_ts"] is not None and rows[-1]["ts"] == e["first_ts"]
         if not (covered or same_bar):
             return False
-        merged = [dict(r) for r in rows][-_MAX_BARS:]
+        merged = [dict(r) for r in rows][-_keep_bars(e):]
         for b in e["bars"]:   # оновлення, що прийшли під час запиту, новіші за REST
             if b["ts"] == merged[-1]["ts"]:
                 merged[-1] = b
             elif b["ts"] > merged[-1]["ts"]:
                 merged.append(b)
-        e["bars"] = merged[-_MAX_BARS:]
+        e["bars"] = merged[-_keep_bars(e):]
         e["seeded"] = True
         e["seeded_at"] = time.time()
         _STATE["seeds"] += 1
@@ -201,8 +212,9 @@ def _apply(sym: str, tf: str, row: Dict[str, Any]) -> None:
             bars[-1] = row
         elif row["ts"] > bars[-1]["ts"]:
             bars.append(row)
-            if len(bars) > _MAX_BARS:
-                del bars[: len(bars) - _MAX_BARS]
+            keep = _keep_bars(e)
+            if len(bars) > keep:
+                del bars[: len(bars) - keep]
         if not e["seeded"] and len(bars) > 5:   # без seed буфер не росте безкінечно
             del bars[: len(bars) - 5]
 

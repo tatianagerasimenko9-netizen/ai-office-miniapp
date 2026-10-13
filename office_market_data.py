@@ -55,6 +55,37 @@ _MAX_STALE = {"1m": 20 * 60, "3m": 20 * 60, "5m": 20 * 60, "15m": 30 * 60, "30m"
 _MAX_STALE_DEFAULT = 20 * 60
 _CANDLE_CACHE: Dict[tuple, tuple] = {}
 _CACHE_LOCK = threading.Lock()
+# Бюджет кешу свічок: раніше записи видалялись лише при >3000 ключів, протерміновані (ротація universe) не прибирались ніколи —
+# на 512 МБ worker це давало повільний ріст RSS (≈14 МБ/год) і OOM. Свічка ≈ 0,5 КБ у пам'яті (dict із 7 полів).
+_CANDLE_CACHE_MAX_ROWS = int(os.getenv("OFFICE_CANDLE_CACHE_MAX_ROWS", "120000") or 120000)
+_CANDLE_CACHE_STATS = {"evicted_expired": 0, "evicted_budget": 0}
+
+
+def _candle_cache_put(key: tuple, now: float, want: int, rows: List[Dict[str, Any]]) -> None:
+    """Кладе набір у кеш і тримає кеш у межах: (1) прибирає записи, які вже не можна віддати навіть як «запасні» (старші за _MAX_STALE ТФ),
+    (2) якщо сумарно свічок більше бюджету — видаляє найстаріші за часом запису. Активні ключі оновлюються щоциклу, тож лишаються."""
+    with _CACHE_LOCK:
+        _CANDLE_CACHE[key] = (now, want, rows)
+        for k in [k for k, v in _CANDLE_CACHE.items() if now - v[0] > _MAX_STALE.get(str(k[1]), _MAX_STALE_DEFAULT)]:
+            del _CANDLE_CACHE[k]
+            _CANDLE_CACHE_STATS["evicted_expired"] += 1
+        total = sum(len(v[2]) for v in _CANDLE_CACHE.values())
+        if total > _CANDLE_CACHE_MAX_ROWS:
+            target = int(_CANDLE_CACHE_MAX_ROWS * 0.85)
+            for k, v in sorted(_CANDLE_CACHE.items(), key=lambda kv: kv[1][0]):
+                if k == key:
+                    continue
+                total -= len(v[2])
+                del _CANDLE_CACHE[k]
+                _CANDLE_CACHE_STATS["evicted_budget"] += 1
+                if total <= target:
+                    break
+
+
+def candle_cache_stats() -> Dict[str, Any]:
+    with _CACHE_LOCK:
+        rows = sum(len(v[2]) for v in _CANDLE_CACHE.values())
+        return {"keys": len(_CANDLE_CACHE), "rows": rows, "approx_mb": round(rows * 0.5 / 1024.0, 1), **_CANDLE_CACHE_STATS}
 
 
 def source_health() -> Dict[str, Any]:
@@ -494,10 +525,7 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3, allow_fallback: bool = F
                 return hit[2][-lim:]
             return {}
         if use_cache:
-            with _CACHE_LOCK:
-                if len(_CANDLE_CACHE) > 3000:
-                    _CANDLE_CACHE.clear()
-                _CANDLE_CACHE[key] = (now, want, rows)
+            _candle_cache_put(key, now, want, rows)
         _note_src(sym, rows)
         bs = _HEALTH.setdefault("by_src", {})
         bs[rows[-1].get("src", "?")] = bs.get(rows[-1].get("src", "?"), 0) + 1
@@ -2515,3 +2543,16 @@ def fetch_macro_context() -> Dict[str, Any]:
         }
     except Exception:
         return {}
+
+
+def _register_memory_probes() -> None:
+    try:
+        import office_runtime_guard as _rg
+
+        _rg.register_probe("candle_cache", lambda: candle_cache_stats())
+        _rg.register_probe("ws_klines", lambda: _ws.memory_stats())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_register_memory_probes()
