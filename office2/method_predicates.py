@@ -98,6 +98,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-ATR-LIMITS": ("atr", "stop_distance", "structure_valid", "risk_within_budget"),
         "D-SESSIONS-NEWS": ("high_impact_news_soon", "session_label"),
         "S-SESSIONS": ("session_name", "timezone_verified"),
+        "O-CANDLE-PATTERNS": ("pattern_name", "closed_bar_confirmed"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -105,7 +106,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-SESSIONS":
+    if rule_id == "O-CANDLE-PATTERNS":
+        name, closed = data["pattern_name"], data["closed_bar_confirmed"]
+        allowed = ("ENGULFING", "HARAMI", "MORNING_STAR", "EVENING_STAR", "THREE_SOLDIERS", "THREE_CROWS")
+        if name not in allowed or not isinstance(closed, bool):
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS" if closed else "FAIL", "pattern": name,
+                "note": "pattern must be independently detected from closed bars"}
+    elif rule_id == "S-SESSIONS":
         name, verified = data["session_name"], data["timezone_verified"]
         if name not in ("ASIA", "LONDON", "NEW_YORK", "OFF_HOURS") or not isinstance(verified, bool):
             return {"status": "UNKNOWN"}
