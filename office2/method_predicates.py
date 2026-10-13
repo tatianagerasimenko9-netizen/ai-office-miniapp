@@ -83,6 +83,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-REVERSAL-CONT": ("htf_poi", "liquidity_raid", "market_structure_shift"),
         "D-SCENARIO-CHECKLIST": ("level_context", "setup_confirmed", "risk_valid"),
         "G-PRESS": ("higher_lows", "level_tested", "pullbacks_shrinking"),
+        "D-VOLUME-PRICE": ("current_volume", "average_volume", "price_change"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -90,7 +91,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-PRESS":
+    if rule_id == "D-VOLUME-PRICE":
+        volume, average, change = (_number(data, k) for k in ("current_volume", "average_volume", "price_change"))
+        if volume is None or average is None or change is None or volume < 0 or average <= 0:
+            return {"status": "UNKNOWN", "reason": "invalid volume/price"}
+        return {"status": "PASS", "volume_ratio": volume / average, "price_direction": "UP" if change > 0 else "DOWN" if change < 0 else "FLAT", "note": "measurement only"}
+    elif rule_id == "G-PRESS":
         flags = [data[k] for k in ("higher_lows", "level_tested", "pullbacks_shrinking")]
         if not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN", "reason": "invalid pressure observations"}
