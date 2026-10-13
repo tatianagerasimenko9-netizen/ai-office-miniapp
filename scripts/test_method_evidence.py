@@ -4,6 +4,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+
 from office2.method_evidence import advisory_snapshot, load_rules, rule_coverage
 
 
