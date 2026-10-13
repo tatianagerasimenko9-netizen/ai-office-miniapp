@@ -334,6 +334,18 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         for th in (B.pullback_break(ctx, d, now), B.reclaim_thesis(ctx, d, now, levels)):
             if th:
                 found[th["id"]] = B.decide(th, ctx, now, RISK_USD)
+    # Shadow-only LONG/SHORT comparison; never overrides live Brain.
+    try:
+        from office2.method_direction_shadow import compare_candidates
+        candidates = {"LONG": None, "SHORT": None}
+        for candidate in found.values():
+            direction = candidate.get("dir")
+            if direction in candidates:
+                candidates[direction] = candidate
+        direction_shadow = compare_candidates(candidates["LONG"], candidates["SHORT"])
+        print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
+    except Exception as exc:
+        print(f"[method_direction_shadow] {sym}: {type(exc).__name__}", flush=True)
     if funnel:
         try:
             record_funnel(db, sym, funnel, now)
