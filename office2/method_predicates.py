@@ -41,7 +41,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-RISK":
+    if rule_id == "G-LVL-FLOATING":
+        fixed = data["fixed_level"]
+        if not isinstance(fixed, bool):
+            return {"status": "UNKNOWN", "reason": "invalid level evidence"}
+        passed = fixed
+    elif rule_id == "S-RISK":
         risk = _number(data, "risk_usd")
         budget = _number(data, "risk_budget_usd")
         if risk is None or budget is None or risk < 0 or budget <= 0:
