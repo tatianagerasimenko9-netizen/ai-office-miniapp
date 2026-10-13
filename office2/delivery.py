@@ -90,6 +90,7 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     risk = abs(entry - sl)
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"    # noqa: E731
+    L.append("🎯 ПЛАН УГОДИ")
     if v["zone"]:
         L.append(f"Вхід: {n(v['zone'][0])}–{n(v['zone'][1])} (план {n(entry)})")
     else:
