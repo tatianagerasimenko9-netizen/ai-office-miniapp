@@ -53,11 +53,11 @@ check("SHORT дзеркально", DS.entry_state({"dir": "SHORT", "entry": 100
 # Telegram-картка
 snap2 = dict(snap, valid_until_ts=VU)
 cap = DL.build_caption(snap2, snap["decided_ts"] + 100)
-check("картка: AI Office / READY · LONG / ticker · Binance Futures", cap.startswith("AI Office\n🟢 READY · LONG\nADA · Binance Futures\n"), cap[:80])
+check("картка: AI Office / READY · LONG / ticker · Binance Futures", cap.startswith("🟢 ADA · LONG · READY\nAI Office · Binance Futures\n"), cap[:80])
 check("картка: вхід, SL, TP1–TP3, скасування закриттям M15, підтвердження, строк у Київ", all(x in cap for x in ("Вхід:", "SL:", "TP1:", "TP2:", "TP3:", "Скасування: закриття M15 нижче", "Підтвердження:", "(Київ)")))
 check("картка чесно показує, що D1/H4 і H1 не підтверджують", "D1/H4 — діапазон (без підтвердження)" in cap and "H1 — проти" in cap)
 check("картка без довгого «Чому» і без OFFICE2/LIVE BETA", "Чому:" not in cap and "OFFICE2" not in cap and "LIVE BETA" not in cap)
-check("захисний SL в картці позначено як дотик", "захисний, спрацьовує дотиком" in cap)
+check("захисний SL в картці позначено як дотик", "захисний стоп, за дотиком" in cap)
 
 # --- скасування закриттям M15 до входу (simulate)
 T0 = 1_800_000_000.0 - (1_800_000_000.0 % 900)

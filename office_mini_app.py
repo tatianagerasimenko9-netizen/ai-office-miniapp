@@ -1573,6 +1573,16 @@ class Handler(BaseHTTPRequestHandler):
                 from office2.webview import payload as _o2_payload
 
                 data = _o2_payload(_db_target_for_identity(), focus=_q("id"))
+            elif u.path == "/api/v2/hypotheses":
+                from office2 import hypothesis as _HY
+
+                st = (_q("state") or "ACTIVE").upper()
+                try:
+                    items = _HY.list_hypotheses(_db_target_for_identity(), st if st in ("ACTIVE", "CONFIRMED", "REFUTED", "EXPIRED") else "ACTIVE", 50)
+                    data = {"ok": True, "state": st, "count": len(items), "role": "SHADOW", "version": _HY.VERSION, "hypotheses": items,
+                            "note": "Гіпотеза не є READY і не дозвіл на угоду; ENTRY/SL/TP — лише з READY-плану."}
+                except Exception as exc:  # table absent until the first hypothesis is stored
+                    data = {"ok": True, "state": st, "count": 0, "hypotheses": [], "role": "SHADOW", "note": f"немає даних: {type(exc).__name__}"}
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")

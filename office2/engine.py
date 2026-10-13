@@ -40,6 +40,10 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS office2_live_signal (
         scenario_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, direction TEXT NOT NULL, created_ts DOUBLE PRECISION NOT NULL, valid_until_ts DOUBLE PRECISION NOT NULL,
         status TEXT NOT NULL, msg_id BIGINT, delivered_ts DOUBLE PRECISION, last_error TEXT, snapshot_json TEXT NOT NULL, version TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS office2_method_reasoning (
+        symbol TEXT NOT NULL, closed_bar_ts DOUBLE PRECISION NOT NULL, created_ts DOUBLE PRECISION NOT NULL,
+        direction TEXT, decision_role TEXT NOT NULL, trace_json TEXT NOT NULL, version TEXT NOT NULL,
+        PRIMARY KEY (symbol, closed_bar_ts, version))""",
     """CREATE TABLE IF NOT EXISTS office2_brain_funnel (
         ts BIGINT NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, stage TEXT NOT NULL, code TEXT, version TEXT NOT NULL,
         PRIMARY KEY (ts, symbol, direction, version))""",
@@ -335,6 +339,110 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         for th in (B.pullback_break(ctx, d, now), B.reclaim_thesis(ctx, d, now, levels)):
             if th:
                 found[th["id"]] = B.decide(th, ctx, now, RISK_USD)
+    # Shadow-only LONG/SHORT comparison; never overrides live Brain.
+    try:
+        from office2.method_direction_shadow import compare_candidates
+        candidates = {"LONG": None, "SHORT": None}
+        for candidate in found.values():
+            direction = candidate.get("dir")
+            if direction in candidates:
+                candidates[direction] = candidate
+        direction_shadow = compare_candidates(candidates["LONG"], candidates["SHORT"])
+        from office2.method_sequence import evaluate_chain
+        from office2.method_evidence import load_rules
+        # Use only closed candles already present in the decision context.
+        method_inputs = {}
+        method_hypotheses = []
+        try:
+            bars15 = ctx["m15"]
+            closes = bars15["c"]
+            highs = bars15["h"]
+            lows = bars15["l"]
+            if len(closes) >= 21:
+                last_close = float(closes[-1])
+                last_range = float(highs[-1])-float(lows[-1])
+                mean_range = sum(float(h)-float(l) for h,l in zip(highs[-21:-1],lows[-21:-1]))/20
+                method_inputs["G-LVL-PARANORMAL"] = {"range": last_range, "average_range": mean_range}
+                # No arbitrary level: latest closed M15 swing reference.
+                level = max(float(v) for v in highs[-21:-1]) if direction_shadow["selected"] == "LONG" else min(float(v) for v in lows[-21:-1])
+                if direction_shadow["selected"] in ("LONG", "SHORT"):
+                    method_inputs["G-SIGNAL-CLOSE"] = {"close": last_close, "level": level, "direction": direction_shadow["selected"]}
+        except (KeyError, IndexError, TypeError, ValueError):
+            pass
+        # All other methodology inputs are assembled by one shared builder (same code as the replay):
+        # closed M15/D1 features, plan/risk from the READY thesis, calendar/session, top-down, SMC.
+        # SHADOW only: nothing here changes READY, risk or LIVE gates.
+        try:
+            from office2 import method_inputs as MI
+            plan_th = next((c for c in found.values() if c.get("state") == "READY"
+                            and c.get("dir") == direction_shadow.get("selected")), None)
+            journal = {}
+            equity = None
+            news_state = None
+            td = None
+            smc_res = None
+            try:
+                from office2.method_plan_features import paper_journal_stats
+                journal = paper_journal_stats(db, now)
+            except Exception as jexc:  # noqa: BLE001
+                print(f"[method_plan_journal] {sym}: {type(jexc).__name__}", flush=True)
+            try:
+                from office_position_size import depo_usdt
+                equity = depo_usdt()
+                import office_calendar
+                news_state = office_calendar.news_check(now)[0]
+            except Exception as cexc:  # noqa: BLE001
+                print(f"[method_calendar] {sym}: {type(cexc).__name__}", flush=True)
+            if plan_th is not None:
+                from office2 import topdown as TD
+                from office2.smc import shadow as SMCS
+                td = TD.analyze(plan_th, plan_th["dir"], now)
+                if SMCS.enabled():
+                    smc_res = SMCS.analyze_ctx(sym, ctx, now, with_events=False)
+            method_inputs.update(MI.build_inputs(ctx, now, plan_th, equity_usd=equity, journal=journal, news_state=news_state,
+                                                 smc_res=smc_res, topdown=td, rules=load_rules()))
+            # Hypothesis engine (SHADOW): explainable models + scenarios A/B/C + active observation. Not READY, no Telegram.
+            try:
+                from office2 import hypothesis as HY
+                from office2.method_context_features import msk_session
+                hctx = {"mc": mc, "news_state": news_state, "session": msk_session(now)}
+                hyps = HY.build(sym, ctx, now, method_inputs, smc_res=smc_res, plan_th=plan_th, context=hctx)
+                # SMC-based hypotheses (family SMC_*) are produced in the background SMC cycle (office2.smc.shadow.run_cycle): SMC costs ~0.3-1.7 s per symbol.
+                obs = HY.observe(db, sym, hyps, ctx["m15"], now)
+                method_hypotheses = [HY.compact(h) for h in hyps]
+                if hyps or obs["transitions"]:
+                    print(f"[hypothesis] {sym}: formed={len(hyps)} {[h['family'] + ':' + h['direction'] for h in hyps]} transitions={obs['transitions']}", flush=True)
+            except Exception as hexc:  # noqa: BLE001
+                print(f"[hypothesis] {sym}: {type(hexc).__name__}: {str(hexc)[:100]}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[method_inputs] {sym}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
+        method_chain = evaluate_chain(load_rules(), method_inputs)
+        # Explicit HTF context is observable without forcing a trade.
+        method_chain["timeframes"] = {}
+        for tf in ("d1", "h4", "h1", "m15", "m5", "m1"):
+            bars = ctx.get(tf)
+            if not isinstance(bars, dict) or not all(k in bars for k in ("t", "c", "h", "l")) or len(bars["c"]) < 2:
+                method_chain["timeframes"][tf] = {"status": "UNKNOWN", "reason": "closed bars unavailable"}
+                continue
+            method_chain["timeframes"][tf] = {"status": "OBSERVED", "last_closed_open_ts": float(bars["t"][-1]),
+                "close": float(bars["c"][-1]), "previous_close": float(bars["c"][-2]),
+                "high": float(bars["h"][-1]), "low": float(bars["l"][-1])}
+        print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
+        # Store full rule-by-rule observations, not just aggregate counts.
+        # SHADOW trace never changes the live READY gate.
+        try:
+            from office_bridge import _execute
+            bar_ts = float(ctx["m15"]["t"][-1])
+            payload = {"method": method_chain, "direction": direction_shadow, "hypotheses": method_hypotheses,
+                       "symbol": sym, "bar_ts": bar_ts, "observed_at": now}
+            _execute(db, "INSERT INTO office2_method_reasoning (symbol, closed_bar_ts, created_ts, direction, decision_role, trace_json, version) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                     (sym, bar_ts, now, direction_shadow.get("selected"), "SHADOW",
+                      json.dumps(payload, ensure_ascii=False, default=str), VERSION))
+        except Exception as exc:
+            print(f"[method_reasoning_store] {sym}: {type(exc).__name__}: {str(exc)[:120]}", flush=True)
+        print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
+    except Exception as exc:
+        print(f"[method_direction_shadow] {sym}: {type(exc).__name__}", flush=True)
     if funnel:
         try:
             record_funnel(db, sym, funnel, now)
@@ -496,6 +604,15 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                 {"step": "перевірки якості (стоп vs шум M15, запас до першої реальної цілі)", "value": th.get("quality")},
                 {"step": "risk", "value": th.get("sizing")},
                 {"step": "decision", "value": "READY (LIVE BETA, UNPROVEN)"}]}
+    # Freeze the same closed-bar 82-rule reasoning alongside this READY.
+    # Source remains SHADOW until separately validated; no gate change.
+    try:
+        from office_bridge import _fetchall
+        bar_ts = float(ctx["m15"]["t"][-1])
+        rows = _fetchall(db, "SELECT trace_json FROM office2_method_reasoning WHERE symbol = ? AND closed_bar_ts = ? AND version = ? LIMIT 1", (sym, bar_ts, VERSION))
+        snap["method_82_reasoning"] = json.loads(rows[0][0]) if rows else {"role": "SHADOW", "status": "NOT_RECORDED"}
+    except Exception as exc:
+        snap["method_82_reasoning"] = {"role": "SHADOW", "status": "UNAVAILABLE", "error": type(exc).__name__}
     try:
         from office2 import daria_steps as _DS
 
@@ -503,6 +620,11 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         snap["daria_steps"] = _DS.build(snap, valid_until_ts=now + READY_VALID_SEC)      # покрокова перевірка зверху вниз, заморожена на момент рішення (лише відображення, READY не змінює)
     except Exception as exc:  # noqa: BLE001
         snap["daria_steps"] = {"version": "daria-steps-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
+    try:
+        from office2.method_evidence import compact_method_trace
+        snap["method_trace"] = compact_method_trace(th, now)
+    except Exception as exc:
+        snap["method_trace"] = {"decision_role": "SHADOW", "status": "UNAVAILABLE", "error": type(exc).__name__}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
 
