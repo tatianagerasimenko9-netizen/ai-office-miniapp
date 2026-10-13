@@ -55,7 +55,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-BE":
+    if rule_id == "S-OTE-PD":
+        entry, low, high = (_number(data, k) for k in ("entry", "range_low", "range_high"))
+        direction = data["direction"]
+        if entry is None or low is None or high is None or high <= low or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN"}
+        position = (entry - low) / (high - low)
+        passed = position < 0.5 if direction == "LONG" else position > 0.5
+    elif rule_id == "G-BE":
         profit = _number(data, "profit_r")
         moved = data["stop_at_entry"]
         if profit is None or not isinstance(moved, bool):
