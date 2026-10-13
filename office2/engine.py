@@ -397,6 +397,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
             print(f"[method_daily_features] {sym}: {type(exc).__name__}", flush=True)
         # Plan/risk rules take their inputs from the frozen READY thesis of the shadow-selected
         # direction (SHADOW only; never alters READY, risk or LIVE gates).
+        plan_th = None
         try:
             from office2.method_plan_features import from_thesis, paper_journal_stats, daily_atr_from_ranges
             from office_position_size import depo_usdt
@@ -414,6 +415,26 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 daily_loss_usd=journal.get("daily_loss_usd"), asof_bar_ts=float(ctx["m15"]["t"][-1])))
         except Exception as exc:  # noqa: BLE001
             print(f"[method_plan_features] {sym}: {type(exc).__name__}", flush=True)
+        # Context rules: calendar/session, D1 base after impulse, top-down and SMC of the READY plan (SHADOW).
+        try:
+            from office2 import method_context_features as MC
+            asof = float(ctx["m15"]["t"][-1])
+            rules_all = load_rules()
+            method_inputs.update(MC.scope_resolution(rules_all))
+            method_inputs.update(MC.d1_base_after_impulse(ctx.get("d1"), asof))
+            try:
+                import office_calendar
+                method_inputs.update(MC.session_news(now, office_calendar.news_check(now)[0]))
+            except Exception as cexc:  # noqa: BLE001
+                print(f"[method_calendar] {sym}: {type(cexc).__name__}", flush=True)
+            if plan_th is not None:
+                from office2 import topdown as TD
+                from office2.smc import shadow as SMCS
+                method_inputs.update(MC.from_topdown(TD.analyze(plan_th, plan_th["dir"], now), asof))
+                if SMCS.enabled():
+                    method_inputs.update(MC.from_smc(SMCS.analyze_ctx(sym, ctx, now, with_events=False), plan_th["dir"], asof))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[method_context_features] {sym}: {type(exc).__name__}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
         # Explicit HTF context is observable without forcing a trade.
         method_chain["timeframes"] = {}
