@@ -1,0 +1,95 @@
+name: Replay tactics vs obstacle (isolated, read-only)
+
+# Replay Brain v2.1: тактики відносно першої перешкоди (T0–T4) + контролі C1/C2 на закритих барах Binance Futures; зведення scripts/replay_tactics_study.py. Нічого не пише в БД/Render/Telegram.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['feat/tactics-replay']
+    paths: ['.github/workflows/replay-tactics.yml', 'scripts/replay_tactics_study.py']
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        period: [A, B, C, D, E, F, G]
+        symbol: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, DOTUSDT, LTCUSDT, NEARUSDT, OPUSDT, SUIUSDT, UNIUSDT, ETCUSDT, FILUSDT, HBARUSDT, TIAUSDT, SEIUSDT, 1000PEPEUSDT, 1000SHIBUSDT, FETUSDT, RUNEUSDT, ALGOUSDT, MKRUSDT, WLDUSDT, ONDOUSDT, JUPUSDT]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+      REPLAY_LTF: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay ${{ matrix.period }} ${{ matrix.symbol }}
+        run: |
+          case "${{ matrix.period }}" in
+            A) E=2026-09-25; D=14;;
+            B) E=2026-10-09; D=14;;
+            C) E=2026-10-11; D=2;;
+            D) E=2026-08-28; D=14;;
+            E) E=2026-08-14; D=14;;
+            F) E=2026-07-31; D=14;;
+            G) E=2026-07-17; D=14;;
+          esac
+          python -u scripts/learning_binance_replay.py "${{ matrix.symbol }}" "$E" "$D" "out_${{ matrix.symbol }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-${{ matrix.period }}-${{ matrix.symbol }}
+          path: out_${{ matrix.symbol }}.json
+  pooled:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-A-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-B-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-C-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-D-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-E-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-F-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-G-*
+          path: parts
+      - name: Tactics study A–G
+        run: |
+          set -o pipefail
+          python -u scripts/replay_tactics_study.py parts replay_tactics.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-tactics-all
+          path: replay_tactics.json

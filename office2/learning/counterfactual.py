@@ -127,7 +127,12 @@ def per_event(events: List[Dict[str, Any]], m15) -> List[Dict[str, Any]]:
              "V4_sl_plus_0.5atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 0.5 * a), "V5_sl_plus_1.0atr": _sim(m15, i, ev, sl=ev["sl"] - sg * 1.0 * a),
              "V6_limit_retest": _limit(m15, i, ev), "V7_structural_sl": _sim(m15, i, ev, sl=_structural_sl(m15, i, ev, a)), "V8_bos_confirm": _bos(m15, i, ev),
              "V9_be_after_1R": _be(m15, i, ev, 1.0), "V10_be_after_0.5R": _be(m15, i, ev, 0.5)}
-        out.append({"symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
+        tac = None
+        if ev["source"] == "BRAIN":
+            from office2 import tactic as TC
+
+            tac = TC.all_variants(m15, i, ev, atr)
+        out.append({"tactics": tac, "bucket": (__import__("office2.tactic", fromlist=["bucket"]).bucket(ev) if tac else None), "symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
                     "late": bool(ev.get("late")), "f": ev.get("f"), "td": ev.get("td"), "mt": ev.get("mt"), "atr_pct": round(a / max(ev["entry"], 1e-9) * 100, 3), "risk_pct": ev["risk_pct"], "r_tp1": ev["r_tp1"],
                     **SS.session_of(float(ev["ts_bar"])), "variants": v})
     return out

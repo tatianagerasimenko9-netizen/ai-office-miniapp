@@ -145,6 +145,8 @@ def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel, ltf
             out.append({"source": "BRAIN", "model": th.get("kind", "SWEEP_SEQ"), "dir": d, "key": th.get("id"), "entry": float(th["entry"]), "sl": float(th["sl"]),
                         "tp1": float(tg[0]["p"]) if tg else None, "r_tp1": float(tg[0]["r"]) if tg else None, "risk_pct": float(th.get("risk_pct") or 0.0),
                         "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone"),
+                        "obst": [{"p": float(o["p"]), "r": float(o["r"])} for o in (th.get("obstacles_before_tp1") or [])[:3] if o.get("p") is not None and o.get("r") is not None],
+                        "tgts": [{"p": float(t["p"]), "r": float(t["r"])} for t in tg[:3]], "sl_v2": ((th.get("stops") or {}).get("v2") or {}).get("sl"),
                         "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown")), "mt": _method_compact(th, ctx, now)})
     return out
 
