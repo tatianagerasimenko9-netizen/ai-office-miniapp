@@ -58,7 +58,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-FIB-LEVELS":
+    if rule_id == "G-STOP-CALC":
+        price = _number(data, "entry_price")
+        stop = _number(data, "stop_distance")
+        if price is None or stop is None or price <= 0:
+            return {"status": "UNKNOWN"}
+        passed = .001 * price <= stop <= .002 * price
+    elif rule_id == "D-FIB-LEVELS":
         low = _number(data, "swing_low")
         high = _number(data, "swing_high")
         if low is None or high is None or high <= low:
