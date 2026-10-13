@@ -46,6 +46,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-CHANNEL": ("channel_width", "stop_distance", "distance_to_boundary"),
         "G-BE-2R": ("profit_r", "stop_at_entry"),
         "G-CRYPTO-SCORE": ("score",),
+        "G-BE": ("profit_r", "stop_at_entry"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
