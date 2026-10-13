@@ -87,6 +87,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-PROGNOSTIC": ("bar_range", "average_range", "close", "high", "low"),
         "G-TP-TRAIL": ("profit_r", "trend_confirmed", "stop_behind_extremum"),
         "S-OB": ("body_open", "body_close", "latest_body_close", "direction"),
+        "G-LVL-CONSTRUCTION": ("higher_timeframe", "level_confirmed", "touches"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -94,7 +95,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-OB":
+    if rule_id == "G-LVL-CONSTRUCTION":
+        htf, confirmed = data["higher_timeframe"], data["level_confirmed"]
+        touches = _number(data, "touches")
+        if not isinstance(htf, bool) or not isinstance(confirmed, bool) or touches is None or touches < 0 or not touches.is_integer():
+            return {"status": "UNKNOWN"}
+        passed = htf and confirmed and touches > 0
+    elif rule_id == "S-OB":
         op, cl, latest = (_number(data, k) for k in ("body_open", "body_close", "latest_body_close"))
         direction = data["direction"]
         if any(v is None for v in (op, cl, latest)) or op == cl or direction not in ("LONG", "SHORT"):
