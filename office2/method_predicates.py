@@ -52,7 +52,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-CHANNEL":
+    if rule_id == "G-BE-2R":
+        profit = _number(data, "profit_r")
+        breakeven = data["stop_at_entry"]
+        if profit is None or not isinstance(breakeven, bool):
+            return {"status": "UNKNOWN"}
+        passed = profit >= 2 and breakeven
+    elif rule_id == "G-CHANNEL":
         width, stop, room = (_number(data, k) for k in ("channel_width", "stop_distance", "distance_to_boundary"))
         if width is None or stop is None or room is None or stop <= 0:
             return {"status": "UNKNOWN"}
