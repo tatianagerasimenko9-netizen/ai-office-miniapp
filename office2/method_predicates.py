@@ -67,7 +67,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-LIQUIDITY-RAID":
+    if rule_id == "D-FALSE-BREAK":
+        level, high, low, close = (_number(data, k) for k in ("level", "high", "low", "close"))
+        direction = data["direction"]
+        if any(v is None for v in (level, high, low, close)) or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN"}
+        passed = low < level < close if direction == "LONG" else high > level > close
+    elif rule_id == "S-LIQUIDITY-RAID":
         level = _number(data, "swept_level")
         close = _number(data, "close")
         direction = data["direction"]
