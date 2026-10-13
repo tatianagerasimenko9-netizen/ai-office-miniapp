@@ -95,6 +95,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "X-QA-RUNE": ("stop_candidates_valid",),
         "G-INDICATORS-NOT-USED": ("uses_oscillator_as_entry_trigger",),
         "D-WYCKOFF-CONTEXT": ("prior_trend", "range_position", "supply_demand"),
+        "D-ATR-LIMITS": ("atr", "stop_distance", "structure_valid", "risk_within_budget"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -102,7 +103,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-WYCKOFF-CONTEXT":
+    if rule_id == "D-ATR-LIMITS":
+        atr, distance = _number(data, "atr"), _number(data, "stop_distance")
+        structure, risk = data["structure_valid"], data["risk_within_budget"]
+        if atr is None or distance is None or atr <= 0 or distance <= 0 or not isinstance(structure, bool) or not isinstance(risk, bool):
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS" if structure and risk else "FAIL", "stop_atr_multiple": distance / atr}
+    elif rule_id == "D-WYCKOFF-CONTEXT":
         trend, position, balance = (data[k] for k in ("prior_trend", "range_position", "supply_demand"))
         if trend not in ("UP", "DOWN", "RANGE") or position not in ("UPPER", "LOWER", "MIDDLE") or balance not in ("BUYERS", "SELLERS", "BALANCED"):
             return {"status": "UNKNOWN"}
