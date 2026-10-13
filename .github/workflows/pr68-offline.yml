@@ -88,6 +88,8 @@ jobs:
         run: python scripts/test_office2_live.py
       - name: Наскрізний №READY (атомарно, ідемпотентно, рестарт/паралельність) + номер у відповідях
         run: python scripts/test_ready_seq.py
+      - name: Продуктивність критичного циклу (кеш карток, бюджет, RSS-ліміт, scout у потоках)
+        run: PYTHONPATH=. python scripts/test_perf_guards.py
       - name: Аналітик READY (12 пунктів, картки/зв'язки, критичні дефекти, тижневий розбір)
         run: PYTHONPATH=. python scripts/test_analyst.py
       - name: Одноразовий тест дизайну Telegram (інертний без прапорця, одна спроба, нова картка 1000×1230)
