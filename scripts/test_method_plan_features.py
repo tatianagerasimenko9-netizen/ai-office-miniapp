@@ -70,7 +70,7 @@ class PlanFeatureTest(unittest.TestCase):
     def test_missing_sources_are_absent_not_invented(self):
         f = from_thesis(ready("LONG"))
         self.assertIn("G-INDICATORS-NOT-USED", f)   # derived from the thesis itself, no external source needed
-        for r in ("G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100", "G-INDICATORS-NOT-USED"):
+        for r in ("G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100"):
             self.assertNotIn(r, f)
         self.assertNotIn("G-RR-MIN3", from_thesis({**ready(), "targets": []}))
         self.assertEqual(from_thesis({**ready(), "state": "WAIT"}), {})
