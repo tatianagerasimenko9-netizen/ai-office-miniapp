@@ -20,6 +20,13 @@ class MethodSequenceTests(unittest.TestCase):
         self.assertLess(names.index("05_SCENARIO"), names.index("06_ENTRY"))
         self.assertLess(names.index("06_ENTRY"), names.index("07_RISK"))
 
+    def test_all_rules_evaluated_unknown_without_inputs(self):
+        from office2.method_sequence import evaluate_chain
+        result = evaluate_chain(load_rules())
+        self.assertEqual(result["evaluated"], 82)
+        self.assertEqual(result["counts"]["UNKNOWN"], 82)
+        self.assertEqual(result["role"], "SHADOW")
+
     def test_missing_rule_fails(self):
         with self.assertRaises(ValueError):
             validate_sequence(load_rules()[:-1])
