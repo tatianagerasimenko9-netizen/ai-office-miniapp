@@ -44,6 +44,66 @@ EDGES = [
 ]
 
 
+def load_tactic_table() -> dict:
+    """Таблиця «корзина перешкоди → тактика» з office2/tactic_table.json. Файл з'являється лише після того, як replay підтвердив перевагу (verdict ADOPT_TABLE) — інакше порожньо → T0."""
+    import json as _json
+    from pathlib import Path as _P
+
+    f = _P(__file__).with_name("tactic_table.json")
+    try:
+        j = _json.loads(f.read_text(encoding="utf-8"))
+        return j.get("table") if j.get("verdict") == "ADOPT_TABLE" else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _first_sentence(t: str, n: int = 150) -> str:
+    t = (t or "").strip().replace("\n", " ")
+    cut = t.find(". ")
+    t = t[: cut + 1] if 0 < cut < n else t
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def _fmt_inputs(inp: Mapping[str, Any]) -> str:
+    out = []
+    for k, v in list((inp or {}).items())[:4]:
+        if isinstance(v, float):
+            v = round(v, 6)
+        if isinstance(v, (int, float, str, bool)) or v is None:
+            out.append(f"{k}={v}")
+    return ", ".join(out)
+
+
+def compact_chain(method_chain: Mapping[str, Any], rules: Optional[List[Mapping[str, Any]]] = None) -> Dict[str, Any]:
+    """Ланцюг 82 карток (DATA → HTF → РІВНІ/ЛІКВІДНІСТЬ → ПОВЕДІНКА → СЦЕНАРІЙ → ВХІД → РИЗИК → СУПРОВІД) для розбору READY.
+    PASS = умова картки виконана, FAIL = порушена, UNKNOWN = немає даних (НЕ підтвердження), N/A = за межами застосування. Розрив ланцюга = перша фаза з порушеннями.
+    Для кожної виконаної/порушеної картки зберігається КОНКРЕТНИЙ факт: що стверджує картка (з реєстру джерел) і на яких виміряних входах це перевірено."""
+    if rules is None:
+        try:
+            from office2.method_evidence import load_rules
+
+            rules = load_rules()
+        except Exception:  # noqa: BLE001
+            rules = []
+    para = {r["rule_id"]: _first_sentence(r.get("fragment_paraphrase") or "") for r in rules}
+    phases, facts = [], {"for": [], "against": []}
+    for g in method_chain.get("phases") or []:
+        c = {"PASS": [], "FAIL": [], "UNKNOWN": 0, "NOT_APPLICABLE": 0}
+        for it in g.get("rules") or []:
+            st = it.get("status")
+            if st in ("PASS", "FAIL"):
+                c[st].append(it["rule_id"])
+                fact = {"rule_id": it["rule_id"], "phase": g.get("phase"), "text": para.get(it["rule_id"], ""), "inputs": _fmt_inputs(it.get("inputs") or {}),
+                        "basis": (it.get("provenance") or {}).get("basis")}
+                facts["for" if st == "PASS" else "against"].append(fact)
+            elif st in c:
+                c[st] += 1
+        phases.append({"phase": g.get("phase"), "pass": c["PASS"], "fail": c["FAIL"], "unknown": c["UNKNOWN"], "na": c["NOT_APPLICABLE"]})
+    first_break = next((p["phase"] for p in phases if p["fail"]), None)
+    return {"phases": phases, "counts": method_chain.get("counts"), "first_break": first_break, "facts": {k: v[:16] for k, v in facts.items()},
+            "activated": sum(len(p["pass"]) + len(p["fail"]) for p in phases), "total": sum(len(p["pass"]) + len(p["fail"]) + p["unknown"] + p["na"] for p in phases)}
+
+
 def mode() -> str:
     v = os.environ.get("OFFICE2_ANALYST", "critical").strip().lower()
     return v if v in ("off", "annotate", "critical") else "critical"
@@ -96,7 +156,7 @@ def _sign(finding: str, supports: Any) -> int:
         return 0
 
 
-def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = None) -> Dict[str, Any]:
+def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = None, chain: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     d = str(th.get("dir") or "")
     entry, sl = _f(th.get("entry")), _f(th.get("sl"))
     ig = th.get("integral") or {}
@@ -190,6 +250,18 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         hyp_al = {"same": [f"{h.get('family')} ({h.get('stage')})" for h in same], "opposite": [f"{h.get('family')} ({h.get('stage')})" for h in opp],
                   "net": ("MIXED" if same and opp else "SUPPORTS" if same else "CONFLICTS" if opp else "NONE"),
                   "note": "гіпотези — додатковий шар доказів (SHADOW); READY вони не змінюють"}
+        # порівняння: чи є протилежна гіпотеза СТРОГО сильнішою за найкращу однонапрямлену (баланс доказів ЗА−ПРОТИ)
+        try:
+            from office2.hypothesis import net_of as _net
+
+            best_same = max((_net(h) for h in same), default=None)
+            best_opp = max((_net(h) for h in opp), default=None)
+            hyp_al["lead"] = {"same_best_net": best_same, "opposite_best_net": best_opp,
+                              "opposite_leads": bool(best_opp is not None and (best_same is None or best_opp > best_same))}
+        except Exception:  # noqa: BLE001
+            hyp_al["lead"] = None
+        if (hyp_al.get("lead") or {}).get("opposite_leads"):
+            flags.append("HYP_LEAD_OPPOSITE")
         if hyp_al["net"] in ("CONFLICTS", "MIXED"):
             flags.append("HYP_OPPOSITE_ACTIVE")
         elif hyp_al["net"] == "SUPPORTS":
@@ -214,6 +286,12 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
                 continue
             links.append({"a": a, "b": b, "relation": rel if sa == sb else "суперечить", "signs": [sa, sb]})
 
+    if chain:
+        for ph in chain.get("phases") or []:
+            for rid in ph.get("pass") or []:
+                cards.setdefault(rid, 1)
+            for rid in ph.get("fail") or []:
+                cards.setdefault(rid, -1)
     grade = "A"
     penal = sum(1 for f in flags if f in ("OBSTACLE_LT_1R", "RR_BELOW_SOURCE_MIN", "RANGE_WRONG_EDGE", "STOP_NOT_JUSTIFIED", "AGAINST_GT_FOR", "M1_RETEST_PENDING"))
     if critical:
@@ -226,7 +304,7 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         verdict = "CRITICAL_PROBLEM"
     elif alt_entry and "RR_BELOW_SOURCE_MIN" in flags and (tp1_r or 0) < 1.5:
         verdict = "PREFER_BETTER_ENTRY"
-    elif penal >= 3:
+    elif penal >= 3 or "HYP_LEAD_OPPOSITE" in flags:
         verdict = "CAUTION"
     else:
         verdict = "CONFIRM"
@@ -235,7 +313,22 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
 
     follow = [f"TP{i + 1} {_px(t['p'])} ({t['r']}R)" for i, t in enumerate(tgt)]
     follow += [f"перешкода {o.get('kind')} {_px(o.get('p'))} на {round(_f(o.get('r')) or 0, 2)}R" for o in obst[:3]]
+    divergence = None
+    if "HYP_LEAD_OPPOSITE" in flags and hyps:
+        from office2.hypothesis import rank as _rank
+
+        lead = _rank(list(hyps))[0]
+        divergence = {"brain_direction": d, "brain_reason": th.get("reason"), "brain_for": f_for[:4], "brain_against": f_against[:4],
+                      "lead_hypothesis": {k: lead.get(k) for k in ("id", "family", "direction", "stage", "what_seen", "n_sup", "n_con", "n_miss", "net")},
+                      "note": "Brain обрав напрям за повною послідовністю сценарію; переважна гіпотеза рушія має протилежний напрям. Розбіжність записано для перевірки на історії та результатах; READY не змінено."}
+    try:
+        from office2 import tactic as _TC
+
+        tactic = _TC.advise(th, load_tactic_table())
+    except Exception as exc:  # noqa: BLE001
+        tactic = {"tactic": "T0_enter_now", "reason": f"недоступно: {type(exc).__name__}", "table_used": False, "options": {}}
     return {
+        "tactic": tactic,
         "version": VERSION, "mode": mode(), "role": "ANALYST_ADVISORY",
         "hypothesis": {"primary": primary, "alternative": alt},
         "for": f_for, "against": f_against, "key_contradiction": key_contra,
@@ -243,8 +336,11 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         "invalidation": th.get("invalidation"), "now_or_wait": now_or_wait, "alt_entry": alt_entry,
         "levels": {"entry": entry, "sl": sl, "zone": zone, "targets": tgt, "risk_pct": _f(th.get("risk_pct"))},
         "follow_up": follow, "rr_source_check": rr_src, "flags": flags, "critical": critical,
-        "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE") if f in flags], "hypotheses": hyp_al,
-        "cards": cards, "links": links,
+        "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE", "HYP_LEAD_OPPOSITE") if f in flags], "hypotheses": hyp_al,
+        "cards": cards, "links": links, "chain82": chain,
+        "card_facts": ({"for": [f"{x['rule_id']}: {x['text']} [{x['inputs']}]" + (" (ГІПОТЕЗА)" if x.get("basis") == "HYPOTHESIS" else "") for x in (chain.get("facts") or {}).get("for", [])],
+                        "against": [f"{x['rule_id']}: {x['text']} [{x['inputs']}]" + (" (ГІПОТЕЗА)" if x.get("basis") == "HYPOTHESIS" else "") for x in (chain.get("facts") or {}).get("against", [])]} if chain else None),
+        "divergence": divergence,
         "note": "Розбір складено лише з фактів сценарію на момент рішення; пороги не вигадувались; ГІПОТЕЗА позначена. Результат угоди сюди не потрапляє.",
     }
 
@@ -295,6 +391,12 @@ def weekly_review(db: str, now: float, days: float = 7.0) -> Dict[str, Any]:
     from office_bridge import _fetchall
 
     _ensure(db)
+    try:
+        from office2 import paper as _PP
+
+        _PP._ensure(db)      # LEFT JOIN потребує таблиці paper-позицій навіть у порожній БД
+    except Exception:  # noqa: BLE001
+        pass
     since = now - days * 86400
     rows = _fetchall(db, """SELECT a.scenario_id, a.symbol, a.direction, a.grade, a.verdict, a.flags, a.cards_json,
         p.status, p.close_reason, p.r_a, p.mfe_r, p.mae_r, p.btc, p.session, p.postmortem_json

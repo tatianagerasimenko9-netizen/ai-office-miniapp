@@ -337,18 +337,65 @@ def cleanup(db: str, now: float, keep_days: float = 14.0) -> None:
 
 
 def active_for(db: str, sym: str, limit: int = 8) -> List[Dict[str, Any]]:
-    """Активні гіпотези одного символу (для розбору READY аналітиком): family, direction, stage, level, invalidation, що бачили. Лише читання."""
+    """Активні гіпотези одного символу (для розбору READY аналітиком): id, family, direction, stage, рівні, кількість ЗА/ПРОТИ/бракує. Лише читання."""
     from office_bridge import _fetchall
 
-    rows = _fetchall(db, "SELECT family, direction, stage, level, invalidation, first_ts, last_ts, payload_json FROM office2_hypothesis WHERE symbol = ? AND state = 'ACTIVE' ORDER BY last_ts DESC LIMIT ?", (sym, int(limit)))
+    rows = _fetchall(db, "SELECT hyp_id, family, direction, stage, level, invalidation, first_ts, last_ts, payload_json FROM office2_hypothesis WHERE symbol = ? AND state = 'ACTIVE' ORDER BY last_ts DESC LIMIT ?", (sym, int(limit)))
     out = []
-    for fam, d, stg, lvl, inv, ft, lt, pj in rows:
+    for hid, fam, d, stg, lvl, inv, ft, lt, pj in rows:
         try:
-            what = (json.loads(pj) or {}).get("what_seen")
+            pl = json.loads(pj) or {}
         except (TypeError, ValueError):
-            what = None
-        out.append({"family": fam, "direction": d, "stage": stg, "level": lvl, "invalidation": inv, "first_ts": ft, "last_ts": lt, "what_seen": what})
+            pl = {}
+        out.append({"id": hid, "family": fam, "direction": d, "stage": stg, "level": lvl, "invalidation": inv, "first_ts": ft, "last_ts": lt, "what_seen": pl.get("what_seen"),
+                    "n_sup": len(pl.get("supports") or []), "n_con": len(pl.get("contradicts") or []), "n_miss": len(pl.get("missing") or [])})
     return out
+
+
+def net_of(h: Mapping[str, Any]) -> int:
+    """Баланс доказів гіпотези = факти ЗА − факти ПРОТИ (без вагових коефіцієнтів: порівняння прозоре й відтворюване)."""
+    if "n_sup" in h:
+        return int(h["n_sup"]) - int(h["n_con"])
+    return len(h.get("supports") or []) - len(h.get("contradicts") or [])
+
+
+def _n(h: Mapping[str, Any], k_n: str, k_list: str) -> int:
+    return int(h[k_n]) if k_n in h else len(h.get(k_list) or [])
+
+
+def rank(hyps: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Порівняння конкуруючих гіпотез одного символу: баланс ЗА−ПРОТИ, далі більше ЗА, далі менше бракуючого. Від сильнішої до слабшої."""
+    key = lambda h: (net_of(h), _n(h, "n_sup", "supports"), -_n(h, "n_miss", "missing"))   # noqa: E731
+    return [dict(h, net=net_of(h)) for h in sorted(hyps, key=key, reverse=True)]
+
+
+LEAD_DDL = """CREATE TABLE IF NOT EXISTS office2_hyp_lead_log (
+    symbol TEXT NOT NULL, ts DOUBLE PRECISION NOT NULL, lead_id TEXT, direction TEXT, family TEXT, net INTEGER, prev_id TEXT, n_active INTEGER,
+    PRIMARY KEY (symbol, ts))"""
+_LEAD: Dict[str, Optional[str]] = {}
+
+
+def update_lead(db: str, sym: str, hyps: List[Mapping[str, Any]], now: float) -> Optional[Dict[str, Any]]:
+    """Переважна гіпотеза символу; у журнал office2_hyp_lead_log пишеться лише ЗМІНА переважної (що змінилось і коли). Працює у критичному циклі: одна дешева вставка лише при зміні."""
+    ranked = rank(hyps)
+    top = ranked[0] if ranked else None
+    cur = top["id"] if top else None
+    known = sym in _LEAD
+    prev = _LEAD.get(sym)
+    if known and prev == cur:
+        return top
+    _LEAD[sym] = cur
+    if not known and cur is None:
+        return top
+    try:
+        from office_bridge import _execute
+
+        _execute(db, LEAD_DDL)
+        _execute(db, "INSERT INTO office2_hyp_lead_log (symbol, ts, lead_id, direction, family, net, prev_id, n_active) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                 (sym, now, cur, top["direction"] if top else None, top["family"] if top else None, top["net"] if top else None, prev, len(ranked)))
+    except Exception:  # noqa: BLE001
+        pass
+    return top
 
 
 def list_hypotheses(db: str, state: str = "ACTIVE", limit: int = 50) -> List[Dict[str, Any]]:

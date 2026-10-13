@@ -346,6 +346,15 @@ def _rss_mb() -> float:
         return 0.0
 
 
+_LAST_CHAIN: Dict[str, Any] = {}
+
+
+def chain_for(sym: str, bar_ts: float) -> Optional[Dict[str, Any]]:
+    """Ланцюг 82 карток, порахований у цьому ж циклі на тому ж закритому барі (None, якщо методологічний блок вимкнено/пропущено бюджетом)."""
+    hit = _LAST_CHAIN.get(sym)
+    return hit[1] if hit and hit[0] == float(bar_ts) else None
+
+
 _METHOD_BUDGET = {"cycle": 0.0, "spent": 0.0, "skipped": 0}
 
 
@@ -471,6 +480,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 hyps = HY.build(sym, ctx, now, method_inputs, smc_res=smc_res, plan_th=plan_th, context=hctx)
                 # SMC-based hypotheses (family SMC_*) are produced in the background SMC cycle (office2.smc.shadow.run_cycle): SMC costs ~0.3-1.7 s per symbol.
                 obs = HY.observe(db, sym, hyps, ctx["m15"], now)
+                HY.update_lead(db, sym, hyps, now)      # порівняння конкуруючих гіпотез: переважна й її зміни
                 method_hypotheses = [HY.compact(h) for h in hyps]
                 if hyps or obs["transitions"]:
                     print(f"[hypothesis] {sym}: formed={len(hyps)} {[h['family'] + ':' + h['direction'] for h in hyps]} transitions={obs['transitions']}", flush=True)
@@ -489,6 +499,12 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
             method_chain["timeframes"][tf] = {"status": "OBSERVED", "last_closed_open_ts": float(bars["t"][-1]),
                 "close": float(bars["c"][-1]), "previous_close": float(bars["c"][-2]),
                 "high": float(bars["h"][-1]), "low": float(bars["l"][-1])}
+        try:
+            _LAST_CHAIN[sym] = (float(ctx["m15"]["t"][-1]), AN.compact_chain(method_chain))
+            if len(_LAST_CHAIN) > 150:
+                _LAST_CHAIN.pop(next(iter(_LAST_CHAIN)))
+        except Exception:  # noqa: BLE001
+            pass
         print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
         # Store full rule-by-rule observations, not just aggregate counts.
         # SHADOW trace never changes the live READY gate.
@@ -575,7 +591,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                             _hy = _HY.active_for(db, sym)
                         except Exception:  # noqa: BLE001
                             _hy = None
-                    th = dict(th, analyst=AN.analyze(th, _hy))
+                    th = dict(th, analyst=AN.analyze(th, _hy, chain_for(sym, float(ctx["m15"]["t"][-1]))))
                 except Exception as aexc:  # noqa: BLE001
                     print(f"[analyst] {sym}: {type(aexc).__name__}: {str(aexc)[:100]}", flush=True)
                 an_crit = (th.get("analyst") or {}).get("critical") if AN.mode() == "critical" else None
