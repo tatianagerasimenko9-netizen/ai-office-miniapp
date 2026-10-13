@@ -46,7 +46,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-FB-DEPTH":
+    if rule_id == "D-ENTRY-CLOSE-WITHIN-HALF-ATR":
+        close, level, atr = (_number(data, k) for k in ("close", "level", "daily_atr"))
+        direction = data["direction"]
+        if close is None or level is None or atr is None or atr <= 0 or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN"}
+        distance = close - level if direction == "LONG" else level - close
+        passed = 0 < distance < 0.5 * atr
+    elif rule_id == "G-FB-DEPTH":
         depth = _number(data, "break_depth")
         atr = _number(data, "daily_atr")
         if depth is None or atr is None or atr <= 0 or depth < 0:
