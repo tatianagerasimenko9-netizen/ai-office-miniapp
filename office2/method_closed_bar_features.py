@@ -102,6 +102,20 @@ def from_closed_bars(bars, cutoff):
         tested = current["high"] >= max(x["high"] for x in tail)
         evidence["G-PRESS"] = {"higher_lows": rising, "level_tested": tested, "pullbacks_shrinking": contracting}
         evidence["D-PRESSURE"] = {"rising_lows": rising, "shrinking_pullbacks": contracting, "near_level": tested}
+    if len(past) >= 8:
+        recent = past[-8:]
+        ceiling = max(x["high"] for x in recent)
+        floor = min(x["low"] for x in recent)
+        held = sum(1 for x in recent if floor <= x["close"] <= ceiling)
+        evidence["G-LVL-CONSOLIDATION"] = {
+            "bars_held": held, "level_broken": not (floor <= current["close"] <= ceiling)}
+        inside = 0
+        for x in reversed(past):
+            if x["high"] <= ceiling and x["low"] >= floor:
+                inside += 1
+            else:
+                break
+        evidence["G-FB-COMPLEX"] = {"inside_bars": inside}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
