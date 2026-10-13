@@ -85,7 +85,7 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
         raise ValueError("немає рівнів тези")
     n = lambda x: card._num(x, sym)  # noqa: E731
     long_ = snap["direction"] == "LONG"
-    L = [BRAND, f"{'🟢' if long_ else '🔴'} READY · {snap['direction']}", f"{ticker(sym)} · Binance Futures", ""]
+    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY", "AI Office  |  Binance Futures", "──────────────"]
     entry, sl = float(v["ready_price"]), float(v["sl"])
     risk = abs(entry - sl)
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
