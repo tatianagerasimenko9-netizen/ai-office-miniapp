@@ -42,6 +42,18 @@ def from_closed_bars(bars, cutoff):
         evidence["S-RANGE"] = {"range_low": min(x["low"] for x in lookback),
                                "range_high": max(x["high"] for x in lookback),
                                "close": current["close"]}
+    evidence["S-FVG"] = {"first_high": left["high"], "first_low": left["low"],
+                         "third_high": right["high"], "third_low": right["low"]}
+    if len(past) >= 5:
+        older, newer = past[-4:-2], past[-2:]
+        evidence["S-STRUCTURE"] = {
+            "previous_high": max(x["high"] for x in older),
+            "current_high": max(x["high"] for x in newer),
+            "previous_low": min(x["low"] for x in older),
+            "current_low": min(x["low"] for x in newer)}
+        evidence["D-FIB-LEVELS"] = {
+            "swing_low": min(x["low"] for x in past[-20:]),
+            "swing_high": max(x["high"] for x in past[-20:])}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
