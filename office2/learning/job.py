@@ -20,6 +20,25 @@ def enabled() -> bool:
     return os.getenv("OFFICE2_LEARNING", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def _iter_payloads(db: str, etype: str, signal_like: str = None, chunk: int = 300):
+    """Порційне читання payload_json подій типу etype за зростанням id (по chunk рядків): пам'ять не росте разом з історією (раніше fetchall тримав усе одним списком)."""
+    from office_bridge import _fetchall
+
+    last = 0
+    while True:
+        if signal_like:
+            rows = _fetchall(db, "SELECT id, signal_id, payload_json FROM office_events WHERE event_type = ? AND signal_id LIKE ? AND id > ? ORDER BY id ASC LIMIT ?", (etype, signal_like, last, chunk))
+        else:
+            rows = _fetchall(db, "SELECT id, signal_id, payload_json FROM office_events WHERE event_type = ? AND id > ? ORDER BY id ASC LIMIT ?", (etype, last, chunk))
+        if not rows:
+            return
+        for rid, sid, pj in rows:
+            last = max(last, int(rid))
+            yield sid, pj
+        if len(rows) < chunk:
+            return
+
+
 def _last_by_scenario(rows) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for (pj,) in rows:
@@ -33,10 +52,8 @@ def _last_by_scenario(rows) -> Dict[str, Dict[str, Any]]:
 
 
 def load_old_lev(db: str) -> List[Dict[str, Any]]:
-    from office_bridge import _fetchall
-
-    plans = _last_by_scenario(_fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = 'SIGNAL_PLAN' ORDER BY id ASC"))
-    res = _last_by_scenario(_fetchall(db, "SELECT payload_json FROM office_events WHERE event_type = 'SIGNAL_RESULT' ORDER BY id ASC"))
+    plans = _last_by_scenario((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_PLAN"))
+    res = _last_by_scenario((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_RESULT"))
     out = []
     for sid, r in res.items():
         t = T.from_old_lev(plans[sid], r) if sid in plans else None
@@ -48,9 +65,9 @@ def load_old_lev(db: str) -> List[Dict[str, Any]]:
 def load_office2(db: str) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
-    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, delivered_ts, snapshot_json FROM office2_live_signal WHERE status = 'DELIVERED' ORDER BY created_ts ASC")
+    sids = [r[0] for r in _fetchall(db, "SELECT scenario_id FROM office2_live_signal WHERE status = 'DELIVERED' ORDER BY created_ts ASC")]
     ms: Dict[str, List[List[Any]]] = {}
-    for sid, pj in _fetchall(db, "SELECT signal_id, payload_json FROM office_events WHERE event_type = 'SCENARIO_MILESTONE' AND signal_id LIKE 'O2|%' ORDER BY id ASC"):
+    for sid, pj in _iter_payloads(db, "SCENARIO_MILESTONE", signal_like="O2|%"):
         try:
             p = json.loads(pj or "{}")
         except ValueError:
@@ -58,7 +75,11 @@ def load_office2(db: str) -> List[Dict[str, Any]]:
         if p.get("level") and p.get("sent_ts") is not None:
             ms.setdefault(sid, []).append([p["level"], p["sent_ts"]])
     out = []
-    for sid, sym, d, ct, dl, sj in rows:
+    for one in sids:       # знімок (snapshot_json) читаємо по одному сигналу: він містить свічки графіка й важить сотні КБ
+        got = _fetchall(db, "SELECT scenario_id, symbol, direction, created_ts, delivered_ts, snapshot_json FROM office2_live_signal WHERE scenario_id = ? AND status = 'DELIVERED'", (one,))
+        if not got:
+            continue
+        sid, sym, d, ct, dl, sj = got[0]
         sn = json.loads(sj or "{}")
         th = sn.get("thesis") or {}
         q = th.get("quality") or {}
@@ -71,6 +92,7 @@ def load_office2(db: str) -> List[Dict[str, Any]]:
                                    "stop_pct": (th.get("sizing") or {}).get("stop_pct"), "risk_atr15": q.get("risk_atr15"),
                                    "align_against": al.get("against"), "align_for": al.get("for"), "level_kind": lv.get("kind"), "level_strength": lv.get("strength"),
                                    "milestones": ms.get(sid, [])}))
+        del sn, th, got
     return out
 
 

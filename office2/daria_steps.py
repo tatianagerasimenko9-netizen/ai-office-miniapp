@@ -4,7 +4,7 @@
   • старший ТФ задає контекст, молодший підтверджує, а не суперечить — D-HTF-LTF-CONFIRM, D-FRACTAL-TF;
   • «Немає підтвердження — немає угоди», хибний пробій: винос → закріплення/повернення → реакція — D-NO-CONFIRMATION-NO-TRADE, D-FALSE-BREAK;
   • обов'язковий молодший ТФ входу (M1/M5/M15), свічковий тригер входу, люфт для ТФ входу, часткові фіксації — у наданих матеріалах Дарії НЕ ЗНАЙДЕНО (X-NOT-SPECIFIED-DARIA-LTF-ENTRY-TP).
-Тому M5 і M1 показуються як «не вимагається джерелом», а не як виконані умови. Модуль нічого не вирішує і не змінює READY: він лише описує, що перевірено, що ні, і чому вхід ще/вже не доречний.
+Роль M5/M1 (уточнення точки входу після старшого контексту) — USER_REQUIREMENT власниці за відеорозборами; УМОВИ входу на M5/M1 у доступних текстових джерелах НЕ ПІДТВЕРДЖЕНО, тому крок M5/M1 показує результат безчисельної структурної форми office2/topdown (OUR_IMPLEMENTATION, ГІПОТЕЗА). Для знімків без top-down (старіші READY) M5/M1 лишаються «не вимагається джерелом». Модуль нічого не вирішує і не змінює READY: він лише описує, що перевірено, що ні, і чому вхід ще/вже не доречний.
 Умови мають тип (дотик / закриття / ретест), ТФ, ціну і час; скасування сценарію (ЗАКРИТТЯ M15) відокремлене від захисного SL (дотик усередині свічки)."""
 from __future__ import annotations
 
@@ -218,17 +218,34 @@ def build(snap: Dict[str, Any], valid_until_ts: Optional[float] = None, price_no
                   "refutes": [], "unknown": ["форма підтвердження і ТФ для входу — НЕ ПІДТВЕРДЖЕНО в джерелах Дарії; M15-тригер — модель Brain v2.1"],
                   "allows_next": all_ok, "sources": SRC["m15"]})
 
-    # --- 4–5. M5 / M1 — джерелом не задані
-    m5 = _evid(snap, "m5")
-    steps.append({"id": "M5", "tf": "M5", "title": "Ретест (довідково)", "status": "NOT_REQUIRED_BY_SOURCE",
-                  "checked": "чи повернулася ціна в зону і чи збережена структура — як ДОДАТКОВИЙ контекст",
-                  "result": (f"{m5.get('finding')}" if m5 else "M5 не входить до умов READY: у наданих матеріалах Дарії обов'язковий M5-ретест НЕ ПІДТВЕРДЖЕНО."),
-                  "refutes": [], "unknown": ["обов'язковий молодший ТФ входу (M1/M5/M15) — у джерелах не знайдено"],
-                  "allows_next": True, "sources": SRC["ltf"]})
-    steps.append({"id": "M1", "tf": "M1", "title": "Виконання", "status": "NOT_REQUIRED_BY_SOURCE",
-                  "checked": "уточнення ціни входу після всіх обов'язкових підтверджень; M1 не замінює M15",
-                  "result": f"Вхід лише в зоні {_px(min(zone)) if zone else '—'}–{_px(max(zone)) if zone else '—'} і не далі {MAX_CHASE_R} R від тригера; вхід заднім числом і погоня за ціною заборонені.",
-                  "refutes": [], "unknown": ["свічковий тригер M1 і люфт для ТФ входу — НЕ ПІДТВЕРДЖЕНО"], "allows_next": True, "sources": SRC["ltf"]})
+    # --- 4–5. M5 / M1 — пошук точки входу (top-down). Для старих знімків без topdown — як раніше
+    td = th.get("topdown") or snap.get("topdown") or {}
+    stg = {x.get("tf"): x for x in (td.get("stages") or [])}
+    SMAP = {"CONFIRMS": "CONFIRMED", "NEUTRAL": "NEUTRAL", "CONFLICTS": "AGAINST", "UNAVAILABLE": "UNAVAILABLE"}
+    ltf_unknown = ["форма підтвердження і умови входу на M5/M1 у доступних текстових джерелах НЕ ПІДТВЕРДЖЕНО (оригінали відеорозборів недоступні); реалізовано безчисельну структурну форму STRUCT_BREAK_V0 (ГІПОТЕЗА)"]
+    if stg.get("M5"):
+        x5, x1 = stg["M5"], stg.get("M1") or {}
+        steps.append({"id": "M5", "tf": "M5", "title": "Реакція у зоні (підтвердження входу)", "status": SMAP.get(x5.get("state"), "NEUTRAL"),
+                      "checked": "чи торкнулась ціна зони входу і чи закрилась M5 за максимумом з моменту дотику (мікро-злам = реакція покупців/продавців у зоні); лише закриті свічки",
+                      "result": x5.get("text", ""), "condition": {"type": "CLOSE", "tf": "M5", "closed_ts": x5.get("closed_ts"), "closed_utc": x5.get("closed_utc")},
+                      "refutes": ([x5.get("text")] if x5.get("state") in ("NEUTRAL", "CONFLICTS") else []), "unknown": ltf_unknown, "allows_next": x5.get("state") != "CONFLICTS", "sources": SRC["ltf"]})
+        steps.append({"id": "M1", "tf": "M1", "title": "Точка входу (ретест)", "status": SMAP.get(x1.get("state"), "NEUTRAL"),
+                      "checked": "після підтвердження M5: ретест зламаного рівня на M1 і закриття назад = точна точка входу; без ретесту — лише можливий лімітний рівень",
+                      "result": x1.get("text", ""), "condition": {"type": "CLOSE", "tf": "M1", "closed_ts": x1.get("closed_ts"), "closed_utc": x1.get("closed_utc"), "price": x1.get("entry_price")},
+                      "refutes": [], "unknown": ltf_unknown, "allows_next": True, "sources": SRC["ltf"]})
+        if x5.get("state") in ("NEUTRAL", "CONFLICTS"):
+            risks.append("M5 ще не підтвердив вхід у зоні (" + str(x5.get("text")) + ")")
+    else:
+        m5 = _evid(snap, "m5")
+        steps.append({"id": "M5", "tf": "M5", "title": "Ретест (довідково)", "status": "NOT_REQUIRED_BY_SOURCE",
+                      "checked": "чи повернулася ціна в зону і чи збережена структура — як ДОДАТКОВИЙ контекст",
+                      "result": (f"{m5.get('finding')}" if m5 else "M5 не входить до умов READY (знімок до top-down)."),
+                      "refutes": [], "unknown": ltf_unknown, "allows_next": True, "sources": SRC["ltf"]})
+        steps.append({"id": "M1", "tf": "M1", "title": "Виконання", "status": "NOT_REQUIRED_BY_SOURCE",
+                      "checked": "уточнення ціни входу після всіх обов'язкових підтверджень; M1 не замінює M15",
+                      "result": f"Вхід лише в зоні {_px(min(zone)) if zone else '—'}–{_px(max(zone)) if zone else '—'} і не далі {MAX_CHASE_R} R від тригера; вхід заднім числом і погоня за ціною заборонені.",
+                      "refutes": [], "unknown": ltf_unknown, "allows_next": True, "sources": SRC["ltf"]})
+    ltf_ok = (td.get("ltf") or {}).get("status") == "CONFIRMED" if td else True
 
     # --- 6. скасування і захист — окремо
     cancel = None
@@ -265,12 +282,13 @@ def build(snap: Dict[str, Any], valid_until_ts: Optional[float] = None, price_no
         not_now.append({"tf": "цілі", "type": "GAP", "text": g})
 
     first_fail = next((s for s in steps if s["status"] in ("AGAINST", "UNAVAILABLE")), None)
-    verdict = "ALL_REQUIRED_CONFIRMED" if all_ok and st1 != "AGAINST" and st2 != "AGAINST" else "CHECK_RISKS"
+    verdict = "ALL_REQUIRED_CONFIRMED" if all_ok and st1 != "AGAINST" and st2 != "AGAINST" and ltf_ok else "CHECK_RISKS"
     return {"version": VERSION, "symbol": snap.get("symbol"), "direction": side, "steps": steps, "cancel": cancel, "protective_sl": protective,
             "entry": {"price": entry, "zone": [min(zone), max(zone)] if zone and len(zone) == 2 else None, "max_chase_r": MAX_CHASE_R, "state": es},
             "valid_until_ts": valid_until_ts, "valid_until_utc": _utc(valid_until_ts), "not_now": not_now, "verdict": verdict,
             "first_problem": (first_fail or {}).get("id"),
-            "note": "Схема відображення; не дослівна послідовність Дарії. M5/M1 у джерелах не задані, тому не є умовами READY. Усі ціни й час — з заморожених фактів знімка."}
+            "scenario_type": td.get("scenario_type"), "conflicts": td.get("conflicts") or [], "ltf": td.get("ltf"), "topdown_stages": td.get("stages"),
+            "note": "Схема відображення; не дослівна послідовність Дарії. Роль M5/M1 — вимога власниці; умови входу на M5/M1 у джерелах НЕ ПІДТВЕРДЖЕНО (форма — наша гіпотеза). Усі ціни й час — з заморожених фактів знімка."}
 
 
 def telegram_confirmation(snap: Dict[str, Any], fmt=None, stamp=None) -> List[str]:
@@ -280,15 +298,28 @@ def telegram_confirmation(snap: Dict[str, Any], fmt=None, stamp=None) -> List[st
     by = {s["id"]: s for s in d["steps"]}
     ua = {"CONFIRMED": "підтверджує", "NEUTRAL": "діапазон (без підтвердження)", "AGAINST": "проти", "UNAVAILABLE": "немає даних"}
     out = []
+    st_by = {x.get("tf"): x for x in (d.get("topdown_stages") or [])}
+    rel_ua = {"CONFIRMS": "за", "CONFLICTS": "проти", "NEUTRAL": "нейтрально"}
     for key, label in (("HTF", "D1/H4"), ("H1", "H1")):
         s = by.get(key)
         if s:
-            out.append(f"{label} — {ua.get(s['status'], s['status'])}")
+            if key == "HTF" and s["status"] != "CONFIRMED" and st_by.get("D1") and st_by.get("H4") and st_by["D1"].get("state") in rel_ua and st_by["H4"].get("state") in rel_ua:
+                out.append(f"D1 — {rel_ua[st_by['D1']['state']]} · H4 — {rel_ua[st_by['H4']['state']]}")     # розбіжність між D1 і H4 видно в картці, а не ховається під «D1/H4 — проти»
+            else:
+                out.append(f"{label} — {ua.get(s['status'], s['status'])}")
     m = by.get("M15")
     c = (m or {}).get("condition") or {}
+    m5s = by.get("M5")
     if m and m["status"] == "CONFIRMED":
         when = ""
         if c.get("closed_ts"):
             when = f" ({stamp(c['closed_ts']) + ' Київ' if stamp else c.get('closed_utc')})"
         out.append(f"M15 — закриття {'вище' if d['direction'] == 'LONG' else 'нижче'} {fp(c.get('price'))}{when}")
+    if m5s and m5s.get("status") in ("CONFIRMED", "NEUTRAL", "AGAINST") and (d.get("ltf") or {}).get("status") not in (None, "OFF"):
+        c5 = m5s.get("condition") or {}
+        if m5s["status"] == "CONFIRMED":
+            w5 = f" ({stamp(c5['closed_ts']) + ' Київ' if stamp else c5.get('closed_utc')})" if c5.get("closed_ts") else ""
+            out.append("M5 — підтверджує" + w5)
+        else:
+            out.append("M5 — ще не підтвердив")
     return out

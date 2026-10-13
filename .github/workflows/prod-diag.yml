@@ -1,0 +1,25 @@
+name: Production diag (read-only)
+
+# Разова діагностика: показує сирі відповіді публічних GET-ендпоінтів Mini App. Нічого не змінює.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/prod-diag.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GET candles / summary
+        run: |
+          B=https://ai-office-miniapp.onrender.com
+          for u in "/api/v2/candles?symbol=BTCUSDT&tf=M15&limit=30" "/api/v2/candles?symbol=ETHUSDT&tf=H1&limit=30" "/api/v2/candles?symbol=BTCUSDT&tf=M15&limit=30"; do
+            echo "== $u"; curl -sS --max-time 40 "$B$u" | head -c 1200; echo
+          done
+          echo "== market source_health"; curl -sS --max-time 40 "$B/api/v2/market" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('source_health'), ensure_ascii=False)[:2500]); print([ (m.get('symbol'), m.get('data_status'), m.get('source')) for m in (d.get('marks') or [])][:6])"
+          echo "== sha"; curl -sS --max-time 40 "$B/api/summary" | python3 -c "import sys,json; print(json.load(sys.stdin).get('git_sha'))"

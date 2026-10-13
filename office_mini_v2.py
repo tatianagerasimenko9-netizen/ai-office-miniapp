@@ -1030,6 +1030,7 @@ def candles_payload(symbol: str, tf: str, limit: int = 180, end: Optional[int] =
         "stale": status != "DATA_OK",
         "history": bool(end),
         "candles": bars,
+        **({"fetch_error": _last_fetch_error()} if not bars and not _fixture_on() else {}),
     }
 
 
@@ -1049,6 +1050,15 @@ def _feed_health(open_ts: Any, interval: str, source: str) -> Dict[str, Any]:
     )
     return {"quality": res["quality"], "usable_for_review": res["usable_for_review"],
             "age_seconds": res["age_seconds"], "reasons": res["reasons"]}
+
+
+def _last_fetch_error() -> Dict[str, Any]:
+    try:
+        from office_market_data import last_fetch_error
+
+        return last_fetch_error()
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _source_health() -> Dict[str, Any]:

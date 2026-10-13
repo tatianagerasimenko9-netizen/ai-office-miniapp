@@ -158,6 +158,9 @@ jobs:
       - name: Final launch tests (offline)
         run: |
           python scripts/test_ws_klines.py
+          python scripts/test_memory_budget.py
+          python scripts/test_learning_chunked_load.py
+          python scripts/test_radar_sync_chunks.py
           python scripts/test_channel_tag.py
           python scripts/test_calendar.py
           python scripts/test_levels_payload.py
@@ -173,6 +176,9 @@ jobs:
           python scripts/test_launch_once.py
           python scripts/test_data_provenance.py
           python scripts/test_daria_steps.py
+          python scripts/test_topdown.py
+          python scripts/test_topdown_brain.py
+          python scripts/test_replay_ltf_nofuture.py
           python scripts/test_events_perf.py
           python scripts/test_counterfactual_be.py
           python scripts/test_learning_flags_shadow.py
