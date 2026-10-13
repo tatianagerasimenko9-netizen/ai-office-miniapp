@@ -50,12 +50,22 @@ def evaluate_chain(rules, evidence_by_rule=None):
         items = []
         for rid in ids:
             inputs = evidence_by_rule.get(rid, {})
-            result = evaluate(rid, inputs)
+            # "_"-prefixed keys are trace metadata: _provenance (source, closed-bar time,
+            # basis SOURCE|HYPOTHESIS) and _not_applicable (reason from the source scope).
+            na_reason = inputs.get("_not_applicable")
+            if na_reason:
+                result = {"status": "NOT_APPLICABLE", "reason": str(na_reason)}
+            else:
+                result = evaluate(rid, inputs)
             state = result["status"]
             counts[state] += 1
-            items.append({"rule_id": rid, "status": state,
-                          "source_class": registry[rid].get("evidence_class"),
-                          "details": result})
+            item = {"rule_id": rid, "status": state,
+                    "source_class": registry[rid].get("evidence_class"),
+                    "details": result}
+            if inputs:
+                item["inputs"] = {k: v for k, v in inputs.items() if not str(k).startswith("_")}
+                item["provenance"] = inputs.get("_provenance")
+            items.append(item)
         phases.append({"phase": phase, "rules": items})
     # Structured reasoning for the full 82-rule sequence. Observations are not
     # independent votes and UNKNOWN must never be interpreted as confirmation.

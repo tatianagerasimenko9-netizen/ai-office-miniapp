@@ -395,6 +395,25 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 method_inputs.update(daily_atr_observation(daily, n_daily - 1))
         except (KeyError, TypeError, ValueError, IndexError) as exc:
             print(f"[method_daily_features] {sym}: {type(exc).__name__}", flush=True)
+        # Plan/risk rules take their inputs from the frozen READY thesis of the shadow-selected
+        # direction (SHADOW only; never alters READY, risk or LIVE gates).
+        try:
+            from office2.method_plan_features import from_thesis, paper_journal_stats, daily_atr_from_ranges
+            from office_position_size import depo_usdt
+            plan_th = next((c for c in found.values() if c.get("state") == "READY"
+                            and c.get("dir") == direction_shadow.get("selected")), None)
+            ranges = (method_inputs.get("G-ATR-CALC") or {}).get("previous_ranges")
+            try:
+                journal = paper_journal_stats(db, now)
+            except Exception as jexc:  # noqa: BLE001
+                journal = {}
+                print(f"[method_plan_journal] {sym}: {type(jexc).__name__}", flush=True)
+            method_inputs.update(from_thesis(
+                plan_th, daily_atr=daily_atr_from_ranges(ranges) if ranges else None,
+                equity_usd=depo_usdt(), closed_trades=journal.get("closed_trades"),
+                daily_loss_usd=journal.get("daily_loss_usd"), asof_bar_ts=float(ctx["m15"]["t"][-1])))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[method_plan_features] {sym}: {type(exc).__name__}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
         # Explicit HTF context is observable without forcing a trade.
         method_chain["timeframes"] = {}
