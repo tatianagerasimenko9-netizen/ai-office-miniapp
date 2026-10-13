@@ -91,6 +91,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-PO3": ("accumulation", "manipulation", "distribution"),
         "D-LEVEL-TYPES": ("level_type",),
         "D-ELLIOTT-RULES": ("wave_1", "wave_3", "wave_5", "wave_2_respects_start", "wave_4_no_overlap"),
+        "S-KAVYA-CONCEPTS": ("body_size", "bar_range", "close", "high", "low"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -98,7 +99,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-ELLIOTT-RULES":
+    if rule_id == "S-KAVYA-CONCEPTS":
+        body, span, close, high, low = (_number(data, k) for k in ("body_size", "bar_range", "close", "high", "low"))
+        if any(v is None for v in (body, span, close, high, low)) or span <= 0 or body < 0 or body > span or high <= low or not low <= close <= high:
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "body_fraction": body / span,
+                "close_location": (close - low) / (high - low),
+                "note": "candle observations only"}
+    elif rule_id == "D-ELLIOTT-RULES":
         lengths = [_number(data, k) for k in ("wave_1", "wave_3", "wave_5")]
         second, fourth = data["wave_2_respects_start"], data["wave_4_no_overlap"]
         if any(v is None or v <= 0 for v in lengths) or not isinstance(second, bool) or not isinstance(fourth, bool):
