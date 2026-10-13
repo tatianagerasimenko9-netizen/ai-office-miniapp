@@ -37,7 +37,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-NO-CONFIRMATION-NO-TRADE":
+    if rule_id == "D-HTF-LTF-CONFIRM":
+        htf, ltf = data["htf_agrees"], data["ltf_confirms"]
+        if not isinstance(htf, bool) or not isinstance(ltf, bool):
+            return {"status": "UNKNOWN", "reason": "invalid timeframe evidence"}
+        passed = htf and ltf
+    elif rule_id == "D-NO-CONFIRMATION-NO-TRADE":
         confirmed = data["confirmed"]
         if not isinstance(confirmed, bool):
             return {"status": "UNKNOWN", "reason": "invalid confirmation"}
