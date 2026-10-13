@@ -79,7 +79,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-PARANORMAL-IMPULSE":
+    if rule_id == "G-LVL-CONFIRM-SIGNS":
+        touches = _number(data, "touches")
+        false_break, wick = data["false_break"], data["long_wick"]
+        if touches is None or not isinstance(false_break, bool) or not isinstance(wick, bool):
+            return {"status": "UNKNOWN"}
+        passed = touches >= 2 or false_break or wick
+    elif rule_id == "D-PARANORMAL-IMPULSE":
         size = _number(data, "range")
         average = _number(data, "average_range")
         if size is None or average is None or average <= 0:
