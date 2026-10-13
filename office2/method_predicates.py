@@ -51,7 +51,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LUFT":
+    if rule_id == "G-CHANNEL":
+        width, stop, room = (_number(data, k) for k in ("channel_width", "stop_distance", "distance_to_boundary"))
+        if width is None or stop is None or room is None or stop <= 0:
+            return {"status": "UNKNOWN"}
+        passed = width >= 6 * stop and room >= 4 * stop
+    elif rule_id == "G-LUFT":
         offset = _number(data, "offset")
         stop = _number(data, "calculated_stop")
         if offset is None or stop is None or stop <= 0:
