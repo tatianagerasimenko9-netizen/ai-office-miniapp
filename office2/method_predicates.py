@@ -69,7 +69,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-FALSE-BREAK-DEF":
+    if rule_id == "D-REACTION-AFTER-RETURN":
+        returned = data["returned_inside"]
+        reaction = data["reaction_confirmed"]
+        if not isinstance(returned, bool) or not isinstance(reaction, bool):
+            return {"status": "UNKNOWN"}
+        passed = returned and reaction
+    elif rule_id == "G-FALSE-BREAK-DEF":
         level, high, low, close = (_number(data, k) for k in ("level", "high", "low", "close"))
         direction = data["direction"]
         if any(v is None for v in (level, high, low, close)) or direction not in ("LONG", "SHORT"):
