@@ -345,7 +345,25 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         direction_shadow = compare_candidates(candidates["LONG"], candidates["SHORT"])
         from office2.method_sequence import evaluate_chain
         from office2.method_evidence import load_rules
-        method_chain = evaluate_chain(load_rules())
+        # Use only closed candles already present in the decision context.
+        method_inputs = {}
+        try:
+            bars15 = ctx["m15"]
+            closes = bars15["c"]
+            highs = bars15["h"]
+            lows = bars15["l"]
+            if len(closes) >= 21:
+                last_close = float(closes[-1])
+                last_range = float(highs[-1] - lows[-1])
+                mean_range = float(np.mean(highs[-21:-1] - lows[-21:-1]))
+                method_inputs["G-LVL-PARANORMAL"] = {"range": last_range, "average_range": mean_range}
+                # No arbitrary level: latest closed M15 swing reference.
+                level = float(np.max(highs[-21:-1])) if direction_shadow["selected"] == "LONG" else float(np.min(lows[-21:-1]))
+                if direction_shadow["selected"] in ("LONG", "SHORT"):
+                    method_inputs["G-SIGNAL-CLOSE"] = {"close": last_close, "level": level, "direction": direction_shadow["selected"]}
+        except (KeyError, IndexError, TypeError, ValueError):
+            pass
+        method_chain = evaluate_chain(load_rules(), method_inputs)
         print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
         print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
     except Exception as exc:
