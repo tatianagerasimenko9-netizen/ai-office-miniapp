@@ -84,6 +84,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-SCENARIO-CHECKLIST": ("level_context", "setup_confirmed", "risk_valid"),
         "G-PRESS": ("higher_lows", "level_tested", "pullbacks_shrinking"),
         "D-VOLUME-PRICE": ("current_volume", "average_volume", "price_change"),
+        "G-PROGNOSTIC": ("bar_range", "average_range", "close", "high", "low"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -91,7 +92,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-VOLUME-PRICE":
+    if rule_id == "G-PROGNOSTIC":
+        size, average, close, high, low = (_number(data, k) for k in ("bar_range", "average_range", "close", "high", "low"))
+        if any(v is None for v in (size, average, close, high, low)) or average <= 0 or high <= low or not low <= close <= high:
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "paranormal": size >= 2 * average,
+                "close_position": (close-low)/(high-low),
+                "note": "observations only; no invented combined score"}
+    elif rule_id == "D-VOLUME-PRICE":
         volume, average, change = (_number(data, k) for k in ("current_volume", "average_volume", "price_change"))
         if volume is None or average is None or change is None or volume < 0 or average <= 0:
             return {"status": "UNKNOWN", "reason": "invalid volume/price"}
