@@ -33,6 +33,11 @@ bad = dict(cases["LINK_SHORT"], sl=12.5)
 check("критичний дефект: SL з неправильного боку входу", AN.analyze(bad)["critical"] and AN.analyze(bad)["verdict"] == "CRITICAL_PROBLEM")
 check("критичний дефект: немає розміру", "не визначено розмір позиції/ризик" in AN.critical_defects(dict(cases["LINK_SHORT"], sizing=None)))
 
+H = AN.analyze(cases["LINK_SHORT"], [{"family": "FALSE_BREAK_RECLAIM", "direction": "LONG", "stage": "TRIGGERED"}])
+check("гіпотези: протилежна активна → CONFLICTS + advisory, grade не змінено", H["hypotheses"]["net"] == "CONFLICTS" and "HYP_OPPOSITE_ACTIVE" in H["would_block_advisory"] and H["grade"] == L["grade"])
+H2 = AN.analyze(cases["LINK_SHORT"], [{"family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED"}])
+check("гіпотези: однонапрямлена → SUPPORTS", H2["hypotheses"]["net"] == "SUPPORTS" and "HYP_SUPPORTS" in H2["flags"])
+check("гіпотези: без даних → поле None", L["hypotheses"] is None)
 d = tempfile.mkdtemp(); db = os.path.join(d, "t.db"); os.environ["OFFICE_DB_PATH"] = db
 import office_bridge  # noqa
 from office2 import paper

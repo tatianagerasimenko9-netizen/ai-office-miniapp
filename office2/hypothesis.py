@@ -336,6 +336,21 @@ def cleanup(db: str, now: float, keep_days: float = 14.0) -> None:
     _execute(db, "DELETE FROM office2_hypothesis WHERE state != 'ACTIVE' AND closed_ts < ?", (now - keep_days * 86400,))
 
 
+def active_for(db: str, sym: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """Активні гіпотези одного символу (для розбору READY аналітиком): family, direction, stage, level, invalidation, що бачили. Лише читання."""
+    from office_bridge import _fetchall
+
+    rows = _fetchall(db, "SELECT family, direction, stage, level, invalidation, first_ts, last_ts, payload_json FROM office2_hypothesis WHERE symbol = ? AND state = 'ACTIVE' ORDER BY last_ts DESC LIMIT ?", (sym, int(limit)))
+    out = []
+    for fam, d, stg, lvl, inv, ft, lt, pj in rows:
+        try:
+            what = (json.loads(pj) or {}).get("what_seen")
+        except (TypeError, ValueError):
+            what = None
+        out.append({"family": fam, "direction": d, "stage": stg, "level": lvl, "invalidation": inv, "first_ts": ft, "last_ts": lt, "what_seen": what})
+    return out
+
+
 def list_hypotheses(db: str, state: str = "ACTIVE", limit: int = 50) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
