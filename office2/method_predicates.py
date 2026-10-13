@@ -60,7 +60,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-STOP-ATR":
+    if rule_id == "G-LUFT-FILL":
+        offset = _number(data, "offset")
+        stop = _number(data, "calculated_stop")
+        if offset is None or stop is None or stop <= 0:
+            return {"status": "UNKNOWN"}
+        passed = offset >= .2 * stop
+    elif rule_id == "G-STOP-ATR":
         distance = _number(data, "stop_distance")
         atr = _number(data, "daily_atr")
         if distance is None or atr is None or atr <= 0:
