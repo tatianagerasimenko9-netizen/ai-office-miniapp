@@ -29,6 +29,19 @@ def from_closed_bars(bars, cutoff):
                              "bar_range": span, "close": current["close"],
                              "high": current["high"], "low": current["low"]},
     }
+    # The middle candle is a confirmed three-bar pivot only once the right
+    # candle has closed. This never uses a future bar beyond cutoff.
+    left, center, right = sample[-3:]
+    evidence["S-SWING3"] = {
+        "left_high": left["high"], "center_high": center["high"],
+        "right_high": right["high"], "left_low": left["low"],
+        "center_low": center["low"], "right_low": right["low"]}
+    # Historical range boundaries exclude the candle under evaluation.
+    if len(past) >= 5:
+        lookback = past[-20:]
+        evidence["S-RANGE"] = {"range_low": min(x["low"] for x in lookback),
+                               "range_high": max(x["high"] for x in lookback),
+                               "close": current["close"]}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
@@ -39,3 +52,20 @@ def from_closed_bars(bars, cutoff):
         for rule in ("D-PARANORMAL-IMPULSE", "G-LVL-PARANORMAL"):
             evidence[rule] = {"range": span, "average_range": avg_range}
     return evidence
+
+
+def daily_atr_observation(bars, cutoff):
+    """Previous 3-5 closed daily true ranges, excluding current day."""
+    if isinstance(cutoff, bool) or not isinstance(cutoff, int) or cutoff < 3 or cutoff >= len(bars):
+        return {}
+    previous = bars[max(0, cutoff - 5):cutoff]
+    ranges = []
+    for bar in previous:
+        try:
+            high, low = float(bar["high"]), float(bar["low"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return {}
+        if not isfinite(high) or not isfinite(low) or high <= low:
+            return {}
+        ranges.append(high - low)
+    return {"G-ATR-CALC": {"previous_ranges": ranges}}
