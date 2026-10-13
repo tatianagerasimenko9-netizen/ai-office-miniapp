@@ -100,6 +100,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-SESSIONS": ("session_name", "timezone_verified"),
         "O-CANDLE-PATTERNS": ("pattern_name", "closed_bar_confirmed"),
         "X-UX-CRB-BTW": ("entry_zone_visible", "stop_visible", "targets_visible", "management_visible"),
+        "S-BLOCKS-OTHER": ("block_type", "source_verified"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -107,7 +108,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "X-UX-CRB-BTW":
+    if rule_id == "S-BLOCKS-OTHER":
+        kind, verified = data["block_type"], data["source_verified"]
+        if kind not in ("BREAKER", "MITIGATION", "REJECTION", "STB", "BTS") or not isinstance(verified, bool):
+            return {"status": "UNKNOWN"}
+        if not verified:
+            return {"status": "UNKNOWN", "reason": "source diagrams inconsistent"}
+        return {"status": "PASS", "block_type": kind, "note": "classification only"}
+    elif rule_id == "X-UX-CRB-BTW":
         flags = [data[k] for k in ("entry_zone_visible", "stop_visible", "targets_visible", "management_visible")]
         if not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN"}
