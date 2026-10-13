@@ -88,6 +88,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-TP-TRAIL": ("profit_r", "trend_confirmed", "stop_behind_extremum"),
         "S-OB": ("body_open", "body_close", "latest_body_close", "direction"),
         "G-LVL-CONSTRUCTION": ("higher_timeframe", "level_confirmed", "touches"),
+        "S-PO3": ("accumulation", "manipulation", "distribution"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -95,7 +96,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-CONSTRUCTION":
+    if rule_id == "S-PO3":
+        stages = [data[k] for k in ("accumulation", "manipulation", "distribution")]
+        if not all(isinstance(v, bool) for v in stages):
+            return {"status": "UNKNOWN"}
+        passed = all(stages)
+    elif rule_id == "G-LVL-CONSTRUCTION":
         htf, confirmed = data["higher_timeframe"], data["level_confirmed"]
         touches = _number(data, "touches")
         if not isinstance(htf, bool) or not isinstance(confirmed, bool) or touches is None or touches < 0 or not touches.is_integer():
