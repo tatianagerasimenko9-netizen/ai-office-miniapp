@@ -28,7 +28,7 @@ def fixture_inputs():
     for rid, val in from_closed_bars(engulf, 2).items():
         inputs.setdefault(rid, val)
     th = {"state": "READY", "dir": "LONG", "entry": 100.0, "sl": 99.0, "trigger_level": 99.5,
-          "invalidation": {"price": 99.2}, "targets": [{"p": 103.0}], "sizing": {"risk_usd": 10.0}}
+          "invalidation": {"price": 99.2}, "targets": [{"p": 103.0}], "sizing": {"risk_usd": 10.0}, "sequence": [{"step": "sweep"}]}
     inputs.update(MP.from_thesis(th, daily_atr=10.0, equity_usd=1000.0, closed_trades=120, daily_loss_usd=1.0, asof_bar_ts=1.0))
     ts = datetime(2026, 10, 13, 8, tzinfo=timezone.utc).timestamp()
     inputs.update(MC.session_news(ts, "OK"))

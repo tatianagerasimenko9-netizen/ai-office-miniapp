@@ -14,6 +14,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 # Source ceilings (registry G-RISK-TRADE / G-RISK-DAY / S-RISK): 1% per trade, up to 3% per day.
 RISK_TRADE_PCT_MAX = 1.0
 RISK_DAY_PCT_MAX = 3.0
+# Oscillators named by the source section 'Осцилятори, дуги Фібоначчі, хвилі Еліотта…' (names only, no thresholds).
+_OSCILLATORS = ("rsi", "macd", "stochastic", "стохастик", "cci", "williams", "осцилятор")
 
 
 def _num(value: Any) -> Optional[float]:
@@ -30,6 +32,7 @@ _PROVENANCE = {
     "G-TRIAL-100": ("office2_paper_position (LIVE scope, paper — not real trades)", "SOURCE"),
     "G-RISK-DAY": ("OFFICE_DEPO_USDT config x 3% (upper bound of source 1-3%) + paper journal", "SOURCE"),
     "G-STOP-ATR": ("D1 ATR (G-ATR-CALC, 3-5 closed days); source numbers are for stocks/FX", "HYPOTHESIS"),
+    "G-INDICATORS-NOT-USED": ("entry-trigger chain of the READY thesis (th.sequence step texts)", "SOURCE"),
     "G-RISK-TRADE": ("OFFICE_DEPO_USDT config x 1% (upper bound of source 0.5-1%)", "SOURCE"),
     "S-RISK": ("OFFICE_DEPO_USDT config x 1% (upper bound of source 0.5-1%)", "SOURCE"),
 }
@@ -90,6 +93,9 @@ def from_thesis(th: Optional[Mapping[str, Any]], *, daily_atr: Optional[float] =
     atr = _num(daily_atr)
     if atr and atr > 0:
         out["G-STOP-ATR"] = {"stop_distance": risk, "daily_atr": atr}
+    if isinstance(th.get("sequence"), list) and th["sequence"]:
+        text = " ".join(str(x.get("step", "")) + " " + str(x.get("text", "")) for x in th["sequence"] if isinstance(x, Mapping)).lower()
+        out["G-INDICATORS-NOT-USED"] = {"uses_oscillator_as_entry_trigger": any(w in text for w in _OSCILLATORS)}
     risk_usd = _num((th.get("sizing") or {}).get("risk_usd")) if isinstance(th.get("sizing"), Mapping) else None
     if equity and equity > 0 and risk_usd is not None and risk_usd >= 0:
         budget = equity * RISK_TRADE_PCT_MAX / 100.0

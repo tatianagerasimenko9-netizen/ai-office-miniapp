@@ -7,14 +7,15 @@ from office2.method_predicates import evaluate
 from office2.method_sequence import evaluate_chain
 
 PLAN_RULES = ("G-RR-MIN3", "G-STOP-CRYPTO", "G-STOP-TECH", "G-STOP-CRYPTO-TECHNICAL",
-              "D-STOP-STRUCTURE", "G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100")
+              "D-STOP-STRUCTURE", "G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100", "G-INDICATORS-NOT-USED")
 
 
 def ready(direction="LONG"):
     sg = 1 if direction == "LONG" else -1
     return {"state": "READY", "dir": direction, "entry": 100.0, "sl": 100.0 - sg * 1.0,
             "trigger_level": 100.0 - sg * 0.5, "invalidation": {"price": 100.0 - sg * 0.8, "why": "x"},
-            "targets": [{"p": 100.0 + sg * 3.0, "r": 3.0}], "sizing": {"risk_usd": 10.0}}
+            "targets": [{"p": 100.0 + sg * 3.0, "r": 3.0}], "sizing": {"risk_usd": 10.0},
+            "sequence": [{"step": "подія: sweep рівня", "ok": True}, {"step": "тригер: закриття M15 вище", "ok": True}]}
 
 
 def feats(th, **kw):
@@ -32,6 +33,14 @@ class PlanFeatureTest(unittest.TestCase):
             self.assertEqual(set(f), set(PLAN_RULES), d)
             for r in PLAN_RULES:
                 self.assertIn(evaluate(r, f[r])["status"], ("PASS", "FAIL"), (d, r))
+
+    def test_oscillator_trigger_detected(self):
+        th = ready("LONG")
+        self.assertEqual(evaluate("G-INDICATORS-NOT-USED", feats(th)["G-INDICATORS-NOT-USED"])["status"], "PASS")
+        th["sequence"].append({"step": "тригер: RSI перетнув 30"})
+        self.assertEqual(evaluate("G-INDICATORS-NOT-USED", feats(th)["G-INDICATORS-NOT-USED"])["status"], "FAIL")
+        th["sequence"] = []
+        self.assertNotIn("G-INDICATORS-NOT-USED", feats(th))
 
     def test_values(self):
         f = feats(ready("LONG"))
@@ -60,7 +69,8 @@ class PlanFeatureTest(unittest.TestCase):
 
     def test_missing_sources_are_absent_not_invented(self):
         f = from_thesis(ready("LONG"))
-        for r in ("G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100"):
+        self.assertIn("G-INDICATORS-NOT-USED", f)   # derived from the thesis itself, no external source needed
+        for r in ("G-STOP-ATR", "G-RISK-TRADE", "S-RISK", "G-RISK-DAY", "G-TRIAL-100", "G-INDICATORS-NOT-USED"):
             self.assertNotIn(r, f)
         self.assertNotIn("G-RR-MIN3", from_thesis({**ready(), "targets": []}))
         self.assertEqual(from_thesis({**ready(), "state": "WAIT"}), {})
