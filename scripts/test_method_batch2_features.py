@@ -1,4 +1,6 @@
 """Batch 2 closed-bar features (+7 rules): no-lookahead, negative cases, evaluate_chain."""
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import unittest
 
 from office2.method_closed_bar_features import from_closed_bars

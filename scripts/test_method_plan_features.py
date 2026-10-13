@@ -1,4 +1,6 @@
 """Plan/risk rule inputs from a frozen READY thesis: positive, negative, no-fabrication."""
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import unittest
 
 from office2.method_evidence import load_rules

@@ -1,4 +1,6 @@
 """Shared methodology input builder: closed-bar cut, no lookahead, live/replay parity."""
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import unittest
 
 import numpy as np

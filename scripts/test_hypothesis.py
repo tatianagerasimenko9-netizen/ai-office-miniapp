@@ -1,4 +1,6 @@
 """Hypothesis engine: families, scenarios A/B/C, no-lookahead, observation transitions, no READY/Telegram side effects."""
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import os
 import sys
 import tempfile

@@ -1,4 +1,6 @@
 """Context rule inputs: calendar/sessions, top-down, SMC, D1 base, scope resolution."""
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 import unittest
 from datetime import datetime, timezone
 
