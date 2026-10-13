@@ -1594,6 +1594,17 @@ class Handler(BaseHTTPRequestHandler):
                             "note": "Гіпотеза не є READY і не дозвіл на угоду; ENTRY/SL/TP — лише з READY-плану."}
                 except Exception as exc:  # table absent until the first hypothesis is stored
                     data = {"ok": True, "state": st, "count": 0, "hypotheses": [], "role": "SHADOW", "note": f"немає даних: {type(exc).__name__}"}
+            elif u.path == "/api/v2/analyst":
+                from office2 import analyst as _AN
+
+                try:
+                    if (_q("view") or "") == "weekly":
+                        data = {"ok": True, "weekly": _AN.weekly_review(_db_target_for_identity(), time.time(), float(_q("days") or 7))}
+                    else:
+                        items = _AN.list_records(_db_target_for_identity(), 50)
+                        data = {"ok": True, "count": len(items), "version": _AN.VERSION, "mode": _AN.mode(), "items": items}
+                except Exception as exc:  # table absent until the first analysed READY
+                    data = {"ok": True, "count": 0, "items": [], "note": f"немає даних: {type(exc).__name__}"}
             else:
                 data = {"ok": False, "error": "unknown v2 endpoint"}
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")

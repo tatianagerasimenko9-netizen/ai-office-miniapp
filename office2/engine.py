@@ -17,6 +17,7 @@ import os
 
 from office2 import brain as B
 from office2 import brain2 as B2
+from office2 import analyst as AN
 from office2 import risk as RK
 
 BRAIN_V2 = os.environ.get("OFFICE2_BRAIN", "2") != "1"   # OFFICE2_BRAIN=1 — відкат до brain v1 (thesis A/B)
@@ -532,6 +533,17 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
                 res["no_trade"] += 1
                 continue
+            if AN.mode() != "off":
+                try:
+                    th = dict(th, analyst=AN.analyze(th))
+                except Exception as aexc:  # noqa: BLE001
+                    print(f"[analyst] {sym}: {type(aexc).__name__}: {str(aexc)[:100]}", flush=True)
+                an_crit = (th.get("analyst") or {}).get("critical") if AN.mode() == "critical" else None
+                if an_crit:
+                    th = dict(th, state="NO_TRADE", reason="аналітик: критичний дефект плану — " + "; ".join(an_crit))
+                    save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
+                    res["no_trade"] += 1
+                    continue
             if conflict_mode() != "off":
                 try:
                     cf = opposite_lifecycle(db, sym, th["dir"], now)
@@ -616,7 +628,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
                       "note": "Brain читає свічки лише з ф'ючерсів Binance (office2/live.py KL_URL); спот і Bybit тут не використовуються"}
     except Exception:  # noqa: BLE001
         provenance = {"source": "unknown"}
-    snap = {"data_provenance": provenance, "learning_flags": learn_flags, "session_tag": sess_tag, "conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
+    snap = {"analyst": th.get("analyst"), "data_provenance": provenance, "learning_flags": learn_flags, "session_tag": sess_tag, "conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
             "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
@@ -662,6 +674,11 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         snap["method_trace"] = compact_method_trace(th, now)
     except Exception as exc:
         snap["method_trace"] = {"decision_role": "SHADOW", "status": "UNAVAILABLE", "error": type(exc).__name__}
+    if th.get("analyst"):
+        try:
+            AN.persist(db, th["id"] + f"|{int(now)}", sym, th["dir"], now, th["analyst"])
+        except Exception as pexc:  # noqa: BLE001
+            print(f"[analyst_persist] {sym}: {type(pexc).__name__}: {str(pexc)[:100]}", flush=True)
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
 
