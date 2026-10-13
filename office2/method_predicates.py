@@ -50,7 +50,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-STOP-ATR-MARGIN":
+    if rule_id == "G-LUFT":
+        offset = _number(data, "offset")
+        stop = _number(data, "calculated_stop")
+        if offset is None or stop is None or stop <= 0:
+            return {"status": "UNKNOWN"}
+        passed = abs(offset - 0.2 * stop) <= 1e-9 * max(1, stop)
+    elif rule_id == "D-STOP-ATR-MARGIN":
         margin = _number(data, "margin")
         average = _number(data, "average_range")
         if margin is None or average is None or average <= 0:
