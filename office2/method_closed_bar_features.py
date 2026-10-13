@@ -80,6 +80,19 @@ def from_closed_bars(bars, cutoff):
         evidence["G-FB-2BAR"] = {
             "first_closed_beyond": previous["close"] > upper or previous["close"] < lower,
             "second_rejected": rejected, "bars": 2}
+    # Closed-body candlestick patterns: strict engulfing or inside-body harami.
+    old_lo = min(previous["open"], previous["close"])
+    old_hi = max(previous["open"], previous["close"])
+    new_lo = min(current["open"], current["close"])
+    new_hi = max(current["open"], current["close"])
+    opposite = ((previous["close"] > previous["open"]) !=
+                (current["close"] > current["open"]))
+    if opposite and new_lo < old_lo and new_hi > old_hi:
+        evidence["O-CANDLE-PATTERNS"] = {
+            "pattern_name": "ENGULFING", "closed_bar_confirmed": True}
+    elif opposite and new_lo > old_lo and new_hi < old_hi:
+        evidence["O-CANDLE-PATTERNS"] = {
+            "pattern_name": "HARAMI", "closed_bar_confirmed": True}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
