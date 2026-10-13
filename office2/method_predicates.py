@@ -66,6 +66,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-FB-COMPLEX": ("inside_bars",),
         "G-LVL-MIRROR": ("was_resistance", "now_support"),
         "G-LVL-CONSOLIDATION": ("bars_held", "level_broken"),
+        "D-LEVEL-STICKING": ("retests", "normal_pullback"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
