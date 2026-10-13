@@ -65,3 +65,11 @@
 READY-картка: широкий графік з історією зліва і простором цілей справа, позначені entry zone, planned entry, SL, TP1/TP2, напрям, R:R, TTL та кнопка переходу до того самого сценарію у Mini App. Використовувати лише перевірені реальні рівні й чинний URL сценарію; не вигадувати ціни або посилання. Приклад стороннього трейдера — орієнтир для ясності супроводу, а не джерело універсальних відсотків фіксації.
 
 Активація заборонена до історичного closed-bar replay, перевірки lookahead, комісій, затримок, порівняння з поточним Brain та контрольованого rollout. SHADOW не відправляє Telegram.
+
+## Партія 2 (closed-bar features): 27 → 33 з 82 (feature formed, не production)
+Додано у `office2/method_closed_bar_features.py`: G-SIGNAL-CLOSE, S-OTE-PD, G-LVL-FLOATING, G-LVL-TRENDBREAK, G-ATR-DAYUSED, G-FB-DEPTH (6 нових).
+Реально нових унікальних правил: **6** (не 10) → 33/82. Лишок з ZIP не рахується: G-BREAKOUT, G-LVL-MIRROR, G-LVL-CONSOLIDATION, G-BOUNCE, G-LVL-CONFIRM-SIGNS уже були; D-REACTION-AFTER-RETURN, D-LEVEL-STICKING, D-LEVEL-TYPES у реєстрі мають `missing_parameters` (формальна ознака реакції / пороги / межі точності — НЕ ПІДТВЕРДЖЕНО), тому їхні входи з ZIP були б вигаданими.
+- ГІПОТЕЗА: S-OTE-PD entry = close сигнального бару; G-LVL-TRENDBREAK «розворотний бар» = протилежний колір + close за останнім higher-low/lower-high.
+- G-SIGNAL-CLOSE: у sweep-контексті виконується за побудовою (завжди PASS) — це не незалежне підтвердження.
+- G-ATR-DAYUSED / G-FB-DEPTH потребують `daily_ranges` (3–5 попередніх закритих D1) і `day_bars`; без них — відсутні → UNKNOWN.
+- Не додано (немає джерела/точного визначення): G-IMPULSE (вікно часу), D-ENTRY-CLOSE-WITHIN-HALF-ATR (ТФ, формула ATR), D-FIB-REACTION-NOT-LIMITS (що є «реакцією»).

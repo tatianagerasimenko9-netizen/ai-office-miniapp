@@ -2,8 +2,38 @@
 from math import isfinite
 
 
-def from_closed_bars(bars, cutoff):
-    """Compute evidence from bars through cutoff inclusive; caller guarantees closure."""
+def _daily_atr(daily_ranges):
+    """Mean of 3-5 previous closed daily ranges (G-ATR-CALC); None when invalid."""
+    if not isinstance(daily_ranges, (list, tuple)) or not 3 <= len(daily_ranges) <= 5:
+        return None
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v) or v <= 0
+           for v in daily_ranges):
+        return None
+    return sum(daily_ranges) / len(daily_ranges)
+
+
+def _day_range(day_bars):
+    """High-low of closed bars of the current day up to cutoff; None when invalid."""
+    if not isinstance(day_bars, (list, tuple)) or not day_bars:
+        return None
+    try:
+        highs = [float(b["high"]) for b in day_bars]
+        lows = [float(b["low"]) for b in day_bars]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if not all(isfinite(v) for v in highs + lows) or max(highs) <= min(lows):
+        return None
+    return max(highs) - min(lows)
+
+
+def from_closed_bars(bars, cutoff, daily_ranges=None, day_bars=None):
+    """Compute evidence from bars through cutoff inclusive; caller guarantees closure.
+
+    Optional daily context (caller guarantees it is closed before the cutoff):
+    daily_ranges = 3-5 previous closed daily high-low ranges (current day excluded);
+    day_bars = closed bars of the current day up to cutoff. Rules needing them are
+    simply absent (UNKNOWN downstream) when they are not supplied.
+    """
     if isinstance(cutoff, bool) or not isinstance(cutoff, int) or cutoff < 2 or cutoff >= len(bars):
         return {}
     sample = []
@@ -54,6 +84,7 @@ def from_closed_bars(bars, cutoff):
         evidence["D-FIB-LEVELS"] = {
             "swing_low": min(x["low"] for x in past[-20:]),
             "swing_high": max(x["high"] for x in past[-20:])}
+    side = None
     if len(past) >= 5:
         ceiling = max(x["high"] for x in past[-20:])
         floor = min(x["low"] for x in past[-20:])
@@ -131,6 +162,7 @@ def from_closed_bars(bars, cutoff):
         retested = current["low"] <= level <= current["close"]
         evidence["G-BREAKOUT"] = {"closed_beyond": previous_break, "held_retest": retested}
         evidence["G-LVL-MIRROR"] = {"was_resistance": previous_break, "now_support": retested}
+    _batch2_observations(evidence, past, current, side, daily_ranges, day_bars)
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
@@ -141,6 +173,42 @@ def from_closed_bars(bars, cutoff):
         for rule in ("D-PARANORMAL-IMPULSE", "G-LVL-PARANORMAL"):
             evidence[rule] = {"range": span, "average_range": avg_range}
     return evidence
+
+
+def _batch2_observations(evidence, past, current, side, daily_ranges, day_bars):
+    """Batch 2 (7 rules). Levels are prior-bar extremes only; nothing from the future."""
+    if len(past) >= 5:
+        lookback = past[-20:]
+        ceiling = max(x["high"] for x in lookback)
+        floor = min(x["low"] for x in lookback)
+        signs = evidence["G-LVL-CONFIRM-SIGNS"]
+        # G-LVL-FLOATING: a level counts as fixed only once confirmation signs
+        # (G-LVL-CONFIRM-SIGNS) appeared; otherwise it stays floating.
+        evidence["G-LVL-FLOATING"] = {"fixed_level": bool(
+            signs["touches"] >= 2 or signs["false_break"] or signs["long_wick"])}
+        if side:
+            level = floor if side == "LONG" else ceiling
+            evidence["G-SIGNAL-CLOSE"] = {"close": current["close"], "level": level, "direction": side}
+            # HYPOTHESIS: entry price = close of the signal bar (source gives no entry TF/price).
+            evidence["S-OTE-PD"] = {"entry": current["close"], "range_low": floor,
+                                    "range_high": ceiling, "direction": side}
+    if len(past) >= 6:
+        tail = past[-3:]
+        up = tail[0]["low"] < tail[1]["low"] < tail[2]["low"]
+        down = tail[0]["high"] > tail[1]["high"] > tail[2]["high"]
+        # HYPOTHESIS: "reversal bar" = opposite-colour bar closing beyond the last
+        # higher-low / lower-high; the source gives no numeric definition.
+        broke = (up and current["close"] < past[-1]["low"]) or (down and current["close"] > past[-1]["high"])
+        opposite = (up and current["close"] < current["open"]) or (down and current["close"] > current["open"])
+        evidence["G-LVL-TRENDBREAK"] = {"trend_reversed": bool(broke), "reversal_bar_confirmed": bool(opposite)}
+    atr = _daily_atr(daily_ranges)
+    day_range = _day_range(day_bars)
+    if atr and day_range is not None:
+        evidence["G-ATR-DAYUSED"] = {"day_range": day_range, "daily_atr": atr}
+    if atr and side and len(past) >= 5:
+        level = evidence["G-SIGNAL-CLOSE"]["level"]
+        depth = level - current["low"] if side == "LONG" else current["high"] - level
+        evidence["G-FB-DEPTH"] = {"break_depth": depth, "daily_atr": atr}
 
 
 def daily_atr_observation(bars, cutoff):
