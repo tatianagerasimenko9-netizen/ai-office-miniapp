@@ -1,6 +1,9 @@
 """Top-down source-method stage coverage tests."""
 import unittest
 
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+
 from office2.method_evidence import load_rules
 from office2.method_stages import STAGES, staged_registry, stage_for
 
