@@ -1,5 +1,9 @@
 """Regression tests for Office methodology observations and phase reasoning."""
 import unittest
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from office2.method_predicates import evaluate
 from office2.method_sequence import PHASES, evaluate_chain
