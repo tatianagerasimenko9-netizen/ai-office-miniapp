@@ -96,6 +96,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-INDICATORS-NOT-USED": ("uses_oscillator_as_entry_trigger",),
         "D-WYCKOFF-CONTEXT": ("prior_trend", "range_position", "supply_demand"),
         "D-ATR-LIMITS": ("atr", "stop_distance", "structure_valid", "risk_within_budget"),
+        "D-SESSIONS-NEWS": ("high_impact_news_soon", "session_label"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -103,7 +104,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-ATR-LIMITS":
+    if rule_id == "D-SESSIONS-NEWS":
+        news, session = data["high_impact_news_soon"], data["session_label"]
+        if not isinstance(news, bool) or session not in ("ASIA", "EUROPE", "US", "OFF_HOURS"):
+            return {"status": "UNKNOWN"}
+        return {"status": "FAIL" if news else "PASS", "session": session,
+                "note": "news proximity must be supplied from a verified calendar"}
+    elif rule_id == "D-ATR-LIMITS":
         atr, distance = _number(data, "atr"), _number(data, "stop_distance")
         structure, risk = data["structure_valid"], data["risk_within_budget"]
         if atr is None or distance is None or atr <= 0 or distance <= 0 or not isinstance(structure, bool) or not isinstance(risk, bool):
