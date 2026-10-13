@@ -152,7 +152,7 @@ def test_engine_integration_v2_trace_and_evidence():
             assert ("WAIT 2/3", "WAIT 3/3") in stages, stages                                   # етапи WAIT залишають слід переходів
             cap = DL.build_caption(dict(snap, valid_until_ts=snap["decided_ts"] + 3600))
             th = snap["thesis"]
-            assert cap.startswith("AI Office\n") and "Вхід:" in cap and "READY · " in cap and "Binance Futures" in cap and "Скасування: закриття M15" in cap and "Чому:" not in cap, cap
+            assert cap.startswith("🟢 X · LONG · READY\nAI Office") and "Вхід:" in cap and "READY" in cap and "Binance Futures" in cap and "Скасування: закриття M15" in cap and "Чому:" not in cap, cap
             assert th["entry_zone"][0] <= th["entry"]
     finally:
         B.all_levels = orig
@@ -329,7 +329,7 @@ def _v2_e2e(short):
             n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: recent if tf == '1m' else candles, card.render, 'TRADE_UPDATE', now=created + 60, log=lambda m: None))
             assert n == 1 and len(sent.calls) == 1, (n, OB._fetchall(db, "SELECT status, last_error FROM office2_live_signal"))
             text = sent.calls[0][1]
-            assert text.startswith("AI Office\n" + ("🔴 READY · SHORT" if short else "🟢 READY · LONG") + "\nX · Binance Futures") and "Вхід:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text, text
+            assert text.startswith(("🔴 X · SHORT · READY" if short else "🟢 X · LONG · READY") + "\nAI Office · Binance Futures") and "Вхід:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text, text
             plan = trk.plan_for(db, sent.calls[0][2]["canonical_id"])
             assert plan and ((plan["sl"] > plan["entry"] > plan["tp1"]) if short else (plan["sl"] < plan["entry"] < plan["tp1"]))
             pl = WV.payload(db, now=created + 120)
