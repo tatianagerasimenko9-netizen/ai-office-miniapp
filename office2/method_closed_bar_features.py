@@ -116,7 +116,8 @@ def from_closed_bars(bars, cutoff):
             else:
                 break
         evidence["G-FB-COMPLEX"] = {"inside_bars": inside}
-    evidence["G-LVL-LIMIT"] = {"touches": sum(x["high"] >= max(y["high"] for y in past[:max(1, len(past)-3)]) for x in past[-3:]), "broken": current["close"] > max(x["high"] for x in past)}
+    resistance_reference = max(x["high"] for x in past[:-3]) if len(past) >= 6 else max(x["high"] for x in past)
+    evidence["G-LVL-LIMIT"] = {"touches": sum(x["high"] >= resistance_reference for x in past[-3:]), "broken": current["close"] > resistance_reference}
     prior_resistance = max(x["high"] for x in past)
     tested = current["high"] >= prior_resistance
     rejected = tested and current["close"] < prior_resistance
