@@ -42,7 +42,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-FLOATING":
+    if rule_id == "D-STOP-STRUCTURE":
+        stop = _number(data, "stop")
+        invalidation = _number(data, "invalidation")
+        direction = data["direction"]
+        if stop is None or invalidation is None or direction not in ("LONG", "SHORT"):
+            return {"status": "UNKNOWN", "reason": "invalid structural stop"}
+        passed = stop <= invalidation if direction == "LONG" else stop >= invalidation
+    elif rule_id == "G-LVL-FLOATING":
         fixed = data["fixed_level"]
         if not isinstance(fixed, bool):
             return {"status": "UNKNOWN", "reason": "invalid level evidence"}
