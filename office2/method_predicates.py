@@ -86,7 +86,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-STRUCTURE":
+    if rule_id == "D-FRACTAL-TF":
+        first, scale = data["htf_marked_first"], data["ltf_same_scale"]
+        if not isinstance(first, bool) or not isinstance(scale, bool):
+            return {"status": "UNKNOWN"}
+        passed = first and scale
+    elif rule_id == "S-STRUCTURE":
         ph, ch, pl, cl = (_number(data, k) for k in ("previous_high", "current_high", "previous_low", "current_low"))
         if any(v is None for v in (ph, ch, pl, cl)):
             return {"status": "UNKNOWN"}
