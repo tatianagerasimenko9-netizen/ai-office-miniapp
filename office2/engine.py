@@ -502,6 +502,11 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
         snap["daria_steps"] = _DS.build(snap, valid_until_ts=now + READY_VALID_SEC)      # покрокова перевірка зверху вниз, заморожена на момент рішення (лише відображення, READY не змінює)
     except Exception as exc:  # noqa: BLE001
         snap["daria_steps"] = {"version": "daria-steps-v1", "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
+    try:
+        from office2.method_evidence import compact_method_trace
+        snap["method_trace"] = compact_method_trace(th, now)
+    except Exception as exc:
+        snap["method_trace"] = {"decision_role": "SHADOW", "status": "UNAVAILABLE", "error": type(exc).__name__}
     _execute(db, """INSERT INTO office2_live_signal(scenario_id, symbol, direction, created_ts, valid_until_ts, status, snapshot_json, version) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
              (th["id"] + f"|{int(now)}", sym, th["dir"], now, now + READY_VALID_SEC, "PENDING", _j(snap), brain_version()))
 
