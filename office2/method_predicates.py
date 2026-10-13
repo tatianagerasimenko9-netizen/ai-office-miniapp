@@ -81,7 +81,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-FB-1BAR":
+    if rule_id == "G-FB-2BAR":
+        first, second = data["first_closed_beyond"], data["second_rejected"]
+        bars = _number(data, "bars")
+        if not isinstance(first, bool) or not isinstance(second, bool) or bars is None:
+            return {"status": "UNKNOWN"}
+        passed = first and second and bars == 2
+    elif rule_id == "G-FB-1BAR":
         swept, returned = data["swept_level"], data["returned_inside"]
         bars = _number(data, "bars")
         if not isinstance(swept, bool) or not isinstance(returned, bool) or bars is None:
