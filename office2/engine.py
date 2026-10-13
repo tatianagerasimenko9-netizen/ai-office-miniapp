@@ -368,73 +368,40 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                     method_inputs["G-SIGNAL-CLOSE"] = {"close": last_close, "level": level, "direction": direction_shadow["selected"]}
         except (KeyError, IndexError, TypeError, ValueError):
             pass
-        # Causal M15 feature extraction for methodology SHADOW only.
-        # Do not replace existing LIVE thesis decisions or READY delivery.
+        # All other methodology inputs are assembled by one shared builder (same code as the replay):
+        # closed M15/D1 features, plan/risk from the READY thesis, calendar/session, top-down, SMC.
+        # SHADOW only: nothing here changes READY, risk or LIVE gates.
         try:
-            from office2.method_closed_bar_features import from_closed_bars
-            m15 = ctx["m15"]
-            if all(k in m15 for k in ("o", "h", "l", "c", "v")):
-                count = min(len(m15[k]) for k in ("o", "h", "l", "c", "v"))
-                closed = [
-                    {"open": m15["o"][i], "high": m15["h"][i],
-                     "low": m15["l"][i], "close": m15["c"][i],
-                     "volume": m15["v"][i]}
-                    for i in range(count)
-                ]
-                method_inputs.update(from_closed_bars(closed, count - 1))
-        except (KeyError, TypeError, ValueError, IndexError) as exc:
-            print(f"[method_features] {sym}: {type(exc).__name__}", flush=True)
-        # Daily volatility is computed from daily bars, never from M15 ranges.
-        try:
-            from office2.method_closed_bar_features import daily_atr_observation
-            d1 = ctx["d1"]
-            if all(k in d1 for k in ("h", "l")):
-                n_daily = min(len(d1["h"]), len(d1["l"]))
-                daily = [{"high": d1["h"][i], "low": d1["l"][i]}
-                         for i in range(n_daily)]
-                method_inputs.update(daily_atr_observation(daily, n_daily - 1))
-        except (KeyError, TypeError, ValueError, IndexError) as exc:
-            print(f"[method_daily_features] {sym}: {type(exc).__name__}", flush=True)
-        # Plan/risk rules take their inputs from the frozen READY thesis of the shadow-selected
-        # direction (SHADOW only; never alters READY, risk or LIVE gates).
-        plan_th = None
-        try:
-            from office2.method_plan_features import from_thesis, paper_journal_stats, daily_atr_from_ranges
-            from office_position_size import depo_usdt
+            from office2 import method_inputs as MI
             plan_th = next((c for c in found.values() if c.get("state") == "READY"
                             and c.get("dir") == direction_shadow.get("selected")), None)
-            ranges = (method_inputs.get("G-ATR-CALC") or {}).get("previous_ranges")
+            journal = {}
+            equity = None
+            news_state = None
+            td = None
+            smc_res = None
             try:
+                from office2.method_plan_features import paper_journal_stats
                 journal = paper_journal_stats(db, now)
             except Exception as jexc:  # noqa: BLE001
-                journal = {}
                 print(f"[method_plan_journal] {sym}: {type(jexc).__name__}", flush=True)
-            method_inputs.update(from_thesis(
-                plan_th, daily_atr=daily_atr_from_ranges(ranges) if ranges else None,
-                equity_usd=depo_usdt(), closed_trades=journal.get("closed_trades"),
-                daily_loss_usd=journal.get("daily_loss_usd"), asof_bar_ts=float(ctx["m15"]["t"][-1])))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[method_plan_features] {sym}: {type(exc).__name__}", flush=True)
-        # Context rules: calendar/session, D1 base after impulse, top-down and SMC of the READY plan (SHADOW).
-        try:
-            from office2 import method_context_features as MC
-            asof = float(ctx["m15"]["t"][-1])
-            rules_all = load_rules()
-            method_inputs.update(MC.scope_resolution(rules_all))
-            method_inputs.update(MC.d1_base_after_impulse(ctx.get("d1"), asof))
             try:
+                from office_position_size import depo_usdt
+                equity = depo_usdt()
                 import office_calendar
-                method_inputs.update(MC.session_news(now, office_calendar.news_check(now)[0]))
+                news_state = office_calendar.news_check(now)[0]
             except Exception as cexc:  # noqa: BLE001
                 print(f"[method_calendar] {sym}: {type(cexc).__name__}", flush=True)
             if plan_th is not None:
                 from office2 import topdown as TD
                 from office2.smc import shadow as SMCS
-                method_inputs.update(MC.from_topdown(TD.analyze(plan_th, plan_th["dir"], now), asof))
+                td = TD.analyze(plan_th, plan_th["dir"], now)
                 if SMCS.enabled():
-                    method_inputs.update(MC.from_smc(SMCS.analyze_ctx(sym, ctx, now, with_events=False), plan_th["dir"], asof))
+                    smc_res = SMCS.analyze_ctx(sym, ctx, now, with_events=False)
+            method_inputs.update(MI.build_inputs(ctx, now, plan_th, equity_usd=equity, journal=journal, news_state=news_state,
+                                                 smc_res=smc_res, topdown=td, rules=load_rules()))
         except Exception as exc:  # noqa: BLE001
-            print(f"[method_context_features] {sym}: {type(exc).__name__}", flush=True)
+            print(f"[method_inputs] {sym}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
         # Explicit HTF context is observable without forcing a trade.
         method_chain["timeframes"] = {}
