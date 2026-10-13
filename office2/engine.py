@@ -480,6 +480,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 hyps = HY.build(sym, ctx, now, method_inputs, smc_res=smc_res, plan_th=plan_th, context=hctx)
                 # SMC-based hypotheses (family SMC_*) are produced in the background SMC cycle (office2.smc.shadow.run_cycle): SMC costs ~0.3-1.7 s per symbol.
                 obs = HY.observe(db, sym, hyps, ctx["m15"], now)
+                HY.update_lead(db, sym, hyps, now)      # порівняння конкуруючих гіпотез: переважна й її зміни
                 method_hypotheses = [HY.compact(h) for h in hyps]
                 if hyps or obs["transitions"]:
                     print(f"[hypothesis] {sym}: formed={len(hyps)} {[h['family'] + ':' + h['direction'] for h in hyps]} transitions={obs['transitions']}", flush=True)

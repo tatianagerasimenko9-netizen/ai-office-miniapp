@@ -36,6 +36,16 @@ check("критичний дефект: немає розміру", "не виз
 H = AN.analyze(cases["LINK_SHORT"], [{"family": "FALSE_BREAK_RECLAIM", "direction": "LONG", "stage": "TRIGGERED"}])
 check("гіпотези: протилежна активна → CONFLICTS + advisory, grade не змінено", H["hypotheses"]["net"] == "CONFLICTS" and "HYP_OPPOSITE_ACTIVE" in H["would_block_advisory"] and H["grade"] == L["grade"])
 H2 = AN.analyze(cases["LINK_SHORT"], [{"family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED"}])
+H3 = AN.analyze(cases["LINK_SHORT"], [{"id": "a", "family": "FALSE_BREAK_RECLAIM", "direction": "LONG", "stage": "RETURNED", "n_sup": 4, "n_con": 0, "n_miss": 1},
+                                      {"id": "b", "family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED", "n_sup": 2, "n_con": 1, "n_miss": 2}])
+check("порівняння: протилежна гіпотеза строго сильніша → HYP_LEAD_OPPOSITE і CAUTION (радить, не блокує)", "HYP_LEAD_OPPOSITE" in H3["flags"] and H3["verdict"] == "CAUTION" and H3["critical"] == [])
+H4 = AN.analyze(cases["LINK_SHORT"], [{"id": "b", "family": "SMC_REVERSAL", "direction": "SHORT", "stage": "ARMED", "n_sup": 3, "n_con": 0, "n_miss": 0},
+                                      {"id": "a", "family": "FALSE_BREAK_RECLAIM", "direction": "LONG", "stage": "RETURNED", "n_sup": 2, "n_con": 0, "n_miss": 1}])
+check("порівняння: однонапрямлена сильніша → без HYP_LEAD_OPPOSITE", "HYP_LEAD_OPPOSITE" not in H4["flags"])
+from office2 import hypothesis as HYP
+rk = HYP.rank([{"id": "x", "n_sup": 1, "n_con": 1, "n_miss": 0}, {"id": "y", "n_sup": 3, "n_con": 1, "n_miss": 1}, {"id": "z", "n_sup": 2, "n_con": 0, "n_miss": 0}])
+check("rank: z(+2) > y(+2, більше ЗА першим?)", [h["id"] for h in rk] == ["y", "z", "x"] or [h["id"] for h in rk] == ["z", "y", "x"])
+check("rank: детермінований порядок за (баланс, ЗА, менше бракує)", [h["id"] for h in rk] == ["y", "z", "x"])
 check("гіпотези: однонапрямлена → SUPPORTS", H2["hypotheses"]["net"] == "SUPPORTS" and "HYP_SUPPORTS" in H2["flags"])
 check("гіпотези: без даних → поле None", L["hypotheses"] is None)
 check("тактика: рекомендація є, без таблиці = план як є", L["tactic"]["tactic"] == "T0_enter_now" and not L["tactic"]["table_used"] and "T1_scalp_to_obstacle" in L["tactic"]["options"])
@@ -49,6 +59,14 @@ check("ланцюг: розрив у фазі ризику (R:R<3), PASS у вх
 Z = AN.analyze(cases["TIA_LONG"], None, cc)
 check("розбір: chain82 і картки ланцюга потрапили в cards", Z["chain82"]["first_break"] == "07_RISK" and Z["cards"].get("G-RR-MIN3") == -1)
 d = tempfile.mkdtemp(); db = os.path.join(d, "t.db"); os.environ["OFFICE_DB_PATH"] = db
+import office_bridge  # noqa
+from office_bridge import _fetchall as _fa
+HYP._LEAD.clear()
+HYP.update_lead(db, "ABCUSDT", [{"id": "a", "direction": "LONG", "family": "F", "n_sup": 3, "n_con": 0, "n_miss": 0}], 100.0)
+HYP.update_lead(db, "ABCUSDT", [{"id": "a", "direction": "LONG", "family": "F", "n_sup": 3, "n_con": 0, "n_miss": 0}], 200.0)   # без зміни — без запису
+HYP.update_lead(db, "ABCUSDT", [{"id": "a", "direction": "LONG", "family": "F", "n_sup": 1, "n_con": 0, "n_miss": 0}, {"id": "b", "direction": "SHORT", "family": "G", "n_sup": 4, "n_con": 0, "n_miss": 0}], 300.0)
+lg = _fa(db, "SELECT lead_id, prev_id FROM office2_hyp_lead_log ORDER BY ts", ())
+check("журнал переваги: лише зміни (a, потім b)", [tuple(x) for x in lg] == [("a", None), ("b", "a")])
 import office_bridge  # noqa
 from office2 import paper
 paper._ensure(db)

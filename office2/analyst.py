@@ -221,6 +221,18 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         hyp_al = {"same": [f"{h.get('family')} ({h.get('stage')})" for h in same], "opposite": [f"{h.get('family')} ({h.get('stage')})" for h in opp],
                   "net": ("MIXED" if same and opp else "SUPPORTS" if same else "CONFLICTS" if opp else "NONE"),
                   "note": "гіпотези — додатковий шар доказів (SHADOW); READY вони не змінюють"}
+        # порівняння: чи є протилежна гіпотеза СТРОГО сильнішою за найкращу однонапрямлену (баланс доказів ЗА−ПРОТИ)
+        try:
+            from office2.hypothesis import net_of as _net
+
+            best_same = max((_net(h) for h in same), default=None)
+            best_opp = max((_net(h) for h in opp), default=None)
+            hyp_al["lead"] = {"same_best_net": best_same, "opposite_best_net": best_opp,
+                              "opposite_leads": bool(best_opp is not None and (best_same is None or best_opp > best_same))}
+        except Exception:  # noqa: BLE001
+            hyp_al["lead"] = None
+        if (hyp_al.get("lead") or {}).get("opposite_leads"):
+            flags.append("HYP_LEAD_OPPOSITE")
         if hyp_al["net"] in ("CONFLICTS", "MIXED"):
             flags.append("HYP_OPPOSITE_ACTIVE")
         elif hyp_al["net"] == "SUPPORTS":
@@ -263,7 +275,7 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         verdict = "CRITICAL_PROBLEM"
     elif alt_entry and "RR_BELOW_SOURCE_MIN" in flags and (tp1_r or 0) < 1.5:
         verdict = "PREFER_BETTER_ENTRY"
-    elif penal >= 3:
+    elif penal >= 3 or "HYP_LEAD_OPPOSITE" in flags:
         verdict = "CAUTION"
     else:
         verdict = "CONFIRM"
@@ -287,7 +299,7 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         "invalidation": th.get("invalidation"), "now_or_wait": now_or_wait, "alt_entry": alt_entry,
         "levels": {"entry": entry, "sl": sl, "zone": zone, "targets": tgt, "risk_pct": _f(th.get("risk_pct"))},
         "follow_up": follow, "rr_source_check": rr_src, "flags": flags, "critical": critical,
-        "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE") if f in flags], "hypotheses": hyp_al,
+        "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE", "HYP_LEAD_OPPOSITE") if f in flags], "hypotheses": hyp_al,
         "cards": cards, "links": links, "chain82": chain,
         "note": "Розбір складено лише з фактів сценарію на момент рішення; пороги не вигадувались; ГІПОТЕЗА позначена. Результат угоди сюди не потрапляє.",
     }
