@@ -38,7 +38,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-HTF-LTF-CONFIRM":
+    if rule_id == "G-RISK-TRADE":
+        risk = _number(data, "risk_usd")
+        budget = _number(data, "risk_budget_usd")
+        if risk is None or budget is None or risk < 0 or budget <= 0:
+            return {"status": "UNKNOWN", "reason": "invalid risk inputs"}
+        passed = risk <= budget
+    elif rule_id == "D-HTF-LTF-CONFIRM":
         htf, ltf = data["htf_agrees"], data["ltf_confirms"]
         if not isinstance(htf, bool) or not isinstance(ltf, bool):
             return {"status": "UNKNOWN", "reason": "invalid timeframe evidence"}
