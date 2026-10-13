@@ -40,5 +40,19 @@ class ClosedBarFeaturesTest(unittest.TestCase):
         self.assertNotIn("X-NOT-SPECIFIED-DARIA-LTF-ENTRY-TP", evidence)
 
 
+
+class ScenarioKeyboardTest(unittest.TestCase):
+    def test_https_deep_link(self):
+        from office2.delivery import scenario_keyboard
+        keyboard = scenario_keyboard("https://office.example.com", "BTC/READY 01")
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["url"],
+                         "https://office.example.com/?scenario=BTC%2FREADY%2001")
+
+    def test_invalid_origin_or_id_rejected(self):
+        from office2.delivery import scenario_keyboard
+        self.assertIsNone(scenario_keyboard("http://office.example.com", "s1"))
+        self.assertIsNone(scenario_keyboard("https://office.example.com/?q=1", "s1"))
+        self.assertIsNone(scenario_keyboard("https://office.example.com", ""))
+
 if __name__ == "__main__":
     unittest.main()
