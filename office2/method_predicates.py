@@ -90,6 +90,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-LVL-CONSTRUCTION": ("higher_timeframe", "level_confirmed", "touches"),
         "S-PO3": ("accumulation", "manipulation", "distribution"),
         "D-LEVEL-TYPES": ("level_type",),
+        "D-ELLIOTT-RULES": ("wave_1", "wave_3", "wave_5", "wave_2_respects_start", "wave_4_no_overlap"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -97,7 +98,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-LEVEL-TYPES":
+    if rule_id == "D-ELLIOTT-RULES":
+        lengths = [_number(data, k) for k in ("wave_1", "wave_3", "wave_5")]
+        second, fourth = data["wave_2_respects_start"], data["wave_4_no_overlap"]
+        if any(v is None or v <= 0 for v in lengths) or not isinstance(second, bool) or not isinstance(fourth, bool):
+            return {"status": "UNKNOWN"}
+        passed = second and fourth and lengths[1] >= min(lengths[0], lengths[2]) and lengths[2] >= min(lengths[0], lengths[1])
+    elif rule_id == "D-LEVEL-TYPES":
         level_type = data["level_type"]
         allowed = ("trend_break", "limit_player", "paranormal_bar", "consolidation", "gap_false_break")
         if not isinstance(level_type, str) or level_type not in allowed:
