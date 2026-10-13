@@ -293,6 +293,22 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             except asyncio.TimeoutError:
                 img = {"ok": False, "reason": "chart_render_timeout_8s"}
                 tm["render_timeout"] = True
+            # Only a validated 1000x1230 image is allowed for a new actionable READY.
+            # A text-only fallback silently breaks the user-facing signal contract.
+            if not img.get("ok") or not img.get("path"):
+                why_image = str(img.get("reason") or "chart_missing")
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"IMAGE_REQUIRED: {why_image}"[:300], sid))
+                log(f"[office2] image required; READY remains pending {sid}: {why_image}")
+                return 0
+            try:
+                from PIL import Image as _ReadyImage
+                with _ReadyImage.open(str(img["path"])) as _image:
+                    if _image.format != "PNG" or _image.size != (1000, 1230):
+                        raise ValueError(f"unexpected READY image format/size: {_image.format} {_image.size}")
+            except (OSError, ValueError, KeyError) as exc_image:
+                await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"IMAGE_REQUIRED: {exc_image}"[:300], sid))
+                log(f"[office2] invalid READY image; remains pending {sid}: {exc_image}")
+                return 0
             cap = build_caption(snap, now=clk())
             t_a = time.time()
             mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
