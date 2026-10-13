@@ -89,7 +89,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-REVERSAL-CONT":
+    if rule_id == "D-SCENARIO-CHECKLIST":
+        flags = [data[k] for k in ("level_context", "setup_confirmed", "risk_valid")]
+        if not all(isinstance(v, bool) for v in flags):
+            return {"status": "UNKNOWN"}
+        passed = all(flags)
+    elif rule_id == "S-REVERSAL-CONT":
         flags = [data[k] for k in ("htf_poi", "liquidity_raid", "market_structure_shift")]
         if not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN"}
