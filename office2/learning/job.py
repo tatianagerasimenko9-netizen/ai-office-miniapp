@@ -124,5 +124,15 @@ def run_once(db: str, now: float = None, log: Callable[[str], None] = print) -> 
             done["office2_paper_live"] = prep["overall"]["closed"]
     except Exception as exc:  # noqa: BLE001
         log(f"[o2learn] paper-звіт не записано: {type(exc).__name__}: {str(exc)[:100]}")
+    try:   # розбір аналітика × paper-результати (оцінка якості, прапори, картки): описова статистика, правил не змінює
+        from office2 import analyst as AN
+
+        wk = AN.weekly_review(db, now, 7.0)
+        if wk["signals"]:
+            _execute(db, "INSERT INTO office2_learning_report (ts_epoch, scope, n_trades, report_json, version) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING",
+                     (int(now), "analyst_weekly", wk["closed"], json.dumps(wk, ensure_ascii=False, default=str), VERSION))
+            done["analyst_weekly"] = wk["closed"]
+    except Exception as exc:  # noqa: BLE001
+        log(f"[o2learn] звіт аналітика не записано: {type(exc).__name__}: {str(exc)[:100]}")
     log(f"[o2learn] звіт збережено: {done}")
     return done

@@ -96,7 +96,7 @@ def _sign(finding: str, supports: Any) -> int:
         return 0
 
 
-def analyze(th: Mapping[str, Any]) -> Dict[str, Any]:
+def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = None) -> Dict[str, Any]:
     d = str(th.get("dir") or "")
     entry, sl = _f(th.get("entry")), _f(th.get("sl"))
     ig = th.get("integral") or {}
@@ -182,6 +182,18 @@ def analyze(th: Mapping[str, Any]) -> Dict[str, Any]:
     if ev_counts.get("against", 0) > ev_counts.get("for", 0) or against_n > for_n:
         flags.append("AGAINST_GT_FOR")
     critical = critical_defects(th)
+    # --- узгодженість з активними гіпотезами рушія (HYPOTHESIS, SHADOW): лише мітка й журнал, на оцінку grade не впливає (користь для READY не доведена)
+    hyp_al = None
+    if hyps is not None:
+        same = [h for h in hyps if h.get("direction") == d]
+        opp = [h for h in hyps if h.get("direction") in ("LONG", "SHORT") and h.get("direction") != d]
+        hyp_al = {"same": [f"{h.get('family')} ({h.get('stage')})" for h in same], "opposite": [f"{h.get('family')} ({h.get('stage')})" for h in opp],
+                  "net": ("MIXED" if same and opp else "SUPPORTS" if same else "CONFLICTS" if opp else "NONE"),
+                  "note": "гіпотези — додатковий шар доказів (SHADOW); READY вони не змінюють"}
+        if hyp_al["net"] in ("CONFLICTS", "MIXED"):
+            flags.append("HYP_OPPOSITE_ACTIVE")
+        elif hyp_al["net"] == "SUPPORTS":
+            flags.append("HYP_SUPPORTS")
 
     # --- картки та зв'язки
     cards: Dict[str, int] = {}
@@ -231,7 +243,7 @@ def analyze(th: Mapping[str, Any]) -> Dict[str, Any]:
         "invalidation": th.get("invalidation"), "now_or_wait": now_or_wait, "alt_entry": alt_entry,
         "levels": {"entry": entry, "sl": sl, "zone": zone, "targets": tgt, "risk_pct": _f(th.get("risk_pct"))},
         "follow_up": follow, "rr_source_check": rr_src, "flags": flags, "critical": critical,
-        "grade": grade, "verdict": verdict, "would_block_advisory": ["STOP_NOT_JUSTIFIED"] if "STOP_NOT_JUSTIFIED" in flags else [],
+        "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE") if f in flags], "hypotheses": hyp_al,
         "cards": cards, "links": links,
         "note": "Розбір складено лише з фактів сценарію на момент рішення; пороги не вигадувались; ГІПОТЕЗА позначена. Результат угоди сюди не потрапляє.",
     }

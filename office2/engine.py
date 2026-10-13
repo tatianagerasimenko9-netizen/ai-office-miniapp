@@ -567,7 +567,15 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 continue
             if AN.mode() != "off":
                 try:
-                    th = dict(th, analyst=AN.analyze(th))
+                    _hy = None
+                    if method_shadow_enabled():
+                        try:
+                            from office2 import hypothesis as _HY
+
+                            _hy = _HY.active_for(db, sym)
+                        except Exception:  # noqa: BLE001
+                            _hy = None
+                    th = dict(th, analyst=AN.analyze(th, _hy))
                 except Exception as aexc:  # noqa: BLE001
                     print(f"[analyst] {sym}: {type(aexc).__name__}: {str(aexc)[:100]}", flush=True)
                 an_crit = (th.get("analyst") or {}).get("critical") if AN.mode() == "critical" else None
