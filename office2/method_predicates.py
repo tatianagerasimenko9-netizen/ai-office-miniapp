@@ -50,6 +50,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-OTE-PD": ("entry", "range_low", "range_high", "direction"),
         "S-FVG": ("first_high", "first_low", "third_high", "third_low"),
         "D-FIB-LEVELS": ("swing_low", "swing_high"),
+        "G-STOP-CALC": ("entry_price", "stop_distance"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
