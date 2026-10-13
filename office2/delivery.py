@@ -48,6 +48,21 @@ _INFLIGHT: set = set()             # сигнали, що вже відправ�
 LATE_NOTE_SEC = 150               # доставка пізніше за 2,5 хв від закриття бару — у підписі є позначка про запізнення
 
 
+def scenario_keyboard(base_url: str, scenario_id: str) -> Optional[Dict[str, Any]]:
+    """Telegram URL button only for a configured HTTPS Mini App origin."""
+    from urllib.parse import quote, urlsplit
+    if not isinstance(base_url, str) or not isinstance(scenario_id, str):
+        return None
+    parsed = urlsplit(base_url.strip())
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return None
+    if parsed.query or parsed.fragment or not scenario_id or len(scenario_id) > 160:
+        return None
+    if any(ord(ch) < 32 for ch in scenario_id):
+        return None
+    link = base_url.strip().rstrip("/") + "/?scenario=" + quote(scenario_id, safe="")
+    return {"inline_keyboard": [[{"text": "📊 Сценарій в AI Office", "url": link}]]}
+
 def delivery_enabled() -> bool:
     import os
 
@@ -294,7 +309,16 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                 tm["render_timeout"] = True
             cap = build_caption(snap, now=clk())
             t_a = time.time()
-            mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
+            send_kwargs = {"symbol": sym, "kind": "CONFIRM", "intent": "CONFIRM",
+                           "canonical_id": sid, "scenario_event": "CONFIRM",
+                           "photo_path": str(img.get("path") or "") if img.get("ok") else ""}
+            # Existing sender contract remains unchanged unless it explicitly
+            # advertises reply_markup. Never risk dropping READY on TypeError.
+            import inspect
+            keyboard = scenario_keyboard(os.getenv("OFFICE_MINI_APP_URL", ""), sid)
+            if keyboard and "reply_markup" in inspect.signature(send).parameters:
+                send_kwargs["reply_markup"] = keyboard
+            mid = await send(event_type, cap, **send_kwargs)
             t_sent = time.time()
             tm["send_ms"] = int((t_sent - t_a) * 1000)
             if not mid:
