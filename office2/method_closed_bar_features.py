@@ -125,6 +125,12 @@ def from_closed_bars(bars, cutoff):
     wick = current["high"] - max(current["open"], current["close"])
     body = abs(current["close"] - current["open"])
     evidence["G-LVL-CONFIRM-SIGNS"] = {"touches": evidence["G-LVL-LIMIT"]["touches"], "false_break": rejected, "long_wick": wick > body}
+    if len(past) >= 8:
+        level = max(x["high"] for x in past[-8:-3])
+        previous_break = previous["close"] > level
+        retested = current["low"] <= level <= current["close"]
+        evidence["G-BREAKOUT"] = {"closed_beyond": previous_break, "held_retest": retested}
+        evidence["G-LVL-MIRROR"] = {"was_resistance": previous_break, "now_support": retested}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
