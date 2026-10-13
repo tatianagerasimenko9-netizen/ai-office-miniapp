@@ -363,6 +363,22 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                     method_inputs["G-SIGNAL-CLOSE"] = {"close": last_close, "level": level, "direction": direction_shadow["selected"]}
         except (KeyError, IndexError, TypeError, ValueError):
             pass
+        # Causal M15 feature extraction for methodology SHADOW only.
+        # Do not replace existing LIVE thesis decisions or READY delivery.
+        try:
+            from office2.method_closed_bar_features import from_closed_bars
+            m15 = ctx["m15"]
+            if all(k in m15 for k in ("o", "h", "l", "c", "v")):
+                count = min(len(m15[k]) for k in ("o", "h", "l", "c", "v"))
+                closed = [
+                    {"open": m15["o"][i], "high": m15["h"][i],
+                     "low": m15["l"][i], "close": m15["c"][i],
+                     "volume": m15["v"][i]}
+                    for i in range(count)
+                ]
+                method_inputs.update(from_closed_bars(closed, count - 1))
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            print(f"[method_features] {sym}: {type(exc).__name__}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
         # Explicit HTF context is observable without forcing a trade.
         method_chain["timeframes"] = {}
