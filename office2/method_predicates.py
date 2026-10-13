@@ -99,6 +99,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-SESSIONS-NEWS": ("high_impact_news_soon", "session_label"),
         "S-SESSIONS": ("session_name", "timezone_verified"),
         "O-CANDLE-PATTERNS": ("pattern_name", "closed_bar_confirmed"),
+        "X-UX-CRB-BTW": ("entry_zone_visible", "stop_visible", "targets_visible", "management_visible"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -106,7 +107,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "O-CANDLE-PATTERNS":
+    if rule_id == "X-UX-CRB-BTW":
+        flags = [data[k] for k in ("entry_zone_visible", "stop_visible", "targets_visible", "management_visible")]
+        if not all(isinstance(v, bool) for v in flags):
+            return {"status": "UNKNOWN"}
+        passed = all(flags)
+    elif rule_id == "O-CANDLE-PATTERNS":
         name, closed = data["pattern_name"], data["closed_bar_confirmed"]
         allowed = ("ENGULFING", "HARAMI", "MORNING_STAR", "EVENING_STAR", "THREE_SOLDIERS", "THREE_CROWS")
         if name not in allowed or not isinstance(closed, bool):
