@@ -97,6 +97,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-WYCKOFF-CONTEXT": ("prior_trend", "range_position", "supply_demand"),
         "D-ATR-LIMITS": ("atr", "stop_distance", "structure_valid", "risk_within_budget"),
         "D-SESSIONS-NEWS": ("high_impact_news_soon", "session_label"),
+        "S-SESSIONS": ("session_name", "timezone_verified"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -104,7 +105,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-SESSIONS-NEWS":
+    if rule_id == "S-SESSIONS":
+        name, verified = data["session_name"], data["timezone_verified"]
+        if name not in ("ASIA", "LONDON", "NEW_YORK", "OFF_HOURS") or not isinstance(verified, bool):
+            return {"status": "UNKNOWN"}
+        if not verified:
+            return {"status": "UNKNOWN", "reason": "source timezone ambiguous"}
+        return {"status": "PASS", "session": name, "note": "session label only, not entry approval"}
+    elif rule_id == "D-SESSIONS-NEWS":
         news, session = data["high_impact_news_soon"], data["session_label"]
         if not isinstance(news, bool) or session not in ("ASIA", "EUROPE", "US", "OFF_HOURS"):
             return {"status": "UNKNOWN"}
