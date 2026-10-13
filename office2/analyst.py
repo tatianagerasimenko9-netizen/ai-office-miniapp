@@ -57,6 +57,24 @@ def load_tactic_table() -> dict:
         return {}
 
 
+def compact_chain(method_chain: Mapping[str, Any]) -> Dict[str, Any]:
+    """Ланцюг 82 карток (DATA → HTF → РІВНІ/ЛІКВІДНІСТЬ → ПОВЕДІНКА → СЦЕНАРІЙ → ВХІД → РИЗИК → СУПРОВІД) у стислому вигляді для розбору READY.
+    FAIL = умова картки порушена, PASS = виконана, UNKNOWN = немає даних (НЕ підтвердження), N/A = за межами застосування. Розрив ланцюга = перша фаза з порушеннями."""
+    phases = []
+    for g in method_chain.get("phases") or []:
+        c = {"PASS": [], "FAIL": [], "UNKNOWN": 0, "NOT_APPLICABLE": 0}
+        for it in g.get("rules") or []:
+            st = it.get("status")
+            if st in ("PASS", "FAIL"):
+                c[st].append(it["rule_id"])
+            elif st in c:
+                c[st] += 1
+        phases.append({"phase": g.get("phase"), "pass": c["PASS"], "fail": c["FAIL"], "unknown": c["UNKNOWN"], "na": c["NOT_APPLICABLE"]})
+    first_break = next((p["phase"] for p in phases if p["fail"]), None)
+    return {"phases": phases, "counts": method_chain.get("counts"), "first_break": first_break,
+            "activated": sum(len(p["pass"]) + len(p["fail"]) for p in phases), "total": sum(len(p["pass"]) + len(p["fail"]) + p["unknown"] + p["na"] for p in phases)}
+
+
 def mode() -> str:
     v = os.environ.get("OFFICE2_ANALYST", "critical").strip().lower()
     return v if v in ("off", "annotate", "critical") else "critical"
@@ -109,7 +127,7 @@ def _sign(finding: str, supports: Any) -> int:
         return 0
 
 
-def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = None) -> Dict[str, Any]:
+def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = None, chain: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     d = str(th.get("dir") or "")
     entry, sl = _f(th.get("entry")), _f(th.get("sl"))
     ig = th.get("integral") or {}
@@ -227,6 +245,12 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
                 continue
             links.append({"a": a, "b": b, "relation": rel if sa == sb else "суперечить", "signs": [sa, sb]})
 
+    if chain:
+        for ph in chain.get("phases") or []:
+            for rid in ph.get("pass") or []:
+                cards.setdefault(rid, 1)
+            for rid in ph.get("fail") or []:
+                cards.setdefault(rid, -1)
     grade = "A"
     penal = sum(1 for f in flags if f in ("OBSTACLE_LT_1R", "RR_BELOW_SOURCE_MIN", "RANGE_WRONG_EDGE", "STOP_NOT_JUSTIFIED", "AGAINST_GT_FOR", "M1_RETEST_PENDING"))
     if critical:
@@ -264,7 +288,7 @@ def analyze(th: Mapping[str, Any], hyps: Optional[List[Mapping[str, Any]]] = Non
         "levels": {"entry": entry, "sl": sl, "zone": zone, "targets": tgt, "risk_pct": _f(th.get("risk_pct"))},
         "follow_up": follow, "rr_source_check": rr_src, "flags": flags, "critical": critical,
         "grade": grade, "verdict": verdict, "would_block_advisory": [f for f in ("STOP_NOT_JUSTIFIED", "HYP_OPPOSITE_ACTIVE") if f in flags], "hypotheses": hyp_al,
-        "cards": cards, "links": links,
+        "cards": cards, "links": links, "chain82": chain,
         "note": "Розбір складено лише з фактів сценарію на момент рішення; пороги не вигадувались; ГІПОТЕЗА позначена. Результат угоди сюди не потрапляє.",
     }
 
