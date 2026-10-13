@@ -428,6 +428,66 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         boxes.append((txt, b.x0, fh - b.y1, b.x1, fh - b.y0))
     fig.savefig(path, facecolor=BG, dpi=100)
     plt.close(fig)
+    if not learning:
+        try:
+            _compose_telegram_card(path, symbol, direction, e, zlo, zhi, sl_, t1, t2, t3)
+        except Exception:
+            pass  # Chart delivery remains available if decorative composition fails.
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
             "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}
+
+
+def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp2, tp3):
+    """Compose a compact mobile-readable graphic around the existing truthful candle chart.
+
+    No synthetic targets or candles; all numbers come from the frozen signal.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import os
+
+    chart = Image.open(path).convert("RGB")
+    width = chart.width
+    scale = width / 1000.0
+    height = int(1230 * scale)
+    out = Image.new("RGB", (width, height), "#0c1422")
+    d = ImageDraw.Draw(out)
+    def u(n):
+        return int(n * scale)
+    def font(size, bold=False):
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return ImageFont.truetype(p, u(size))
+        return ImageFont.load_default()
+    def label(x, y, txt, size=25, color="#ffffff", bold=False):
+        d.text((u(x), u(y)), str(txt), font=font(size, bold), fill=color)
+    def box(x0, y0, x1, y1, bg, border=None):
+        d.rounded_rectangle((u(x0), u(y0), u(x1), u(y1)), radius=u(20), fill=bg, outline=border, width=max(1,u(2)))
+    short = str(direction).upper() == "SHORT"
+    label(35, 24, "AI OFFICE  /  BINANCE FUTURES", 24, "#a4b5ce", True)
+    label(35, 68, f"{symbol.replace('USDT','')} / USDT", 49, "#ffffff", True)
+    box(730, 68, 965, 142, "#42232b" if short else "#103e31")
+    label(752, 84, "SHORT" if short else "LONG", 35, "#ff949e" if short else "#64e6a7", True)
+    chart_h = u(635)
+    out.paste(chart.resize((width, chart_h), Image.Resampling.LANCZOS), (0, u(158)))
+    d = ImageDraw.Draw(out)
+    def fmt(x):
+        return _num(x, symbol)
+    box(28, 809, 972, 943, "#152235", "#3c526d")
+    label(52, 822, "ЗОНА ВХОДУ", 24, "#a8c4e4", True)
+    label(52, 858, fmt(zlo) + (" – " + fmt(zhi) if zlo != zhi else ""), 37, "#ffffff", True)
+    label(52, 909, "План " + fmt(entry), 22, "#b0bdd1")
+    box(28, 961, 483, 1080, "#103729", "#147b52")
+    label(51, 973, "TP1  /  TAKE PROFIT", 23, "#64e6a7", True)
+    label(51, 1011, fmt(tp1) if tp1 is not None else "Немає цілі", 37, "#ffffff", True)
+    box(499, 961, 972, 1080, "#3b1b27", "#a23c4d")
+    label(524, 973, "SL  /  STOP LOSS", 23, "#ff999f", True)
+    label(524, 1011, fmt(sl), 37, "#ffffff", True)
+    rr = abs(tp1-entry)/abs(entry-sl) if tp1 is not None and entry != sl else None
+    label(37, 1104, "R/R  1:" + (f"{rr:.2f}" if rr is not None else "—"), 29, "#ffcb68", True)
+    label(37, 1158, "Повний аналіз — кнопка під повідомленням", 21, "#9aaec9")
+    out.save(path, format="PNG", optimize=True)
