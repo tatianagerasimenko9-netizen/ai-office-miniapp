@@ -1,0 +1,94 @@
+name: Replay hypotheses (isolated, read-only)
+
+# Replay рушія гіпотез на закритих барах Binance Futures (контроль: протилежний напрямок); зведення scripts/replay_hypotheses.py study. Нічого не пише в БД/Render/Telegram.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['docs/daria-library-source-recovery-20261012']
+    paths: ['.github/workflows/replay-hypotheses.yml', 'scripts/replay_hypotheses.py']
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        period: [A, B, C, D, E, F, G]
+        symbol: [BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, DOTUSDT, LTCUSDT, NEARUSDT, OPUSDT, SUIUSDT, UNIUSDT, ETCUSDT, FILUSDT, HBARUSDT, TIAUSDT, SEIUSDT, 1000PEPEUSDT, 1000SHIBUSDT, FETUSDT, RUNEUSDT, ALGOUSDT, MKRUSDT, WLDUSDT, ONDOUSDT, JUPUSDT]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      OFFICE_EXINFO_SEED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - name: Replay ${{ matrix.period }} ${{ matrix.symbol }}
+        run: |
+          case "${{ matrix.period }}" in
+            A) E=2026-09-25; D=14;;
+            B) E=2026-10-09; D=14;;
+            C) E=2026-10-11; D=2;;
+            D) E=2026-08-28; D=14;;
+            E) E=2026-08-14; D=14;;
+            F) E=2026-07-31; D=14;;
+            G) E=2026-07-17; D=14;;
+          esac
+          python -u scripts/replay_hypotheses.py run "${{ matrix.symbol }}" "$E" "$D" "out_${{ matrix.symbol }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-hyp-${{ matrix.period }}-${{ matrix.symbol }}
+          path: out_${{ matrix.symbol }}.json
+  pooled:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-A-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-B-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-C-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-D-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-E-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-F-*
+          path: parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: replay-hyp-G-*
+          path: parts
+      - name: Hypotheses study A–G
+        run: |
+          set -o pipefail
+          python -u scripts/replay_hypotheses.py study parts replay_hypotheses.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-hypotheses-all
+          path: replay_hypotheses.json

@@ -256,62 +256,67 @@ def _insert_or_refresh(db: str, h: Mapping[str, Any], now: float) -> None:
         _execute(db, "UPDATE office2_hypothesis SET last_ts = ? WHERE hyp_id = ?", (now, h["id"]))
 
 
+def walk(fam: str, d: str, bar_ts: float, lvl: Optional[float], inv: Optional[float], ref: Optional[float], risk: Optional[float],
+         arr: Mapping[str, Any], now: float) -> Dict[str, Any]:
+    """Pure state walk over CLOSED M15 bars after the signal bar (shared by live observation and replay; no I/O)."""
+    from office2.method_inputs import _closed
+
+    a = _closed(arr, M15, now)
+    out: Dict[str, Any] = {"state": "ACTIVE", "closed_ts": None, "events": [], "mfe": 0.0, "mae": 0.0, "touches": 0, "bars": 0}
+    if not a:
+        return out
+    t = [float(x) for x in a["t"]]
+    idx = [i for i, ts in enumerate(t) if ts > float(bar_ts)]
+    out["bars"] = len(idx)
+    long_ = d == "LONG"
+    r = float(risk) if risk else None
+    for i in idx:
+        hi, lo, cl = float(a["h"][i]), float(a["l"][i]), float(a["c"][i])
+        if inv is not None and (cl < inv if long_ else cl > inv):
+            out.update(state="REFUTED", closed_ts=t[i] + M15)
+            out["events"].append({"ts": out["closed_ts"], "event": "REFUTED", "close": cl})
+            return out
+        if lvl is not None and lo <= lvl <= hi:
+            out["touches"] += 1
+            held = cl >= lvl if long_ else cl <= lvl
+            out["events"].append({"ts": t[i] + M15, "event": "RETEST_HELD" if held else "TOUCH_LOST", "close": cl})
+        if r and ref is not None:
+            fav = (hi - ref) / r if long_ else (ref - lo) / r
+            adv = (ref - lo) / r if long_ else (hi - ref) / r
+            out["mfe"], out["mae"] = max(out["mfe"], fav), max(out["mae"], adv)
+            if out["mfe"] >= CONFIRM_R:
+                out.update(state="CONFIRMED", closed_ts=t[i] + M15)
+                out["events"].append({"ts": out["closed_ts"], "event": "CONFIRMED", "mfe_r": round(out["mfe"], 2)})
+                return out
+    if len(idx) >= TTL_BARS.get(fam, 96):
+        out.update(state="EXPIRED", closed_ts=t[idx[-1]] + M15)
+        out["events"].append({"ts": out["closed_ts"], "event": "EXPIRED"})
+    return out
+
+
 def progress(db: str, sym: str, m15: Mapping[str, Any], now: float) -> List[Dict[str, Any]]:
     """Advance ACTIVE hypotheses of the symbol using CLOSED M15 bars after the signal bar. Returns the transitions made."""
     from office_bridge import _execute, _fetchall
-    from office2.method_inputs import _closed
 
-    arr = _closed(m15, M15, now)
     rows = _fetchall(db, "SELECT hyp_id, family, direction, bar_ts, level, invalidation, ref_price, risk_ref, payload_json FROM office2_hypothesis WHERE symbol = ? AND state = 'ACTIVE'", (sym,))
     done: List[Dict[str, Any]] = []
-    if not arr or not rows:
-        return done
-    t = [float(x) for x in arr["t"]]
     for hid, fam, d, bar_ts, lvl, inv, ref, risk, pj in rows:
-        idx = [i for i, ts in enumerate(t) if ts > float(bar_ts)]
-        if not idx:
-            continue
-        long_ = d == "LONG"
-        mfe = mae = 0.0
-        events, state, closed_ts = [], "ACTIVE", None
-        r = float(risk) if risk else None
-        touches = 0
-        for i in idx:
-            hi, lo, cl = float(arr["h"][i]), float(arr["l"][i]), float(arr["c"][i])
-            if inv is not None and (cl < inv if long_ else cl > inv):
-                state, closed_ts = "REFUTED", t[i] + M15
-                events.append({"ts": closed_ts, "event": "REFUTED", "close": cl})
-                break
-            if lvl is not None and lo <= lvl <= hi:
-                touches += 1
-                held = cl >= lvl if long_ else cl <= lvl
-                events.append({"ts": t[i] + M15, "event": "RETEST_HELD" if held else "TOUCH_LOST", "close": cl})
-            if r:
-                fav = (hi - ref) / r if long_ else (ref - lo) / r
-                adv = (ref - lo) / r if long_ else (hi - ref) / r
-                mfe, mae = max(mfe, fav), max(mae, adv)
-                if mfe >= CONFIRM_R:
-                    state, closed_ts = "CONFIRMED", t[i] + M15
-                    events.append({"ts": closed_ts, "event": "CONFIRMED", "mfe_r": round(mfe, 2)})
-                    break
-        if state == "ACTIVE" and len(idx) >= TTL_BARS.get(fam, 96):
-            state, closed_ts = "EXPIRED", t[idx[-1]] + M15
-            events.append({"ts": closed_ts, "event": "EXPIRED"})
-        if state == "ACTIVE" and not events:
+        w = walk(fam, d, bar_ts, lvl, inv, ref, risk, m15, now)
+        if w["state"] == "ACTIVE" and not w["events"]:
             continue
         try:
             payload = json.loads(pj)
         except Exception:  # noqa: BLE001
             payload = {}
-        hist = (payload.get("history") or []) + events
-        payload["history"] = hist[-30:]
-        payload["state"] = state
-        outcome = {"state": state, "mfe_r": round(mfe, 3), "mae_r": round(mae, 3), "bars_after": len(idx), "touches": touches,
-                   "convention": f"CONFIRMED = {CONFIRM_R}R у напрямку до інвалідації (HYPOTHESIS); R = відстань ref→інвалідація, не ризик угоди"} if state != "ACTIVE" else None
+        payload["history"] = ((payload.get("history") or []) + w["events"])[-30:]
+        payload["state"] = w["state"]
+        outcome = ({"state": w["state"], "mfe_r": round(w["mfe"], 3), "mae_r": round(w["mae"], 3), "bars_after": w["bars"], "touches": w["touches"],
+                    "convention": f"CONFIRMED = {CONFIRM_R}R у напрямку до інвалідації (HYPOTHESIS); R = відстань ref→інвалідація, не ризик угоди"}
+                   if w["state"] != "ACTIVE" else None)
         _execute(db, "UPDATE office2_hypothesis SET state = ?, closed_ts = ?, payload_json = ?, outcome_json = ?, last_ts = ? WHERE hyp_id = ?",
-                 (state, closed_ts, json.dumps(payload, ensure_ascii=False, default=str), json.dumps(outcome) if outcome else None, now, hid))
-        if state != "ACTIVE":
-            done.append({"id": hid, "state": state, "mfe_r": round(mfe, 2), "mae_r": round(mae, 2)})
+                 (w["state"], w["closed_ts"], json.dumps(payload, ensure_ascii=False, default=str), json.dumps(outcome) if outcome else None, now, hid))
+        if w["state"] != "ACTIVE":
+            done.append({"id": hid, "state": w["state"], "mfe_r": round(w["mfe"], 2), "mae_r": round(w["mae"], 2)})
     return done
 
 

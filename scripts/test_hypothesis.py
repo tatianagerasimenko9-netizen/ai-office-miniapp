@@ -151,5 +151,34 @@ class HypothesisTest(unittest.TestCase):
             self.assertNotIn(bad, src)
 
 
+class ReplayCoreTest(unittest.TestCase):
+    def test_replay_core_is_causal_and_has_control(self):
+        import replay_hypotheses as R
+        rng = np.random.default_rng(5)
+
+        def mk(n, w, t0, vol):
+            t = t0 + np.arange(n) * w
+            c = 100 + np.cumsum(rng.normal(0, vol, n))
+            o = np.r_[c[0], c[:-1]]
+            h = np.maximum(o, c) + abs(rng.normal(0, vol / 3, n))
+            l = np.minimum(o, c) - abs(rng.normal(0, vol / 3, n))
+            v = rng.random(n) * 100
+            return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v, "tbv": v * 0.5}
+        t0 = 1_750_000_000.0 // 900 * 900
+        arrs = {"m15": mk(3000, 900, t0, 0.3), "h4": mk(600, 14400, t0 - 20 * 86400, 1.0), "d1": mk(200, 86400, t0 - 100 * 86400, 2.0), "w1": mk(50, 604800, t0 - 300 * 86400, 3)}
+        rows = R.core("TEST", arrs, t0 + 20 * 86400, t0 + 30 * 86400)
+        hyp = [r for r in rows if "id" in r]
+        self.assertTrue(hyp)
+        for r in hyp:
+            self.assertIn(r["state"], ("CONFIRMED", "REFUTED", "EXPIRED", "ACTIVE"))
+            self.assertIn(r["ctl_state"], ("CONFIRMED", "REFUTED", "EXPIRED", "ACTIVE"))
+        # poisoning bars far after the window must not change which hypotheses exist at decision time
+        arrs2 = {k: {kk: np.array(vv, dtype=float) for kk, vv in v.items()} for k, v in arrs.items()}
+        arrs2["m15"]["h"][-100:] += 50.0
+        arrs2["m15"]["l"][-100:] -= 50.0
+        rows2 = R.core("TEST", arrs2, t0 + 20 * 86400, t0 + 30 * 86400)
+        self.assertEqual([r["id"] for r in hyp], [r["id"] for r in rows2 if "id" in r])
+
+
 if __name__ == "__main__":
     unittest.main()
