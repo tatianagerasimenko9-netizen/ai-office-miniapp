@@ -57,5 +57,22 @@ def evaluate_chain(rules, evidence_by_rule=None):
                           "source_class": registry[rid].get("evidence_class"),
                           "details": result})
         phases.append({"phase": phase, "rules": items})
+    # Structured reasoning for the full 82-rule sequence. Observations are not
+    # independent votes and UNKNOWN must never be interpreted as confirmation.
+    reasoning = []
+    for group in phases:
+        items = group["rules"]
+        failed = [x["rule_id"] for x in items if x["status"] == "FAIL"]
+        unknown = [x["rule_id"] for x in items if x["status"] == "UNKNOWN"]
+        passed = [x["rule_id"] for x in items if x["status"] == "PASS"]
+        reasoning.append({
+            "phase": group["phase"],
+            "observed": passed,
+            "contradictions": failed,
+            "unresolved": unknown,
+            "complete": not unknown,
+        })
     return {"phases": phases, "counts": counts, "evaluated": sum(counts.values()),
-            "role": "SHADOW", "decision": "UNDETERMINED"}
+            "reasoning": reasoning, "unresolved_count": counts["UNKNOWN"],
+            "role": "SHADOW", "decision": "UNDETERMINED",
+            "decision_reason": "Methodology observations only; no validated live trade gate"}
