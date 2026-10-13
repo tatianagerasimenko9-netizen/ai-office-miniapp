@@ -56,7 +56,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "S-OTE-PD":
+    if rule_id == "S-FVG":
+        a, b, c, d = (_number(data, k) for k in ("first_high", "first_low", "third_high", "third_low"))
+        if any(v is None for v in (a, b, c, d)):
+            return {"status": "UNKNOWN"}
+        passed = d > a or c < b
+    elif rule_id == "S-OTE-PD":
         entry, low, high = (_number(data, k) for k in ("entry", "range_low", "range_high"))
         direction = data["direction"]
         if entry is None or low is None or high is None or high <= low or direction not in ("LONG", "SHORT"):
