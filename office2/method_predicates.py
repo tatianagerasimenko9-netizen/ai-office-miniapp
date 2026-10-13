@@ -33,6 +33,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-RISK-TRADE": ("risk_usd", "risk_budget_usd"),
         "G-RISK-DAY": ("daily_loss_usd", "daily_limit_usd"),
         "S-RISK": ("risk_usd", "risk_budget_usd"),
+        "G-LVL-FLOATING": ("fixed_level",),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
