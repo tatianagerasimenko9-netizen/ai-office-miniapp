@@ -78,7 +78,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-TRENDBREAK":
+    if rule_id == "D-PARANORMAL-IMPULSE":
+        size = _number(data, "range")
+        average = _number(data, "average_range")
+        if size is None or average is None or average <= 0:
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "multiple": size / average, "note": "observed size; no unsupported threshold"}
+    elif rule_id == "G-LVL-TRENDBREAK":
         reversed_trend = data["trend_reversed"]
         reversal_bar = data["reversal_bar_confirmed"]
         if not isinstance(reversed_trend, bool) or not isinstance(reversal_bar, bool):
