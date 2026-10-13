@@ -65,7 +65,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-TRIAL-100":
+    if rule_id == "S-RANGE":
+        low, high, close = (_number(data, k) for k in ("range_low", "range_high", "close"))
+        if low is None or high is None or close is None or high <= low:
+            return {"status": "UNKNOWN"}
+        return {"status": "PASS", "position": (close-low)/(high-low), "equilibrium": (high+low)/2}
+    elif rule_id == "G-TRIAL-100":
         count = _number(data, "closed_trades")
         if count is None or count < 0 or not count.is_integer():
             return {"status": "UNKNOWN"}
