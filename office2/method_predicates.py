@@ -28,6 +28,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-ATR-DAYUSED": ("day_range", "daily_atr"),
         "G-RR-MIN3": ("reward", "risk"),
         "G-LVL-LIMIT": ("touches", "broken"),
+        "D-NO-CONFIRMATION-NO-TRADE": ("confirmed",),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
