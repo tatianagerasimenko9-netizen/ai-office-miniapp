@@ -71,7 +71,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-FIB-REACTION-NOT-LIMITS":
+    if rule_id == "G-FB-COMPLEX":
+        bars = _number(data, "inside_bars")
+        if bars is None or bars < 0 or not bars.is_integer():
+            return {"status": "UNKNOWN"}
+        passed = bars >= 3
+    elif rule_id == "D-FIB-REACTION-NOT-LIMITS":
         touched = data["zone_touched"]
         reaction = data["reaction_confirmed"]
         if not isinstance(touched, bool) or not isinstance(reaction, bool):
