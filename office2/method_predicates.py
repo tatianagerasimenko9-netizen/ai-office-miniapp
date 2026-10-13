@@ -93,6 +93,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "D-ELLIOTT-RULES": ("wave_1", "wave_3", "wave_5", "wave_2_respects_start", "wave_4_no_overlap"),
         "S-KAVYA-CONCEPTS": ("body_size", "bar_range", "close", "high", "low"),
         "X-QA-RUNE": ("stop_candidates_valid",),
+        "G-INDICATORS-NOT-USED": ("uses_oscillator_as_entry_trigger",),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -100,7 +101,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "X-QA-RUNE":
+    if rule_id == "G-INDICATORS-NOT-USED":
+        uses_indicator = data["uses_oscillator_as_entry_trigger"]
+        if not isinstance(uses_indicator, bool):
+            return {"status": "UNKNOWN"}
+        passed = not uses_indicator
+    elif rule_id == "X-QA-RUNE":
         flags = data["stop_candidates_valid"]
         if not isinstance(flags, (list, tuple)) or not flags or not all(isinstance(v, bool) for v in flags):
             return {"status": "UNKNOWN"}
