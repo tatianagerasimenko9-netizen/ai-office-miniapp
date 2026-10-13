@@ -77,7 +77,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-CANDLE-STRENGTH":
+    if rule_id == "G-LVL-TRENDBREAK":
+        reversed_trend = data["trend_reversed"]
+        reversal_bar = data["reversal_bar_confirmed"]
+        if not isinstance(reversed_trend, bool) or not isinstance(reversal_bar, bool):
+            return {"status": "UNKNOWN"}
+        passed = reversed_trend and reversal_bar
+    elif rule_id == "D-CANDLE-STRENGTH":
         op, high, low, close = (_number(data, k) for k in ("open", "high", "low", "close"))
         if any(v is None for v in (op, high, low, close)) or high <= low or not low <= op <= high or not low <= close <= high:
             return {"status": "UNKNOWN"}
