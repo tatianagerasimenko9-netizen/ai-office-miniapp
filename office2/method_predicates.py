@@ -64,7 +64,12 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-IMPULSE":
+    if rule_id == "G-TRIAL-100":
+        count = _number(data, "closed_trades")
+        if count is None or count < 0 or not count.is_integer():
+            return {"status": "UNKNOWN"}
+        passed = count >= 100
+    elif rule_id == "G-IMPULSE":
         move = _number(data, "move")
         atr = _number(data, "daily_atr")
         if move is None or atr is None or atr <= 0:
