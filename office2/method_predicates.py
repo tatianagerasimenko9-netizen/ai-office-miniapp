@@ -80,7 +80,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-CONFIRM-SIGNS":
+    if rule_id == "G-FB-1BAR":
+        swept, returned = data["swept_level"], data["returned_inside"]
+        bars = _number(data, "bars")
+        if not isinstance(swept, bool) or not isinstance(returned, bool) or bars is None:
+            return {"status": "UNKNOWN"}
+        passed = swept and returned and bars == 1
+    elif rule_id == "G-LVL-CONFIRM-SIGNS":
         touches = _number(data, "touches")
         false_break, wick = data["false_break"], data["long_wick"]
         if touches is None or not isinstance(false_break, bool) or not isinstance(wick, bool):
