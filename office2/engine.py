@@ -354,11 +354,11 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
             lows = bars15["l"]
             if len(closes) >= 21:
                 last_close = float(closes[-1])
-                last_range = float(highs[-1] - lows[-1])
-                mean_range = float(np.mean(highs[-21:-1] - lows[-21:-1]))
+                last_range = float(highs[-1])-float(lows[-1])
+                mean_range = sum(float(h)-float(l) for h,l in zip(highs[-21:-1],lows[-21:-1]))/20
                 method_inputs["G-LVL-PARANORMAL"] = {"range": last_range, "average_range": mean_range}
                 # No arbitrary level: latest closed M15 swing reference.
-                level = float(np.max(highs[-21:-1])) if direction_shadow["selected"] == "LONG" else float(np.min(lows[-21:-1]))
+                level = max(float(v) for v in highs[-21:-1]) if direction_shadow["selected"] == "LONG" else min(float(v) for v in lows[-21:-1])
                 if direction_shadow["selected"] in ("LONG", "SHORT"):
                     method_inputs["G-SIGNAL-CLOSE"] = {"close": last_close, "level": level, "direction": direction_shadow["selected"]}
         except (KeyError, IndexError, TypeError, ValueError):
