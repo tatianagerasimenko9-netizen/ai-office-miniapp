@@ -158,6 +158,7 @@ jobs:
       - name: Final launch tests (offline)
         run: |
           python scripts/test_ws_klines.py
+          python scripts/test_memory_budget.py
           python scripts/test_channel_tag.py
           python scripts/test_calendar.py
           python scripts/test_levels_payload.py

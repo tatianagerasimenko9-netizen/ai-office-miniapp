@@ -205,6 +205,18 @@ class Feed:
         return arr
 
 
+def _stage(name: str):
+    """Позначка етапу для вимірювання RSS (office_runtime_guard.stage); без guard — порожній контекст. Логіку не змінює."""
+    try:
+        import office_runtime_guard as _rg
+
+        return _rg.stage(name)
+    except Exception:  # noqa: BLE001
+        import contextlib
+
+        return contextlib.nullcontext()
+
+
 def _once(fn):
     """Один мережевий запит на символ і цикл: докази, top-down і знімок READY читають однакові дані (без дублів до Binance)."""
     box: Dict[str, Any] = {}
@@ -583,7 +595,8 @@ def cycle(db: str, feed: Feed, now: float, state: Dict[str, Any], syms: Optional
                 return                                     # попередній фоновий прохід ще йде: нові плани підхопить наступний цикл (last_plan_id не зсунуто)
             try:
                 t0_ = time.time()
-                n_ = _ingest_old_lev(db, feed, now, states, mc, state)
+                with _stage("oldlev.bg"):
+                    n_ = _ingest_old_lev(db, feed, now, states, mc, state)
                 _bump("old_lev", n_)
                 _log(f"[o2shadow] старий Лев (фон): {n_} подій, {time.time() - t0_:.0f} с")
             except Exception as exc_:  # noqa: BLE001
@@ -688,6 +701,12 @@ def _next_bar_close(now: float) -> float:
 
 def run_forever(db: str, feed: Optional[Feed] = None) -> None:
     feed = feed or Feed()
+    try:
+        import office_runtime_guard as _rg
+
+        _rg.register_probe("o2_feed_cache", lambda: {"keys": len(feed._cache), "approx_mb": round(sum(a["t"].nbytes * 6 for a in (v[1] for v in list(feed._cache.values())) if a is not None) / 1048576.0, 1), "requests": feed.requests})
+    except Exception:  # noqa: BLE001
+        pass
     init_db(db)
     if engine_enabled():
         from office2 import engine as EN
@@ -727,8 +746,10 @@ def run_forever(db: str, feed: Optional[Feed] = None) -> None:
 
                 EN.CYCLE_TIMES.clear()
                 EN.CYCLE_TIMES.update(bar_close=now, wake=t_wake, bar_ready=t0)
-            res = cycle(db, feed, now, state, old_lev_background=True)
-            n_out = resolve_outcomes(db, feed, time.time())
+            with _stage("o2.cycle"):
+                res = cycle(db, feed, now, state, old_lev_background=True)
+            with _stage("o2.outcomes"):
+                n_out = resolve_outcomes(db, feed, time.time())
             _log(f"цикл {datetime.fromtimestamp(now, tz=timezone.utc):%H:%M}Z: {res}, очікування бару {waited:.0f} с, наслідків {n_out}, запитів {feed.requests}, {time.time() - t0:.0f} с")
         except Exception as exc:  # noqa: BLE001
             _bump("errors")
@@ -768,7 +789,8 @@ def _paper_loop(db: str) -> None:
     time.sleep(60)
     while True:
         try:
-            r = PP.tick(db, fetch_candles, log=_log)
+            with _stage("paper.tick"):
+                r = PP.tick(db, fetch_candles, log=_log)
             if r["new"] or r["closed"] or r["errors"]:
                 _log(f"[paper] {r}")
         except Exception as exc:  # noqa: BLE001
@@ -784,8 +806,9 @@ def _radar_loop(db: str) -> None:
     time.sleep(75)
     while True:
         try:
-            a = RW.sync(db)
-            n = RW.track(db, fetch_candles, log=_log)
+            with _stage("radar"):
+                a = RW.sync(db)
+                n = RW.track(db, fetch_candles, log=_log)
             if a["new"] or n:
                 _log(f"[radar] нові картки {a['new']}, оновлено paper {n}")
         except Exception as exc:  # noqa: BLE001
@@ -801,7 +824,8 @@ def _htf_loop(db: str) -> None:
     time.sleep(240)
     while True:
         try:
-            r = HS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
+            with _stage("htf.shadow"):
+                r = HS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
             if r["new"] or r["changed"] or r["errors"]:
                 _log(f"[htf] shadow: символів {r['symbols']}, нових {r['new']}, змін стану {r['changed']}, помилок {r['errors']}")
         except Exception as exc:  # noqa: BLE001
@@ -817,7 +841,8 @@ def _source_shadow_loop(db: str) -> None:
     time.sleep(300)
     while True:
         try:
-            r = SS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
+            with _stage("src.shadow"):
+                r = SS.run_once(db, fetch_candles, universe(), time.time(), log=_log)
             if r["new"] or r["changed"] or r["errors"]:
                 _log(f"[srcshadow] символів {r['symbols']}, нових {r['new']}, змін стану {r['changed']}, помилок {r['errors']}")
         except Exception as exc:  # noqa: BLE001
@@ -832,7 +857,8 @@ def _learning_loop(db: str) -> None:
     time.sleep(180)                                  # не заважати старту й першому циклу
     while True:
         try:
-            LJ.run_once(db, log=_log)
+            with _stage("learning"):
+                LJ.run_once(db, log=_log)
         except Exception as exc:  # noqa: BLE001
             _log(f"[o2learn] помилка: {type(exc).__name__}: {str(exc)[:160]}")
         time.sleep(LJ.EVERY_SEC)
