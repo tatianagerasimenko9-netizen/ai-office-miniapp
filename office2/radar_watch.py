@@ -39,6 +39,7 @@ DDL = ("""CREATE TABLE IF NOT EXISTS office2_radar_card (
 _COLS = ("card_id", "kind", "scenario_id", "symbol", "direction", "stage", "created_ts", "updated_ts", "expires_ts", "zone_lo", "zone_hi", "entry", "sl", "tp1", "tp2", "tp3", "risk_pct",
          "level_kind", "level_price", "need_text", "reason", "plan_ok", "reject", "scen_state", "tg_status", "tg_tries", "msg_id", "sent_ts", "last_error", "notified",
          "paper_status", "entry_ts", "exit_ts", "reached", "r_net", "gate_reason", "version", "far_targets", "entry_note", "stops_json", "stop_eval", "postmortem_json", "reasons_json", "daria_observation_json", "inval_px", "inval_ts", "inval_why", "data_src")
+SYNC_CHUNK = 10
 _READY: set = set()
 _TMP = tempfile.gettempdir()      # один раз при імпорті: у циклі подій виклик gettempdir блокував його на 3 с (loop-lag у production)
 
@@ -137,10 +138,21 @@ def sync(db: str, now: Optional[float] = None) -> Dict[str, int]:
     t = time.time() if now is None else now
     _ensure(db)
     out = {"new": 0, "updated": 0}
-    rows = _fetchall(db, "SELECT scenario_id, symbol, direction, kind, state, reason, updated_ts, thesis_json FROM office2_live_scenario "
+    base = _fetchall(db, "SELECT scenario_id, symbol, direction, kind, state, reason, updated_ts FROM office2_live_scenario "
                          "WHERE (state = 'WAIT' AND updated_ts > ?) OR (state = 'NO_TRADE' AND reason LIKE ? AND reason NOT LIKE ? AND updated_ts > ?) ORDER BY updated_ts",
                    (t - 2400, BLOCK_PREFIX + "%", "%живий сигнал%", t - 3 * 3600))      # «вже є живий сигнал по монеті» — не навчальна ідея, а дубль справжнього READY
-    for sid, sym, d, kind, state, reason, upd, tj in rows:
+
+    def _with_thesis():
+        """thesis_json важкий (карта ринку, свічки): читаємо по SYNC_CHUNK штук, а не всі одним списком — піки RSS радара (≈+60 МБ щохвилини) падають."""
+        for i in range(0, len(base), SYNC_CHUNK):
+            part = base[i:i + SYNC_CHUNK]
+            ids = [r[0] for r in part]
+            tjs = dict(_fetchall(db, f"SELECT scenario_id, thesis_json FROM office2_live_scenario WHERE scenario_id IN ({','.join('?' for _ in ids)})", tuple(ids)))
+            for r in part:
+                yield (*r, tjs.get(r[0]))
+            tjs.clear()
+
+    for sid, sym, d, kind, state, reason, upd, tj in _with_thesis():
         st = stage_of(state, reason)
         if not st:
             continue

@@ -98,6 +98,21 @@ def candle_cache_relieve(keep_fraction: float = 0.5) -> Dict[str, int]:
         return {"dropped_keys": dropped, "rows_left": total}
 
 
+_LAST_FETCH_ERROR: Dict[str, Any] = {}
+
+
+def _note_fetch_error(sym: str, tf: str, exc: BaseException) -> None:
+    """Остання помилка завантаження свічок (для діагностики: раніше fetch_candles мовчки повертав {} і причина не була видна ніде)."""
+    try:
+        _LAST_FETCH_ERROR.update(at=time.time(), symbol=sym, tf=tf, error=f"{type(exc).__name__}: {str(exc)[:200]}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def last_fetch_error() -> Dict[str, Any]:
+    return dict(_LAST_FETCH_ERROR)
+
+
 def candle_cache_stats() -> Dict[str, Any]:
     with _CACHE_LOCK:
         rows = sum(len(v[2]) for v in _CANDLE_CACHE.values())
@@ -528,8 +543,9 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3, allow_fallback: bool = F
                 if ws_on:
                     _ws.seed(sym, str(tf), rows, t_req)   # історія з REST лягає в пам'ять; далі свічки йдуть потоком
                 _FALLBACK_AT.pop(sym, None)  # ф'ючерси відновились; старі резервні свічки в кеші самі знову позначать себе при читанні
-            except Exception:  # noqa: BLE001
+            except Exception as exc_rest:  # noqa: BLE001
                 _HEALTH["errors"] += 1
+                _note_fetch_error(sym, str(tf), exc_rest)
                 # спот/Bybit — лише за явним allow_fallback=True (відображення графіка з позначкою src); рішення й супровід їх не отримують
                 rows = _fallback_klines(sym, str(tf), want) if allow_fallback else []
                 if not rows:
@@ -546,7 +562,8 @@ def fetch_candles(symbol: str, tf: str, limit: int = 3, allow_fallback: bool = F
         bs = _HEALTH.setdefault("by_src", {})
         bs[rows[-1].get("src", "?")] = bs.get(rows[-1].get("src", "?"), 0) + 1
         return rows[-lim:]
-    except Exception:  # noqa: BLE001
+    except Exception as exc_all:  # noqa: BLE001
+        _note_fetch_error(str(symbol), str(tf), exc_all)
         return {}
 
 
