@@ -6711,12 +6711,13 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     day_used_pct=_used,
                                     market_context=_mctx,
                                 )
-                                return _lev_risk_review(
-                                    _c, _s,
-                                    candles_ltf=_m5 if isinstance(_m5, list) else _m15,
-                                    market_context=_mctx,
-                                )
+                                return _c
                             cycle = await asyncio.to_thread(_scout_lev)    # важкі обчислення Лева — у потоці, не в циклі подій
+                            cycle = _lev_risk_review(
+                                cycle, rsym,
+                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
+                                market_context=mctx,
+                            )
                             _lev_record_thesis(cycle, {"H1": rh1, "M15": rm15, "M5": rm5})
                             _fun.mark_deep(rsym, time.time())
                             _fun.mark_checked(rsym, time.time())
