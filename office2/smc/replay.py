@@ -145,8 +145,27 @@ def _brain_ready(sym: str, ctx: Dict[str, Any], now: float, levels, mc, rel, ltf
             out.append({"source": "BRAIN", "model": th.get("kind", "SWEEP_SEQ"), "dir": d, "key": th.get("id"), "entry": float(th["entry"]), "sl": float(th["sl"]),
                         "tp1": float(tg[0]["p"]) if tg else None, "r_tp1": float(tg[0]["r"]) if tg else None, "risk_pct": float(th.get("risk_pct") or 0.0),
                         "late": ev.get("class") == "LATE_SWEEP", "ctx_class": (th.get("integral") or {}).get("classification"), "zone": th.get("entry_zone"),
-                        "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown"))})
+                        "f": _features(th, now, mc, rel), "td": _td_compact(th.get("topdown")), "mt": _method_compact(th, ctx, now)})
     return out
+
+
+def _method_compact(th: Dict[str, Any], ctx: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
+    """Methodology SHADOW at this READY: {rule: 'P'|'F'|'U'} for rules with inputs (closed bars <= now only) + hypothesis-basis rule ids.
+    Equity, paper journal, calendar and SMC are unavailable historically -> those rules stay absent (never invented)."""
+    try:
+        from office2.method_inputs import build_inputs
+        from office2.method_predicates import evaluate
+
+        inputs = build_inputs(ctx, now, th, topdown=th.get("topdown"))
+        s, hyp = {}, []
+        for rid, vals in inputs.items():
+            r = evaluate(rid, {k: v for k, v in vals.items() if not k.startswith("_")})["status"]
+            s[rid] = {"PASS": "P", "FAIL": "F"}.get(r, "U")
+            if (vals.get("_provenance") or {}).get("basis") == "HYPOTHESIS":
+                hyp.append(rid)
+        return {"s": s, "hyp": hyp}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {str(exc)[:80]}"}
 
 
 def _td_compact(td: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

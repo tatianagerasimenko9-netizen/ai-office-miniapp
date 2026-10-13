@@ -94,6 +94,16 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
             if r.get("error"):
                 continue
             m15c = _m15_closed(ctx, r["k"])
+            try:   # SHADOW hypotheses from SMC models (explained, scenarios A/B/C, observed); only when OFFICE2_METHOD_SHADOW=1; never READY/Telegram
+                from office2.engine import method_shadow_enabled as _ms_on
+
+                if _ms_on():
+                    from office2 import hypothesis as HY
+
+                    HY.observe(db, sym, HY.build(sym, ctx, now, {}, smc_res=r), ctx["m15"], now)
+            except Exception as hexc:  # noqa: BLE001
+                with _LOCK:
+                    _STATS["last_error"] = f"hypothesis {sym}: {type(hexc).__name__}: {str(hexc)[:100]}"
             for d, mods in r["models"].items():
                 vs = [v for v in mods.values() if v]
                 best = EN._best(vs)
