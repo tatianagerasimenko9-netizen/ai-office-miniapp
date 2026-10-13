@@ -61,6 +61,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-LIQUIDITY-RAID": ("swept_level", "close", "direction"),
         "D-FALSE-BREAK": ("level", "high", "low", "close", "direction"),
         "G-FALSE-BREAK-DEF": ("level", "high", "low", "close", "direction"),
+        "D-REACTION-AFTER-RETURN": ("returned_inside", "reaction_confirmed"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
