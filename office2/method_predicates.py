@@ -40,7 +40,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-RISK-DAY":
+    if rule_id == "S-RISK":
+        risk = _number(data, "risk_usd")
+        budget = _number(data, "risk_budget_usd")
+        if risk is None or budget is None or risk < 0 or budget <= 0:
+            return {"status": "UNKNOWN", "reason": "invalid SMC risk inputs"}
+        passed = risk <= budget
+    elif rule_id == "G-RISK-DAY":
         loss = _number(data, "daily_loss_usd")
         limit = _number(data, "daily_limit_usd")
         if loss is None or limit is None or loss < 0 or limit <= 0:
