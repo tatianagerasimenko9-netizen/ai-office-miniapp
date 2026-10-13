@@ -42,7 +42,7 @@ check("тактика: рекомендація є, без таблиці = пл
 check("тактика: TIA — лімітний вхід дає більше R, ніж 1.22", T["tactic"]["options"]["T3_limit_zone_mid"]["r_to_tp"] > 1.22)
 from office2.method_evidence import load_rules
 from office2.method_sequence import evaluate_chain
-mc = evaluate_chain(load_rules(), {"G-RR-MIN3": {"rr": 1.2}, "G-SIGNAL-CLOSE": {"close": 100.0, "level": 99.0, "direction": "LONG"}})
+mc = evaluate_chain(load_rules(), {"G-RR-MIN3": {"reward": 1.2, "risk": 1.0}, "G-SIGNAL-CLOSE": {"close": 100.0, "level": 99.0, "direction": "LONG"}})
 cc = AN.compact_chain(mc)
 check("ланцюг 82: 9 фаз, усього 82 картки", len(cc["phases"]) == 9 and cc["total"] == 82)
 check("ланцюг: розрив у фазі ризику (R:R<3), PASS у вході", cc["first_break"] == "07_RISK" and "G-SIGNAL-CLOSE" in next(p for p in cc["phases"] if p["phase"] == "06_ENTRY")["pass"])
