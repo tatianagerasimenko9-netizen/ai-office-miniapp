@@ -160,8 +160,9 @@ def from_closed_bars(bars, cutoff, daily_ranges=None, day_bars=None):
         level = max(x["high"] for x in past[-8:-3])
         previous_break = previous["close"] > level
         retested = current["low"] <= level <= current["close"]
-        evidence["G-BREAKOUT"] = {"closed_beyond": previous_break, "held_retest": retested}
-        evidence["G-LVL-MIRROR"] = {"was_resistance": previous_break, "now_support": retested}
+        # `level` (resistance reference of the prior bars) is context for hypotheses; predicates ignore it.
+        evidence["G-BREAKOUT"] = {"closed_beyond": previous_break, "held_retest": retested, "level": level}
+        evidence["G-LVL-MIRROR"] = {"was_resistance": previous_break, "now_support": retested, "level": level}
     _batch2_observations(evidence, past, current, side, daily_ranges, day_bars)
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],

@@ -210,7 +210,7 @@ jobs:
         run: python scripts/ui_chart_interactive.py
       - name: Методологія 82 правил (closed-bar features, predicates, sequence)
         run: |
-          for t in scripts/test_method_*.py; do PYTHONPATH=. python "$t"; done
+          for t in scripts/test_method_*.py scripts/test_hypothesis.py; do PYTHONPATH=. python "$t"; done
 
   postgres-integration:
     runs-on: ubuntu-latest

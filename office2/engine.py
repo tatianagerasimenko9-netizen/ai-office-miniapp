@@ -352,6 +352,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         from office2.method_evidence import load_rules
         # Use only closed candles already present in the decision context.
         method_inputs = {}
+        method_hypotheses = []
         try:
             bars15 = ctx["m15"]
             closes = bars15["c"]
@@ -400,6 +401,19 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                     smc_res = SMCS.analyze_ctx(sym, ctx, now, with_events=False)
             method_inputs.update(MI.build_inputs(ctx, now, plan_th, equity_usd=equity, journal=journal, news_state=news_state,
                                                  smc_res=smc_res, topdown=td, rules=load_rules()))
+            # Hypothesis engine (SHADOW): explainable models + scenarios A/B/C + active observation. Not READY, no Telegram.
+            try:
+                from office2 import hypothesis as HY
+                from office2.method_context_features import msk_session
+                hctx = {"mc": mc, "news_state": news_state, "session": msk_session(now)}
+                hyps = HY.build(sym, ctx, now, method_inputs, smc_res=smc_res, plan_th=plan_th, context=hctx)
+                # SMC-based hypotheses (family SMC_*) are produced in the background SMC cycle (office2.smc.shadow.run_cycle): SMC costs ~0.3-1.7 s per symbol.
+                obs = HY.observe(db, sym, hyps, ctx["m15"], now)
+                method_hypotheses = [HY.compact(h) for h in hyps]
+                if hyps or obs["transitions"]:
+                    print(f"[hypothesis] {sym}: formed={len(hyps)} {[h['family'] + ':' + h['direction'] for h in hyps]} transitions={obs['transitions']}", flush=True)
+            except Exception as hexc:  # noqa: BLE001
+                print(f"[hypothesis] {sym}: {type(hexc).__name__}: {str(hexc)[:100]}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[method_inputs] {sym}: {type(exc).__name__}: {str(exc)[:100]}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
@@ -419,7 +433,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         try:
             from office_bridge import _execute
             bar_ts = float(ctx["m15"]["t"][-1])
-            payload = {"method": method_chain, "direction": direction_shadow,
+            payload = {"method": method_chain, "direction": direction_shadow, "hypotheses": method_hypotheses,
                        "symbol": sym, "bar_ts": bar_ts, "observed_at": now}
             _execute(db, "INSERT INTO office2_method_reasoning (symbol, closed_bar_ts, created_ts, direction, decision_role, trace_json, version) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                      (sym, bar_ts, now, direction_shadow.get("selected"), "SHADOW",

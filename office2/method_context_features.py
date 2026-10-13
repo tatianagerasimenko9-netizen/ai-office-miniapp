@@ -128,6 +128,9 @@ def d1_base_after_impulse(d1: Optional[Mapping[str, Any]], asof: Optional[float]
             in_third = base_l >= h[j] - third
             retraced = (h[j] - base_l) / rng >= 0.5
         return {"D-POST-IMPULSE-BASE": {"base_in_expected_third": bool(in_third), "retracement_complete": bool(retraced),
+                                        # context for hypotheses (predicate ignores): impulse geometry and base range
+                                        "impulse_dir": "DOWN" if down else "UP", "impulse_hi": h[j], "impulse_lo": l[j],
+                                        "base_hi": base_h, "base_lo": base_l, "base_days": n - 1 - j,
                                         "_provenance": _prov(f"closed D1 bars; impulse day index {j}, base {n - 1 - j} days", "SOURCE", asof)}}
     return {}
 

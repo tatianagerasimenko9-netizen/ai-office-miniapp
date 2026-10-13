@@ -47,6 +47,38 @@ def fixture_inputs():
     return inputs
 
 
+# Blockers established by code/registry review (not "no builder yet"): why a builder cannot be written without inventing values.
+KNOWN_BLOCKERS = {
+    "G-NO-CHASE": "джерело не дає числа «запізно»; MAX_CHASE_R у Brain — наш параметр, не правило автора",
+    "G-LUFT": "число джерела (0,04% ціни / 20% розрахункового стопа) — для акцій РФ; для крипти розрахунковий стоп не визначено, Brain використовує інший люфт (медіана проколів)",
+    "G-LUFT-FILL": "прив'язане до розрахункового стопа акцій/FX; для крипти немає визначення",
+    "G-CHANNEL": "потрібна розмітка каналу (окремий аудит регресійного каналу не завершено); ширина «в стопах» визначена для акцій/FX",
+    "G-BE": "у LIVE-супроводі немає перенесення стопа (лише paper-порівняння); автор не вважає BE обов'язковим",
+    "G-BE-2R": "у LIVE-супроводі немає перенесення стопа; правило умовне («лише для нервового інструмента»)",
+    "G-TP-TRAIL": "у LIVE-супроводі немає трейлінгу; джерело якісне (тренд із запасом), порогів немає",
+    "D-FRACTAL-TF": "потрібна розмітка хвиль різних ТФ (Еліотт — розмітка в джерелі «гіпотеза», автоматичної немає)",
+    "G-LVL-CONSTRUCTION": "потрібна таблиця дотиків/хибних пробоїв по рівню (джерело радить її вести) — у Brain її немає; допуск близькості рівня не заданий",
+}
+STATUS = {"FORMED_SOURCE": "IMPLEMENTED", "FORMED_HYPOTHESIS": "PARTIAL", "NOT_APPLICABLE": "NOT_APPLICABLE"}
+
+
+def render_md(rules, rows, summary):
+    """Single registry of the 82 cards: status is derived from CODE (fixture run), never from documentation."""
+    by = {r["rule_id"]: r for r in rules}
+    out = ["# Реєстр 82 методологічних карток — стан за кодом", "",
+           "Автогенерація: `PYTHONPATH=. python3 scripts/method_coverage_audit.py --md`. Статус виводиться з виконання коду, а не з документів.", "",
+           "- **IMPLEMENTED** — входи формуються з реальних джерел (закриті свічки / READY-план / календар / D1), є predicate і тести. Це НЕ означає «доведено прибутковим» чи «активний фільтр у production».",
+           "- **PARTIAL** — входи формуються, але форма/таймфрейм/пороги — наша інтерпретація (ГІПОТЕЗА), джерело її не фіксує.",
+           "- **BLOCKED** — у реєстрі зафіксовано, чого бракує (`missing_parameters`); без нового матеріалу не реалізується.",
+           "- **UNKNOWN** — builder відсутній, блокера в реєстрі немає (потрібна робота).",
+           "- **NOT_APPLICABLE** — реєстр сам визначає запис як не-торгове правило (приклад/QA) або замінене для крипти.", "",
+           f"Підсумок: {summary}", "", "| Правило | Метод | Статус | Деталь |", "|---|---|---|---|"]
+    for rid, kind, note in rows:
+        st = STATUS.get(kind) or ("BLOCKED" if by[rid].get("missing_parameters") else "UNKNOWN")
+        out.append(f"| {rid} | {by[rid].get('method')} | {st} | {note[:110].replace('|', '/')} |")
+    return "\n".join(out)
+
+
 def main():
     rules = load_rules()
     inputs = fixture_inputs()
@@ -61,10 +93,13 @@ def main():
             res = evaluate(rid, {k: v for k, v in inputs[rid].items() if not k.startswith("_")})
             rows.append((rid, "FORMED_" + basis, res["status"]))
         else:
-            rows.append((rid, "BLOCKED", "; ".join(r.get("missing_parameters") or []) or "no builder"))
+            rows.append((rid, "BLOCKED", KNOWN_BLOCKERS.get(rid) or "; ".join(r.get("missing_parameters") or []) or "no builder"))
     summary = {}
     for _, kind, _ in rows:
         summary[kind] = summary.get(kind, 0) + 1
+    if "--md" in sys.argv:
+        print(render_md(rules, rows, summary))
+        return
     if "--json" in sys.argv:
         print(json.dumps({"summary": summary, "rows": rows}, ensure_ascii=False, indent=1))
         return
