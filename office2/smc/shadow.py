@@ -37,6 +37,15 @@ def init_db(db: str) -> None:
     _execute(db, DDL)
 
 
+_LAST: Dict[str, Any] = {}
+
+
+def cached_result(sym: str, bar_ts: float) -> Optional[Dict[str, Any]]:
+    """Останній результат фонового SMC-циклу для символу, якщо він пораховано на тому самому закритому M15-барі. Синхронного перерахунку немає."""
+    hit = _LAST.get(sym)
+    return hit[1] if hit and hit[0] == float(bar_ts) else None
+
+
 def analyze_ctx(sym: str, ctx: Dict[str, Any], now: float, with_events: bool = True) -> Dict[str, Any]:
     levels = B.all_levels(ctx, now)
     return EN.analyze(ctx, now, sym, real_levels=levels, with_events=with_events)
@@ -93,6 +102,9 @@ def run_cycle(db: str, ctxs: Dict[str, Dict[str, Any]], now: float, brain_states
             r = analyze_ctx(sym, ctx, now, with_events=False)
             if r.get("error"):
                 continue
+            _LAST[sym] = (float(ctx["m15"]["t"][-1]), r)
+            if len(_LAST) > 120:
+                _LAST.pop(next(iter(_LAST)))
             m15c = _m15_closed(ctx, r["k"])
             try:   # SHADOW hypotheses from SMC models (explained, scenarios A/B/C, observed); only when OFFICE2_METHOD_SHADOW=1; never READY/Telegram
                 from office2.engine import method_shadow_enabled as _ms_on

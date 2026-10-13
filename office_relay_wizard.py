@@ -6643,11 +6643,11 @@ EV позитивне: {prob.get('ev_positive', '')}
                 for rsym in deep_syms:
                     await asyncio.sleep(0)   # віддаємо цикл подій між сигналами (синхронні БД/HTTP не мають блокувати Office2)
                     try:
-                        rd1 = fetch_candles(rsym, "1d", 30)
-                        rh4 = fetch_candles(rsym, "4h", 30)
-                        rh1 = fetch_candles(rsym, "1h", 30)
-                        rm15 = fetch_candles(rsym, "15m", 96)
-                        rm5 = fetch_candles(rsym, "5m", 20)
+                        # Синхронний HTTP до Binance (5 свічкових запитів) не повинен блокувати цикл подій: вимір 13.10 — розриви доставки Office2 6–12 с під час цього проходу
+                        def _scout_fetch(_s=rsym):
+                            return (fetch_candles(_s, "1d", 30), fetch_candles(_s, "4h", 30), fetch_candles(_s, "1h", 30),
+                                    fetch_candles(_s, "15m", 96), fetch_candles(_s, "5m", 20))
+                        rd1, rh4, rh1, rm15, rm5 = await asyncio.to_thread(_scout_fetch)
                         if not isinstance(rh1, list) or len(rh1) < 8:
                             continue
                         rprice = 0.0
@@ -6671,7 +6671,7 @@ EV позитивне: {prob.get('ev_positive', '')}
                             print(f"[scout] market_state {rsym}: {type(exc_ms).__name__}")
                         r_used = None
                         try:
-                            r_atr = fetch_atr_context(rsym) or {}
+                            r_atr = (await asyncio.to_thread(fetch_atr_context, rsym)) or {}
                             if r_atr.get("day_used_pct") is not None:
                                 r_used = float(r_atr.get("day_used_pct"))
                         except Exception:
@@ -6696,25 +6696,27 @@ EV позитивне: {prob.get('ev_positive', '')}
                                     "note": "BTC-контекст не підтверджений даними — не вигадую",
                                 }
                             )
-                            cycle = lev_cycle(
-                                symbol=rsym,
-                                price=rprice,
-                                timeframe="H1",
-                                candles_m5=rm5 if isinstance(rm5, list) else None,
-                                candles_m15=rm15 if isinstance(rm15, list) else None,
-                                candles_h1=rh1,
-                                candles_h4=rh4 if isinstance(rh4, list) else None,
-                                candles_d1=rd1 if isinstance(rd1, list) else None,
-                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
-                                atr_h1=_atr_h1(rh1),
-                                day_used_pct=r_used,
-                                market_context=mctx,
-                            )
-                            cycle = _lev_risk_review(
-                                cycle, rsym,
-                                candles_ltf=rm5 if isinstance(rm5, list) else rm15,
-                                market_context=mctx,
-                            )
+                            def _scout_lev(_s=rsym, _p=rprice, _m5=rm5, _m15=rm15, _h1=rh1, _h4=rh4, _d1=rd1, _used=r_used, _mctx=mctx):
+                                _c = lev_cycle(
+                                    symbol=_s,
+                                    price=_p,
+                                    timeframe="H1",
+                                    candles_m5=_m5 if isinstance(_m5, list) else None,
+                                    candles_m15=_m15 if isinstance(_m15, list) else None,
+                                    candles_h1=_h1,
+                                    candles_h4=_h4 if isinstance(_h4, list) else None,
+                                    candles_d1=_d1 if isinstance(_d1, list) else None,
+                                    candles_ltf=_m5 if isinstance(_m5, list) else _m15,
+                                    atr_h1=_atr_h1(_h1),
+                                    day_used_pct=_used,
+                                    market_context=_mctx,
+                                )
+                                return _lev_risk_review(
+                                    _c, _s,
+                                    candles_ltf=_m5 if isinstance(_m5, list) else _m15,
+                                    market_context=_mctx,
+                                )
+                            cycle = await asyncio.to_thread(_scout_lev)    # важкі обчислення Лева — у потоці, не в циклі подій
                             _lev_record_thesis(cycle, {"H1": rh1, "M15": rm15, "M5": rm5})
                             _fun.mark_deep(rsym, time.time())
                             _fun.mark_checked(rsym, time.time())

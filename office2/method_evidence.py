@@ -14,8 +14,25 @@ VALID_ROLES = frozenset({"GATE", "EVIDENCE", "SHADOW", "DISPLAY"})
 VALID_STATES = frozenset({"PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"})
 
 
+_RULES_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
 def load_rules(path: Path = DEFAULT_REGISTRY) -> list[dict[str, Any]]:
-    """Validate complete rule registry; fail loudly on missing/duplicate rules."""
+    """Validate complete rule registry; fail loudly on missing/duplicate rules. Результат кешується за mtime файлу (раніше JSONL розбирався на кожен символ кожного циклу)."""
+    key = str(path)
+    try:
+        mt = Path(path).stat().st_mtime
+    except OSError:
+        mt = -1.0
+    hit = _RULES_CACHE.get(key)
+    if hit is not None and hit[0] == mt:
+        return [dict(r) for r in hit[1]]
+    rules = _load_rules_uncached(path)
+    _RULES_CACHE[key] = (mt, rules)
+    return [dict(r) for r in rules]
+
+
+def _load_rules_uncached(path: Path) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
     seen: set[str] = set()
     with Path(path).open(encoding="utf-8") as stream:

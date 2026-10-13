@@ -338,6 +338,36 @@ def _prune_method_tables(db: str, now: float) -> None:
         print(f"[method_prune] {type(exc).__name__}: {str(exc)[:100]}", flush=True)
 
 
+def _rss_mb() -> float:
+    try:
+        with open("/proc/self/statm") as f:
+            return int(f.read().split()[1]) * (os.sysconf("SC_PAGE_SIZE") / 1048576.0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+_METHOD_BUDGET = {"cycle": 0.0, "spent": 0.0, "skipped": 0}
+
+
+def method_block_allowed(now: float) -> bool:
+    """Захист критичного циклу: аналітика методик має бюджет часу на цикл (OFFICE2_METHOD_BUDGET_MS, за замовчуванням 2500) і вимикається при RSS ≥ OFFICE2_METHOD_RSS_MB (480).
+    Перевищення → блок пропускається в цьому циклі (READY/доставка/ризик не залежать від нього)."""
+    b = _METHOD_BUDGET
+    if b["cycle"] != now:
+        if b["skipped"]:
+            print(f"[method_budget] попередній цикл: витрачено {b['spent'] * 1000:.0f} мс, пропущено символів {b['skipped']}", flush=True)
+        b.update(cycle=now, spent=0.0, skipped=0)
+    try:
+        limit = float(os.environ.get("OFFICE2_METHOD_BUDGET_MS", "2500")) / 1000.0
+        rss_cap = float(os.environ.get("OFFICE2_METHOD_RSS_MB", "480"))
+    except ValueError:
+        limit, rss_cap = 2.5, 480.0
+    if b["spent"] >= limit or (rss_cap > 0 and _rss_mb() >= rss_cap):
+        b["skipped"] += 1
+        return False
+    return True
+
+
 def method_shadow_enabled() -> bool:
     """Methodology/hypothesis SHADOW (82-rule trace, hypotheses). OFF unless OFFICE2_METHOD_SHADOW=1; never affects READY, risk or gates."""
     return os.environ.get("OFFICE2_METHOD_SHADOW", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -370,8 +400,9 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 found[th["id"]] = B.decide(th, ctx, now, RISK_USD)
     # Shadow-only LONG/SHORT comparison; never overrides live Brain.
     try:
-        if not method_shadow_enabled():
+        if not method_shadow_enabled() or not method_block_allowed(now):
             raise _ShadowOff()
+        _mb_t0 = time.perf_counter()
         from office2.method_direction_shadow import compare_candidates
         candidates = {"LONG": None, "SHORT": None}
         for candidate in found.values():
@@ -429,7 +460,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 from office2.smc import shadow as SMCS
                 td = TD.analyze(plan_th, plan_th["dir"], now)
                 if SMCS.enabled():
-                    smc_res = SMCS.analyze_ctx(sym, ctx, now, with_events=False)
+                    smc_res = SMCS.cached_result(sym, float(ctx["m15"]["t"][-1]))      # лише з фонового SMC-циклу: синхронний SMC (0.3–1.7 с/символ) у критичному циклі заборонено
             method_inputs.update(MI.build_inputs(ctx, now, plan_th, equity_usd=equity, journal=journal, news_state=news_state,
                                                  smc_res=smc_res, topdown=td, rules=load_rules()))
             # Hypothesis engine (SHADOW): explainable models + scenarios A/B/C + active observation. Not READY, no Telegram.
@@ -472,6 +503,7 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         except Exception as exc:
             print(f"[method_reasoning_store] {sym}: {type(exc).__name__}: {str(exc)[:120]}", flush=True)
         _prune_method_tables(db, now)
+        _METHOD_BUDGET["spent"] += time.perf_counter() - _mb_t0
         print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
     except _ShadowOff:
         pass
