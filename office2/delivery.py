@@ -70,16 +70,17 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
         raise ValueError("немає рівнів тези")
     n = lambda x: card._num(x, sym)  # noqa: E731
     long_ = snap["direction"] == "LONG"
-    L = [BRAND, f"{'🟢' if long_ else '🔴'} READY · {snap['direction']}", f"{ticker(sym)} · Binance Futures", ""]
+    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY", "AI Office · Binance Futures", "──────────────"]
     entry, sl = float(v["ready_price"]), float(v["sl"])
     risk = abs(entry - sl)
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"    # noqa: E731
+    L.append("🎯 ПЛАН УГОДИ")
     if v["zone"]:
         L.append(f"Вхід: {n(v['zone'][0])}–{n(v['zone'][1])} (план {n(entry)})")
     else:
         L.append(f"Вхід: {n(entry)}")
-    L.append(f"SL: {n(sl)} (−{pc(sl)}%) · захисний, спрацьовує дотиком")
+    L.append(f"🛑 SL: {n(sl)} (−{pc(sl)}%) · захисний стоп, за дотиком")
     for i, t in enumerate(v["targets"][:3], 1):
         L.append(f"TP{i}: {n(t['p'])} (+{pc(t['p'])}%; {rr(t['p'])}R)")
     if len(v["targets"]) < 3:
