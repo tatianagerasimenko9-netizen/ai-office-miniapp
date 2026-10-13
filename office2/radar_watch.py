@@ -45,7 +45,8 @@ _TMP = tempfile.gettempdir()      # один раз при імпорті: у ц
 
 
 def tg_enabled() -> bool:
-    return os.getenv("OFFICE2_RADAR_TG", "1").strip().lower() not in ("0", "false", "no", "off")
+    """WATCH-картки радара у Telegram за замовчуванням ВИМКНЕНО: у робочу групу йдуть лише READY і супровід (власниця, 13.10.2026). Радар, БД і Mini App працюють як раніше. Повернути для налагодження: OFFICE2_RADAR_TG=1."""
+    return os.getenv("OFFICE2_RADAR_TG", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _ensure(db: str) -> None:

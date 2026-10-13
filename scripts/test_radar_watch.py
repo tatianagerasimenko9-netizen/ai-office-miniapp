@@ -92,6 +92,9 @@ check("повторний sync без дублів", OB._fetchall(db, "SELECT CO
 # --- 3. вибір для Telegram: RETRACE+ARMED+BLOCKED, plan_ok, антиспам
 # нова політика (12.10.2026): за замовчуванням у Telegram лише ARMED-спостереження; BLOCKED/RETRACE — у БД і Mini App
 os.environ.pop("RADAR_TG_STAGES", None)
+os.environ.pop("OFFICE2_RADAR_TG", None)
+check("за замовчуванням Telegram-потік радара ВИМКНЕНО (у робочу групу лише READY і супровід)", RW.tg_enabled() is False and RW.pick_for_tg(db, NOW + 100) == [])
+os.environ["OFFICE2_RADAR_TG"] = "1"
 pk_def = RW.pick_for_tg(db, NOW + 100)
 check("за замовчуванням у Telegram лише ARMED-спостереження (навчальні BLOCKED і ранні RETRACE — не надсилаються)", pk_def and all(x["stage"] == "ARMED" and x["kind"] == "WATCH" for x in pk_def), str([(x["card_id"], x["stage"]) for x in pk_def]))
 txt_w = RW.format_card(pk_def[0])
@@ -119,7 +122,7 @@ RW.sync(db, NOW + 310)
 check("антиспам: не більше TG_PER_HOUR карток за годину (вже 3 відправлено)", len(RW.pick_for_tg(db, NOW + 320)) == RW.TG_PER_HOUR - 3)
 os.environ["OFFICE2_RADAR_TG"] = "0"
 check("OFFICE2_RADAR_TG=0 повністю вимикає Telegram-потік", RW.pick_for_tg(db, NOW + 320) == [])
-os.environ.pop("OFFICE2_RADAR_TG")
+os.environ["OFFICE2_RADAR_TG"] = "1"
 
 # --- 4. paper-супровід за свічками після появи картки
 def cds(bars, t0):
