@@ -80,6 +80,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "S-STRUCTURE": ("previous_high", "current_high", "previous_low", "current_low"),
         "D-FRACTAL-TF": ("htf_marked_first", "ltf_same_scale"),
         "D-HTF-STRONG-CANDLE-PULLBACK": ("strong_htf_candle", "pullback_into_range", "reaction_confirmed"),
+        "S-REVERSAL-CONT": ("htf_poi", "liquidity_raid", "market_structure_shift"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
