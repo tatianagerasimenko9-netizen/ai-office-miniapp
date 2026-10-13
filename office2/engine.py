@@ -364,6 +364,16 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
         except (KeyError, IndexError, TypeError, ValueError):
             pass
         method_chain = evaluate_chain(load_rules(), method_inputs)
+        # Explicit HTF context is observable without forcing a trade.
+        method_chain["timeframes"] = {}
+        for tf in ("d1", "h4", "h1", "m15", "m5", "m1"):
+            bars = ctx.get(tf)
+            if not isinstance(bars, dict) or not all(k in bars for k in ("t", "c", "h", "l")) or len(bars["c"]) < 2:
+                method_chain["timeframes"][tf] = {"status": "UNKNOWN", "reason": "closed bars unavailable"}
+                continue
+            method_chain["timeframes"][tf] = {"status": "OBSERVED", "last_closed_open_ts": float(bars["t"][-1]),
+                "close": float(bars["c"][-1]), "previous_close": float(bars["c"][-2]),
+                "high": float(bars["h"][-1]), "low": float(bars["l"][-1])}
         print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
         print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
     except Exception as exc:
