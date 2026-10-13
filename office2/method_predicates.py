@@ -85,6 +85,7 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
         "G-PRESS": ("higher_lows", "level_tested", "pullbacks_shrinking"),
         "D-VOLUME-PRICE": ("current_volume", "average_volume", "price_change"),
         "G-PROGNOSTIC": ("bar_range", "average_range", "close", "high", "low"),
+        "G-TP-TRAIL": ("profit_r", "trend_confirmed", "stop_behind_extremum"),
     }
     if rule_id not in requirements:
         return {"status": "UNKNOWN", "reason": "No verified predicate implemented"}
@@ -92,7 +93,14 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-PROGNOSTIC":
+    if rule_id == "G-TP-TRAIL":
+        profit = _number(data, "profit_r")
+        trend = data["trend_confirmed"]
+        stop = data["stop_behind_extremum"]
+        if profit is None or not isinstance(trend, bool) or not isinstance(stop, bool):
+            return {"status": "UNKNOWN"}
+        passed = profit > 3 and trend and stop
+    elif rule_id == "G-PROGNOSTIC":
         size, average, close, high, low = (_number(data, k) for k in ("bar_range", "average_range", "close", "high", "low"))
         if any(v is None for v in (size, average, close, high, low)) or average <= 0 or high <= low or not low <= close <= high:
             return {"status": "UNKNOWN"}
