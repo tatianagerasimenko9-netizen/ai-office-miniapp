@@ -383,6 +383,17 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 method_inputs.update(from_closed_bars(closed, count - 1))
         except (KeyError, TypeError, ValueError, IndexError) as exc:
             print(f"[method_features] {sym}: {type(exc).__name__}", flush=True)
+        # Daily volatility is computed from daily bars, never from M15 ranges.
+        try:
+            from office2.method_closed_bar_features import daily_atr_observation
+            d1 = ctx["d1"]
+            if all(k in d1 for k in ("h", "l")):
+                n_daily = min(len(d1["h"]), len(d1["l"]))
+                daily = [{"high": d1["h"][i], "low": d1["l"][i]}
+                         for i in range(n_daily)]
+                method_inputs.update(daily_atr_observation(daily, n_daily - 1))
+        except (KeyError, TypeError, ValueError, IndexError) as exc:
+            print(f"[method_daily_features] {sym}: {type(exc).__name__}", flush=True)
         method_chain = evaluate_chain(load_rules(), method_inputs)
         # Explicit HTF context is observable without forcing a trade.
         method_chain["timeframes"] = {}
