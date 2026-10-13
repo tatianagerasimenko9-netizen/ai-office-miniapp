@@ -93,6 +93,15 @@ def from_closed_bars(bars, cutoff):
     elif opposite and new_lo > old_lo and new_hi < old_hi:
         evidence["O-CANDLE-PATTERNS"] = {
             "pattern_name": "HARAMI", "closed_bar_confirmed": True}
+    if len(past) >= 8:
+        tail = past[-8:]
+        rising = tail[-3]["low"] < tail[-2]["low"] < tail[-1]["low"]
+        earlier_width = max(x["high"] for x in tail[:4]) - min(x["low"] for x in tail[:4])
+        recent_width = max(x["high"] for x in tail[4:]) - min(x["low"] for x in tail[4:])
+        contracting = recent_width < earlier_width
+        tested = current["high"] >= max(x["high"] for x in tail)
+        evidence["G-PRESS"] = {"higher_lows": rising, "level_tested": tested, "pullbacks_shrinking": contracting}
+        evidence["D-PRESSURE"] = {"rising_lows": rising, "shrinking_pullbacks": contracting, "near_level": tested}
     if avg_volume > 0:
         evidence["D-VOLUME-PRICE"] = {"current_volume": current["volume"],
                                       "average_volume": avg_volume,
