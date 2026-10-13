@@ -3425,6 +3425,13 @@ async def run() -> None:
     except Exception as exc:
         print(f"[relay][ERROR] cannot send startup ping to OFFICE: {exc}")
 
+    try:   # one-off design test: inert unless OFFICE_DESIGN_TEST_ONCE is set; no READY/trade/lifecycle (see office_design_test.py)
+        from office_design_test import run_once_if_enabled as _design_test_once
+
+        await _design_test_once(send_office_photo, db_path, office_chat_id)
+    except Exception as exc:
+        print(f"[design_test] ERROR: {type(exc).__name__}: {str(exc)[:160]}")
+
     source_raw = os.getenv("SOURCE_CHAT_ID", "").strip()
     source_chat_id = int(source_raw) if source_raw else None
     source_entity = await client.get_entity(source_chat_id) if source_chat_id is not None else None
