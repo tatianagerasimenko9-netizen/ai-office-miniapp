@@ -97,3 +97,41 @@ def advisory_snapshot(
         "decision": "NOT_EVALUATED",
         "reason": "Source registry evidence only; existing Brain controls READY.",
     }
+
+
+def compact_method_trace(thesis: Mapping[str, Any], now: float) -> dict[str, Any]:
+    """Small provenance-aware reasoning trace for a frozen READY.
+
+    Source-method rules are indexed by ID; never serialize the entire registry
+    into each signal, and never silently promote unverified rules into gates.
+    """
+    from datetime import datetime, timezone
+
+    rules = load_rules()
+    by_id = {r["rule_id"]: r for r in rules}
+    observed = []
+    for group, ids, fact in (
+        ("topdown", ("D-HTF-LTF-CONFIRM", "G-LEVEL-HTF-FIRST"), thesis.get("map")),
+        ("level", ("G-LVL-FLOATING", "G-LUFT"), thesis.get("entry_zone") or thesis.get("zone")),
+        ("structure", ("D-NO-CONFIRMATION-NO-TRADE",), thesis.get("sequence")),
+        ("ltf", ("X-NOT-SPECIFIED-DARIA-LTF-ENTRY-TP",), (thesis.get("topdown") or {}).get("ltf")),
+    ):
+        for rule_id in ids:
+            if rule_id not in by_id:
+                continue
+            observed.append({
+                "rule_id": rule_id,
+                "group": group,
+                "status": "OBSERVED_UNVERIFIED" if fact is not None else "UNKNOWN",
+                "role": "SHADOW",
+                "source_class": by_id[rule_id].get("evidence_class", "UNKNOWN"),
+            })
+    return {
+        "schema_version": "method_trace_v1",
+        "asof_utc": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+        "decision_role": "SHADOW",
+        "registered_rule_count": len(rules),
+        "evaluations": observed,
+        "methodology_coverage": "PARTIAL",
+        "note": "Observation is not source-rule confirmation; Brain gates unchanged.",
+    }
