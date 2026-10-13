@@ -7661,9 +7661,15 @@ EV позитивне: {prob.get('ev_positive', '')}
                         await _th(trk.record_milestone, db_path, m, None)
                         print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
                         continue
+                    try:
+                        import office_ready_seq as _rseq
+
+                        _no = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # той самий №READY, що в початковому повідомленні
+                    except Exception:  # noqa: BLE001
+                        _no = None
                     mid = await send_proactive(
                         EVENT_TRADE_UPDATE,
-                        _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price")),
+                        _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price"), number=_no),
                         reply_to_message_id=m.get("confirm_msg_id"), symbol=str(m["symbol"]), direction=str(m["direction"]),
                         kind="SCENARIO_EVENT", intent="SCENARIO_EVENT", canonical_id=f"{m['scenario_id']}|{m['confirmed_ts']}|{m['level']}",
                         scenario_event=str(m["level"]), link_scenario_id=str(m["scenario_id"]),

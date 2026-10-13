@@ -86,6 +86,10 @@ jobs:
         run: python scripts/test_sig_cache.py
       - name: Office2 LIVE BETA (мозок, стани, доставка, lifecycle, без lookahead)
         run: python scripts/test_office2_live.py
+      - name: Наскрізний №READY (атомарно, ідемпотентно, рестарт/паралельність) + номер у відповідях
+        run: python scripts/test_ready_seq.py
+      - name: PNG-картки READY (LONG/SHORT, 1–3 TP, дешеві монети) — розмір 1000×1230
+        run: python scripts/render_card_samples.py /tmp/card_samples
       - name: Summary cache (health-check не чекає на БД)
         run: python scripts/test_summary_cache.py
       - name: Office2 Strong Candle

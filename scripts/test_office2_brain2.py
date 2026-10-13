@@ -152,7 +152,7 @@ def test_engine_integration_v2_trace_and_evidence():
             assert ("WAIT 2/3", "WAIT 3/3") in stages, stages                                   # етапи WAIT залишають слід переходів
             cap = DL.build_caption(dict(snap, valid_until_ts=snap["decided_ts"] + 3600))
             th = snap["thesis"]
-            assert cap.startswith("AI Office\n") and "Вхід:" in cap and "READY · " in cap and "Binance Futures" in cap and "Скасування: закриття M15" in cap and "Чому:" not in cap, cap
+            assert cap.startswith("AI Office") and "READY · #XUSDT" in cap and "ВХІД" in cap and "Скасування: закриття M15" in cap and "Чому:" not in cap, cap
             assert th["entry_zone"][0] <= th["entry"]
     finally:
         B.all_levels = orig
@@ -329,7 +329,7 @@ def _v2_e2e(short):
             n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: recent if tf == '1m' else candles, card.render, 'TRADE_UPDATE', now=created + 60, log=lambda m: None))
             assert n == 1 and len(sent.calls) == 1, (n, OB._fetchall(db, "SELECT status, last_error FROM office2_live_signal"))
             text = sent.calls[0][1]
-            assert text.startswith("AI Office\n" + ("🔴 READY · SHORT" if short else "🟢 READY · LONG") + "\nX · Binance Futures") and "Вхід:" in text and "SL:" in text and "TP1:" in text and "Ризик моделі: 10 $" in text, text
+            assert text.startswith("AI Office · №") and ("🔴 X · SHORT · READY · #XUSDT" if short else "🟢 X · LONG · READY · #XUSDT") in text and "ВХІД" in text and "🔴 SL" in text and "TP1" in text, text
             plan = trk.plan_for(db, sent.calls[0][2]["canonical_id"])
             assert plan and ((plan["sl"] > plan["entry"] > plan["tp1"]) if short else (plan["sl"] < plan["entry"] < plan["tp1"]))
             pl = WV.payload(db, now=created + 120)
@@ -438,12 +438,12 @@ def test_telegram_caption_single_percent_and_r_from_ready_price():
         th = {"entry": entry, "sl": sl, "entry_zone": zone, "targets": [{"p": p_, "kind": "X"} for p_ in tps], "sizing": {"risk_usd": 10.0}, "trigger_level": zone[0]}
         cap = DL.build_caption({"thesis": th, "symbol": "TIAUSDT", "direction": direction, "valid_until_ts": 1791392000.0, "why": "тест"})
         risk = abs(entry - sl)
-        m = re.search(r"SL: [\d,]+ \(−([\d,]+)%\)", cap)
+        m = re.search(r"🔴 SL\s+[\d,]+\s+\(−([\d,]+)%\)", cap)
         assert m and abs(float(m.group(1).replace(",", ".")) - abs(sl - entry) / entry * 100) < 0.006, cap
         for i, p_ in enumerate(tps, 1):
-            mm = re.search(rf"TP{i}: [\d,]+ \(\+([\d,]+)%; ([\d,]+)R\)", cap)
+            mm = re.search(rf"TP{i}\s+[\d,]+\s+\(\+([\d,]+)% · ([\d,]+)R\)", cap)
             assert mm and abs(float(mm.group(1).replace(",", ".")) - abs(p_ - entry) / entry * 100) < 0.006 and abs(float(mm.group(2).replace(",", ".")) - abs(p_ - entry) / risk) < 0.006, cap
-        assert "…" not in cap and cap.count("Вхід:") == 1 and "Ризик моделі: 10 $" in cap, cap          # діапазонів у відсотках більше немає
+        assert "…" not in cap and cap.count("ВХІД") == 1, cap          # діапазонів у відсотках більше немає
     v = LVL.view_from_thesis({"entry": 0.5089, "sl": 0.48415, "entry_zone": [0.495963, 0.5089], "targets": [{"p": 0.5379}], "trigger_level": 0.495963})
     assert v["sl_pct"][0] != v["sl_pct"][1] and v["targets"][0]["pct"][0] != v["targets"][0]["pct"][1]            # Mini App: діапазон для інших цін входу збережено
 

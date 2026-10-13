@@ -46,7 +46,7 @@ plan("SCN|V|SHORT|H1|1", "VVVUSDT", "SHORT", 27.984, 28.351, [27.134, 26.511])
 cv = c1(T0, [(27.98, 27.99, 27.97, 27.98), (27.98, 28.44, 27.98, 28.20), (28.2, 28.3, 28.1, 28.2)])
 ms = run({"VVVUSDT": cv}, T0 + 3 * 60 + 1)
 assert levels(ms, "VVVUSDT") == ["ENTRY", "SL"], ms     # SL зафіксовано на 3-й хвилині, не через 15 хв
-assert [m["silent"] for m in ms if m["symbol"] == "VVVUSDT"] == [True, False]
+assert [m["silent"] for m in ms if m["symbol"] == "VVVUSDT"] == [False, False]   # ENTRY тепер іде відповіддю в гілку READY (OFFICE_TG_ENTRY_REPLY=0 повертає тишу)
 # ще не закрита свічка не зараховується (усередині 2-ї хвилини SL ще не видно)
 assert levels(run({"VVVUSDT": cv}, T0 + 90), "VVVUSDT") == ["ENTRY", "SL"], "SL у свічці, що формується, після входу фіксується одразу (торкання не скасовується)"
 assert levels(run({"VVVUSDT": cv[:1]}, T0 + 30), "VVVUSDT") == [], "вхід у ще формованій свічці не фіксуємо"

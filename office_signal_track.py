@@ -308,7 +308,9 @@ FRESH_SEC = 6 * 3600            # молодші плани дивимось п�
 OLD_RECHECK_SEC = 600
 OLD_RECHECK_LEGACY_SEC = 1800         # старий Лев після cutover (OFFICE_OLD_READY_DELIVERY=0) — лише статистика: перегляд раз на 30 хв (раніше 10 хв давало до 725 ваги Binance за хвилину)
 OLD_RECHECK_O2_SEC = 120          # Office2: активних планів одиниці — перевіряємо частіше (TP/SL старшого плану не чекає до 10 хв)
-SILENT_LEVELS = ("ENTRY", "EXPIRED")   # лише запис у БД (життя сценарію й статистика); у Telegram не йдуть
+# EXPIRED — лише запис у БД (життя сценарію й статистика). ENTRY (ціна торкнулась зони входу плану) — відповідь у гілку READY;
+# вимкнути: OFFICE_TG_ENTRY_REPLY=0 (тоді ENTRY, як раніше, лише в БД).
+SILENT_LEVELS = ("EXPIRED",) if os.getenv("OFFICE_TG_ENTRY_REPLY", "1").strip() != "0" else ("ENTRY", "EXPIRED")
 
 
 def _levels_of(res: Dict[str, Any]) -> List[str]:

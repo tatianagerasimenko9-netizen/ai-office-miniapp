@@ -282,11 +282,10 @@ def test_slow_chart_does_not_block_ready_text():
             n = asyncio.run(DL.deliver_pending(db, sent, fetch, slow_render, "TRADE_UPDATE", now=created + 25, log=lambda m: None))
         finally:
             asyncio.wait_for = orig_wait
-        assert n == 1 and len(sent.calls) == 1, (n, sent.calls)
-        assert not sent.calls[0][2].get("photo_path"), sent.calls
-        event = json.loads(OB._fetchone(db, "SELECT payload_json FROM office_events WHERE event_type='OFFICE2_READY_SENT'")[0])
-        assert event["image_error"] == "chart_render_timeout_8s" and event["timing"]["render_timeout"] is True, event
-        assert OB._fetchone(db, "SELECT status FROM office2_live_signal")[0] == "DELIVERED"
+        # Contract of #244: a READY without a valid 1000x1230 PNG is NEVER sent as text-only; it stays pending and is retried.
+        assert n == 0 and len(sent.calls) == 0, (n, sent.calls)
+        status, err = OB._fetchone(db, "SELECT status, last_error FROM office2_live_signal")
+        assert status != "DELIVERED" and str(err).startswith("IMAGE_REQUIRED: chart_render_timeout_8s"), (status, err)
     finally:
         B.all_levels = orig_levels
 
@@ -298,7 +297,7 @@ def test_late_delivery_is_marked_and_stale_or_missed_closes_scenario():
         db, b, created = _make_pending()
         sent = Sent()
         n = asyncio.run(DL.deliver_pending(db, sent, lambda s_, tf, lim: _live_price_candle(db) if tf == '1m' else _candles(b), card.render, "TRADE_UPDATE", now=created + 300, log=lambda m: None))
-        assert n == 1 and "⏱ Рішення було о" in sent.calls[0][1] and "доставлено через 5 хв" in sent.calls[0][1], sent.calls[0][1]      # запізнення не приховується
+        assert n == 1 and "⏱ Рішення:" in sent.calls[0][1] and "затримка 5 хв" in sent.calls[0][1], sent.calls[0][1]      # запізнення не приховується
         # STALE: доставка пізніше за ліміт → не шлемо, сценарій закрито з причиною
         db2, b2, created2 = _make_pending()
         sent2 = Sent()
