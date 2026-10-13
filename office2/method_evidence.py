@@ -110,6 +110,8 @@ def compact_method_trace(thesis: Mapping[str, Any], now: float) -> dict[str, Any
     rules = load_rules()
     from office2.method_stages import staged_registry
     stages = staged_registry(rules)
+    from office2.method_sequence import decision_trace
+    sequence = decision_trace(rules)
     by_id = {r["rule_id"]: r for r in rules}
     observed = []
     for group, ids, fact in (
@@ -134,6 +136,7 @@ def compact_method_trace(thesis: Mapping[str, Any], now: float) -> dict[str, Any
         "decision_role": "SHADOW",
         "registered_rule_count": len(rules),
         "stages": stages,
+        "dependency_sequence": sequence,
         "evaluations": observed,
         "methodology_coverage": "PARTIAL",
         "note": "Observation is not source-rule confirmation; Brain gates unchanged.",
