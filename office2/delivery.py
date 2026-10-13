@@ -55,12 +55,13 @@ def delivery_enabled() -> bool:
 
 
 def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
-    """Telegram: коротка картка AI Office. Лише числа з рішення; повна аргументація (кроки D1/H4 → H1 → M15, чому ще/вже не входити) — у Mini App.
-    Скасування (ЗАКРИТТЯ M15) і захисний SL (дотик) — різні речі й показані окремо. Рівні — з office2.levels (та сама математика, що в Mini App)."""
+    """Compact Telegram photo caption: key trade numbers first; details in Mini App.
+
+    All values come from the frozen thesis; this is presentation-only.
+    """
     import office_ready_card as card
     import office_ready_core as rc
     from office_user_messages import ticker
-    from office2 import daria_steps as DS
     from office2 import levels as LVL
 
     th = snap["thesis"]
@@ -68,48 +69,39 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     v = LVL.view_from_thesis(th)
     if not v:
         raise ValueError("немає рівнів тези")
-    n = lambda x: card._num(x, sym)  # noqa: E731
+    n = lambda x: card._num(x, sym)
     long_ = snap["direction"] == "LONG"
-    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY", "AI Office · Binance Futures", "──────────────"]
     entry, sl = float(v["ready_price"]), float(v["sl"])
     risk = abs(entry - sl)
-    pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")    # noqa: E731  один відсоток — від ціни READY
-    rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"    # noqa: E731
-    L.append("🎯 ПЛАН УГОДИ")
+    pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
+    rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
+
+    L = [f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY",
+         "━━━━━━━━━━━━━━━━"]
     if v["zone"]:
-        L.append(f"Вхід: {n(v['zone'][0])}–{n(v['zone'][1])} (план {n(entry)})")
+        L.append(f"🟡 ВХІД  {n(v['zone'][0])}–{n(v['zone'][1])}")
+        L.append(f"    План: {n(entry)}")
     else:
-        L.append(f"Вхід: {n(entry)}")
-    L.append(f"🛑 SL: {n(sl)} (−{pc(sl)}%) · захисний стоп, за дотиком")
-    for i, t in enumerate(v["targets"][:3], 1):
-        L.append(f"TP{i}: {n(t['p'])} (+{pc(t['p'])}%; {rr(t['p'])}R)")
-    if len(v["targets"]) < 3:
-        k = len(v["targets"]) + 1
-        L.append(f"{'TP3' if k == 3 else f'TP{k}–TP3'}: немає наступної реальної цілі")
+        L.append(f"🟡 ВХІД  {n(entry)}")
+    for i, target in enumerate(v["targets"][:3], 1):
+        p = float(target["p"])
+        L.append(f"🟢 TP{i}  {n(p)}  (+{pc(p)}% · {rr(p)}R)")
+    L.append(f"🔴 SL     {n(sl)}  (−{pc(sl)}%)")
+    if v["targets"]:
+        first_rr = abs(float(v["targets"][0]["p"]) - entry) / risk if risk else 0.0
+        L.append(f"📊 R/R до TP1: 1:{first_rr:.2f}".replace(".", ","))
+        if first_rr < 1.5:
+            L.append("⚠️ Низьке R/R до першої цілі")
+    else:
+        L.append("⚠️ Реальних цілей немає")
     inv = _inv_price(th)
     if inv is not None:
         L.append(f"Скасування: закриття M15 {'нижче' if long_ else 'вище'} {n(inv)}")
-    try:
-        conf = DS.telegram_confirmation(snap, fmt=n, stamp=rc.kyiv_stamp)
-    except Exception:  # noqa: BLE001
-        conf = []
-    if conf:
-        L.append("Підтвердження: " + " · ".join(conf))
-    try:
-        from office2 import topdown as TD
-
-        sl_ = TD.summary_line(th.get("topdown"))
-    except Exception:  # noqa: BLE001
-        sl_ = None
-    if sl_:
-        L.append(sl_[0].upper() + sl_[1:])
-    if (th.get("sizing") or {}).get("risk_usd"):
-        L.append(f"Ризик моделі: {float(th['sizing']['risk_usd']):.0f} $")
     decided = float(snap.get("decided_ts") or 0.0)
-    if now and decided and now - decided >= LATE_NOTE_SEC:      # чесно про запізнення доставки (сигнал не подається як свіжий)
-        L.append(f"⏱ Рішення було о {rc.kyiv_stamp(decided)}; доставлено через {int((now - decided) // 60)} хв")
-    L.append(f"⏳ до {rc.kyiv_stamp(snap['valid_until_ts'])} (Київ)")
-    L.append("Повний аналіз і «чому ще не / вже не входити» — у Mini App.")
+    if now and decided and now - decided >= LATE_NOTE_SEC:
+        L.append(f"⏱ Рішення: {rc.kyiv_stamp(decided)}; затримка {int((now - decided) // 60)} хв")
+    L.append(f"⏳ До {rc.kyiv_stamp(snap['valid_until_ts'])} (Київ)")
+    L.append("📊 Пояснення та перевірки — у Mini App ↓")
     return "\n".join(L)
 
 
