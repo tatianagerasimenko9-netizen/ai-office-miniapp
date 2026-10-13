@@ -73,7 +73,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-LVL-MIRROR":
+    if rule_id == "G-LVL-CONSOLIDATION":
+        bars = _number(data, "bars_held")
+        broken = data["level_broken"]
+        if bars is None or not isinstance(broken, bool):
+            return {"status": "UNKNOWN"}
+        passed = bars >= 2 and not broken
+    elif rule_id == "G-LVL-MIRROR":
         before = data["was_resistance"]
         after = data["now_support"]
         if not isinstance(before, bool) or not isinstance(after, bool):
