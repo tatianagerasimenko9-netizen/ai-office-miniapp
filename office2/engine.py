@@ -40,6 +40,10 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS office2_live_signal (
         scenario_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, direction TEXT NOT NULL, created_ts DOUBLE PRECISION NOT NULL, valid_until_ts DOUBLE PRECISION NOT NULL,
         status TEXT NOT NULL, msg_id BIGINT, delivered_ts DOUBLE PRECISION, last_error TEXT, snapshot_json TEXT NOT NULL, version TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS office2_method_reasoning (
+        symbol TEXT NOT NULL, closed_bar_ts DOUBLE PRECISION NOT NULL, created_ts DOUBLE PRECISION NOT NULL,
+        direction TEXT, decision_role TEXT NOT NULL, trace_json TEXT NOT NULL, version TEXT NOT NULL,
+        PRIMARY KEY (symbol, closed_bar_ts, version))""",
     """CREATE TABLE IF NOT EXISTS office2_brain_funnel (
         ts BIGINT NOT NULL, symbol TEXT NOT NULL, direction TEXT NOT NULL, stage TEXT NOT NULL, code TEXT, version TEXT NOT NULL,
         PRIMARY KEY (ts, symbol, direction, version))""",
@@ -391,6 +395,18 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 "close": float(bars["c"][-1]), "previous_close": float(bars["c"][-2]),
                 "high": float(bars["h"][-1]), "low": float(bars["l"][-1])}
         print(f"[method_82] {sym}: evaluated={method_chain['evaluated']} counts={method_chain['counts']} role=SHADOW", flush=True)
+        # Store full rule-by-rule observations, not just aggregate counts.
+        # SHADOW trace never changes the live READY gate.
+        try:
+            from office_bridge import _execute
+            bar_ts = float(ctx["m15"]["t"][-1])
+            payload = {"method": method_chain, "direction": direction_shadow,
+                       "symbol": sym, "bar_ts": bar_ts, "observed_at": now}
+            _execute(db, "INSERT INTO office2_method_reasoning (symbol, closed_bar_ts, created_ts, direction, decision_role, trace_json, version) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                     (sym, bar_ts, now, direction_shadow.get("selected"), "SHADOW",
+                      json.dumps(payload, ensure_ascii=False, default=str), VERSION))
+        except Exception as exc:
+            print(f"[method_reasoning_store] {sym}: {type(exc).__name__}: {str(exc)[:120]}", flush=True)
         print(f"[method_direction_shadow] {sym}: {direction_shadow['selected']}", flush=True)
     except Exception as exc:
         print(f"[method_direction_shadow] {sym}: {type(exc).__name__}", flush=True)
