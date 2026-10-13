@@ -49,7 +49,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-ATR-CALC":
+    if rule_id == "D-STOP-ATR-MARGIN":
+        margin = _number(data, "margin")
+        average = _number(data, "average_range")
+        if margin is None or average is None or average <= 0:
+            return {"status": "UNKNOWN"}
+        passed = 0.10 * average <= margin <= 0.15 * average
+    elif rule_id == "G-ATR-CALC":
         ranges = data["previous_ranges"]
         if not isinstance(ranges, (tuple, list)) or not 3 <= len(ranges) <= 5:
             return {"status": "UNKNOWN", "reason": "need 3-5 prior daily bars"}
