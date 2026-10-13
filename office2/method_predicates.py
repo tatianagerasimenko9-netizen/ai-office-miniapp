@@ -85,7 +85,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "D-POST-IMPULSE-BASE":
+    if rule_id == "S-STRUCTURE":
+        ph, ch, pl, cl = (_number(data, k) for k in ("previous_high", "current_high", "previous_low", "current_low"))
+        if any(v is None for v in (ph, ch, pl, cl)):
+            return {"status": "UNKNOWN"}
+        trend = "UP" if ch > ph and cl > pl else "DOWN" if ch < ph and cl < pl else "RANGE"
+        return {"status": "PASS", "structure": trend}
+    elif rule_id == "D-POST-IMPULSE-BASE":
         in_third = data["base_in_expected_third"]
         retraced = data["retracement_complete"]
         if not isinstance(in_third, bool) or not isinstance(retraced, bool):
