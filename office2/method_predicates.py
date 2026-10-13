@@ -35,7 +35,13 @@ def evaluate(rule_id: str, data: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if data.get(key) is None]
     if missing:
         return {"status": "UNKNOWN", "missing_inputs": missing}
-    if rule_id == "G-SIGNAL-CLOSE":
+    if rule_id == "G-LVL-LIMIT":
+        touches = _number(data, "touches")
+        broken = data["broken"]
+        if touches is None or not isinstance(broken, bool):
+            return {"status": "UNKNOWN", "reason": "invalid touches/broken"}
+        passed = touches >= 3 and not broken
+    elif rule_id == "G-SIGNAL-CLOSE":
         close, level = _number(data, "close"), _number(data, "level")
         direction = data.get("direction")
         if close is None or level is None or direction not in ("LONG", "SHORT"):
