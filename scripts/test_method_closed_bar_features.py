@@ -90,6 +90,16 @@ class CandlePatternTest(unittest.TestCase):
             bars + [bar(20, 40, 1, 30, 100)], 2))
 
 
+class RangeDurationTest(unittest.TestCase):
+    def test_range_duration_uses_prior_reference(self):
+        from office2.method_closed_bar_features import from_closed_bars
+        candles = [bar(10, 12, 9, 11, 10) for _ in range(9)]
+        result = from_closed_bars(candles, 8)
+        self.assertEqual(result["G-LVL-CONSOLIDATION"]["bars_held"], 3)
+        self.assertEqual(result["G-FB-COMPLEX"]["inside_bars"], 3)
+        self.assertEqual(result, from_closed_bars(
+            candles + [bar(20, 50, 1, 40, 100)], 8))
+
 class ScenarioKeyboardTest(unittest.TestCase):
     def test_https_deep_link(self):
         from office2.delivery import scenario_keyboard
