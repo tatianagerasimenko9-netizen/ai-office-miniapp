@@ -338,6 +338,66 @@ def _prio():
         return contextlib.nullcontext()
 
 
+HB_DDL = ("CREATE TABLE IF NOT EXISTS office_track_heartbeat (scenario_id TEXT PRIMARY KEY, checked_ts DOUBLE PRECISION NOT NULL, tf TEXT, bars INTEGER, last_bar_ts DOUBLE PRECISION, "
+          "status TEXT, src TEXT, fails INTEGER DEFAULT 0, last_error TEXT)",)
+_HB_READY: set = set()
+HB_STALE_SEC = 900.0       # активний сценарій без успішної перевірки довше 15 хв не показуємо як повністю актуальний
+
+
+def _hb_ensure(db: str) -> None:
+    if db in _HB_READY:
+        return
+    from office_bridge import _execute
+
+    for d in HB_DDL:
+        _execute(db, d)
+    _HB_READY.add(db)
+
+
+def heartbeat(db: str, sid: Any, now: float, *, tf: str = "", candles: Any = None, status: str = "", src: str = "binance_futures", error: str = "") -> None:
+    """Час останньої ПЕРЕВІРКИ супроводу сценарію (успішної або з помилкою) — щоб Mini App не показував застарілий сценарій як актуальний. Один рядок на сценарій; збій запису ніколи не ламає супровід."""
+    if not sid:
+        return
+    try:
+        from office_bridge import _execute
+
+        _hb_ensure(db)
+        last = None
+        n = 0
+        if isinstance(candles, list) and candles:
+            n = len(candles)
+            last = _ts((candles[-1] or {}).get("ts") or (candles[-1] or {}).get("time"))
+        if error:
+            _execute(db, "INSERT INTO office_track_heartbeat(scenario_id, checked_ts, tf, bars, last_bar_ts, status, src, fails, last_error) VALUES (?,?,?,?,?,?,?,1,?) "
+                         "ON CONFLICT (scenario_id) DO UPDATE SET fails = office_track_heartbeat.fails + 1, last_error = excluded.last_error",
+                     (str(sid), float(now), tf, 0, None, "ERROR", src, str(error)[:200]))
+        else:
+            _execute(db, "INSERT INTO office_track_heartbeat(scenario_id, checked_ts, tf, bars, last_bar_ts, status, src, fails, last_error) VALUES (?,?,?,?,?,?,?,0,NULL) "
+                         "ON CONFLICT (scenario_id) DO UPDATE SET checked_ts = excluded.checked_ts, tf = excluded.tf, bars = excluded.bars, last_bar_ts = excluded.last_bar_ts, "
+                         "status = excluded.status, src = excluded.src, fails = 0, last_error = NULL",
+                     (str(sid), float(now), tf, n, last, status, src))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def heartbeat_for(db: str, sid: Any, now: Optional[float] = None, active: bool = True) -> Dict[str, Any]:
+    """Стан супроводу для Mini App: коли востаннє перевірено, скільки свічок, чи дані застарілі."""
+    now = time.time() if now is None else now
+    try:
+        from office_bridge import _fetchall
+
+        _hb_ensure(db)
+        rows = _fetchall(db, "SELECT checked_ts, tf, bars, last_bar_ts, status, src, fails, last_error FROM office_track_heartbeat WHERE scenario_id = ?", (str(sid),))
+    except Exception:  # noqa: BLE001
+        rows = []
+    if not rows:
+        return {"known": False, "stale": bool(active), "text": "Супровід: перевірок ще немає" if active else ""}
+    c, tf, n, lb, st, src, fails, err = rows[0]
+    age = now - float(c)
+    stale = bool(active) and (age > HB_STALE_SEC or (fails or 0) > 0)
+    return {"known": True, "checked_ts": float(c), "age_sec": round(age), "tf": tf, "bars": n, "last_bar_ts": lb, "status": st, "src": src, "fails": int(fails or 0), "last_error": err, "stale": stale}
+
+
 def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None, scope: str = "all") -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача.
@@ -376,9 +436,11 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         try:
             with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
                 candles = fetch(p["symbol"], tf, lim)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            heartbeat(db, sid, now, tf=tf, error=f"{type(exc).__name__}: {exc}")
             continue
         if not isinstance(candles, list) or not candles:
+            heartbeat(db, sid, now, tf=tf, error="порожня відповідь свічок")
             continue
         # Reject the whole series if any candle is from a different venue.
         # Checking only the final candle can silently mix spot and futures
@@ -388,6 +450,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             continue
         src = "binance_futures"
         res = simulate(p, candles, now, tf_sec=tfs, live_tail=True)
+        heartbeat(db, sid, now, tf=tf, candles=candles, status=str(res.get("status") or ""), src=src)
         levels = _levels_of(res)
         terminal = res["status"] not in ("PENDING", "INVALID")
         if terminal and all((sid, ct, lv) in seen for lv in levels):

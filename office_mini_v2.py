@@ -501,8 +501,16 @@ def o2_scenario_detail(sid: str) -> Dict[str, Any]:
     mr["potential_r"] = float(tg[-1]["r"]) if tg and tg[-1].get("r") is not None else None     # R найдальшої цілі: потенціал при утриманні, не прибуток
     if not mr["final"] and card["status_raw"] == "EXPIRED":
         mr.update(state="EXPIRED", final=True)                                                  # строк входу минув, а віхи ще не записані трекером
+    tracking = None
+    try:
+        import office_signal_track as _TR
+
+        tracking = _TR.heartbeat_for(_db(), pack["id"], active=not mr["final"])
+        # Mini App не показує сценарій як повністю актуальний, якщо супровід давно не перевіряв ціну (рахується з часу останньої успішної перевірки)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mini] o2 tracking heartbeat failed: {type(exc).__name__}: {exc}")
     return {"ok": True, "readonly": True, "data_status": "DATA_OK", "brain": "o2", "model_result": mr, "scenario": card, "o2": pack, "events": scenario_events(pack["id"]), "execution": execution,
-            "has_position": pos, "hypothetical": not pos}
+            "has_position": pos, "hypothetical": not pos, "tracking": tracking}
 
 
 def smc_row_payload(rid: str) -> Dict[str, Any]:

@@ -1130,13 +1130,16 @@ async function openO2(d, T0){
     +(doneLv.includes('SL')?'<span class="stop">стоп сценарію</span>':'')+(doneLv.includes('EXPIRED')?'<span class="stop">строк вийшов, входу не було</span>':'');
   const mv=ch.price_now!=null?`від входу ${o2f(ch.move_r)} R (${o2f(ch.move_pct)}%) · до SL ${o2f(ch.sl_distance_r)} R`:'';
   const ex=d.execution;
+  const tk=d.tracking, trk=(!fin&&tk)?(tk.known
+      ?`<div class="mut" style="margin-top:4px;${tk.stale?'color:#F36B78;font-weight:600':''}">${tk.stale?'⚠ Супровід застарів: ':'Супровід: '}ціну перевірено ${o2hm(tk.checked_ts)} Київ (${Math.round((tk.age_sec||0)/60)} хв тому)${tk.tf?` · ${esc(String(tk.tf).toUpperCase())}`:''}${tk.last_bar_ts?` · остання свічка ${o2hm(tk.last_bar_ts)}`:''}${tk.fails?` · помилок підряд: ${tk.fails}`:''}${tk.stale?'. Не покладайтеся на цей стан як на актуальний.':''}</div>`
+      :`<div class="mut" style="margin-top:4px;color:#F36B78;font-weight:600">⚠ Супровід: перевірок ще немає — стан сценарію не підтверджений.</div>`):'';
   const FIN_UA={TP3:'TP3 · ЗАВЕРШЕНО',SL:'СТОП · ЗАВЕРШЕНО','TP1→SL':'TP1, потім СТОП · ЗАВЕРШЕНО','TP2→SL':'TP2, потім СТОП · ЗАВЕРШЕНО',EXPIRED:'СТРОК ВИЙШОВ · ЗАВЕРШЕНО'};
   const stLine=fin?(FIN_UA[mr.state]||'ЗАВЕРШЕНО'):(st.short||'У РУСІ');
   const nowCls=fin?(['SL','TP1→SL','TP2→SL'].includes(mr.state)?'r':'n'):(ex&&ex.eligible===false?'r':'g');
   const finBox=fin?`<div class="nowbar ${nowCls}"><b>Підсумок сценарію (модель)${mr.finished_ts?` · ${o2kt(mr.finished_ts)}`:''}</b>${esc(st.text||'')}
       ${mr.max_r!=null?`<div class="mut" style="margin-top:4px">Найдальша досягнута ціль: TP${mr.max_tp} = ${o2f(mr.max_r)} R за початковим ризиком. Це потенціал при утриманні до цієї цілі, а не прибуток: правил виходу й особистої угоди тут немає.</div>`:''}
       ${ch.price_now!=null?`<div class="mut" style="margin-top:4px">Ціна зараз ${o2px(ch.price_now)} (${mn.ts_epoch?o2hm(mn.ts_epoch)+' Київ':'—'}) — це вже після завершення сценарію і до його результату не належить.</div>`:''}</div>`
-    :`<div class="nowbar ${nowCls}"><b>Зараз${ch.price_now!=null?` · ціна ${o2px(ch.price_now)}`:''}${mn.ts_epoch?` · ${o2hm(mn.ts_epoch)} Київ`:''}</b>${esc(st.text||'')}${mv?`<div class="mut" style="margin-top:4px">${esc(mv)}</div>`:''}
+    :`<div class="nowbar ${nowCls}"><b>Зараз${ch.price_now!=null?` · ціна ${o2px(ch.price_now)}`:''}${mn.ts_epoch?` · ${o2hm(mn.ts_epoch)} Київ`:''}</b>${esc(st.text||'')}${mv?`<div class="mut" style="margin-top:4px">${esc(mv)}</div>`:''}${trk}
       ${ex?`<div class="mut" style="margin-top:4px">${esc(ex.text||'')}</div>`:''}</div>`;
   const top=`<button class="back" id="back" aria-label="Назад до сценаріїв">← Сценарії</button>
     <div class="rh ${sd}"><div class="rt1"><b>${long_?'🟢':'🔴'} ${esc(String(s.symbol||'').replace(/USDT$/,''))}</b><span class="${sd}">${long_?'LONG':'SHORT'}</span><span class="o2tag">Brain ${esc((s.brain==='v2.1')?'v2.1':'v1')}</span></div>
