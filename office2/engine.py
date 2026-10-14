@@ -631,6 +631,20 @@ def _chart_rows(ctx: Dict[str, Any], n: int = 96) -> List[Dict[str, Any]]:
     return out
 
 
+def _chart_view_fields(ctx: Dict[str, Any], th: Dict[str, Any], now: float) -> Dict[str, Any]:
+    """Графік READY у Telegram: головний ТФ (H1/H4) з передісторією руху + рядки свічок цього ТФ у заморожений знімок (лише відображення; M15 лишається в chart_candles)."""
+    try:
+        from office2 import chart_view as CV
+
+        view = CV.choose(th, now)
+        rows = CV.build_rows(ctx, view, now)
+        if len(rows) < 24:
+            return {"chart_view": dict(view, rows_n=len(rows), used=False, why="замало свічок вибраного ТФ")}
+        return {"chart_view": dict(view, rows_n=len(rows), used=True), "chart_candles_view": rows}
+    except Exception as exc:  # noqa: BLE001
+        return {"chart_view": {"used": False, "why": f"{type(exc).__name__}: {str(exc)[:80]}"}}
+
+
 def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: Dict[str, Any], mc: Dict[str, Any], rel: Dict[str, Any], now: float, old_lev: Optional[Dict[str, Any]],
                flow_fetch: Optional[Callable[[], Dict[str, Any]]] = None, m5_fetch: Optional[Callable[[], Any]] = None) -> None:
     from office_bridge import _execute
@@ -685,7 +699,7 @@ def emit_ready(db: str, sym: str, th: Dict[str, Any], ctx: Dict[str, Any], st: D
     except Exception:  # noqa: BLE001
         provenance = {"source": "unknown"}
     snap = {"analyst": th.get("analyst"), "data_provenance": provenance, "learning_flags": learn_flags, "session_tag": sess_tag, "conflict": th.get("conflict"), "smc": smc_block, "version": VERSION, "brain": brain_version(), "version_id": brain_version(), "evidence": evid, "evidence_counts": (th.get("evidence_counts") or (__import__("office2.evidence", fromlist=["summary"]).summary(evid) if evid else None)), "integral": th.get("integral"), "market_map": th.get("map"),
-            "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+            "sequence": th.get("sequence"), "evidence_status": B.EVIDENCE_STATUS, "label": "OFFICE2 · LIVE BETA", "decided_ts": now, "emitted_wall_ts": time.time(), "latency": dict(CYCLE_TIMES, emitted=time.time()), "chart_candles": _chart_rows(ctx), **_chart_view_fields(ctx, th, now), "decided_utc": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "symbol": sym, "direction": th["dir"], "thesis": th, "why": why, "context": pack, "market_at_signal": market_for_signal(mc, st, rel), "alignment": aligned, "alignment_summary": AL.summary(aligned), "old_lev": old_lev,
             "trace": [
                 {"step": "HTF context", "value": {k: (v.get("trend") if isinstance(v, dict) else v) for k, v in pack["htf"].items()}},

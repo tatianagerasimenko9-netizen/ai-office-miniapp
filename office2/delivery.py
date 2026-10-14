@@ -264,13 +264,35 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
             zl, zh = LVL.zone_of(th)
             trig = float(th.get("trigger_level") or th["entry"])
 
+            # Новий вигляд (OFFICE2_CHART_VIEW=0 вимикає): головний ТФ H1/H4 з передісторією + збільшена вставка M15 для входу; свічки — лише з заморожених даних знімка
+            view_kw: Dict[str, Any] = {}
+            try:
+                vrows = snap.get("chart_candles_view")
+                cv = snap.get("chart_view") or {}
+                if os.getenv("OFFICE2_CHART_VIEW", "1").strip() != "0" and cv.get("used") and isinstance(vrows, list) and len(vrows) >= 24:
+                    from office2 import chart_view as CVW
+                    import office_ready_card as card
+
+                    m15_rows = evd.candles_from_chart(chart) if chart.get("candles") else (candles if isinstance(candles, list) else [])
+                    mk = CVW.marks(th, m15_rows, d)
+                    inset = CVW.inset_view(th, m15_rows, d, float(snap.get("decided_ts") or t_pick))
+                    if inset:
+                        inset["marks"] = mk
+                    nfmt = lambda x: card._num(x, sym)  # noqa: E731
+                    view_kw = {"max_bars": int(cv.get("bars") or 90), "tf_label": str(cv.get("tf") or "H1").replace("M15", "M15"), "evidence": mk,
+                               "story": CVW.story(th, [zl, zh], th["entry"], nfmt), "inset": inset, "height_px": 635}
+            except Exception as exc_view:  # noqa: BLE001
+                view_kw = {}
+                log(f"[office2] chart view fallback {sid}: {type(exc_view).__name__}: {str(exc_view)[:80]}")
+
             async def _render() -> Dict[str, Any]:
                 t_r = time.time()
                 try:
-                    out = await run_o2(render, symbol=sym, direction=d, candles=evd.candles_from_chart(chart) if chart.get("candles") else (candles if isinstance(candles, list) else []),
+                    out = await run_o2(render, symbol=sym, direction=d,
+                                       candles=(snap.get("chart_candles_view") if view_kw else None) or (evd.candles_from_chart(chart) if chart.get("candles") else (candles if isinstance(candles, list) else [])),
                                        entry=th["entry"], zone=[zl, zh], sl=th["sl"], tp1=(tg[0]["p"] if tg else None), tp2=(tg[1]["p"] if len(tg) > 1 else None),
                                        tp3=(tg[2]["p"] if len(tg) > 2 else None), ready_price=th["entry"], key_level=trig, key_label="пробій" if th["kind"] == "PULLBACK_BREAK" else "рівень",
-                                       path=os.path.join(tempfile.gettempdir(), f"o2ready_{sym}_{int(t_pick)}.png"))
+                                       path=os.path.join(tempfile.gettempdir(), f"o2ready_{sym}_{int(t_pick)}.png"), **view_kw)
                 except Exception as exc_img:  # noqa: BLE001
                     out = {"ok": False, "reason": f"{type(exc_img).__name__}: {exc_img}"}
                 tm["render_ms"] = int((time.time() - t_r) * 1000)

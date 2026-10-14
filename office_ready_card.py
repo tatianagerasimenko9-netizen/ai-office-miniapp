@@ -147,7 +147,7 @@ def _ohlc_sha(cs: List[Dict[str, Any]], tsf: Any) -> str:
 
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
            ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800,
-           learning: bool = False, extra_stops: Any = None, max_bars: int = 96, tf_label: Optional[str] = None, story: Optional[str] = None) -> Dict[str, Any]:
+           learning: bool = False, extra_stops: Any = None, max_bars: int = 96, tf_label: Optional[str] = None, story: Optional[str] = None, inset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
         import matplotlib
@@ -198,7 +198,7 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     rng = y1 - y0
     n = len(cs)
     fig = plt.figure(figsize=(width_px / 100, height_px / 100), dpi=100, facecolor=BG)
-    ax = fig.add_axes([0.02, 0.12 if story else 0.05, 0.64 if tf_label else 0.55, 0.73 if story else 0.80], facecolor=BG)
+    ax = fig.add_axes([0.02, 0.51 if inset else (0.12 if story else 0.05), 0.64 if tf_label else 0.55, 0.34 if inset else (0.73 if story else 0.80)], facecolor=BG)
     ax.set_xlim(-1, n + 1)
     ax.set_ylim(y0, y1)
     for s in ax.spines.values():
@@ -410,9 +410,10 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     if rp is not None and y0 < rp < y1:
         block(n - 1, rp, 14.0)
         ax.scatter([n - 1], [rp], s=120, color="#ffffff", edgecolors=BG, linewidths=2, zorder=7)
-        labels.append((rp, f"{'Вхід (навчальний)' if learning else 'READY'}  {_num(rp, symbol)}", "#ffffff", True))
+        if not inset:     # зі вставкою M15 ціна READY підписана на ній (на основному графіку лишається крапка)
+            labels.append((rp, f"{'Вхід (навчальний)' if learning else 'READY'}  {_num(rp, symbol)}", "#ffffff", True))
     # підписи справа без накладання: мінімальний крок 6,5% висоти
-    gap = rng * 0.065
+    gap = rng * (0.10 if inset else 0.065)
     labels.sort(key=lambda t: t[0])
     ys: List[float] = []
     for y, *_ in labels:
@@ -424,14 +425,22 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         ys[i] = min(ys[i], ys[i + 1] - gap)
     right_boxes: List[Any] = []
     for (y, txt, col, bold), yy in zip(labels, ys):
-        ann = ax.annotate(txt, xy=(n + 1, y), xytext=(n + 3.2, yy), color=col, fontsize=20, fontweight="bold" if bold else "normal", va="center", annotation_clip=False,
+        ann = ax.annotate(txt, xy=(n + 1, y), xytext=(n + 3.2, yy), color=col, fontsize=(15 if inset else 20), fontweight="bold" if bold else "normal", va="center", annotation_clip=False,
                     arrowprops=dict(arrowstyle="-", color=col, lw=1.2, alpha=0.8, shrinkA=0, shrinkB=0), zorder=8)
         right_boxes.append((txt, ann))
+    if tf_label:
+        ax.text(0.012, 0.975, f"{tf_label}", transform=ax.transAxes, color="#8fc2ff", fontsize=24, fontweight="bold", va="top", ha="left", zorder=10,
+                bbox=dict(boxstyle="round,pad=0.25", facecolor=BG, edgecolor="none", alpha=0.85))        # таймфрейм на самому графіку
+    if inset:
+        try:
+            _draw_inset(fig, inset, symbol, short, e, zlo, zhi, sl_, t1)
+        except Exception as exc_in:  # noqa: BLE001
+            skipped.append(f"inset:{type(exc_in).__name__}")
     dot, word = _dir_head(direction)
     fig.text(0.03, 0.935, f"{'Очікуємо падіння' if short else 'Очікуємо зростання'}  {ticker(symbol)}" if learning else f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34 if not learning else 28, fontweight="bold", va="center")
     if story and not learning:
         fig.text(0.03, 0.066, story, color="#c9d6ea", fontsize=15, fontweight="bold", va="bottom")      # шлях сигналу: що було на графіку до READY (лише обчислені факти)
-    fig.text(0.03, 0.015, "Навчальний сигнал · без реальних грошей · 15 хв" if learning else (f"{tf_label} · реальні закриті свічки · аналіз, не ордер" if tf_label else "15 хв · аналіз, не ордер"), color="#6b778c", fontsize=14, va="bottom")
+    fig.text(0.03, 0.015, "Навчальний сигнал · без реальних грошей · 15 хв" if learning else (f"{tf_label}{(' + ' + str(inset.get('label') or 'M15')) if inset else ''} · реальні закриті свічки Binance Futures · аналіз, не ордер" if tf_label else "15 хв · аналіз, не ордер"), color="#6b778c", fontsize=14, va="bottom")
     from matplotlib.text import Text as _Text
 
     fig.canvas.draw()   # позиції підписів-анотацій уточнюються лише під час малювання
@@ -456,6 +465,94 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
             "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "tp2_edge": t2_edge, "tf": tf_label, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}
+
+
+def _draw_inset(fig: Any, inset: Dict[str, Any], symbol: str, short: bool, entry: float, zlo: float, zhi: float, sl: float, tp1: Optional[float]) -> None:
+    """Збільшена вставка (зазвичай M15) для входу: реальні закриті свічки, зона входу виділена, вхід/SL/TP1, структурні позначки (sweep, зсув структури); ТФ підписано.
+    Лише відображення: усі рівні — ті самі, що на основному графіку."""
+    from matplotlib.patches import Rectangle
+    from office_patterns import _ts as _tsf
+
+    cs = [c for c in (inset.get("candles") or []) if all(_f(c.get(k)) is not None for k in ("open", "high", "low", "close"))][-int(inset.get("bars") or 56):]
+    if len(cs) < 8:
+        return
+    n = len(cs)
+    tt = [_tsf(c.get("ts")) for c in cs]
+    step = sorted(tt[i + 1] - tt[i] for i in range(n - 1))[(n - 1) // 2] if all(t is not None for t in tt) and n > 2 else None
+    xi = (lambda t: (float(t) - tt[0]) / step) if step else (lambda t: None)
+    hi_c, lo_c = max(float(c["high"]) for c in cs), min(float(c["low"]) for c in cs)
+    core = [hi_c, lo_c, zlo, zhi, entry, sl]
+    top, bot = max(core), min(core)
+    tp1_edge = False
+    if tp1 is not None:
+        nt, nb = max(top, tp1), min(bot, tp1)
+        if (hi_c - lo_c) / max(nt - nb, 1e-12) >= 0.45:
+            top, bot = nt, nb
+        else:
+            tp1_edge = True       # TP1 далеко: стрілка біля краю, свічки не стискаємо
+    pad = (top - bot) * 0.08
+    y0, y1 = bot - pad, top + pad
+    rng = y1 - y0
+    axi = fig.add_axes([0.02, 0.17, 0.64, 0.29], facecolor=BG)
+    axi.set_xlim(-1, n + 1)
+    axi.set_ylim(y0, y1)
+    for sp in axi.spines.values():
+        sp.set_visible(False)
+    axi.set_xticks([])
+    axi.set_yticks([])
+    axi.add_patch(Rectangle((-1, zlo), n + 2, max(zhi - zlo, rng * 0.02), facecolor=YEL, alpha=0.30, edgecolor=YEL, linewidth=1.4, zorder=1))     # зона входу
+    for i, c in enumerate(cs):
+        o, h, l, cl = (float(c[k]) for k in ("open", "high", "low", "close"))
+        col = UP if cl >= o else DOWN
+        axi.vlines(i, l, h, color=col, linewidth=1.8, zorder=3)
+        axi.add_patch(Rectangle((i - 0.34, min(o, cl)), 0.68, max(abs(cl - o), rng * 0.003), facecolor=col, edgecolor=col, zorder=4))
+    axi.axhline(entry, color="#ffffff", linestyle="--", linewidth=1.3, zorder=2, alpha=0.85)
+    axi.axhline(sl, color=SLC, linewidth=2.0, zorder=2)
+    marks_ = [(entry, "ВХІД " + _num(entry, symbol), "#ffffff"), (sl, "SL " + _num(sl, symbol), SLC), ((zlo + zhi) / 2, "ЗОНА", YEL)]
+    if tp1 is not None and y0 < tp1 < y1:
+        axi.axhline(tp1, color=TPC, linewidth=2.0, zorder=2)
+        marks_.append((tp1, "TP1 " + _num(tp1, symbol), TPC))
+    elif tp1_edge:
+        up_ = tp1 > entry
+        axi.annotate("", xy=(n * 0.5, y1 - rng * 0.005 if up_ else y0 + rng * 0.005), xytext=(n * 0.5, y1 - rng * 0.09 if up_ else y0 + rng * 0.09), arrowprops=dict(arrowstyle="-|>", color=TPC, lw=2.5), zorder=6)
+        marks_.append((y1 - rng * 0.03 if up_ else y0 + rng * 0.03, "TP1 " + _num(tp1, symbol), TPC))
+    for it in inset.get("marks") or []:
+        try:
+            if it.get("draw") == "sweep" and xi(it["t_sweep"]) is not None:
+                xs, xw = max(xi(it["t0"]), -1.0), xi(it["t_sweep"])
+                axi.plot([xs, min(xw + 4, n)], [it["price"]] * 2, color=EVC, linewidth=1.6, linestyle="--", zorder=5)
+                axi.scatter([xw], [it["extreme"]], s=90, marker="^" if it.get("type") == "low" else "v", color=EVC, edgecolors=BG, zorder=8)
+                if y0 < it["price"] < y1:
+                    marks_.append((it["price"], "Sweep " + _num(it["price"], symbol), EVC))
+            elif it.get("draw") == "break" and xi(it["t_break"]) is not None:
+                xs, xb = max(xi(it["t0"]), -1.0), xi(it["t_break"])
+                axi.plot([xs, min(xb + 3, n)], [it["price"]] * 2, color=EVC, linewidth=1.6, linestyle="--", zorder=5)
+                axi.scatter([xb], [it["close"]], s=80, color=EVC, edgecolors=BG, zorder=8)
+                if y0 < it["price"] < y1:
+                    marks_.append((it["price"], "Зсув " + _num(it["price"], symbol), EVC))
+        except Exception:  # noqa: BLE001
+            continue
+    gap = rng * 0.11
+    marks_.sort(key=lambda m: m[0])
+    ys = []
+    for y, *_ in marks_:
+        ys.append(y if not ys else max(y, ys[-1] + gap))
+    over = ys[-1] - (y1 - rng * 0.02)
+    if over > 0:
+        ys = [v - over for v in ys]
+    for (y, txt, col), yy in zip(marks_, ys):
+        axi.annotate(txt, xy=(n + 1, y), xytext=(n + 3.0, yy), color=col, fontsize=14, fontweight="bold", va="center", annotation_clip=False,
+                     arrowprops=dict(arrowstyle="-", color=col, lw=1.0, alpha=0.7, shrinkA=0, shrinkB=0), zorder=8)
+    axi.plot([n - 1], [entry], marker="o", markersize=9, color="#ffffff", markeredgecolor=BG, zorder=9)
+    fig.text(0.03, 0.475, f"{inset.get('label') or 'M15'} · збільшено: вхід", color="#8fc2ff", fontsize=20, fontweight="bold", va="center", ha="left")      # ТФ вставки — над нею, не на свічках
+    try:
+        from office_ready_core import kyiv_stamp
+
+        for idx in (0, n // 2, n - 1):
+            if tt[idx] is not None:
+                axi.text(idx, y0 - rng * 0.04, kyiv_stamp(tt[idx] + (step or 0))[6:], color="#6b778c", fontsize=11, ha="center", va="top", clip_on=False)      # час закриття свічки, Київ
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp2, tp3, tf_label=None):

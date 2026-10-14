@@ -140,3 +140,15 @@ def story(th: Dict[str, Any], entry_zone: Any, entry: Any, fmt) -> str:
     if entry is not None:
         parts.append(f"READY {fmt(entry)}")
     return " → ".join(parts)
+
+
+def inset_view(th: Dict[str, Any], m15_rows: List[Dict[str, Any]], direction: str, now: float) -> Optional[Dict[str, Any]]:
+    """Збільшена вставка M15 для входу: від початку структури (мінус 8 барів) до READY, 32–64 свічки (параметр читабельності); ті самі структурні позначки."""
+    if not m15_rows:
+        return None
+    start = structure_start(th)
+    n = 48
+    if start:
+        n = int((now - start) / 900) + 8
+    n = max(32, min(64, n))
+    return {"candles": m15_rows[-n:], "bars": n, "label": "M15", "marks": marks(th, m15_rows, direction)}
