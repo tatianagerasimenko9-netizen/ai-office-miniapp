@@ -74,8 +74,14 @@ async def _run(port: int, sid: str, problems: list) -> None:
             problems.append("CDN не має бути потрібен, коли локальна бібліотека віддається")
         if not await pg.evaluate("usingLW"):
             problems.append("графік працює на canvas-заглушці, а не на інтерактивній бібліотеці")
-        if "стопи+2" not in (await pg.evaluate("window.__chartLayers")):
-            problems.append("три варіанти стопа зі знімка не намальовані")
+        lay0 = await pg.evaluate("window.__chartLayers")
+        if "стопи+" in lay0 or "інвалідація" in lay0:
+            problems.append("додаткові лінії стопа/інвалідації мають бути вимкнені за замовчуванням (на графіку один SL)")
+        if await pg.locator('button[data-l="inval"]').count():
+            await pg.click('button[data-l="inval"]')
+            await pg.wait_for_function("window.__chartLayers && window.__chartLayers.includes('інвалідація')", timeout=8000)
+        else:
+            problems.append("немає перемикача «Інвалідація (не SL)»")
         n0 = await pg.evaluate("S.bars.length")
         if n0 < 400:
             problems.append(f"на старті замало історії: {n0} свічок")
