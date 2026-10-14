@@ -119,4 +119,17 @@ def fetch_r(sym, tf, lim):
 fresh_process()
 mr = [m for m in T.pending_milestones(db, fetch_r, now_ts=BASE + 9 * 3600) if m["symbol"] == "SOLUSDT" and m["level"] == "TP1"]
 check("час TP1 уточнено до хвилини", mr and abs(mr[0]["touched_ts"] - (tp_bar + 180)) < 1, mr)
+
+# 7) REST недоступний (бан IP) → свічки Binance Futures через Mini App; TP1 фіксується, джерело позначено
+plan("O2|mir|1", "LTCUSDT", "SHORT", 100.0, 102.0, (98.0, 96.0, 94.0), 10592)
+mir_bars = c5([(100, 100.2, 99.5, 99.8), (99.8, 99.9, 99.0, 99.2), (99.2, 99.3, 97.5, 98.5)] + [(98.5, 98.6, 98.2, 98.3)] * 5)
+def banned(sym, tf, lim):
+    raise RuntimeError("binance backoff 1755s")
+T._mirror_candles = lambda sym, tf, lim: [dict(b, ts=__import__("datetime").datetime.fromtimestamp(b["ts"], __import__("datetime").timezone.utc).isoformat()) for b in mir_bars] if sym == "LTCUSDT" else None
+fresh_process()
+mm = [m for m in T.pending_milestones(db, banned, now_ts=BASE + 9 * 3600, use_mirror=True) if m["symbol"] == "LTCUSDT"]
+check("бан REST: ENTRY і TP1 через Mini App, джерело позначено", [m["level"] for m in mm][:2] == ["ENTRY", "TP1"] and all(m["src"] == "binance_futures_via_miniapp" for m in mm), mm)
+T._mirror_candles = lambda sym, tf, lim: None
+fresh_process()
+check("бан REST і дзеркала немає: подій не вигадуємо", [m for m in T.pending_milestones(db, banned, now_ts=BASE + 9 * 3600, use_mirror=True) if m["symbol"] == "LTCUSDT"] == [])
 sys.exit(1 if bad else 0)

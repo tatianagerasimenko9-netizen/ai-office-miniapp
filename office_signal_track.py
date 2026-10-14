@@ -458,10 +458,38 @@ def _ws_fallback(p: Dict[str, Any], seen: set, now: float) -> List[Dict[str, Any
     return out
 
 
-def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None, scope: str = "all") -> List[Dict[str, Any]]:
+def _mirror_candles(symbol: str, tf: str, limit: int) -> Optional[List[Dict[str, Any]]]:
+    """Запасне джерело свічок для супроводу: публічний GET Mini App `/api/v2/candles` (окремий сервіс). Приймається лише source=binance_futures і data_status=DATA_OK.
+    Вимкнути: OFFICE_TRACK_MIRROR=0."""
+    if os.getenv("OFFICE_TRACK_MIRROR", "1").strip() == "0":
+        return None
+    try:
+        import urllib.request
+        from urllib.parse import urlencode
+
+        base = os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com").rstrip("/")
+        q = urlencode({"symbol": symbol, "tf": {"1m": "M1", "5m": "M5", "15m": "M15"}.get(tf, tf.upper()), "limit": max(20, min(int(limit), 1000))})
+        with urllib.request.urlopen(f"{base}/api/v2/candles?{q}", timeout=20) as r:
+            j = json.loads(r.read().decode("utf-8", errors="replace"))
+        if not isinstance(j, dict) or j.get("source") != "binance_futures" or str(j.get("data_status")) != "DATA_OK":
+            return None
+        out = []
+        for b in j.get("candles") or []:
+            if b.get("time") is None:
+                continue
+            out.append({"ts": datetime.fromtimestamp(int(b["time"]), tz=timezone.utc).isoformat(), "open": float(b["open"]), "high": float(b["high"]), "low": float(b["low"]), "close": float(b["close"]),
+                        "volume": float(b.get("volume") or 0.0), "src": "binance_futures"})
+        return out or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None, scope: str = "all", use_mirror: Optional[bool] = None) -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача.
     scope: "all" — усі плани; "o2" — лише Office2 (scenario_id «O2|…»), швидкий цикл; "other" — усі, крім Office2 (повільний цикл по сотнях старих планів не затримує Office2)."""
+    if use_mirror is None:
+        use_mirror = fetch is None      # запасне джерело лише в бойовому режимі; у тестах із підставленим fetch мережі немає
     if fetch is None:
         from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
@@ -499,15 +527,19 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         else:
             tf, tfs = "5m", 300.0
             lim = min(1000, int(age // 300) + 20)
+        candles, via, err = None, "binance_futures", ""
         try:
             with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
                 candles = fetch(p["symbol"], tf, lim)
         except Exception as exc:  # noqa: BLE001
-            heartbeat(db, sid, now, tf=tf, error=f"{type(exc).__name__}: {exc}")
-            out.extend(_ws_fallback(p, seen, now))
-            continue
+            err = f"{type(exc).__name__}: {exc}"
         if not isinstance(candles, list) or not candles:
-            heartbeat(db, sid, now, tf=tf, error="порожня відповідь свічок")
+            # IP Worker під обмеженням Binance (429/418) → ті самі свічки Binance Futures через Mini App (інший сервіс/IP). Підробки немає: беремо лише відповідь із source=binance_futures.
+            candles = _mirror_candles(p["symbol"], tf, lim) if use_mirror else None
+            if candles:
+                via = "binance_futures_via_miniapp"
+        if not isinstance(candles, list) or not candles:
+            heartbeat(db, sid, now, tf=tf, error=err or "порожня відповідь свічок")
             out.extend(_ws_fallback(p, seen, now))
             continue
         # Reject the whole series if any candle is from a different venue.
@@ -516,7 +548,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         sources = {str(c.get("src") or "binance_futures") for c in candles if isinstance(c, dict)}
         if sources != {"binance_futures"}:
             continue
-        src = "binance_futures"
+        src = via
         res = simulate(p, candles, now, tf_sec=tfs, live_tail=True)
         heartbeat(db, sid, now, tf=tf, candles=candles, status=str(res.get("status") or ""), src=src)
         levels = _levels_of(res)
