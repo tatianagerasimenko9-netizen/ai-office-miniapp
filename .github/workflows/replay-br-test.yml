@@ -1,0 +1,52 @@
+name: Replay B&R TEST (isolated, read-only)
+
+# run-id: br-1 (змінюйте число, щоб свідомо повторити прогін)
+# B&R · TEST (пробій → ретест → відбій) на реальних свічках Binance Futures M15, періоди A–G, 12 символів. Пороги — ГІПОТЕЗИ. Працює лише в GitHub Actions; нічого не пише в БД/Render/Telegram.
+on:
+  push:
+    branches: ['feat/br-test-20261014']
+    paths: ['.github/workflows/replay-br-test.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, ADAUSDT, AVAXUSDT, LINKUSDT, NEARUSDT, TIAUSDT, SEIUSDT, ONDOUSDT]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - run: python -u scripts/br_replay.py "${{ matrix.symbol }}" "br_${{ matrix.symbol }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: br-${{ matrix.symbol }}
+          path: br_${{ matrix.symbol }}.json
+  study:
+    needs: replay
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: br-*
+          path: parts
+      - run: python -u scripts/br_study.py parts br_study.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: br-study
+          path: br_study.json
