@@ -477,13 +477,39 @@ def _mirror_candles(symbol: str, tf: str, limit: int) -> Optional[List[Dict[str,
             j = json.loads(r.read().decode("utf-8", errors="replace"))
         if not isinstance(j, dict) or j.get("source") != "binance_futures" or str(j.get("data_status")) != "DATA_OK":
             return None
+        # A mirror response must be a coherent futures candle series, not just
+        # a JSON object with a trusted-looking source label. Reject partial,
+        # unsorted, future-dated and stale series rather than invent milestones.
+        import math
+        seconds = {"1m": 60, "5m": 300, "15m": 900}.get(tf)
+        if seconds is None:
+            return None
+        bars = j.get("candles")
+        if not isinstance(bars, list) or not bars:
+            return None
         out = []
-        for b in j.get("candles") or []:
-            if b.get("time") is None:
-                continue
-            out.append({"ts": datetime.fromtimestamp(int(b["time"]), tz=timezone.utc).isoformat(), "open": float(b["open"]), "high": float(b["high"]), "low": float(b["low"]), "close": float(b["close"]),
-                        "volume": float(b.get("volume") or 0.0), "src": "binance_futures"})
-        return out or None
+        prev_ts = -1
+        now = time.time()
+        for b in bars:
+            if not isinstance(b, dict):
+                return None
+            try:
+                ts = int(b["time"])
+                op, hi, lo, cl = (float(b[k]) for k in ("open", "high", "low", "close"))
+                vol = float(b.get("volume") or 0.0)
+            except (KeyError, ValueError, TypeError, OverflowError):
+                return None
+            if (not all(math.isfinite(v) for v in (op, hi, lo, cl, vol))
+                    or lo <= 0 or vol < 0 or not lo <= min(op, cl) <= max(op, cl) <= hi
+                    or ts <= prev_ts or ts > now + 5):
+                return None
+            prev_ts = ts
+            out.append({"ts": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
+                        "open": op, "high": hi, "low": lo, "close": cl,
+                        "volume": vol, "src": "binance_futures"})
+        if now - prev_ts > 3 * seconds:
+            return None
+        return out
     except Exception:  # noqa: BLE001
         return None
 
