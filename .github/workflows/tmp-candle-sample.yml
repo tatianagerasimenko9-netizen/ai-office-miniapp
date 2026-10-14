@@ -15,7 +15,7 @@ jobs:
           import io, zipfile, csv, json, urllib.request
           days = ["2026-10-%02d" % d for d in range(8, 14)]
           for sym in ["FILUSDT", "BTCUSDT", "SEIUSDT"]:
-              for tf in ["1h", "15m"]:
+              for tf in ["1h"]:
                   rows = []
                   for d in days:
                       url = f"https://data.binance.vision/data/futures/um/daily/klines/{sym}/{tf}/{sym}-{tf}-{d}.zip"
