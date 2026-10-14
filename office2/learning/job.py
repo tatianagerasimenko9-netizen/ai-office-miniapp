@@ -51,9 +51,26 @@ def _last_by_scenario(rows) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+_PLAN_KEYS = ("scenario_id", "symbol", "direction", "tf", "entry", "sl", "tp1", "confirmed_ts")
+_RES_KEYS = ("scenario_id", "outcome", "filled", "rejected", "time_to_result_sec", "mfe_pct", "mae_pct")
+
+
+def _last_by_scenario_lean(rows, keys) -> Dict[str, Dict[str, Any]]:
+    """Те саме, що _last_by_scenario, але в пам'яті лишаються лише потрібні поля (SIGNAL_PLAN/RESULT старого Лева ≈ 34 тис. подій: повні розібрані payload давали +130 МБ RSS на 512-МБ worker)."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for (pj,) in rows:
+        try:
+            j = json.loads(pj or "{}")
+        except ValueError:
+            continue
+        if j.get("scenario_id"):
+            out[j["scenario_id"]] = {k: j.get(k) for k in keys if k in j}
+    return out
+
+
 def load_old_lev(db: str) -> List[Dict[str, Any]]:
-    plans = _last_by_scenario((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_PLAN"))
-    res = _last_by_scenario((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_RESULT"))
+    plans = _last_by_scenario_lean(((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_PLAN")), _PLAN_KEYS)
+    res = _last_by_scenario_lean(((pj,) for _sid, pj in _iter_payloads(db, "SIGNAL_RESULT")), _RES_KEYS)
     out = []
     for sid, r in res.items():
         t = T.from_old_lev(plans[sid], r) if sid in plans else None
