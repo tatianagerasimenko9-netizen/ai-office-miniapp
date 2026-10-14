@@ -209,7 +209,12 @@ def build(snap: Dict[str, Any], valid_until_ts: Optional[float] = None, price_no
         res3.append(f"зсув: закриття {'вище' if long_ else 'нижче'} {_px(brk.get('level'))}, тіло {float(brk.get('body_atr') or 0):.2f} ATR, утримано барів: {brk.get('bars_held')}")
     if zone and len(zone) == 2:
         res3.append(f"ретрейс у зону {_px(min(zone))}–{_px(max(zone))}")
-    if trig is not None:
+    # Фактична умова Brain (brain2): {бичаче|ведмеже} закриття M15 за серединою зони входу. trigger_level — це край зони («не доганяємо»), а не тригер.
+    mid = (min(zone) + max(zone)) / 2.0 if zone and len(zone) == 2 else None
+    if mid is not None:
+        trig = mid
+        res3.append(f"тригер: {'бичаче' if long_ else 'ведмеже'} закриття M15 {'≥' if long_ else '≤'} середини зони {_px(mid)}")
+    elif trig is not None:
         res3.append(f"тригер: закриття M15 {'вище' if long_ else 'нижче'} {_px(trig)}")
     res3.append(f"рішення прийнято на закритті бару о {_utc(closed_ts)}; після цього момент вхід не переглядається заднім числом")
     steps.append({"id": "M15", "tf": "M15", "title": "Підтвердження", "status": "CONFIRMED" if all_ok else "UNAVAILABLE",
@@ -314,7 +319,7 @@ def telegram_confirmation(snap: Dict[str, Any], fmt=None, stamp=None) -> List[st
         when = ""
         if c.get("closed_ts"):
             when = f" ({stamp(c['closed_ts']) + ' Київ' if stamp else c.get('closed_utc')})"
-        out.append(f"M15 — закриття {'вище' if d['direction'] == 'LONG' else 'нижче'} {fp(c.get('price'))}{when}")
+        out.append(f"M15 — {'бичаче' if d['direction'] == 'LONG' else 'ведмеже'} закриття {'≥' if d['direction'] == 'LONG' else '≤'} середини зони {fp(c.get('price'))}{when}")
     if m5s and m5s.get("status") in ("CONFIRMED", "NEUTRAL", "AGAINST") and (d.get("ltf") or {}).get("status") not in (None, "OFF"):
         c5 = m5s.get("condition") or {}
         if m5s["status"] == "CONFIRMED":
