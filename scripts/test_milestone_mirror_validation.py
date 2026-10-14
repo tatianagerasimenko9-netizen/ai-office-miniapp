@@ -4,9 +4,12 @@ import json
 import os
 import time
 import unittest
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
-import office_signal_track as track
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import office_signal_track as track  # noqa: E402
 
 
 class Response:
