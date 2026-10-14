@@ -147,7 +147,7 @@ def _ohlc_sha(cs: List[Dict[str, Any]], tsf: Any) -> str:
 
 def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry: Any, zone: Any = None, sl: Any, tp1: Any, tp2: Any = None, tp3: Any = None,
            ready_price: Any = None, key_level: Any = None, key_label: str = "рівень", evidence: Any = None, path: str, width_px: int = 1000, height_px: int = 800,
-           learning: bool = False, extra_stops: Any = None) -> Dict[str, Any]:
+           learning: bool = False, extra_stops: Any = None, max_bars: int = 96, tf_label: Optional[str] = None, story: Optional[str] = None) -> Dict[str, Any]:
     """PNG-картка. {'ok': True, 'path', 'sha256', 'size', 'drawn': {...}} або {'ok': False, 'reason'}."""
     try:
         import matplotlib
@@ -159,7 +159,7 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         return {"ok": False, "reason": f"matplotlib: {type(exc).__name__}"}
     from office_user_messages import _dir_head, ticker
 
-    cs = [c for c in (candles or []) if all(_f(c.get(k)) is not None for k in ("open", "high", "low", "close"))][-96:]
+    cs = [c for c in (candles or []) if all(_f(c.get(k)) is not None for k in ("open", "high", "low", "close"))][-int(max_bars or 96):]
     if len(cs) < 12:
         return {"ok": False, "reason": "мало свічок"}
     short = str(direction or "").upper() == "SHORT"
@@ -169,21 +169,36 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         return {"ok": False, "reason": "немає входу/стопа"}
     hi_c, lo_c = max(float(c["high"]) for c in cs), min(float(c["low"]) for c in cs)
     xs_ = [(_f(p_), n_) for p_, n_ in (extra_stops or []) if _f(p_) is not None]
-    core = [hi_c, lo_c, e, sl_] + [x for x in (t1, t2, zlo, zhi) if x is not None] + [p_ for p_, _n in xs_]
-    top, bot = max(core), min(core)
-    span = max(top - bot, e * 0.002)
-    t3_edge = False
-    if t3 is not None:
-        if abs(t3 - e) <= 1.6 * span:
-            top, bot = max(top, t3), min(bot, t3)
-        else:
-            t3_edge = True
+    t2_edge = t3_edge = False
+    if tf_label:     # нова картка: далекі цілі не стискають реальні свічки; ціль, яка зробила б свічки < 45 % висоти графіка, показується стрілкою біля краю з підписом (ціна — у блоках внизу)
+        core = [hi_c, lo_c, e, sl_] + [x for x in (t1, zlo, zhi) if x is not None] + [p_ for p_, _n in xs_]
+        top, bot = max(core), min(core)
+        for k_, tv in ((2, t2), (3, t3)):
+            if tv is None:
+                continue
+            nt, nb = max(top, tv), min(bot, tv)
+            if (hi_c - lo_c) / max(nt - nb, 1e-12) >= 0.45:
+                top, bot = nt, nb
+            elif k_ == 2:
+                t2_edge = True
+            else:
+                t3_edge = True
+        span = max(top - bot, e * 0.002)
+    else:
+        core = [hi_c, lo_c, e, sl_] + [x for x in (t1, t2, zlo, zhi) if x is not None] + [p_ for p_, _n in xs_]
+        top, bot = max(core), min(core)
+        span = max(top - bot, e * 0.002)
+        if t3 is not None:
+            if abs(t3 - e) <= 1.6 * span:
+                top, bot = max(top, t3), min(bot, t3)
+            else:
+                t3_edge = True
     pad = (top - bot) * 0.08
     y0, y1 = bot - pad, top + pad
     rng = y1 - y0
     n = len(cs)
     fig = plt.figure(figsize=(width_px / 100, height_px / 100), dpi=100, facecolor=BG)
-    ax = fig.add_axes([0.02, 0.05, 0.55, 0.80], facecolor=BG)
+    ax = fig.add_axes([0.02, 0.12 if story else 0.05, 0.64 if tf_label else 0.55, 0.73 if story else 0.80], facecolor=BG)
     ax.set_xlim(-1, n + 1)
     ax.set_ylim(y0, y1)
     for s in ax.spines.values():
@@ -378,15 +393,18 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
             hline(p_, col_, "--", 1.6)
             labels.append((p_, f"{n_}  {_num(p_, symbol)}", col_, True))
     for k, v in ((1, t1), (2, t2), (3, t3)):
-        if v is None or (k == 3 and t3_edge):
+        if v is None or (k == 3 and t3_edge) or (k == 2 and t2_edge):
             continue
         hline(v, TPC)
         labels.append((v, f"{'Ціль ' + str(k) if learning else 'TP' + str(k)}  {_num(v, symbol)}", TPC, True))
-    if t3_edge:
-        up = (t3 > e)
-        ax.annotate("", xy=(n * 0.5, y1 - rng * 0.005 if up else y0 + rng * 0.005), xytext=(n * 0.5, (y1 if up else y0) + (-rng * 0.07 if up else rng * 0.07)),
+    for k_, tv, edge_ in ((2, t2, t2_edge), (3, t3, t3_edge)):
+        if not edge_:
+            continue
+        up = (tv > e)
+        xa_ = n * (0.40 if k_ == 2 else 0.60)
+        ax.annotate("", xy=(xa_, y1 - rng * 0.005 if up else y0 + rng * 0.005), xytext=(xa_, (y1 if up else y0) + (-rng * 0.07 if up else rng * 0.07)),
                     arrowprops=dict(arrowstyle="-|>", color=TPC, lw=3), zorder=6)
-        labels.append((y1 - rng * 0.02 if up else y0 + rng * 0.02, f"{'Ціль 3' if learning else 'TP3'}  {_num(t3, symbol)}", TPC, True))
+        labels.append((y1 - rng * (0.02 if k_ == 3 else 0.075) if up else y0 + rng * (0.02 if k_ == 3 else 0.075), f"{'Ціль ' + str(k_) if learning else 'TP' + str(k_)}  {_num(tv, symbol)}", TPC, True))
     labels.append(((zlo + zhi) / 2, "ВХІД  " + (_num(zlo, symbol) if zlo == zhi else f"{_num(zlo, symbol)}–{_num(zhi, symbol)}"), YEL, True))
     rp = _f(ready_price)
     if rp is not None and y0 < rp < y1:
@@ -411,7 +429,9 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
         right_boxes.append((txt, ann))
     dot, word = _dir_head(direction)
     fig.text(0.03, 0.935, f"{'Очікуємо падіння' if short else 'Очікуємо зростання'}  {ticker(symbol)}" if learning else f"{word}  {ticker(symbol)}", color=(DOWN if short else UP), fontsize=34 if not learning else 28, fontweight="bold", va="center")
-    fig.text(0.03, 0.015, "Навчальний сигнал · без реальних грошей · 15 хв" if learning else "15 хв · аналіз, не ордер", color="#6b778c", fontsize=14, va="bottom")
+    if story and not learning:
+        fig.text(0.03, 0.066, story, color="#c9d6ea", fontsize=15, fontweight="bold", va="bottom")      # шлях сигналу: що було на графіку до READY (лише обчислені факти)
+    fig.text(0.03, 0.015, "Навчальний сигнал · без реальних грошей · 15 хв" if learning else (f"{tf_label} · реальні закриті свічки · аналіз, не ордер" if tf_label else "15 хв · аналіз, не ордер"), color="#6b778c", fontsize=14, va="bottom")
     from matplotlib.text import Text as _Text
 
     fig.canvas.draw()   # позиції підписів-анотацій уточнюються лише під час малювання
@@ -430,15 +450,15 @@ def render(*, symbol: str, direction: str, candles: List[Dict[str, Any]], entry:
     plt.close(fig)
     if not learning:
         try:
-            _compose_telegram_card(path, symbol, direction, e, zlo, zhi, sl_, t1, t2, t3)
+            _compose_telegram_card(path, symbol, direction, e, zlo, zhi, sl_, t1, t2, t3, tf_label)
         except Exception as exc:
             return {"ok": False, "reason": f"telegram_card_compose_failed: {type(exc).__name__}: {exc}"}
     data = open(path, "rb").read()
     return {"ok": True, "path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
-            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}
+            "drawn": {"candles": n, "entry": [zlo, zhi], "sl": sl_, "tps": [t1, t2, t3], "tp3_edge": t3_edge, "tp2_edge": t2_edge, "tf": tf_label, "ready": rp, "key_level": _f(key_level), "evidence": drawn_ev, "label_boxes": boxes, "labels_skipped": skipped, "label_dist_px": label_dist, "ohlc_sha": _ohlc_sha(cs, _tsf), "size_px": [width_px, height_px]}}
 
 
-def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp2, tp3):
+def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp2, tp3, tf_label=None):
     """Compose a compact mobile-readable graphic around the existing truthful candle chart.
 
     No synthetic targets or candles; all numbers come from the frozen signal.
@@ -468,12 +488,15 @@ def _compose_telegram_card(path, symbol, direction, entry, zlo, zhi, sl, tp1, tp
     def box(x0, y0, x1, y1, bg, border=None):
         d.rounded_rectangle((u(x0), u(y0), u(x1), u(y1)), radius=u(20), fill=bg, outline=border, width=max(1,u(2)))
     short = str(direction).upper() == "SHORT"
-    label(35, 24, "AI OFFICE  /  BINANCE FUTURES", 24, "#a4b5ce", True)
+    if tf_label:
+        label(35, 20, f"ГРАФІК {tf_label} · BINANCE FUTURES", 31, "#8fc2ff", True)      # головний ТФ — великим шрифтом
+    else:
+        label(35, 24, "AI OFFICE  /  BINANCE FUTURES", 24, "#a4b5ce", True)
     label(35, 68, f"{symbol.replace('USDT','')} / USDT", 49, "#ffffff", True)
     box(730, 68, 965, 142, "#42232b" if short else "#103e31")
     label(752, 84, "SHORT" if short else "LONG", 35, "#ff949e" if short else "#64e6a7", True)
     chart_h = u(635)
-    out.paste(chart.resize((width, chart_h), Image.Resampling.LANCZOS), (0, u(158)))
+    out.paste(chart if chart.size == (width, chart_h) else chart.resize((width, chart_h), Image.Resampling.LANCZOS), (0, u(158)))
     d = ImageDraw.Draw(out)
     def fmt(x):
         return _num(x, symbol)
