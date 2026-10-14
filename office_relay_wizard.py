@@ -7675,8 +7675,10 @@ EV позитивне: {prob.get('ev_positive', '')}
                         import office_ready_seq as _rseq
 
                         _no = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # той самий №READY, що в початковому повідомленні
-                    except Exception:  # noqa: BLE001
-                        _no = None
+                    except Exception as _exn:  # noqa: BLE001
+                        # збій читання номера ≠ «без номера»: подію не губимо, повторимо в наступному циклі
+                        print(f"[milestone][WARN] number_of failed, retry next cycle: {type(_exn).__name__}")
+                        continue
                     # Only delivered, numbered Office2 READY plans are user-facing.
                     # Older beta/paper scenarios must not emit TP/SL into the one-office chat.
                     if scope != "o2" or _no is None:
