@@ -462,7 +462,7 @@ def _stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def gate_status(db: str, now: Optional[float] = None) -> Dict[str, Any]:
-    """Статус денного ліміту «3 стопи/добу UTC» (office2.engine.day_stops): які стопи його активували, коли блок почався/закінчується, скільки кандидатів знайдено/відсічено і shadow-результат відсічених.
+    """Статус лічильника «3 стопи/добу UTC» (з 14.10.2026 лише попередження, не блокування) (office2.engine.day_stops): які стопи його активували, коли блок почався/закінчується, скільки кандидатів знайдено/відсічено і shadow-результат відсічених.
     Лише читання; ліміт не змінює."""
     from office_bridge import _fetchall
 
@@ -488,8 +488,10 @@ def gate_status(db: str, now: Optional[float] = None) -> Dict[str, Any]:
                     stops.append({"signal": sid, "symbol": sym.get(sid), "sent_ts": ts, "after_tp1": after})
         stops.sort(key=lambda x: x["sent_ts"])
         out["stops"] = stops
-        out["locked"] = len(stops) >= 3
-        out["locked_since_ts"] = stops[2]["sent_ts"] if len(stops) >= 3 else None
+        out["locked"] = False                      # з 14.10.2026 3 SL за добу не блокують READY
+        out["elevated_risk"] = len(stops) >= 3     # лише попередження в картці
+        out["elevated_since_ts"] = stops[2]["sent_ts"] if len(stops) >= 3 else None
+        out["locked_since_ts"] = None
         rows = _fetchall(db, "SELECT symbol, reason FROM office2_live_scenario WHERE state = 'NO_TRADE' AND updated_ts >= ?", (t0,))
         by_reason: Dict[str, int] = {}
         for _s, r in rows:

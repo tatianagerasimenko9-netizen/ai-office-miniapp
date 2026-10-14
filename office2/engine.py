@@ -216,6 +216,14 @@ def day_stops(db: str, now: float) -> int:
     return n
 
 
+def day_risk_warning(db: str, now: float, cfg: RK.RiskConfig = RK.RiskConfig()) -> Optional[Dict[str, Any]]:
+    """Інформація, а не заборона: ≥ daily_loss_r стопів за добу UTC → підвищений денний ризик (текст у картці). None, якщо стопів менше."""
+    n = day_stops(db, now)
+    if n < int(cfg.daily_loss_r):
+        return None
+    return {"stops_today": n, "limit": int(cfg.daily_loss_r), "blocking": False, "text": f"Підвищений денний ризик: {n} SL за добу UTC (сигнал не заблоковано; рішення про вхід — твоє)"}
+
+
 def portfolio_gate(db: str, sym: str, direction: str, lvl_key: Optional[str], now: float, cfg: RK.RiskConfig = RK.RiskConfig()) -> Optional[str]:
     """None = можна; інакше причина відмови (NO_TRADE). Ті самі правила, що в Risk Manager (shadow-перевірений код)."""
     op = open_signals(db, now)
@@ -232,8 +240,7 @@ def portfolio_gate(db: str, sym: str, direction: str, lvl_key: Optional[str], no
         return "по цій монеті вже є живий сигнал Office2"
     if lvl_key and any(o["lvl_key"] == lvl_key for o in op):
         return "та сама ідея/рівень уже в роботі"
-    if day_stops(db, now) >= int(cfg.daily_loss_r):
-        return f"денний ліміт: {int(cfg.daily_loss_r)} стопи за добу UTC"
+    # Рішення власниці 14.10.2026: після 3 SL за добу UTC READY більше НЕ блокуються — лише попередження в картці (day_risk_warning) і повна статистика.
     from office_bridge import _fetchone
 
     t0 = now - (now % 86400)
@@ -645,6 +652,12 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                         res["no_trade"] += 1
                         continue
                     th = dict(th, conflict=cf)
+            try:
+                _drw = day_risk_warning(db, now)
+            except Exception:  # noqa: BLE001
+                _drw = None
+            if _drw:
+                th = dict(th, day_risk=_drw)
             emit_ready(db, sym, th, ctx, st, mc, rel, now, old_lev, flow_fetch, m5_fetch)
             save_scenario(db, sym, th, "READY", now, prev["created_ts"], prev["state"], th.get("reason", ""))
             res["ready"] += 1

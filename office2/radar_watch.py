@@ -786,12 +786,12 @@ def summary(db: str, now: Optional[float] = None, card_id: Optional[str] = None)
             from office2 import paper as P
 
             g = P.gate_status(db, t)
-            wr["gate"] = {"locked": g.get("locked"), "stops_today": len(g.get("stops") or []), "lock_ends_ts": g.get("lock_ends_ts"), "candidates_blocked_today": g.get("candidates_blocked_today")}
+            wr["gate"] = {"locked": g.get("locked"), "elevated_risk": g.get("elevated_risk"), "stops_today": len(g.get("stops") or []), "lock_ends_ts": g.get("lock_ends_ts"), "candidates_blocked_today": g.get("candidates_blocked_today")}
         except Exception as exc:  # noqa: BLE001
             wr["gate_error"] = f"{type(exc).__name__}: {str(exc)[:80]}"
         g = wr.get("gate") or {}
-        wr["message"] = (f"Сьогодні нових дозволених входів немає: спрацював денний ліміт ризику (до {RT.kyiv(g.get('lock_ends_ts'))}). Навчальні сигнали без реальних грошей продовжують надходити."
-                         if g.get("locked") else "Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Навчальні сигнали без реальних грошей надходять далі.")
+        wr["message"] = (f"Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Увага: сьогодні вже {g.get('stops_today')} SL — підвищений денний ризик (сигнали не блоковані). Навчальні сигнали без реальних грошей надходять далі."
+                         if g.get("elevated_risk") else "Нових дозволених входів зараз немає: умови підтвердження ще не зібралися. Навчальні сигнали без реальних грошей надходять далі.")
         try:
             wr["scanner"] = scanner_diag(db, t)
         except Exception as exc:  # noqa: BLE001

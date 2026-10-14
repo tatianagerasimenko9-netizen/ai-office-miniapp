@@ -178,7 +178,9 @@ def test_portfolio_gate():
         assert EN.portfolio_gate(db, "BTCUSDT", "LONG", None, now) is None                                      # BTC — окремий кластер
         for i in range(3):                                                         # 3 стопи за добу → стоп
             OB.log_event(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": now - 50 - i}, f"O2|x{i}|1")
-        assert "денний ліміт" in (EN.portfolio_gate(db, "BTCUSDT", "LONG", None, now) or "")
+        assert EN.portfolio_gate(db, "BTCUSDT", "LONG", None, now) is None                                    # з 14.10.2026 3 SL НЕ блокують
+        w = EN.day_risk_warning(db, now)
+        assert w and w["stops_today"] == 3 and w["blocking"] is False and "Підвищений денний ризик" in w["text"]
 
 
 class _Sent:
@@ -736,6 +738,29 @@ def test_miniapp_opens_office2_scenario_ids():
         assert r["ok"] and r["brain"] == "o2" and r["scenario"]["scenario_id"] == real and r["o2"]["frozen"]["thesis"]["entry"] and r["o2"]["levels"]
 
 
+def test_three_stops_warn_in_card_but_do_not_block():
+    """Рішення власниці 14.10.2026: після 3 SL за добу UTC READY не блокуються; є попередження в картці, облік SL повний."""
+    import office_bridge as OB
+    from office2 import delivery as DL
+
+    now = 1_790_100_000.0
+    with tempfile.TemporaryDirectory() as td:
+        db = _db(td)
+        assert EN.day_risk_warning(db, now) is None
+        for i in range(2):
+            OB.log_event(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": now - 50 - i}, f"O2|y{i}|1")
+        assert EN.day_risk_warning(db, now) is None
+        OB.log_event(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": now - 10}, "O2|y9|1")
+        w = EN.day_risk_warning(db, now)
+        assert w and w["stops_today"] == 3 and w["blocking"] is False
+        assert EN.portfolio_gate(db, "BTCUSDT", "LONG", None, now) is None
+        assert EN.day_stops(db, now) == 3                                       # облік SL незмінний
+        snap = _sol_snap()
+        assert "Підвищений денний ризик" not in DL.build_caption(snap)
+        snap["thesis"] = dict(snap["thesis"], day_risk=w)
+        assert "⚠️ Підвищений денний ризик: 3 SL" in DL.build_caption(snap)
+
+
 def main() -> int:
     for n, f in list(globals().items()):
         if n.startswith("test_"):
@@ -747,3 +772,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

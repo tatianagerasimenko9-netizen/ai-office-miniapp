@@ -116,6 +116,9 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     decided = float(snap.get("decided_ts") or 0.0)
     if now and decided and now - decided >= LATE_NOTE_SEC:
         L.append(f"⏱ Рішення: {rc.kyiv_stamp(decided)}; затримка {int((now - decided) // 60)} хв")
+    dr = th.get("day_risk")
+    if isinstance(dr, dict) and dr.get("text"):
+        L.append(f"⚠️ {dr['text']}")
     L.append(f"⏳ До {rc.kyiv_stamp(snap['valid_until_ts'])} (Київ)")
     L.append("📊 Пояснення та перевірки — у Mini App ↓")
     return "\n".join(L)

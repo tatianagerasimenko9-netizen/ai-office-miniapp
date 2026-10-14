@@ -239,7 +239,7 @@ for i, (lvl, off) in enumerate((("ENTRY", 0), ("TP1", 100), ("SL", 200), ("SL", 
 _le(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": T0 + 500}, "O2|g2")
 _le(db, "SCENARIO_MILESTONE", {"level": "SL", "sent_ts": T0 + 600}, "O2|g3")
 g = P.gate_status(db, NOWG)
-check("ліміт: 5 стопів за добу, locked, блок почався з 3-го (T0+400)", len(g["stops"]) == 5 and g["locked"] and abs(g["locked_since_ts"] - (T0 + 400)) < 1, str(g)[:300])
+check("ліміт: 5 стопів за добу, НЕ locked (з 14.10.2026 лише попередження), підвищений ризик з 3-го (T0+400)", len(g["stops"]) == 5 and not g["locked"] and g["elevated_risk"] and abs(g["elevated_since_ts"] - (T0 + 400)) < 1, str(g)[:300])
 check("ліміт: стоп після TP1 позначено, кінець блоку — наступна доба 00:00 UTC", any(x["after_tp1"] for x in g["stops"]) and g["lock_ends_ts"] % 86400 == 0)
 check("ліміт: shadow_today та лічильники відсічених", "shadow_today" in g and "candidates_blocked_today" in g)
 
