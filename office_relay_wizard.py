@@ -7666,43 +7666,20 @@ EV позитивне: {prob.get('ev_positive', '')}
 
                 _th = _run_o2 if scope == "o2" else asyncio.to_thread   # Office2 — власний пул потоків (не чекає на чужі довгі запити)
                 _legacy_quiet = scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0"   # старий Лев вимкнено для користувача: його плани доводимо до кінця лише для статистики, без Telegram
-                for m in await _th(trk.pending_milestones, db_path, None, None, scope):
-                    from office2.milestone_policy import DB_ONLY, RETRY, decide as _decide_ms
-                    import office_ready_seq as _rseq
+                import office_ready_seq as _rseq
+                from office2.milestone_policy import dispatch as _dispatch_ms
 
-                    _nres: Any = None
-                    _nerr: Any = None
-                    if not (m.get("silent") or _legacy_quiet):
-                        try:
-                            _nres = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # у потоці: не блокуємо event loop
-                        except Exception as _exn:  # noqa: BLE001
-                            _nerr = _exn
-
-                    def _num_lookup(_sid: str) -> Any:
-                        if _nerr is not None:
-                            raise _nerr
-                        return _nres
-
-                    _act, _no, _why = _decide_ms(scope, m, _num_lookup, _legacy_quiet)
-                    if _act == RETRY:
-                        print(f"[milestone][WARN] {m['symbol']} {m['level']}: {_why} — повторю в наступному циклі")
-                        continue
-                    if _act == DB_ONLY:
-                        await _th(trk.record_milestone, db_path, m, None)
-                        print(f"[milestone] {m['symbol']} {m['level']} (лише БД: {_why})")
-                        continue
-                    mid = await send_proactive(
+                async def _ms_send(m: Dict[str, Any], no: Any) -> Any:
+                    return await send_proactive(
                         EVENT_TRADE_UPDATE,
-                        _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price"), number=_no),
+                        _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price"), number=no),
                         reply_to_message_id=m.get("confirm_msg_id"), symbol=str(m["symbol"]), direction=str(m["direction"]),
                         kind="SCENARIO_EVENT", intent="SCENARIO_EVENT", canonical_id=f"{m['scenario_id']}|{m['confirmed_ts']}|{m['level']}",
                         scenario_event=str(m["level"]), link_scenario_id=str(m["scenario_id"]),
                     )
-                    if mid:
-                        await _th(trk.record_milestone, db_path, m, mid)
-                        print(f"[milestone] sent {m['symbol']} {m['level']} id={mid}")
-                    else:
-                        print(f"[milestone] not delivered {m['symbol']} {m['level']} — повторю")
+
+                _pend = await _th(trk.pending_milestones, db_path, None, None, scope)
+                await _dispatch_ms(_pend, scope, lambda sid: _th(_rseq.number_of, db_path, sid), _ms_send, lambda m, mid: _th(trk.record_milestone, db_path, m, mid), _legacy_quiet)
             except Exception as exc_ms:
                 print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
             await asyncio.sleep(300 if (scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0") else pause)   # старі плани — лише статистика: рідший огляд (менше Binance REST)
