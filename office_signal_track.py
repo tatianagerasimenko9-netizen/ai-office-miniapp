@@ -218,6 +218,7 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
     horizon = now - HOT_WINDOW_SEC
     done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events(db, EV_RESULT, horizon)}
     written: List[Dict[str, Any]] = []
+    cache: Dict[str, Any] = {}      # символ → свічки 15m за ЦЕЙ прохід: раніше кожен план (у т.ч. відхилені, ~1700 за 14 діб) робив власний REST-запит до Binance, хоча символів ~150
     for ev in _events(db, EV_PLAN, horizon):
         p = ev["p"]
         key = (p.get("scenario_id"), p.get("confirmed_ts"))
@@ -225,10 +226,13 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
             continue
         if _skip_same_bar("tick", key, now):
             continue   # нова 15m-свічка ще не закрилась: результат не може змінитись
-        try:
-            candles = fetch(p["symbol"], "15m", 300)
-        except Exception:  # noqa: BLE001
-            continue
+        sym = str(p.get("symbol") or "")
+        if sym not in cache:
+            try:
+                cache[sym] = fetch(sym, "15m", 300)
+            except Exception:  # noqa: BLE001
+                cache[sym] = None
+        candles = cache[sym]
         if not isinstance(candles, list) or not candles:
             continue
         # A spot/alternate-venue fallback has a different price basis. Never
@@ -497,6 +501,7 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     horizon = now - HOT_WINDOW_SEC
     seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon)}
     out: List[Dict[str, Any]] = []
+    fetched: Dict[Any, Any] = {}      # (символ, tf, ліміт) → свічки за ЦЕЙ прохід
     for ev in _events(db, EV_PLAN, horizon):
         p = ev["p"]
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
@@ -528,18 +533,32 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             tf, tfs = "5m", 300.0
             lim = min(1000, int(age // 300) + 20)
         candles, via, err = None, "binance_futures", ""
-        try:
-            with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
-                candles = fetch(p["symbol"], tf, lim)
-        except Exception as exc:  # noqa: BLE001
-            err = f"{type(exc).__name__}: {exc}"
+        ck = (p["symbol"], tf, lim)
+        if ck in fetched:
+            candles = fetched[ck]
+        else:
+            try:
+                with _prio():   # життя READY не чекає на власну паузу ваги, яку з'їли скани
+                    candles = fetch(p["symbol"], tf, lim)
+            except Exception as exc:  # noqa: BLE001
+                err = f"{type(exc).__name__}: {exc}"
+            if candles:
+                fetched[ck] = candles
         if not isinstance(candles, list) or not candles:
             # IP Worker під обмеженням Binance (429/418) → ті самі свічки Binance Futures через Mini App (інший сервіс/IP). Підробки немає: беремо лише відповідь із source=binance_futures.
             candles = _mirror_candles(p["symbol"], tf, lim) if use_mirror else None
             if candles:
                 via = "binance_futures_via_miniapp"
         if not isinstance(candles, list) or not candles:
-            heartbeat(db, sid, now, tf=tf, error=err or "порожня відповідь свічок")
+            ws_info = ""
+            try:
+                import office_ws_ticker as _WT2
+
+                s_ = _WT2.watched_summary(str(p.get("symbol") or ""))
+                ws_info = (f" · запасний WS-облік: {s_['bars']} хв, ціна {s_['lo']}–{s_['hi']}" if s_.get("bars") else " · запасний WS-облік: даних ще немає")
+            except Exception:  # noqa: BLE001
+                pass
+            heartbeat(db, sid, now, tf=tf, error=((err or "порожня відповідь свічок")[:110] + ws_info)[:200])
             out.extend(_ws_fallback(p, seen, now))
             continue
         # Reject the whole series if any candle is from a different venue.
@@ -636,6 +655,7 @@ def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     now = time.time() if now_ts is None else now_ts
     done = {e["p"].get("scenario_id") for e in _events(db, EV_FALSE)}
     out: List[Dict[str, Any]] = []
+    cache: Dict[str, Any] = {}      # один запит на символ за прохід
     for ev in _events(db, EV_EXPIRY):
         p = ev["p"]
         if p.get("scenario_id") in done or now < float(p["expired_ts"]) + 3600:
@@ -645,10 +665,13 @@ def check_false_expiry(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         lo, hi = _f(p.get("zone_lo")), _f(p.get("zone_hi"))
         if lo is None or hi is None or _f(p.get("sl")) is None or _f(p.get("tp1")) is None:
             continue
-        try:
-            candles = fetch(p["symbol"], "15m", 300)
-        except Exception:  # noqa: BLE001
-            continue
+        sym = str(p.get("symbol") or "")
+        if sym not in cache:
+            try:
+                cache[sym] = fetch(sym, "15m", 300)
+            except Exception:  # noqa: BLE001
+                cache[sym] = None
+        candles = cache[sym]
         if not isinstance(candles, list) or not candles:
             continue
         plan = {"direction": p["direction"], "entry": (lo + hi) / 2.0, "sl": p["sl"], "tp1": p["tp1"], "confirmed_ts": float(p["expired_ts"]),

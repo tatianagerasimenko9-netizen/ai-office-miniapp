@@ -105,6 +105,14 @@ def watched_bars(symbol: str, since_ts: float = 0.0) -> list:
     return out
 
 
+def watched_summary(symbol: str) -> dict:
+    """Що запасний облік реально бачив: кількість повних хвилин, мінімум/максимум ціни потоку, перша й остання хвилина (для діагностики супроводу)."""
+    bars = watched_bars(symbol, 0.0)
+    if not bars:
+        return {"bars": 0}
+    return {"bars": len(bars), "lo": min(b["low"] for b in bars), "hi": max(b["high"] for b in bars), "first": bars[0]["ts"], "last": bars[-1]["ts"]}
+
+
 def get(symbol: str, max_age: float = MAX_AGE_SEC) -> Optional[Dict[str, float]]:
     """Те саме, що віддавав REST ticker/24hr (lastPrice, highPrice, lowPrice, quoteVolume, priceChangePercent), або None."""
     if not enabled():
