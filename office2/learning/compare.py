@@ -26,6 +26,19 @@ def _mean(x):
     return sum(x) / len(x) if x else None
 
 
+def _boot_means(x, reps: int, rnd, max_cells: int = 2_000_000):
+    """Середні reps бутстреп-вибірок, порціями рядків: пам'ять обмежена ≈ max_cells×16 Б (раніше одна матриця reps×n: ≈2000×n×16 Б — сотні МБ на 512-МБ worker; production: learning Δ+96…131 МБ)."""
+    import numpy as np
+
+    n = len(x)
+    rows = max(1, max_cells // n)
+    out = np.empty(reps, dtype=float)
+    for i in range(0, reps, rows):
+        k = min(rows, reps - i)
+        out[i:i + k] = x[rnd.integers(0, n, size=(k, n))].mean(axis=1)
+    return out
+
+
 def boot_diff(a: List[float], b: List[float], reps: int = BOOT, seed: int = SEED) -> Optional[List[float]]:
     if len(a) < 2 or len(b) < 2:
         return None
@@ -33,8 +46,8 @@ def boot_diff(a: List[float], b: List[float], reps: int = BOOT, seed: int = SEED
 
     rnd = np.random.default_rng(seed)
     xa, xb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-    ma = xa[rnd.integers(0, len(xa), size=(reps, len(xa)))].mean(axis=1)
-    mb = xb[rnd.integers(0, len(xb), size=(reps, len(xb)))].mean(axis=1)
+    ma = _boot_means(xa, reps, rnd)
+    mb = _boot_means(xb, reps, rnd)
     d = np.sort(ma - mb)
     return [round(float(d[int(0.025 * reps)]), 3), round(float(d[int(0.975 * reps) - 1]), 3)]
 
