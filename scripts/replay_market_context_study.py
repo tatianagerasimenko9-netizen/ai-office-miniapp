@@ -24,6 +24,8 @@ RULES = {
     "R3_btc_against": lambda r: r["btc"] == "AGAINST",
     "R4_beta_only(btc_with & rs_not_with)": lambda r: r["btc"] == "WITH" and r["rs"] != "WITH",
     "R5_rs_against": lambda r: r["rs"] == "AGAINST",
+    "R6_retest_not_fresh(повторний тест прийнятого рівня / LATE_SWEEP)": lambda r: r["late"],
+    "R7_risk_gt_3_atr15": lambda r: r["risk_atr"] == "≥3.0",
 }
 
 
@@ -43,7 +45,8 @@ def load(root):
                     continue
                 f = r.get("f") or {}
                 rows.append({"per": per, "sym": r.get("symbol") or j.get("symbol"), "ts": float(r["ts_bar"]), "dir": r["dir"], "sess": f.get("session") or r.get("session") or "NA",
-                             "btc": f.get("btc_1h", "NA"), "rs": f.get("rs_1h", "NA"), "out": v0.get("outcome"), "r": float(v0["r_net"])})
+                             "btc": f.get("btc_1h", "NA"), "rs": f.get("rs_1h", "NA"), "evc": f.get("ev_class", "NA"), "lvc": f.get("lvl_class", "NA"), "late": bool(f.get("retest_not_fresh")),
+                             "risk_atr": f.get("risk_atr", "NA"), "tp1_r": f.get("tp1_r", "NA"), "out": v0.get("outcome"), "r": float(v0["r_net"])})
     return rows
 
 
@@ -154,6 +157,9 @@ def main():
     out["rs"] = table(rows, lambda r: r["rs"], "3. Відносна сила монети проти BTC за 1 год відносно напряму угоди")
     out["btc_x_rs"] = table(rows, lambda r: f"btc={r['btc']}|rs={r['rs']}", "4. BTC × відносна сила")
     out["conc"] = table(rows, lambda r: min(r["conc_prior"], 3), f"5. Скільки інших монет вже мали READY того ж напряму за попередні {WINDOW_H:g} год (3 = 3 і більше)")
+    out["event_class"] = table(rows, lambda r: r["evc"], "6. Клас події (SWEEP / LATE_SWEEP / …)")
+    out["level_class"] = table(rows, lambda r: r["lvc"], "7. Клас рівня події (сесійний / свінг / добовий …)")
+    out["risk_atr"] = table(rows, lambda r: r["risk_atr"], "8. Ризик до SL у ATR(M15)")
     out["rules"] = rules(rows)
     if len(sys.argv) > 2:
         Path(sys.argv[2]).write_text(json.dumps(out, ensure_ascii=False, indent=1))

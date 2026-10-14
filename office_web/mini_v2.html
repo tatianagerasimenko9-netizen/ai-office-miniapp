@@ -1131,7 +1131,7 @@ async function openO2(d, T0){
   const mv=ch.price_now!=null?`від входу ${o2f(ch.move_r)} R (${o2f(ch.move_pct)}%) · до SL ${o2f(ch.sl_distance_r)} R`:'';
   const ex=d.execution;
   const tk=d.tracking, trk=(!fin&&tk)?(tk.known
-      ?`<div class="mut" style="margin-top:4px;${tk.stale?'color:#F36B78;font-weight:600':''}">${tk.stale?'⚠ Супровід застарів: ':'Супровід: '}ціну перевірено ${o2hm(tk.checked_ts)} Київ (${Math.round((tk.age_sec||0)/60)} хв тому)${tk.tf?` · ${esc(String(tk.tf).toUpperCase())}`:''}${tk.last_bar_ts?` · остання свічка ${o2hm(tk.last_bar_ts)}`:''}${tk.fails?` · помилок підряд: ${tk.fails}`:''}${tk.stale?'. Не покладайтеся на цей стан як на актуальний.':''}</div>`
+      ?`<div class="mut" style="margin-top:4px;${tk.stale?'color:#F36B78;font-weight:600':''}">${tk.stale?'⚠ Супровід застарів: ':'Супровід: '}ціну перевірено ${o2hm(tk.checked_ts)} Київ (${Math.round((tk.age_sec||0)/60)} хв тому)${tk.tf?` · ${esc(String(tk.tf).toUpperCase())}`:''}${tk.last_bar_ts?` · остання свічка ${o2hm(tk.last_bar_ts)}`:''}${tk.fails?` · помилок підряд: ${tk.fails}`:''}${tk.last_error?` · ${esc(tk.last_error)}`:''}${tk.stale?'. Не покладайтеся на цей стан як на актуальний.':''}</div>`
       :`<div class="mut" style="margin-top:4px;color:#F36B78;font-weight:600">⚠ Супровід: перевірок ще немає — стан сценарію не підтверджений.</div>`):'';
   const FIN_UA={TP3:'TP3 · ЗАВЕРШЕНО',SL:'СТОП · ЗАВЕРШЕНО','TP1→SL':'TP1, потім СТОП · ЗАВЕРШЕНО','TP2→SL':'TP2, потім СТОП · ЗАВЕРШЕНО',EXPIRED:'СТРОК ВИЙШОВ · ЗАВЕРШЕНО'};
   const stLine=fin?(FIN_UA[mr.state]||'ЗАВЕРШЕНО'):(st.short||'У РУСІ');

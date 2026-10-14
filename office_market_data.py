@@ -124,9 +124,34 @@ def candle_cache_stats() -> Dict[str, Any]:
         return {"keys": len(_CANDLE_CACHE), "rows": rows, "approx_mb": round(rows * 0.5 / 1024.0, 1), **_CANDLE_CACHE_STATS}
 
 
+_EGRESS = {"ip": None, "at": 0.0, "busy": False}
+
+
+def egress_ip() -> Any:
+    """Вихідна IP цього сервісу (для порівняння з IP у повідомленнях Binance -1003). Визначається у фоні раз на годину; None — ще не відомо."""
+    now = time.time()
+    if (now - _EGRESS["at"] > 3600.0) and not _EGRESS["busy"]:
+        _EGRESS["busy"] = True
+
+        def _go() -> None:
+            try:
+                from urllib.request import urlopen as _uo
+
+                with _uo("https://api.ipify.org", timeout=5) as r:
+                    _EGRESS["ip"] = r.read().decode("ascii", "ignore").strip()[:45]
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                _EGRESS["at"] = time.time()
+                _EGRESS["busy"] = False
+
+        threading.Thread(target=_go, daemon=True, name="egress-ip").start()
+    return _EGRESS["ip"]
+
+
 def source_health() -> Dict[str, Any]:
     """Лічильники джерела (для перевірки: скільки 429, скільки віддано зі старого кешу)."""
-    return {**_HEALTH, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
+    return {**_HEALTH, "egress_ip": egress_ip(), "ban_streak": _BAN_STREAK, "need_probe": _NEED_PROBE, "backoff_left_sec": max(0.0, round(max(_BACKOFF_UNTIL, _SOFT_UNTIL) - time.time(), 1)), "used_weight_1m": _WEIGHT_LAST.get("used"),
             "ws": _ws.stats() if _ws.enabled() else "off", "ws_ticker": _ws_ticker.stats() if _ws_ticker.enabled() else "off", "klines_callers": callers_report(), "direct_fapi": dict(_DIRECT), "peak_minutes": peak_minutes()}
 
 
@@ -140,14 +165,14 @@ def hard_backoff_left() -> float:
     return max(0.0, _BACKOFF_UNTIL - time.time())
 
 
-def _log_limit(code: int, ra: float) -> None:
+def _log_limit(code: int, ra: float, body: str = "") -> None:
     """Один рядок на хвилину: який саме код (429/418) і який Retry-After повернув Binance — щоб бачити фактичну тривалість обмеження."""
     global _LIMIT_LOG_AT
     now = time.time()
     if now - _LIMIT_LOG_AT >= 60.0:
         _LIMIT_LOG_AT = now
         try:
-            print(f"[binance] HTTP {code}, Retry-After={ra:.0f} с (пауза до {min(max(ra, 5.0), _RETRY_AFTER_CAP):.0f} с)", flush=True)
+            print(f"[binance] HTTP {code}, Retry-After={ra:.0f} с, серія={_BAN_STREAK}, тіло: {body}", flush=True)
         except Exception:  # noqa: BLE001
             pass
 
@@ -158,7 +183,7 @@ def note_rate_limited(retry_after: Any = None) -> None:
         ra = float(retry_after) if retry_after is not None else 30.0
     except (TypeError, ValueError):
         ra = 30.0
-    _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + min(max(ra, 5.0), _RETRY_AFTER_CAP))
+    _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + _escalate(ra))
     _HEALTH["rate_limited"] += 1
     _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -348,7 +373,40 @@ def _count_rest(url: str, params: Dict[str, Any]) -> None:
         pass
 
 
+_NEED_PROBE = False                      # після 429/418: першим по закінченні паузи іде ОДИН запит, решта чекає його результату (раніше всі потоки одразу після паузи знову били в Binance → нова пауза)
+_PROBE_LOCK = threading.Lock()
+_BAN_STREAK = 0
+_LAST_BAN_END = 0.0
+
+
+def _escalate(ra: float) -> float:
+    """Повторне обмеження менш ніж за 10 хв після попередньої паузи → подвоюємо очікування (60 с, 120 с, 240 с … до стелі), а не повторюємо запит через ту саму паузу."""
+    global _BAN_STREAK, _LAST_BAN_END, _NEED_PROBE
+    now = time.time()
+    _BAN_STREAK = _BAN_STREAK + 1 if (now - _LAST_BAN_END) < 600.0 else 0
+    _LAST_BAN_END = now
+    _NEED_PROBE = True
+    return min(max(ra, 5.0, 60.0 * (2 ** min(_BAN_STREAK, 6)) if _BAN_STREAK else ra), _RETRY_AFTER_CAP)
+
+
 def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
+    global _NEED_PROBE
+    probing = False
+    if "fapi.binance.com" in url and _NEED_PROBE and time.time() >= _BACKOFF_UNTIL:
+        if not _PROBE_LOCK.acquire(blocking=False):
+            raise RateLimited(2.0)
+        probing = True
+    try:
+        out = _http_get_json_inner(url, params, scope)
+        if probing:
+            _NEED_PROBE = False
+        return out
+    finally:
+        if probing:
+            _PROBE_LOCK.release()
+
+
+def _http_get_json_inner(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
     global _BACKOFF_UNTIL
     now = time.time()
     if "fapi.binance.com" in url and now < _BACKOFF_UNTIL:
@@ -388,8 +446,12 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
                 ra = float(exc.headers.get("Retry-After") or 30)
             except (TypeError, ValueError):
                 ra = 30.0
-            _log_limit(exc.code, ra)
-            ra = min(max(ra, 5.0), _RETRY_AFTER_CAP)
+            try:
+                body = exc.read().decode("utf-8", errors="replace")[:200]
+            except Exception:  # noqa: BLE001
+                body = ""
+            _log_limit(exc.code, ra, body)
+            ra = _escalate(ra)
             _BACKOFF_UNTIL = time.time() + ra
             _HEALTH["rate_limited"] += 1
             _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()

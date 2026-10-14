@@ -132,7 +132,15 @@ def per_event(events: List[Dict[str, Any]], m15) -> List[Dict[str, Any]]:
             from office2 import tactic as TC
 
             tac = TC.all_variants(m15, i, ev, atr)
-        out.append({"tactics": tac, "bucket": (__import__("office2.tactic", fromlist=["bucket"]).bucket(ev) if tac else None), "symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
+        qual = None
+        if ev["source"] == "BRAIN":
+            try:
+                from office2 import entry_quality as EQ
+
+                qual = EQ.analyze(m15, i, ev, a)
+            except Exception as exc:  # noqa: BLE001
+                qual = {"error": f"{type(exc).__name__}: {str(exc)[:80]}"}
+        out.append({"q": qual, "tactics": tac, "bucket": (__import__("office2.tactic", fromlist=["bucket"]).bucket(ev) if tac else None), "symbol": ev.get("symbol"), "source": ev["source"], "dir": ev["dir"], "ts_bar": ev["ts_bar"], "model": ev.get("model"),
                     "late": bool(ev.get("late")), "f": ev.get("f"), "td": ev.get("td"), "mt": ev.get("mt"), "atr_pct": round(a / max(ev["entry"], 1e-9) * 100, 3), "risk_pct": ev["risk_pct"], "r_tp1": ev["r_tp1"],
                     **SS.session_of(float(ev["ts_bar"])), "variants": v})
     return out

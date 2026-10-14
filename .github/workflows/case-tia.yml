@@ -1,0 +1,45 @@
+name: case-study TIA LONG (read-only)
+# Розбір окремого READY за свічками Binance Futures через публічний GET Mini App. Нічого не змінює у production.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/case-tia.yml', 'scripts/case_ready_study.py']
+permissions:
+  contents: read
+jobs:
+  case:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch candles (data.binance.vision, Binance USDT-M Futures архів)
+        run: |
+          mkdir -p data raw
+          python3 - <<'PY'
+          import csv, io, json, urllib.request, zipfile
+          SYM = "TIAUSDT"
+          def day(tf, d):
+              u = f"https://data.binance.vision/data/futures/um/daily/klines/{SYM}/{tf}/{SYM}-{tf}-{d}.zip"
+              try:
+                  z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(u, timeout=60).read()))
+              except Exception as e:
+                  print("немає", u, e); return []
+              rows = []
+              for r in csv.reader(io.TextIOWrapper(z.open(z.namelist()[0]))):
+                  if not r or not r[0].isdigit(): continue
+                  rows.append({"time": int(r[0]) // 1000, "open": r[1], "high": r[2], "low": r[3], "close": r[4]})
+              return rows
+          days = ["2026-10-%02d" % d for d in range(6, 14)]
+          for name, tf, ds in (("m1", "1m", days[-3:]), ("m15", "15m", days), ("h1", "1h", days), ("h4", "4h", days)):
+              bars = []
+              for d in ds: bars += day(tf, d)
+              json.dump({"source": "binance_futures_archive", "candles": bars}, open(f"data/{name}.json", "w"))
+              print(name, len(bars))
+          json.dump({"symbol": SYM, "dir": "LONG", "ready_ts": 1791891900, "entry": 0.5942, "zone": [0.58322, 0.59376], "extreme": 0.5702, "sl": 0.56865, "tp1": 0.6254, "level": 0.5762, "leg": [0.5702, 0.6322]}, open("data/spec.json", "w"))
+          PY
+      - name: Case study
+        run: python3 scripts/case_ready_study.py data | tee "$GITHUB_STEP_SUMMARY"
