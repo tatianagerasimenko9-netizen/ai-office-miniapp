@@ -7667,23 +7667,29 @@ EV позитивне: {prob.get('ev_positive', '')}
                 _th = _run_o2 if scope == "o2" else asyncio.to_thread   # Office2 — власний пул потоків (не чекає на чужі довгі запити)
                 _legacy_quiet = scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0"   # старий Лев вимкнено для користувача: його плани доводимо до кінця лише для статистики, без Telegram
                 for m in await _th(trk.pending_milestones, db_path, None, None, scope):
-                    if m.get("silent") or _legacy_quiet:   # ENTRY / EXPIRED (і всі події старого Лева після cutover): життя сценарію для статистики, без Telegram
-                        await _th(trk.record_milestone, db_path, m, None)
-                        print(f"[milestone] {m['symbol']} {m['level']} (тихо, лише БД)")
-                        continue
-                    try:
-                        import office_ready_seq as _rseq
+                    from office2.milestone_policy import DB_ONLY, RETRY, decide as _decide_ms
+                    import office_ready_seq as _rseq
 
-                        _no = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # той самий №READY, що в початковому повідомленні
-                    except Exception as _exn:  # noqa: BLE001
-                        # збій читання номера ≠ «без номера»: подію не губимо, повторимо в наступному циклі
-                        print(f"[milestone][WARN] number_of failed, retry next cycle: {type(_exn).__name__}")
+                    _nres: Any = None
+                    _nerr: Any = None
+                    if not (m.get("silent") or _legacy_quiet):
+                        try:
+                            _nres = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # у потоці: не блокуємо event loop
+                        except Exception as _exn:  # noqa: BLE001
+                            _nerr = _exn
+
+                    def _num_lookup(_sid: str) -> Any:
+                        if _nerr is not None:
+                            raise _nerr
+                        return _nres
+
+                    _act, _no, _why = _decide_ms(scope, m, _num_lookup, _legacy_quiet)
+                    if _act == RETRY:
+                        print(f"[milestone][WARN] {m['symbol']} {m['level']}: {_why} — повторю в наступному циклі")
                         continue
-                    # Only delivered, numbered Office2 READY plans are user-facing.
-                    # Older beta/paper scenarios must not emit TP/SL into the one-office chat.
-                    if scope != "o2" or _no is None:
+                    if _act == DB_ONLY:
                         await _th(trk.record_milestone, db_path, m, None)
-                        print(f"[milestone] suppressed unnumbered/legacy {m['symbol']} {m['level']} (db-only)")
+                        print(f"[milestone] {m['symbol']} {m['level']} (лише БД: {_why})")
                         continue
                     mid = await send_proactive(
                         EVENT_TRADE_UPDATE,
