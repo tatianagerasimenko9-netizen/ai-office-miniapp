@@ -7703,9 +7703,19 @@ EV позитивне: {prob.get('ev_positive', '')}
         from office_market_data import fetch_candles as _o2_fetch
 
         await asyncio.sleep(20)
+        _delivery_last_state = None
+        _delivery_last_heartbeat = 0.0
         while True:
             try:
-                if _o2d.delivery_enabled():
+                _delivery_enabled = _o2d.delivery_enabled()
+                _delivery_now = time.time()
+                if (_delivery_enabled != _delivery_last_state
+                        or _delivery_now - _delivery_last_heartbeat >= 300):
+                    print(f"[office2][delivery-health] enabled={int(_delivery_enabled)} "
+                          f"poll_interval_s=2 mode=signals_only", flush=True)
+                    _delivery_last_state = _delivery_enabled
+                    _delivery_last_heartbeat = _delivery_now
+                if _delivery_enabled:
                     _t_o2 = asyncio.ensure_future(_o2d.deliver_pending(db_path, send_proactive, _o2_fetch, _o2card.render, EVENT_TRADE_UPDATE))   # не чекаємо кінця: повільна відправка не блокує наступний READY
 
                     def _o2_done(f: "asyncio.Future") -> None:
