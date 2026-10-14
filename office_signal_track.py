@@ -460,8 +460,8 @@ def _ws_fallback(p: Dict[str, Any], seen: set, now: float) -> List[Dict[str, Any
 
 def _mirror_candles(symbol: str, tf: str, limit: int) -> Optional[List[Dict[str, Any]]]:
     """Запасне джерело свічок для супроводу: публічний GET Mini App `/api/v2/candles` (окремий сервіс). Приймається лише source=binance_futures і data_status=DATA_OK.
-    Вимкнути: OFFICE_TRACK_MIRROR=0."""
-    if os.getenv("OFFICE_TRACK_MIRROR", "1").strip() == "0":
+    УВАГА: Mini App і Worker, імовірно, ділять вихідну IP (регіон Render), тож під час бану IP дзеркало може теж мовчати — НЕ ДОВЕДЕНО. Тому за замовчуванням ВИМКНЕНО; увімкнути: OFFICE_TRACK_MIRROR=1."""
+    if os.getenv("OFFICE_TRACK_MIRROR", "0").strip() != "1":
         return None
     try:
         import urllib.request

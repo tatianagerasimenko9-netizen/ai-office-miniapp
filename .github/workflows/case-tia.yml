@@ -16,38 +16,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Fetch candles (Mini App /api/v2/candles)
+      - name: Fetch candles (data.binance.vision, Binance USDT-M Futures архів)
         run: |
-          mkdir -p data
+          mkdir -p data raw
           python3 - <<'PY'
-          import json, time, urllib.request
-          B = "https://ai-office-miniapp.onrender.com/api/v2/candles"
-          def get(sym, tf, limit, end=None):
-              u = f"{B}?symbol={sym}&tf={tf}&limit={limit}" + (f"&end={end}" if end else "")
-              for k in range(4):
-                  try:
-                      return json.load(urllib.request.urlopen(u, timeout=60))
-                  except Exception as e:
-                      print("retry", u, e); time.sleep(5)
-              raise SystemExit("candles unavailable")
+          import csv, io, json, urllib.request, zipfile
           SYM = "TIAUSDT"
-          T_FROM = 1791891900 - 6 * 3600
-          pages, end, src = [], None, set()
-          while True:
-              j = get(SYM, "M1", 1000, end)
-              src.add(j.get("source"))
-              bars = [b for b in j.get("candles", []) if b.get("time")]
-              if not bars: break
-              pages = bars + pages
-              end = min(b["time"] for b in bars)
-              if end <= T_FROM or len(pages) > 6000: break
-          seen, uniq = set(), []
-          for b in pages:
-              if b["time"] not in seen: seen.add(b["time"]); uniq.append(b)
-          json.dump({"source": ",".join(map(str, src)), "candles": uniq}, open("data/m1.json", "w"))
-          for name, tf, lim in (("m15", "M15", 500), ("h1", "H1", 300), ("h4", "H4", 200)):
-              j = get(SYM, tf, lim); json.dump(j, open(f"data/{name}.json", "w")); print(name, len(j.get("candles", [])), j.get("source"))
-          print("m1", len(uniq), src)
+          def day(tf, d):
+              u = f"https://data.binance.vision/data/futures/um/daily/klines/{SYM}/{tf}/{SYM}-{tf}-{d}.zip"
+              try:
+                  z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(u, timeout=60).read()))
+              except Exception as e:
+                  print("немає", u, e); return []
+              rows = []
+              for r in csv.reader(io.TextIOWrapper(z.open(z.namelist()[0]))):
+                  if not r or not r[0].isdigit(): continue
+                  rows.append({"time": int(r[0]) // 1000, "open": r[1], "high": r[2], "low": r[3], "close": r[4]})
+              return rows
+          days = ["2026-10-%02d" % d for d in range(6, 14)]
+          for name, tf, ds in (("m1", "1m", days[-3:]), ("m15", "15m", days), ("h1", "1h", days), ("h4", "4h", days)):
+              bars = []
+              for d in ds: bars += day(tf, d)
+              json.dump({"source": "binance_futures_archive", "candles": bars}, open(f"data/{name}.json", "w"))
+              print(name, len(bars))
           json.dump({"symbol": SYM, "dir": "LONG", "ready_ts": 1791891900, "entry": 0.5942, "zone": [0.58322, 0.59376], "extreme": 0.5702, "sl": 0.56865, "tp1": 0.6254, "level": 0.5762, "leg": [0.5702, 0.6322]}, open("data/spec.json", "w"))
           PY
       - name: Case study

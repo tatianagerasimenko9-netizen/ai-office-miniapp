@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 db = str(Path(tempfile.mkdtemp()) / "t.db")
 os.environ.update(OFFICE_DB_PATH=db, DATABASE_URL="", OFFICE_DEPO_USDT="1000", OFFICE_EXINFO_SEED="1")
+os.environ["OFFICE_TRACK_MIRROR"] = "1"
 import office_signal_track as T  # noqa: E402
 from office_bridge import init_office_db  # noqa: E402
 
