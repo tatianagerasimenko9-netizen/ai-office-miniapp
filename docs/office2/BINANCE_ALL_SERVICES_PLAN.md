@@ -6,7 +6,7 @@
 | Питання | Статус |
 |---|---|
 | Що IP 74.220.51.148 заблокована Binance (-1003) і це видно в scanner-bot | Доведено (логи) |
-| Що Worker AI Office має ту саму IP | **Не доведено.** Діагностика: `egress_ip` у `source_health()` після деплою #259 (Worker — рядок `[data] binance` у логах, Mini App — `/api/v2/market`). Сервіс scanner-bot/etalon: IP береться з тексту -1003 або з дашборду Render (Outbound IPs) — потрібна ваша довідка |
+| Що Worker AI Office має ту саму IP | **Спростовано.** Виміряно (лог `[data] binance`, 12:07 UTC): Worker `egress_ip=74.220.51.160`; scanner-bot отримує бан для **74.220.51.148**. Це різні адреси з одного пулу 74.220.51.x. IP etalon і Mini App ще не виміряні (додано `EGRESS_IP` у PR-и scanner-bot/etalon). Було: діагностика: `egress_ip` у `source_health()` після деплою #259 (Worker — рядок `[data] binance` у логах, Mini App — `/api/v2/market`). Сервіс scanner-bot/etalon: IP береться з тексту -1003 або з дашборду Render (Outbound IPs) — потрібна ваша довідка |
 | Що Binance рахує вагу спільно для сервісів | **Не доведено.** Ознака: `used_weight_1m=73` на першому запиті після рестарту Worker при 2 власних запитах |
 | Що scanner-bot блокує AI Office | **Не доведено.** Звинувачувати не можна, поки не підтверджено спільну IP |
 | Що Worker сам створював надмірне навантаження | **Доведено:** 1725 REST на 15m-бар (запит на кожен план) → виправлено в #259 |
