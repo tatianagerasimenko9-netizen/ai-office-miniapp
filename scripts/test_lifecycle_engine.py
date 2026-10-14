@@ -33,7 +33,8 @@ bars, _ = T.S.build()
 def run(mode, relation):
     os.environ["OFFICE2_LIFECYCLE"] = mode
     real = LC.relate
-    LC.relate = lambda db, sym, d, th, now: {"relation": relation, "parent": dict(PARENT, terminal=["SL"] if relation == "REENTRY" else [], live=relation != "REENTRY") if relation != "NEW" else None, "same_idea": False}
+    LC.relate = lambda db, sym, d, th, now: {"relation": relation, "parent": dict(PARENT, terminal=["SL"] if relation == "REENTRY" else [], live=relation != "REENTRY") if relation != "NEW" else None, "same_idea": relation == "DUPLICATE",
+                                             "difference": {"new_event": {"class": "FRESH_RAID", "kind": "LONDON_L"}, "new_invalidation": 101.5, "parent_invalidation": 102.0} if relation == "INDEPENDENT" else None}
     try:
         with tempfile.TemporaryDirectory() as td:
             db = T._db(td)
@@ -58,7 +59,18 @@ def run(mode, relation):
 r = run("merge", "CONTINUATION")
 check("ПРОДОВЖЕННЯ (merge): нового READY немає", r["sig"] == [], r["sig"])
 check("ПРОДОВЖЕННЯ: сценарій збережено як NO_TRADE з поясненням «продовження сценарію №3»", any(s == "NO_TRADE" and "продовження сценарію №3" in (why or "") for s, why in r["scen"]), r["scen"])
-check("ПРОДОВЖЕННЯ: створено рівно одну подію в гілці початкового №3 (тексту не вигадано)", len(r["ev"]) == 1 and r["ev"][0][1] == "CONTINUATION" and r["ev"][0][2] == 3 and "Не є новим входом" in json.loads(r["ev"][0][3])["text"], r["ev"])
+pl0 = json.loads(r["ev"][0][3]) if r["ev"] else {}
+check("ПРОДОВЖЕННЯ: створено рівно одну подію в гілці початкового №3; пропозиція цілей — «НЕ ЗАСТОСОВАНО», початковий план не змінюється",
+      len(r["ev"]) == 1 and r["ev"][0][1] == "CONTINUATION" and r["ev"][0][2] == 3 and "ПРОПОЗИЦІЯ · НЕ ЗАСТОСОВАНО" in pl0["text"] and pl0["proposal"]["applied"] is False, r["ev"])
+
+r = run("merge", "DUPLICATE")
+check("ДУБЛІКАТ: нічого не надсилається (ні READY, ні події)", r["sig"] == [] and r["ev"] == [] and any("дублікат" in (why or "") for _s, why in r["scen"]), r)
+
+r = run("merge", "INDEPENDENT")
+snap = json.loads(r["sig"][0][2]) if r["sig"] else {}
+n, calls = r["sent"] if r["sig"] else (0, [])
+check("НЕЗАЛЕЖНИЙ сетап: окремий READY, у картці явне пояснення відмінності від №3 (нова структура, своє скасування), відповідь на №3",
+      len(r["sig"]) == 1 and snap["thesis"]["lifecycle"]["relation"] == "INDEPENDENT" and "◆ НОВИЙ НЕЗАЛЕЖНИЙ СЕТАП · відмінність від №3" in calls[0][1] and "власне скасування 101,5" in calls[0][1] and calls[0][2].get("reply_to_message_id") == 10575, calls[0][1][:300] if calls else r)
 
 r = run("annotate", "CONTINUATION")
 check("режим annotate: READY лишається як раніше (рішення не змінено), позначка життєвого циклу в знімку", len(r["sig"]) == 1 and json.loads(r["sig"][0][2])["thesis"].get("lifecycle", {}).get("relation") == "CONTINUATION")

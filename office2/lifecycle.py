@@ -4,11 +4,14 @@
   сценарій    — доставлений READY (scenario_id, №, повідомлення Telegram, заморожений план);
   сетап       — теза Brain (th["id"] = стабільний id ідеї по монеті; той самий id = та сама ідея);
   подія       — супровід (ENTRY/TP/SL …, `office_events` SCENARIO_MILESTONE);
-  ПРОДОВЖЕННЯ — новий сетап того ж напряму, поки попередній сценарій ще в роботі (немає SL/TP3/EXPIRED/INVALIDATED): НЕ новий READY, а подія в гілці початкового №;
+  ДУБЛІКАТ      — та сама ідея (той самий id або та сама структурна подія), що вже в роботі: нічого не надсилаємо;
+  ПРОДОВЖЕННЯ   — інша ідея, але її структурна подія НЕ новіша за початковий сценарій (той самий рух), поки він ще в роботі (немає SL/TP3/EXPIRED/INVALIDATED): НЕ новий READY, а подія в гілці початкового №;
+  НЕЗАЛЕЖНИЙ    — структурна подія сформувалася ПІСЛЯ видачі початкового сценарію (нова структура, власне скасування): окремий №, лише з поясненням відмінності й після звичайних ризик-обмежень;
   ПОВТОРНИЙ ВХІД — новий підтверджений сетап після того, як попередній сценарій завершився: окремий №, з посиланням на попередній.
+(Критерії — ГІПОТЕЗА щодо класифікації без числових порогів; перевіряються на історії, режим OFFICE2_LIFECYCLE=annotate/off — відкат.)
 
-Нічого тут не змінює торгові правила, рівні чи ризик-обмеження: початкові рівні не переписуються, цілі — лише реальні рівні тези, стоп не вигадується,
-часткових фіксацій і «прибутку» немає (торкання ціни ≠ виконання ордера).
+Система ВМІЄ пропонувати нові цілі (наступний структурний рівень за початковими цілями), але лише як окрему ПРОПОЗИЦІЮ зі статусом «НЕ ЗАСТОСОВАНО»:
+початкові TP1/TP2/TP3 і SL не змінюються, стоп не пересувається, часткових закриттів і ордерів немає (торкання ціни ≠ виконання ордера).
 Режим OFFICE2_LIFECYCLE: merge (за замовчуванням: продовження → подія в гілці) | annotate (лише позначка, READY як раніше) | off.
 Відкат: OFFICE2_LIFECYCLE=off.
 """
@@ -76,7 +79,7 @@ def _plan_of(snap: Dict[str, Any]) -> Dict[str, Any]:
     return {"entry": _f(th.get("entry")), "sl": _f((th.get("sl") or {}).get("price") if isinstance(th.get("sl"), dict) else th.get("sl")),
             "targets": [{"kind": t.get("kind"), "p": _f(t.get("p")), "r": _f(t.get("r"))} for t in (th.get("targets") or []) if _f(t.get("p")) is not None],
             "zone": th.get("entry_zone") or th.get("zone"), "thesis_id": th.get("id"), "invalidation": _f((th.get("invalidation") or {}).get("price")),
-            "event": {"src": (th.get("event") or {}).get("src"), "class": (th.get("event") or {}).get("class"), "level": (th.get("event") or {}).get("level")}}
+            "event": {"src": (th.get("event") or {}).get("src"), "class": (th.get("event") or {}).get("class"), "level": (th.get("event") or {}).get("level"), "ts": (th.get("event") or {}).get("ts")}}
 
 
 def parents(db: str, sym: str, direction: str, now: float, exclude: str = "") -> List[Dict[str, Any]]:
@@ -104,40 +107,72 @@ def parents(db: str, sym: str, direction: str, now: float, exclude: str = "") ->
 
 
 def relate(db: str, sym: str, direction: str, th: Dict[str, Any], now: float) -> Dict[str, Any]:
-    """NEW | CONTINUATION | REENTRY. Продовження — є живий (не термінальний) попередній сценарій; повторний вхід — найновіший попередній уже завершено."""
+    """NEW | DUPLICATE | CONTINUATION | INDEPENDENT | REENTRY (див. докстрінг модуля)."""
     ps = parents(db, sym, direction, now, exclude=str(th.get("scenario_id") or ""))
     live = [p for p in ps if p["live"]]
     if live:
         p = live[0]
-        same = bool(p["plan"].get("thesis_id") and p["plan"]["thesis_id"] == th.get("id"))
-        return {"relation": "CONTINUATION", "parent": p, "same_idea": same}
+        ev = th.get("event") or {}
+        c_ts, p_ts = _f(ev.get("ts")), _f((p["plan"].get("event") or {}).get("ts"))
+        same_id = bool(p["plan"].get("thesis_id") and p["plan"]["thesis_id"] == th.get("id"))
+        same_event = bool(c_ts is not None and p_ts is not None and c_ts == p_ts)
+        if same_id or same_event:
+            return {"relation": "DUPLICATE", "parent": p, "same_idea": True}
+        if c_ts is not None and c_ts > p["created_ts"]:
+            return {"relation": "INDEPENDENT", "parent": p, "same_idea": False, "difference": difference(p, th)}
+        return {"relation": "CONTINUATION", "parent": p, "same_idea": False}
     if ps:
         return {"relation": "REENTRY", "parent": ps[0], "same_idea": False}
     return {"relation": "NEW", "parent": None, "same_idea": False}
+
+
+def difference(parent: Dict[str, Any], th: Dict[str, Any]) -> Dict[str, Any]:
+    """Що відрізняє новий сетап від початкового сценарію (лише обчислені факти)."""
+    ev = th.get("event") or {}
+    lvl = ev.get("level") or th.get("level") or {}
+    pl = parent["plan"]
+    return {"new_event": {"class": ev.get("class"), "src": ev.get("src"), "kind": lvl.get("kind"), "level": _f(lvl.get("p")), "ts": _f(ev.get("ts"))},
+            "new_invalidation": _f((th.get("invalidation") or {}).get("price")), "parent_invalidation": pl.get("invalidation"), "parent_event": pl.get("event")}
 
 
 def compact(rel: Dict[str, Any]) -> Dict[str, Any]:
     """Те, що потрапляє в заморожений знімок READY (повторний вхід): без важких полів."""
     p = rel.get("parent") or {}
     return {"relation": rel.get("relation"), "parent_scenario_id": p.get("scenario_id"), "parent_seq": p.get("seq"), "parent_msg_id": p.get("msg_id"),
-            "parent_milestones": p.get("milestones"), "parent_terminal": p.get("terminal"), "version": VERSION}
+            "parent_milestones": p.get("milestones"), "parent_terminal": p.get("terminal"), "difference": rel.get("difference"), "version": VERSION}
 
 
 def new_targets_beyond(parent_plan: Dict[str, Any], th: Dict[str, Any], long_: bool) -> List[Dict[str, Any]]:
-    """Цілі нового сетапу, що лежать ДАЛІ за найдальшу початкову ціль у напрямі угоди (реальні рівні тези; нічого не вигадуємо)."""
+    """Цілі нового сетапу, що лежать ДАЛІ за найдальшу початкову ціль (реальні рівні тези)."""
     old = [t["p"] for t in parent_plan.get("targets") or [] if t.get("p") is not None]
     if not old:
         return []
     far = max(old) if long_ else min(old)
-    out = []
-    for t in th.get("targets") or []:
-        p = _f(t.get("p"))
-        if p is not None and ((p > far) if long_ else (p < far)):
-            out.append({"kind": t.get("kind"), "p": p})
+    return [{"kind": t.get("kind"), "p": _f(t.get("p"))} for t in th.get("targets") or [] if _f(t.get("p")) is not None and ((_f(t.get("p")) > far) if long_ else (_f(t.get("p")) < far))]
+
+
+def propose_targets(parent_plan: Dict[str, Any], levels: List[Dict[str, Any]], long_: bool, limit: int = 2) -> List[Dict[str, Any]]:
+    """ПРОПОЗИЦІЯ (не застосовується): найближчі ще не зняті структурні рівні ЗА найдальшою початковою ціллю в напрямі угоди; R — від початкового входу/SL батьківського плану.
+    Рівнів немає → порожньо (нічого не вигадуємо). Початкові цілі й стоп не змінюються."""
+    tps = [t["p"] for t in parent_plan.get("targets") or [] if t.get("p") is not None]
+    e, sl = parent_plan.get("entry"), parent_plan.get("sl")
+    if not tps or e is None or sl is None or e == sl:
+        return []
+    far = max(tps) if long_ else min(tps)
+    risk = abs(e - sl)
+    want = "high" if long_ else "low"
+    cand = sorted([x for x in levels if x.get("taken_ts") is None and x.get("side") == want and ((x["p"] > far) if long_ else (x["p"] < far))], key=lambda x: x["p"] if long_ else -x["p"])
+    out: List[Dict[str, Any]] = []
+    for x in cand:
+        if out and abs(x["p"] - out[-1]["p"]) < 0.5 * risk:       # як у Brain.targets_for: наступна ціль — не ближче 0,5 R від попередньої
+            continue
+        out.append({"kind": x.get("kind"), "p": float(x["p"]), "r_from_original": round(abs(x["p"] - e) / risk, 2), "strength": int(x.get("strength", 1))})
+        if len(out) >= limit:
+            break
     return out
 
 
-def continuation_text(rel: Dict[str, Any], th: Dict[str, Any], symbol: str, direction: str, fmt: Callable[[Any], str], ticker: str) -> str:
+def continuation_text(rel: Dict[str, Any], th: Dict[str, Any], symbol: str, direction: str, fmt: Callable[[Any], str], ticker: str, proposals: Optional[List[Dict[str, Any]]] = None) -> str:
     p = rel["parent"]
     plan = p["plan"]
     long_ = str(direction).upper() != "SHORT"
@@ -145,9 +180,11 @@ def continuation_text(rel: Dict[str, Any], th: Dict[str, Any], symbol: str, dire
     reached = [m for m in ("TP1", "TP2", "TP3") if m in p.get("milestones", [])]
     status = f"{reached[-1]} досягнуто (за ринковою ціною)" if reached else ("Сценарій у роботі" if p.get("entered") else "Сценарій у роботі, вхід ще не торкнуто")
     L = ["AI OFFICE · СУПРОВІД СЦЕНАРІЮ", f"{no} · {ticker} {direction}", "", status, "Продовження руху", "",
-         f"Початковий сценарій {no} залишається головним. Система виявила новий {direction}-сетап і перевіряє, чи можна продовжувати супровід."]
+         f"Початковий сценарій {no} залишається головним. Новий {direction}-сетап підтверджує продовження руху."]
     for i, t in enumerate(plan.get("targets") or [], 1):
         L.append(f"Початковий TP{i}  {fmt(t['p'])}" + ("  (досягнуто)" if f"TP{i}" in p.get("milestones", []) else ""))
+    if plan.get("sl") is not None:
+        L.append(f"Початковий SL  {fmt(plan['sl'])}  (без змін)")
     z = th.get("entry_zone") or th.get("zone")
     inv = _f((th.get("invalidation") or {}).get("price"))
     ev = th.get("event") or {}
@@ -161,19 +198,20 @@ def continuation_text(rel: Dict[str, Any], th: Dict[str, Any], symbol: str, dire
         bits.append(f"подія {ev.get('class') or ''} {lvl.get('kind') or ''} {fmt(lvl['p']) if _f(lvl.get('p')) is not None else ''}".strip())
     if bits:
         L.append("Новий сетап: " + " · ".join(bits))
-    nt = [f"TP{i} {fmt(t['p'])}" for i, t in enumerate(th.get("targets") or [], 1) if _f(t.get("p")) is not None]
-    if nt:
-        L.append("Рівні нового сетапу (не змінюють початкові): " + " · ".join(nt))
-    beyond = new_targets_beyond(plan, th, long_)
+    L += ["", "ПРОПОЗИЦІЯ · НЕ ЗАСТОСОВАНО"]
+    if proposals:
+        for i, x in enumerate(proposals, 4):
+            L.append(f"Можливий TP{i}  {fmt(x['p'])}  ({x.get('kind') or 'рівень'}, {x['r_from_original']:.2f}R від початкового входу)")
+        steps = [f"{x.get('step')}: {x.get('value')}" for x in (th.get("sequence") or []) if isinstance(x, dict) and x.get("ok") and x.get("value")]
+        if steps:
+            L.append("Підтвердження: " + "; ".join(steps[:5]))
+        L.append("Ризики: рівень лежить за початковими цілями — ціна має пройти шлях до нього; R рахується від початкового входу/SL, не від ціни зараз.")
+    else:
+        L.append("Наступного структурного рівня за початковими цілями не знайдено — пропозиції немає.")
+    cond = f"закриття M15 {'нижче' if long_ else 'вище'} {fmt(inv)}" if inv is not None else "умова скасування нового сетапу не задана"
+    L.append(f"Умови скасування: {cond}; початковий SL {fmt(plan['sl']) if plan.get('sl') is not None else '—'} лишається чинним.")
     L.append("")
-    L.append("Нова запропонована ціль")
-    L.append("Потребує підтвердження")      # нових цілей (TP4/TP5) автоматично не додаємо: це окрема логіка супроводу, яку спершу перевіряють на історії
-    if beyond:
-        L.append(f"Інформація: рівень нового сетапу за початковими цілями — {beyond[0].get('kind') or 'рівень'} {fmt(beyond[0]['p'])} (ціль не додано)")
-    L.append("Новий захисний стоп")
-    L.append("Не визначено")
-    L.append("")
-    L.append("Не є новим входом. Зміна стопа, часткове закриття й додавання до позиції потребують окремого рішення. Старі рівні та історія не переписуються. Торкання ціни — не виконання ордера.")
+    L.append("Пропозиція не змінює початковий сигнал: TP1–TP3 і SL ті самі. Пересування стопа, часткове закриття, додавання до позиції й нові ордери — лише окреме рішення; автоматично нічого не застосовується. Торкання ціни — не виконання ордера.")
     return "\n".join(L)
 
 
@@ -181,7 +219,7 @@ def event_id(parent_sid: str, thesis_id: str, kind: str = "CONTINUATION") -> str
     return f"LC|{kind}|{hashlib.sha256(f'{parent_sid}|{thesis_id}'.encode()).hexdigest()[:14]}"
 
 
-def record_continuation(db: str, rel: Dict[str, Any], th: Dict[str, Any], sym: str, direction: str, child_sid: str, text: str, now: float) -> bool:
+def record_continuation(db: str, rel: Dict[str, Any], th: Dict[str, Any], sym: str, direction: str, child_sid: str, text: str, now: float, proposals: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Один запис на пару (початковий сценарій, id ідеї нового сетапу): паралельні цикли й повтори не дублюють. True — створено щойно."""
     from office_bridge import _execute, _fetchall
 
@@ -191,7 +229,7 @@ def record_continuation(db: str, rel: Dict[str, Any], th: Dict[str, Any], sym: s
     if _fetchall(db, "SELECT 1 FROM office2_lifecycle_event WHERE event_id = ?", (eid,)):
         return False
     payload = {"text": text, "parent": {k: p.get(k) for k in ("scenario_id", "seq", "milestones", "plan")}, "child_targets": th.get("targets"), "child_zone": th.get("entry_zone") or th.get("zone"),
-               "child_invalidation": (th.get("invalidation") or {}).get("price")}
+               "child_invalidation": (th.get("invalidation") or {}).get("price"), "proposal": {"status": "ПРОПОЗИЦІЯ · НЕ ЗАСТОСОВАНО", "applied": False, "targets": proposals or []}}
     _execute(db, "INSERT INTO office2_lifecycle_event(event_id, ts, relation, symbol, direction, parent_scenario_id, parent_seq, parent_msg_id, child_scenario_id, child_thesis_id, payload_json, tg_status, version) "
                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (event_id) DO NOTHING",
              (eid, float(now), "CONTINUATION", sym, direction, p["scenario_id"], p.get("seq"), p.get("msg_id"), child_sid, th.get("id"), json.dumps(payload, ensure_ascii=False, default=str), "NEW", VERSION))
