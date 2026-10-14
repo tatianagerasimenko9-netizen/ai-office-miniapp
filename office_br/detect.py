@@ -16,6 +16,7 @@ HYP: Dict[str, Any] = {
     "max_risk_atr": 3.00,      # ГІПОТЕЗА: відсікає надто широкий стоп
     "r_targets": (1.0, 2.0, 3.0),   # ГІПОТЕЗА: запасні цілі в R, коли немає структурних
     "min_struct_target_r": 0.8,     # ГІПОТЕЗА: структурна ціль має бути не ближче 0,8R
+    "min_risk_pct": None,           # ГІПОТЕЗА (варіант V2): мінімальна відстань до SL у % від входу, щоб комісія+прослизання (0,15%) не з'їдали R
 }
 
 
@@ -111,6 +112,8 @@ def _follow(direction: str, L: float, bi: int, t, o, h, l, c, cfg, piv) -> Optio
                 sl = ext - cfg["sl_buffer_atr"] * aq if sg > 0 else ext + cfg["sl_buffer_atr"] * aq
                 risk = abs(entry - sl)
                 if risk < cfg["min_risk_atr"] * aq or risk > cfg["max_risk_atr"] * aq or sg * (entry - sl) <= 0:
+                    return None
+                if cfg.get("min_risk_pct") and risk / entry < cfg["min_risk_pct"]:
                     return None
                 tg = _targets(direction, entry, risk, [x for x in piv], cfg)
                 return {"direction": direction, "retest_i": j, "retest_ts": float(t[j]), "confirm_i": q, "confirm_ts": float(t[q]), "entry": entry, "sl": float(sl),

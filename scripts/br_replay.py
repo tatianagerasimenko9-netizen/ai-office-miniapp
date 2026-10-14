@@ -19,6 +19,10 @@ PERIODS = {"A": ("2026-09-25", 14), "B": ("2026-10-09", 14), "C": ("2026-10-11",
 
 
 def run(sym: str) -> dict:
+    import os
+
+    if os.environ.get("BR_MIN_RISK_PCT"):
+        D.HYP["min_risk_pct"] = float(os.environ["BR_MIN_RISK_PCT"])      # варіант V2 (ГІПОТЕЗА)
     out = {"symbol": sym, "hyp": {k: (list(v) if isinstance(v, tuple) else v) for k, v in D.HYP.items()}, "periods": {}}
     for pid, (end, days) in PERIODS.items():
         e = date.fromisoformat(end)
