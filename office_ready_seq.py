@@ -52,4 +52,4 @@ def assign(db: str, scenario_id: str, now: Optional[float] = None, attempts: int
 
 
 def label(seq: Optional[int]) -> str:
-    return f"№{int(seq):04d}" if seq else ""
+    return f"№{int(seq)}" if seq else ""

@@ -569,6 +569,39 @@ def step_symbol(db: str, sym: str, ctx: Dict[str, Any], st: Dict[str, Any], mc: 
                 res["no_trade"] += 1
                 continue
             lvl_key = f"{sym}|{th['dir']}|{round(float((th.get('level') or {}).get('p') or th.get('trigger_level') or 0), 6)}"
+            from office2 import lifecycle as LC
+
+            if LC.mode() != "off":
+                # життєвий цикл: попередній сценарій ще в роботі → ПРОДОВЖЕННЯ (подія в гілці початкового №, а не новий READY); завершений → ПОВТОРНИЙ ВХІД (окремий №, посилання на попередній)
+                try:
+                    lc = LC.relate(db, sym, th["dir"], th, now)
+                except Exception as lexc:  # noqa: BLE001
+                    lc = {"relation": "NEW", "parent": None, "same_idea": False}
+                    print(f"[lifecycle] {sym}: {type(lexc).__name__}: {str(lexc)[:100]}", flush=True)
+                if lc["relation"] == "DUPLICATE" and LC.mode() == "merge":
+                    par = lc["parent"]
+                    th = dict(th, state="NO_TRADE", reason=f"дублікат: та сама ідея вже в роботі, сценарій №{par.get('seq')} (нічого не надсилаємо)")
+                    save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
+                    res["no_trade"] += 1
+                    continue
+                if lc["relation"] == "CONTINUATION" and LC.mode() == "merge":
+                    par = lc["parent"]
+                    try:
+                        from office_price_format import format_px
+                        from office_user_messages import ticker as _tk
+
+                        props = LC.propose_targets(par["plan"], B.all_levels(ctx, now), th["dir"] == "LONG")      # ПРОПОЗИЦІЯ (не застосовується): наступний структурний рівень за початковими цілями
+                        txt = LC.continuation_text(lc, th, sym, th["dir"], lambda x: format_px(x, sym).replace(".", ","), _tk(sym), props)
+                        if LC.record_continuation(db, lc, th, sym, th["dir"], f"{th['id']}|{int(now)}", txt, now, props):
+                            print(f"[lifecycle] ПРОДОВЖЕННЯ {sym} {th['dir']} → №{par.get('seq')} (нова ідея {th['id']}; пропозицій цілей {len(props)})", flush=True)
+                    except Exception as lexc:  # noqa: BLE001
+                        print(f"[lifecycle] запис продовження {sym}: {type(lexc).__name__}: {str(lexc)[:100]}", flush=True)
+                    th = dict(th, state="NO_TRADE", reason=f"продовження сценарію №{par.get('seq')}: той самий рух, попередній READY ще в роботі (не новий вхід)")
+                    save_scenario(db, sym, th, "NO_TRADE", now, prev["created_ts"], prev["state"], th["reason"])
+                    res["no_trade"] += 1
+                    continue
+                if lc["relation"] in ("CONTINUATION", "INDEPENDENT", "REENTRY"):
+                    th = dict(th, lifecycle=LC.compact(lc))
             deny = portfolio_gate(db, sym, th["dir"], lvl_key, now)
             if deny:
                 th = dict(th, state="NO_TRADE", reason="ємність сценаріїв: " + deny)

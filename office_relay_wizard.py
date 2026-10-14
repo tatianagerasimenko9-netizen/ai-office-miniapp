@@ -7713,6 +7713,14 @@ EV позитивне: {prob.get('ev_positive', '')}
                             print(f"[office2][WARN] delivery pass failed: {type(f.exception()).__name__}: {f.exception()}")
 
                     _t_o2.add_done_callback(_o2_done)
+                    try:
+                        from office2 import lifecycle as _lc_mod
+
+                        if _lc_mod.mode() == "merge":
+                            _t_lc = asyncio.ensure_future(_lc_mod.deliver(db_path, send_proactive, EVENT_TRADE_UPDATE))      # ПРОДОВЖЕННЯ: подія в гілці початкового READY (один раз на ідею)
+                            _t_lc.add_done_callback(lambda f: (not f.cancelled() and f.exception() is not None) and print(f"[office2][WARN] lifecycle pass failed: {type(f.exception()).__name__}: {f.exception()}"))
+                    except Exception as exc_lc:
+                        print(f"[office2][WARN] lifecycle pass failed: {type(exc_lc).__name__}: {exc_lc}")
             except Exception as exc_o2d:
                 print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
             await asyncio.sleep(2)   # outbox читається кожні 2 с (було 10): запит дешевий, а черга не додає до 10 с затримки
