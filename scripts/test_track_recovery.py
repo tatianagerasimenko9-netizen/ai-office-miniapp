@@ -13,7 +13,7 @@ import office_signal_track as T  # noqa: E402
 from office_bridge import init_office_db  # noqa: E402
 
 init_office_db(db)
-BASE = T.milestone_since(db) + 100
+BASE = int(T.milestone_since(db)) + 100
 bad = 0
 
 
