@@ -95,6 +95,44 @@ async def _run(port: int, sid: str, problems: list) -> None:
         r1 = await pg.evaluate("chart.timeScale().getVisibleLogicalRange()")
         if round(r0["to"] - r0["from"]) == round(r1["to"] - r1["from"]):
             problems.append("колесо не змінює масштаб")
+        # --- жести на телефоні: масштаб ДВОМА ПАЛЬЦЯМИ (pinch) змінює масштаб графіка, а не сторінки; вертикальний рух лишається сторінці
+        ta = await pg.evaluate("[...document.querySelectorAll('#chart canvas')].map(c=>getComputedStyle(c).touchAction)")
+        if not ta or any(("pan-y" not in x) for x in ta):
+            problems.append(f"touch-action на графіку має бути pan-y (інакше iPhone забирає щипок для масштабу сторінки): {ta}")
+        gesture_prevented = await pg.evaluate("(()=>{const e=new Event('gesturestart',{cancelable:true,bubbles:true});document.querySelector('#chart').dispatchEvent(e);return e.defaultPrevented;})()")
+        if not gesture_prevented:
+            problems.append("gesturestart на графіку не гаситься: Safari масштабує всю сторінку")
+        cdp = await ctx.new_cdp_session(pg)
+        box = await (await pg.query_selector("#chart")).bounding_box()
+        cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        await pg.evaluate("chart.timeScale().setVisibleLogicalRange({from:20,to:120})")
+        w0 = await pg.evaluate("(()=>{const r=chart.timeScale().getVisibleLogicalRange();return r.to-r.from})()")
+
+        async def touch(kind, pts):
+            await cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": [{"x": x, "y": y, "id": i} for i, (x, y) in enumerate(pts)]})
+
+        await touch("touchStart", [(cx - 30, cy), (cx + 30, cy)])
+        for k in range(1, 9):
+            d = 30 + k * 14
+            await touch("touchMove", [(cx - d, cy), (cx + d, cy)])
+            await pg.wait_for_timeout(20)
+        await touch("touchEnd", [])
+        await pg.wait_for_timeout(300)
+        w1 = await pg.evaluate("(()=>{const r=chart.timeScale().getVisibleLogicalRange();return r.to-r.from})()")
+        if not w1 < w0 * 0.8:
+            problems.append(f"щипок двома пальцями не збільшує масштаб графіка: ширина {w0:.0f} → {w1:.0f} барів")
+        vs = await pg.evaluate("window.visualViewport ? window.visualViewport.scale : 1")
+        if abs(vs - 1) > 0.01:
+            problems.append(f"щипок змінив масштаб сторінки: {vs}")
+        await touch("touchStart", [(cx + 90, cy)])
+        for k in range(1, 7):
+            await touch("touchMove", [(cx + 90 - k * 30, cy)])
+            await pg.wait_for_timeout(20)
+        await touch("touchEnd", [])
+        await pg.wait_for_timeout(300)
+        w2 = await pg.evaluate("(()=>{const r=chart.timeScale().getVisibleLogicalRange();return r.from})()")
+        if not w2 > 0:
+            problems.append("гортання одним пальцем вздовж часу не працює")
         before = await pg.evaluate("chart.timeScale().getVisibleRange()")
         await pg.click("[data-l=liq]")
         await pg.wait_for_function("window.__chartLayers && window.__chartLayers.includes('ліквідність')", timeout=6000)
