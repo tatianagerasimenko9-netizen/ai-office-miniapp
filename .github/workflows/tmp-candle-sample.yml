@@ -1,0 +1,31 @@
+name: tmp candle sample (read-only, delete after use)
+on:
+  push:
+    branches: ['tmp/candle-sample']
+    paths: ['.github/workflows/tmp-candle-sample.yml']
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: fetch
+        run: |
+          python3 - <<'PY'
+          import io, zipfile, csv, json, urllib.request
+          days = ["2026-10-%02d" % d for d in range(8, 14)]
+          for sym in ["FILUSDT", "BTCUSDT", "SEIUSDT"]:
+              for tf in ["1h", "15m"]:
+                  rows = []
+                  for d in days:
+                      url = f"https://data.binance.vision/data/futures/um/daily/klines/{sym}/{tf}/{sym}-{tf}-{d}.zip"
+                      try:
+                          raw = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "x"}), timeout=30).read()
+                      except Exception as e:
+                          print("MISS", sym, tf, d, e); continue
+                      z = zipfile.ZipFile(io.BytesIO(raw))
+                      for r in csv.reader(io.TextIOWrapper(z.open(z.namelist()[0]), encoding="utf-8")):
+                          if r and r[0].strip().isdigit():
+                              rows.append([int(r[0]) // 1000, float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])])
+                  print("CANDLES " + json.dumps({"s": sym, "tf": tf, "rows": rows}, separators=(",", ":")))
+          PY
