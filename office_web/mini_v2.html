@@ -854,6 +854,29 @@ function loadChartLib(){
   });
 }
 /* Явна помилка замість тихої підміни графіка картинкою: що сталося + кнопка «Повторити» */
+/* Масштаб графіка двома пальцями (iPhone/Telegram): горизонтально — за відстанню між пальцями по X (час), вертикально — за відстанню по Y (ціна, S.yz).
+   Перехоплюємо двопальцеві touch-події в capture-фазі з preventDefault: інакше WebView забирає жест для прокрутки/масштабу сторінки і шле touchcancel. Один палець лишається за бібліотекою (гортання в часі) і сторінкою (вертикальний скрол). */
+function installPinch(el){
+  if(el.__pinch) return; el.__pinch=1;
+  let p=null;
+  const dist=(t)=>({x:Math.abs(t[0].clientX-t[1].clientX),y:Math.abs(t[0].clientY-t[1].clientY),cx:(t[0].clientX+t[1].clientX)/2});
+  el.addEventListener('touchstart',e=>{ if(e.touches.length>=2){ e.preventDefault(); e.stopPropagation(); p=dist(e.touches); } },{passive:false,capture:true});
+  el.addEventListener('touchmove',e=>{
+    if(e.touches.length<2||!p||!chart) return;
+    e.preventDefault(); e.stopPropagation();
+    const n=dist(e.touches), ts=chart.timeScale(), r=ts.getVisibleLogicalRange();
+    const h=Math.hypot(p.x,p.y), h2=Math.hypot(n.x,n.y);
+    if(r&&h>=20&&h2>=20){
+      const k=Math.min(2.5,Math.max(0.4,h/h2));
+      const rect=el.getBoundingClientRect(); const cl=ts.coordinateToLogical(n.cx-rect.left); const c=(cl==null||!isFinite(cl))?(r.from+r.to)/2:cl;
+      ts.setVisibleLogicalRange({from:c-(c-r.from)*k,to:c+(r.to-c)*k});
+    }
+    if(p.y>=24&&n.y>=24&&n.y>n.x*0.6){ S.yz=Math.min(5,Math.max(0.2,(S.yz||1)*Math.min(2.5,Math.max(0.4,p.y/n.y)))); try{series.applyOptions({});}catch(_){} }
+    p=n;
+  },{passive:false,capture:true});
+  const end=e=>{ if(!e.touches||e.touches.length<2) p=null; };
+  el.addEventListener('touchend',end,{passive:true,capture:true}); el.addEventListener('touchcancel',end,{passive:true,capture:true});
+}
 function chartError(el,s,msg){
   if(chart){ try{chart.remove();}catch(e){} chart=null; series=null; }
   el.innerHTML=`<div class="empty" role="alert">${esc(msg)}<br><button class="btn" id="chretry" style="margin-top:10px">↻ Повторити</button></div>`;
@@ -905,9 +928,11 @@ async function paintChart(el, s){
       grid:{vertLines:{color:'#18212E'},horzLines:{color:'#18212E'}},rightPriceScale:{borderColor:'#243244'},
       timeScale:{borderColor:'#243244',timeVisible:true},crosshair:{mode:0},localization:{locale:'uk-UA'},height:el.clientHeight||320,width:el.clientWidth||320,
       handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},
-      handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true,axisDoubleClickReset:true},kineticScroll:{touch:true,mouse:false}});
+      handleScale:{mouseWheel:true,pinch:false,axisPressedMouseMove:true,axisDoubleClickReset:true},kineticScroll:{touch:true,mouse:false}});   /* pinch вимкнено в бібліотеці: масштаб двома пальцями робить наш обробник нижче (iOS забирав щипок для прокрутки/масштабу сторінки) */
     series=chart.addCandlestickSeries({upColor:'#27C99A',downColor:'#F36B78',borderVisible:false,wickUpColor:'#27C99A',wickDownColor:'#F36B78',
-      priceFormat:priceFormat((s.display||{}).tick)});
+      priceFormat:priceFormat((s.display||{}).tick),
+      autoscaleInfoProvider:(orig)=>{const r=orig(); if(!r||!r.priceRange||!S.yz||S.yz===1) return r; const mn=r.priceRange.minValue, mx=r.priceRange.maxValue, mid=(mn+mx)/2, half=(mx-mn)/2*S.yz; return {priceRange:{minValue:mid-half,maxValue:mid+half},margins:r.margins};}});
+    installPinch(el);
     series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
     const vol=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:''}); S.vol=vol;
     vol.priceScale().applyOptions({scaleMargins:{top:.85,bottom:0}});

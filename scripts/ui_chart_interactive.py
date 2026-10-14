@@ -127,6 +127,22 @@ async def _run(port: int, sid: str, problems: list) -> None:
         w1 = await pg.evaluate("(()=>{const r=chart.timeScale().getVisibleLogicalRange();return r.to-r.from})()")
         if not w1 < w0 * 0.8:
             problems.append(f"щипок двома пальцями не збільшує масштаб графіка: ширина {w0:.0f} → {w1:.0f} барів")
+        # вертикальний щипок (пальці розходяться по Y) збільшує масштаб по ціні, не чіпаючи сторінку
+        yz0 = await pg.evaluate("S.yz||1")
+        sy0 = await pg.evaluate("window.scrollY")
+        await touch("touchStart", [(cx, cy - 30), (cx, cy + 30)])
+        for k in range(1, 7):
+            d = 30 + k * 12
+            await touch("touchMove", [(cx, cy - d), (cx, cy + d)])
+            await pg.wait_for_timeout(20)
+        await touch("touchEnd", [])
+        await pg.wait_for_timeout(300)
+        yz1 = await pg.evaluate("S.yz||1")
+        if not yz1 < yz0 * 0.85:
+            problems.append(f"вертикальний щипок не змінює масштаб по ціні: {yz0} → {yz1}")
+        sy = await pg.evaluate("window.scrollY")
+        if abs(sy - sy0) > 2:
+            problems.append(f"щипок на графіку прокрутив сторінку: scrollY {sy0} → {sy}")
         vs = await pg.evaluate("window.visualViewport ? window.visualViewport.scale : 1")
         if abs(vs - 1) > 0.01:
             problems.append(f"щипок змінив масштаб сторінки: {vs}")
