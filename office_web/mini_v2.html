@@ -144,7 +144,7 @@ const una=v=>(v===null||v===undefined||v==='')?'—':v;
 function lsGet(k,d){try{return localStorage.getItem(k)??d;}catch(e){return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 const S={tf:lsGet('ao_tf','H1'), sf:'all', rf:'all', jkind:'trades',prefill:null, lastBar:0,
-  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch3','0')==='1', ctx:lsGet('ao_ctx3','0')==='1', smc:lsGet('ao_smc3','0')==='1', liq:lsGet('ao_liq3','0')==='1'}, hist:[], histKey:'', noMoreOld:false, loadingOld:false, view:null, bars:[]};
+  layers:{zone:true,sl:true,tp:true, ch:lsGet('ao_ch3','0')==='1', ctx:lsGet('ao_ctx3','0')==='1', smc:lsGet('ao_smc3','0')==='1', liq:lsGet('ao_liq3','0')==='1', inval:lsGet('ao_inv1','0')==='1'}, hist:[], histKey:'', noMoreOld:false, loadingOld:false, view:null, bars:[]};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function sid(v){return String(v||'').replace(/[^A-Za-z0-9._:|+-]/g,'');}
 let RT=0; /* номер поточного екрана: запізніла відповідь старого екрана не має перезаписувати новий */
@@ -353,7 +353,7 @@ function lrStat(n,s){
 }
 function lrStopStudy(z){
   if(!z) return '';
-  const V=z.variants||{}; const nm={v1:'Стоп 1 · поточний',v2:'Стоп 2 · за структурою',v3:'Стоп 3 · структура + запас ATR'};
+  const V=z.variants||{}; const nm={v1:'Стоп 1 · поточний (SL плану)',v2:'Структурна інвалідація · довідково, не SL',v3:'Структура + запас ATR · довідково, не SL'};
   const rows=['v1','v2','v3'].map(k=>{const v=V[k]||{}; return `<div class="kv"><span>${nm[k]}</span><b class="num">завершено ${v.n} (цілі ${v.tp} / стопи ${v.sl}) · результат ${v.sum_r>=0?'+':''}${v.sum_r} · збитки ${v.loss_r} · сер. ризик ${v.avg_risk_pct??'—'}%${k!=='v1'?' · проти поточного: '+(v.delta_sum_r_vs_current>=0?'+':'')+v.delta_sum_r_vs_current:''}${v.after_stop_hunt||v.after_stop_broken?` · після стопа: повернулась ${v.after_stop_hunt}, зламалась ${v.after_stop_broken}`:''}</b></div>`;}).join('');
   return `<h2>Порівняння стопів (навчальна статистика)</h2>${rows}<div class="o2need">${esc(z.verdict||'')}</div>
     <div class="o2sub">Усі три варіанти рахуються на тих самих угодах (той самий вхід і цілі), результат у «від ризику» з комісіями. Це окреме порівняння: фактичний результат угоди не змінюється, стоп у реальній торгівлі автоматично не змінюється.</div>`;
@@ -409,13 +409,13 @@ async function openRadarCard(id){
   const kv=(k,v)=>`<div class="kv"><span>${esc(k)}</span><b class="num">${v}</b></div>`;
   const sv=h.stops; const COL={v1:'#F36B78',v2:'#FFB347',v3:'#C792EA'};
   const s={symbol:x.symbol,zone_lo:x.zone_lo,zone_hi:x.zone_hi,sl:x.sl,tp1:x.tp1,tp2:x.tp2,tp3:x.tp3,entry_px:x.entry,display:{},__ua:true,
-    __extra:sv?sv.items.filter(i=>i.key!=='v1').map(i=>({p:i.sl,color:COL[i.key],title:i.name})):[]};
+    __extra:sv?sv.items.filter(i=>i.key==='v2').map(i=>({p:i.sl,color:COL[i.key],title:'Інвалідація структури (не SL)'})):[]};
   const pl=h.plan; const planHtml=`<div class="card"><b>План і причини входу</b>
     ${pl&&pl.items&&pl.items.length?'<ol class="o2ol">'+pl.items.map(i=>'<li>'+esc(i.text)+'</li>').join('')+'</ol>'+(pl.extra?'<div class="o2sub">Ще підтверджень: '+pl.extra+' (нижче в деталях)</div>':''):'<div class="o2sub">Підтверджених причин у даних поки немає — не вигадуємо.</div>'}
     ${pl&&pl.against&&pl.against.length?'<div class="o2need"><b>Проти:</b> '+pl.against.map(esc).join('; ')+'</div>':''}
     ${pl&&pl.wait?'<div class="o2need"><b>Чекаємо:</b> '+esc(pl.wait)+'</div>':''}
     ${pl&&pl.cancel?'<div class="o2m">Скасування: '+esc(pl.cancel)+'</div>':''}</div>`;
-  const stopsHtml=sv?`<div class="card"><b>Три варіанти стопа</b><div class="o2sub">${esc(sv.note)}</div>
+  const stopsHtml=sv?`<div class="card"><b>Варіанти стопа (довідково; справжній SL у плані — лише Стоп 1)</b><div class="o2sub">${esc(sv.note)}</div>
     ${sv.items.map(i=>`<div class="o2need" style="border-left:4px solid ${COL[i.key]}"><b>${esc(i.name)}</b>: <span class="num">${esc(i.sl_txt)}</span> (ризик ${esc(i.risk_pct)}%) ${i.justified?'<span class="pill ok">обґрунтований</span>':'<span class="pill watch">сумнівний</span>'}<br>
       <span class="o2m">До цілей: ${i.mult1?'ціль 1 ≈'+esc(i.mult1)+'× стопа':''}${i.mult2?' · ціль 2 ≈'+esc(i.mult2)+'×':''}${i.mult3?' · ціль 3 ≈'+esc(i.mult3)+'×':''}</span><br>${esc(i.explain)}<br>
       <span class="o2m">Результат цього варіанта: ${esc(i.status)}${i.r_net!=null?' · '+(i.r_net>=0?'+':'')+i.r_net+' від ризику (з комісіями)':''}</span>${i.after?'<br><span class="o2y">Після стопа: '+esc(i.after)+'</span>':''}</div>`).join('')}
@@ -838,7 +838,7 @@ function drawFallback(el, candles, lv, cx){
 }
 function chartLevels(s){
   const L=S.layers, o={};
-  if(L.sl&&s.__extra){ s.__extra.forEach((e,i)=>{o['sl'+(i+2)]=e.p;}); }
+  if(L.inval&&s.__extra){ s.__extra.forEach((e,i)=>{o['sl'+(i+2)]=e.p;}); }
   if(L.zone){o.zone_lo=s.zone_lo; o.zone_hi=s.zone_hi;}
   if(L.sl) o.sl=s.sl;
   if(L.tp){o.tp1=s.tp1; o.tp2=s.tp2; o.tp3=s.tp3;}
@@ -915,10 +915,10 @@ async function paintChart(el, s){
     const line=(p,color,title,style)=>{if(p!=null) series.createPriceLine({price:p,color,title,lineStyle:style||0,lineWidth:1});};
     const zl=(s.__objs&&s.__objs.includes('level'))?'рівень · зона':(s.__objs&&s.__objs.includes('block'))?'блок · зона':'зона';
     line(lv.zone_lo,'#5DA9FF',s.__ua?'Зона входу':zl,2); line(lv.zone_hi,'#5DA9FF',s.__ua?'Зона входу':zl,2);
-    const UA=!!s.__ua; line(lv.sl,'#F36B78',UA?(s.__extra&&s.__extra.length?'Стоп 1 (поточний)':'Стоп'):'SL'); if(S.layers.sl) (s.__extra||[]).forEach(e=>line(e.p,e.color,e.title,2)); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
+    const UA=!!s.__ua; if(S.layers.sl) line(lv.sl,'#F36B78',UA?'Стоп-лосс':'SL'); if(S.layers.inval) (s.__extra||[]).forEach(e=>line(e.p,'#9AA4B2','Інвалідація структури (не SL)',3)); line(lv.tp1,'#27C99A',UA?'Ціль 1':'TP1'); line(lv.tp2,'#27C99A',UA?'Ціль 2':'TP2',2); line(lv.tp3,'#27C99A',UA?'Ціль 3':'TP3',2); line(lv.entry,'#E8EDF4',UA?'Вхід (навчальний)':(s.__ready_ts?'вхід за планом':'вхід'),1);
     /* Лише те, що потрібно для ручної угоди: канал, FVG і сильна свічка (коли актуальні для цього сценарію), PDH/PDL (коли це ціль/межа).
        OB, дзеркальні й інші внутрішні рівні Лев враховує всередині — на графік не виводимо. */
-    const shown=['зона','SL','TP']; if(S.layers.sl&&s.__extra&&s.__extra.length) shown.push('стопи+'+s.__extra.length);
+    const shown=['зона','SL','TP']; if(S.layers.inval&&s.__extra&&s.__extra.length) shown.push('інвалідація');
     const mkAll=[];
     let cx=null;
     if(S.layers.ch||S.layers.ctx){
@@ -1118,7 +1118,7 @@ function o2EvidenceHtml(ev){
 async function openO2(d, T0){
   const s=d.scenario||{}, o=d.o2||{}, fr=o.frozen||{}, th=fr.thesis||{}, lv=o.levels||{}, ch=o.changed||{}, I=fr.integral;
   const long_=String(s.direction||'').toUpperCase()!=='SHORT', sd=long_?'L':'S', st=s.status||{};
-  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts; s.__smc=(fr.smc&&fr.smc.overlay)||null; { const stp=th.stops||{}, SC={v2:'#FFB347',v3:'#C792EA'}; s.__extra=['v2','v3'].filter(k=>stp[k]&&stp[k].sl!=null).map(k=>({p:stp[k].sl,color:SC[k],title:stp[k].name||('Стоп '+k.slice(1))})); }   /* три варіанти стопа зі знімка: поточний, за структурою, структура+ATR */
+  s.entry_px=th.entry; s.__objs=null; s.__ready_ts=o.created_ts; s.__smc=(fr.smc&&fr.smc.overlay)||null; { const stp=th.stops||{}, SC={v2:'#FFB347',v3:'#C792EA'}; s.__extra=['v2'].filter(k=>stp[k]&&stp[k].sl!=null).map(k=>({p:stp[k].sl,color:SC[k],title:'Інвалідація структури (не SL)'})); }   /* три варіанти стопа зі знімка: поточний, за структурою, структура+ATR */
   s.__liq=fr.market_map?[].concat(fr.market_map.pools_above||[],fr.market_map.pools_below||[]):null;
   const mn=(o.market_now||{}), m0=((fr.market_at_signal||{}).market)||{}, m1=mn.market||{};
   const cells=[`<div class="en"><span>Вхід (ціна READY)</span><b>${o2px(lv.ready_price)}</b>${lv.zone?`<small>зона ${o2px(lv.zone[0])}–${o2px(lv.zone[1])}</small>`:''}</div>`,
@@ -1153,6 +1153,7 @@ async function openO2(d, T0){
     <div class="chips" id="lay">
       <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
       <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      ${s.__extra&&s.__extra.length?`<button data-l="inval" class="${S.layers.inval?'on':''}" aria-pressed="${S.layers.inval}">Інвалідація (не SL)</button>`:''}
       <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
       <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
       <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
@@ -1198,7 +1199,7 @@ async function openO2(d, T0){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); if(b.dataset.l==='smc') lsSet('ao_smc3',S.layers.smc?'1':'0'); if(b.dataset.l==='liq') lsSet('ao_liq3',S.layers.liq?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); if(b.dataset.l==='smc') lsSet('ao_smc3',S.layers.smc?'1':'0'); if(b.dataset.l==='liq') lsSet('ao_liq3',S.layers.liq?'1':'0'); if(b.dataset.l==='inval') lsSet('ao_inv1',S.layers.inval?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
@@ -1346,6 +1347,7 @@ async function openSc(id){
     <div class="chips" id="lay">
       <button data-l="zone" class="${S.layers.zone?'on':''}" aria-pressed="${S.layers.zone}">Зона</button>
       <button data-l="sl" class="${S.layers.sl?'on':''}" aria-pressed="${S.layers.sl}">SL</button>
+      ${s.__extra&&s.__extra.length?`<button data-l="inval" class="${S.layers.inval?'on':''}" aria-pressed="${S.layers.inval}">Інвалідація (не SL)</button>`:''}
       <button data-l="tp" class="${S.layers.tp?'on':''}" aria-pressed="${S.layers.tp}">TP</button>
       <button data-l="ch" class="${S.layers.ch?'on':''}" aria-pressed="${S.layers.ch}">Канал</button>
       <button data-l="ctx" class="${S.layers.ctx?'on':''}" aria-pressed="${S.layers.ctx}">FVG і сильна свічка</button>
@@ -1385,7 +1387,7 @@ async function openSc(id){
     S.tf=b.dataset.tf; lsSet('ao_tf',S.tf);
     app.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b)); await paintChart(el,s);});
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=async()=>{
-    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
+    S.layers[b.dataset.l]=!S.layers[b.dataset.l]; if(b.dataset.l==='ch') lsSet('ao_ch3',S.layers.ch?'1':'0'); if(b.dataset.l==='ctx') lsSet('ao_ctx3',S.layers.ctx?'1':'0'); if(b.dataset.l==='inval') lsSet('ao_inv1',S.layers.inval?'1':'0'); b.classList.toggle('on',S.layers[b.dataset.l]); b.setAttribute('aria-pressed',String(S.layers[b.dataset.l])); await paintChart(el,s);});
   $('fs').onclick=()=>{el.classList.toggle('full'); if(chart) chart.applyOptions({width:el.clientWidth,height:el.clientHeight});};
   poll=setInterval(async()=>{
     if(document.hidden) return;
