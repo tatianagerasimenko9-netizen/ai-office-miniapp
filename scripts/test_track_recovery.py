@@ -82,4 +82,41 @@ fresh_process()
 T.pending_milestones(db, boom, now_ts=NOW + 3600 * 3 + 200)
 hb2 = T.heartbeat_for(db, "O2|btc4|1", now=NOW + 3600 * 3 + 210, active=True)
 check("помилка Binance → stale і лічильник помилок", hb2["stale"] and hb2["fails"] >= 1, hb2)
+
+# 5) запасний контур: REST недоступний (429), але потік ціни бачив торкання TP1 → подія з фактичним хвилинним часом, без вигадування
+import time as _t
+import office_ws_ticker as WT
+os.environ["OFFICE_WS_TICKER"] = "1"
+WT._ensure_thread = lambda: None
+WT.reset_for_tests()
+sid2 = "O2|btc4ws|1"
+plan(sid2, "ETHUSDT", "SHORT", 3000.0, 3050.0, (2950.0, 2900.0, 2850.0), 10590)
+CT2 = BASE - 3600
+seen_entry = {(sid2, CT2, "ENTRY")}
+WT.watch("ETHUSDT")
+t0 = int(_t.time() // 60) * 60 - 600
+WT._WATCH["ETHUSDT"][t0] = [2990.0, 2995.0, 2985.0, 2990.0]
+WT._WATCH["ETHUSDT"][t0 + 60] = [2990.0, 2991.0, 2949.5, 2951.0]     # TP1 2950 торкнуто
+WT._WATCH_SINCE["ETHUSDT"] = t0 - 30
+pp = {"scenario_id": sid2, "confirmed_ts": CT2, "symbol": "ETHUSDT", "direction": "SHORT", "entry": 3000.0, "sl": 3050.0, "tp1": 2950.0, "tp2": 2900.0, "tp3": 2850.0, "confirm_msg_id": 10590}
+fb = T._ws_fallback(pp, seen_entry, _t.time())
+check("WS-запас: TP1 зафіксовано з часом хвилини торкання", [m["level"] for m in fb] == ["TP1"] and fb[0]["touched_ts"] == t0 + 60 and fb[0]["src"] == "binance_futures_ws_ticker", fb)
+check("WS-запас без ENTRY нічого не вигадує", T._ws_fallback(pp, set(), _t.time()) == [])
+WT._WATCH["ETHUSDT"][t0 + 120] = [2951.0, 3051.0, 2951.0, 3040.0]    # у ту ж або наступну хвилину SL
+fb2 = T._ws_fallback(pp, seen_entry, _t.time())
+check("WS-запас: SL після цілі не скасовує TP1, SL окремою подією", sorted(m["level"] for m in fb2) == ["SL", "TP1"], fb2)
+WT._WATCH["ETHUSDT"][t0 + 60] = [2990.0, 3055.0, 2949.5, 2951.0]     # SL і ціль в одній хвилині → консервативно лише SL
+fb3 = T._ws_fallback(pp, seen_entry, _t.time())
+check("WS-запас: SL і ціль в одну хвилину → лише SL", [m["level"] for m in fb3] == ["SL"], fb3)
+
+# 6) уточнення часу до хвилини для старшого плану (5m → 1m)
+plan("O2|ref|1", "SOLUSDT", "SHORT", 100.0, 102.0, (98.0, 96.0, 94.0), 10591)
+five = c5([(100, 100.2, 99.5, 99.8)] + [(99.8, 99.9, 99.0, 99.2)] * 3 + [(99.2, 99.3, 97.5, 98.5)] + [(98.5, 98.6, 98.2, 98.3)] * 3)
+tp_bar = five[4]["ts"]
+one = [{"ts": tp_bar + 60 * i, "open": 99, "high": 99.0, "low": (97.9 if i == 3 else 98.9), "close": 98.5, "volume": 1, "src": "binance_futures"} for i in range(5)]
+def fetch_r(sym, tf, lim):
+    return one if tf == "1m" else five
+fresh_process()
+mr = [m for m in T.pending_milestones(db, fetch_r, now_ts=BASE + 9 * 3600) if m["symbol"] == "SOLUSDT" and m["level"] == "TP1"]
+check("час TP1 уточнено до хвилини", mr and abs(mr[0]["touched_ts"] - (tp_bar + 180)) < 1, mr)
 sys.exit(1 if bad else 0)

@@ -398,6 +398,66 @@ def heartbeat_for(db: str, sid: Any, now: Optional[float] = None, active: bool =
     return {"known": True, "checked_ts": float(c), "age_sec": round(age), "tf": tf, "bars": n, "last_bar_ts": lb, "status": st, "src": src, "fails": int(fails or 0), "last_error": err, "stale": stale}
 
 
+def _refine_touch(p: Dict[str, Any], lv: str, price: Any, touched: float, fetch: Callable[[str, str, int], Any], now: float) -> float:
+    """Старший план перевіряється по 5m: час події — початок 5-хв свічки. Для нової події (рідко) уточнюємо до хвилини по 1m; не вдалося — лишаємо час 5m-свічки."""
+    try:
+        n = int((now - touched) // 60) + 3
+        px = _f(price)
+        if px is None or n > 600:
+            return touched
+        short = str(p.get("direction") or "").upper() == "SHORT"
+        with __import__("office_market_data").priority():
+            bars = fetch(p["symbol"], "1m", n)
+        for b in bars or []:
+            ts = _ts((b or {}).get("ts") or (b or {}).get("time"))
+            if ts is None or ts < touched - 1 or ts > touched + 300:
+                continue
+            lo, hi = float(b["low"]), float(b["high"])
+            if (lv == "SL" and ((hi >= px) if short else (lo <= px))) or (lv != "SL" and ((lo <= px) if short else (hi >= px))):
+                return ts
+    except Exception:  # noqa: BLE001
+        pass
+    return touched
+
+
+def _ws_fallback(p: Dict[str, Any], seen: set, now: float) -> List[Dict[str, Any]]:
+    """Запасний контур, коли REST Binance недоступний (429/418): рівні TP/SL за хвилинними барами з WebSocket-потоку ціни останньої угоди ф'ючерсів.
+    Працює ЛИШЕ для сценарію, де ENTRY уже зафіксовано (потік не бачить минулого). Ніколи не вигадує торкання: ціна останньої угоди не вище/нижче рівня = рівня не торкнулись
+    (можливий лише пропуск — його знайде REST після відновлення). У одній хвилині SL і ціль → SL (консервативно, як у основному симуляторі)."""
+    try:
+        import office_ws_ticker as WT
+    except Exception:  # noqa: BLE001
+        return []
+    sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
+    if (sid, ct, "ENTRY") not in seen:
+        return []
+    short = str(p.get("direction") or "").upper() == "SHORT"
+    bars = WT.watched_bars(str(p.get("symbol") or ""), float(ct or 0))
+    if not bars:
+        return []
+    out: List[Dict[str, Any]] = []
+    sl = _f(p.get("sl"))
+    for lv, key in (("TP1", "tp1"), ("TP2", "tp2"), ("TP3", "tp3"), ("SL", "sl")):
+        if (sid, ct, lv) in seen:
+            continue
+        px = _f(p.get(key))
+        if px is None:
+            continue
+        if lv == "SL":
+            hit = next((b for b in bars if (b["high"] >= px if short else b["low"] <= px)), None)
+        else:
+            hit = next((b for b in bars if (b["low"] <= px if short else b["high"] >= px)), None)
+        if hit is None:
+            continue
+        if lv != "SL" and sl is not None:
+            sl_bar = next((b for b in bars if (b["high"] >= sl if short else b["low"] <= sl)), None)
+            if sl_bar is not None and sl_bar["ts"] <= hit["ts"]:
+                continue   # SL раніше (або в тій самій хвилині) — ціль не зараховуємо; SL піде окремим рівнем
+        out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv, "price": px, "confirm_msg_id": p.get("confirm_msg_id"),
+                    "silent": lv in SILENT_LEVELS, "touched_ts": float(hit["ts"]), "src": "binance_futures_ws_ticker", "tf": "1m(ws)"})
+    return out
+
+
 def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts: Optional[float] = None, scope: str = "all") -> List[Dict[str, Any]]:
     """Нові події життя доставлених READY (для КОЖНОГО, незалежно від кнопки «Я відкрила угоду»): ENTRY (вхід торкнуто), TP1/TP2/TP3, SL, EXPIRED (вхід так і не торкнуто до кінця строку).
     Кожна — один раз. Свічки 1m для свіжих планів (затримка ≤ ~1 хв замість ≤ 15), 5m для старших. Це рух ринку за планом, а не стан угоди користувача.
@@ -426,6 +486,12 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
         if not fresh and now - _MS_LAST.get((sid, ct), 0.0) < (OLD_RECHECK_O2_SEC if is_o2 else (OLD_RECHECK_LEGACY_SEC if os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0" else OLD_RECHECK_SEC)):
             continue
         _MS_LAST[(sid, ct)] = now
+        try:
+            import office_ws_ticker as _WT
+
+            _WT.watch(p.get("symbol"))      # запасний облік хвилинних барів із потоку, поки сценарій живий
+        except Exception:  # noqa: BLE001
+            pass
         # Мінімальне навантаження на Binance REST (вага запиту росте з limit): беремо рівно стільки свічок, скільки минуло від READY (+запас)
         if fresh:
             tf, tfs = "1m", 60.0
@@ -438,9 +504,11 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
                 candles = fetch(p["symbol"], tf, lim)
         except Exception as exc:  # noqa: BLE001
             heartbeat(db, sid, now, tf=tf, error=f"{type(exc).__name__}: {exc}")
+            out.extend(_ws_fallback(p, seen, now))
             continue
         if not isinstance(candles, list) or not candles:
             heartbeat(db, sid, now, tf=tf, error="порожня відповідь свічок")
+            out.extend(_ws_fallback(p, seen, now))
             continue
         # Reject the whole series if any candle is from a different venue.
         # Checking only the final candle can silently mix spot and futures
@@ -460,9 +528,12 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
             if (sid, ct, lv) in seen:
                 continue
             price = p.get({"ENTRY": "entry", "TP1": "tp1", "TP2": "tp2", "TP3": "tp3", "SL": "sl", "EXPIRED": "entry", "INVALIDATED": "inval_px"}[lv])
+            touched = (res.get("at") or {}).get(lv)
+            if tf != "1m" and touched and lv in ("TP1", "TP2", "TP3", "SL"):
+                touched = _refine_touch(p, lv, price, float(touched), fetch, now)
             out.append({"scenario_id": sid, "confirmed_ts": ct, "symbol": p.get("symbol"), "direction": p.get("direction"), "level": lv,
                         "price": price, "confirm_msg_id": p.get("confirm_msg_id"), "silent": lv in SILENT_LEVELS,
-                        "touched_ts": (res.get("at") or {}).get(lv), "src": src, "tf": tf})
+                        "touched_ts": touched, "src": src, "tf": tf})
     return out
 
 

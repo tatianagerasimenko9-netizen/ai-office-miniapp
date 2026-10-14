@@ -17,6 +17,9 @@ _LOCK = threading.Lock()
 _TICK: Dict[str, Dict[str, float]] = {}
 _STATE: Dict[str, Any] = {"thread": None, "connected": False, "msgs": 0, "hits": 0, "misses": 0, "errors": 0, "last_msg": 0.0, "connects": 0, "last_error": None}
 MAX_AGE_SEC = 30.0
+_WATCH: Dict[str, Dict[int, list]] = {}      # символ під супроводом READY → {хвилина(unix): [open, high, low, close]} за ціною потоку; запасне джерело, коли REST Binance мовчить (429/418)
+_WATCH_SINCE: Dict[str, float] = {}
+WATCH_KEEP_MIN = 600
 _MISS: Dict[str, Any] = {"symbol_missing": 0, "stale": 0, "no_open": 0, "ages": [], "stale_syms": {}}   # вимір причин промахів (лише облік, поведінку не змінює)
 _MISS_AGES_CAP = 4000
 
@@ -52,11 +55,54 @@ def _parse(data: Any) -> int:
                 q = float(r.get("q") or 0.0)
             except (KeyError, TypeError, ValueError):
                 continue
-            _TICK[str(r["s"]).upper()] = {"c": c, "o": o, "h": h, "l": l_, "q": q, "at": now}
+            sym_u = str(r["s"]).upper()
+            _TICK[sym_u] = {"c": c, "o": o, "h": h, "l": l_, "q": q, "at": now}
             n += 1
+            wb = _WATCH.get(sym_u)
+            if wb is not None:
+                m = int(now // 60) * 60
+                b = wb.get(m)
+                if b is None:
+                    wb[m] = [c, c, c, c]
+                    for old in [k for k in wb if k < m - WATCH_KEEP_MIN * 60]:
+                        wb.pop(old, None)
+                else:
+                    b[1] = max(b[1], c)
+                    b[2] = min(b[2], c)
+                    b[3] = c
         if n:
             _STATE["last_msg"] = now
     return n
+
+
+def watch(symbol: str) -> None:
+    """Ставить символ активного READY на запасний облік хвилинних барів із потоку (ціна останньої угоди ф'ючерсів). Нічого не робить, якщо потік вимкнено."""
+    if not enabled():
+        return
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return
+    _ensure_thread()
+    with _LOCK:
+        if sym not in _WATCH:
+            _WATCH[sym] = {}
+            _WATCH_SINCE[sym] = time.time()
+
+
+def watched_bars(symbol: str, since_ts: float = 0.0) -> list:
+    """Хвилинні бари з потоку (лише ПОВНІ хвилини після початку спостереження за символом і після since_ts), формат як у свічок: ts, open, high, low, close. Порожньо — даних потоку немає."""
+    sym = str(symbol or "").upper().strip()
+    now = time.time()
+    with _LOCK:
+        wb = dict(_WATCH.get(sym) or {})
+        t0 = _WATCH_SINCE.get(sym, now)
+    out = []
+    for m in sorted(wb):
+        if m < t0 or m < since_ts or m + 60 > now:
+            continue
+        o, h, l_, c = wb[m]
+        out.append({"ts": m, "open": o, "high": h, "low": l_, "close": c, "volume": 0.0, "src": "binance_futures"})
+    return out
 
 
 def get(symbol: str, max_age: float = MAX_AGE_SEC) -> Optional[Dict[str, float]]:
@@ -167,6 +213,8 @@ def stats() -> Dict[str, Any]:
 
 
 def reset_for_tests() -> None:
+    _WATCH.clear()
+    _WATCH_SINCE.clear()
     with _LOCK:
         _TICK.clear()
         _STATE.update(msgs=0, hits=0, misses=0, errors=0, last_msg=0.0, connects=0, connected=False, last_error=None)
