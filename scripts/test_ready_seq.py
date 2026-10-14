@@ -17,7 +17,7 @@ def main():
         assert (a, b, c) == (1, 2, 3), (a, b, c)
         assert RS.assign(db, "O2|S1|1") == 2                   # idempotent: a retry never burns a number
         assert RS.number_of(db, "O2|S1|1") == 2 and RS.number_of(db, "nope") is None
-        assert RS.label(7) == "№0007" and RS.label(12345) == "№12345" and RS.label(None) == ""
+        assert RS.label(7) == "№7" and RS.label(12345) == "№12345" and RS.label(None) == ""
         RS._READY_DBS.clear()                                  # "restart": module state lost, DB state kept
         assert RS.assign(db, "O2|S1|1") == 2 and RS.assign(db, "O2|NEW|1") == 4
         # parallel assigners: unique numbers, no gaps for distinct scenarios
@@ -37,10 +37,10 @@ def main():
         assert not errs, errs
         assert sorted(res.values()) == list(range(1, 13)), sorted(res.values())
         import office_user_messages as M
-        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="TP1", price=0.6254, number=7).startswith("🎯 TIA · TP1 · №0007\n")
-        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="SL", price=0.5686, number=12).startswith("❌ TIA · СТОП · №0012\n")
+        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="TP1", price=0.6254, number=7).startswith("🎯 TIA · TP1 · №7\n")
+        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="SL", price=0.5686, number=12).startswith("❌ TIA · СТОП · №12\n")
         assert "№" not in M.scenario_event(symbol="TIAUSDT", direction="LONG", level="TP2", price=0.65)
-        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="ENTRY", price=0.59, number=3).startswith("🟡 TIA · ВХІД ТОРКНУТО · №0003")
+        assert M.scenario_event(symbol="TIAUSDT", direction="LONG", level="ENTRY", price=0.59, number=3).startswith("🟡 TIA · ВХІД ТОРКНУТО · №3")
         # the number is NOT a message id and never depends on one
         assert "message_id" not in open(RS.__file__, encoding="utf-8").read().replace("Not the Telegram message_id", "")
     print("OK test_ready_seq")

@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory() as td:
     sent = T._Sent(); created = OB._fetchone(db, "SELECT created_ts FROM office2_live_signal")[0]
     n = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: T._candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
     ev, text, kw = sent.calls[0]
-    check("Telegram: №0001, хештег, один виклик, PNG існує", n == 1 and text.startswith("AI Office · №0001\n") and "#XUSDT" in text and Path(kw["photo_path"]).exists())
+    check("Telegram: №1, хештег, один виклик, PNG існує", n == 1 and text.startswith("AI Office · №1\n") and "#XUSDT" in text and Path(kw["photo_path"]).exists())
     check("Telegram: текст не містить внутрішнього розбору аналітика (дизайн не змінено)", "аналітик" not in text.lower() and "T1_scalp" not in text and "chain82" not in text)
     # Mini App API
     from office2 import webview as WV

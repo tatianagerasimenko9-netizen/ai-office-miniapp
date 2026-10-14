@@ -216,7 +216,7 @@ def test_delivery_end_to_end_and_lifecycle():
         n = asyncio.run(DL.deliver_pending(db, sent, lambda s, tf, lim: _candles(b), card.render, "TRADE_UPDATE", now=created + 60, log=lambda m: None))
         assert n == 1 and len(sent.calls) == 1
         ev, text, kw = sent.calls[0]
-        assert text.startswith("AI Office · №0001\n") and "LONG · READY · #XUSDT" in text, text   # наскрізний номер, не message_id
+        assert text.startswith("AI Office · №1\n") and "LONG · READY · #XUSDT" in text, text   # наскрізний номер, не message_id
         import office_ready_seq as _RS
         assert _RS.number_of(db, kw0_sid := sent.calls[0][2]["canonical_id"]) == 1
         assert "LONG · READY · #XUSDT" in text and "🟡 ВХІД" in text and "Скасування: закриття M15" in text and "🔴 SL" in text and "🟢 TP1" in text and "⏳ До" in text, text

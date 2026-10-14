@@ -248,7 +248,7 @@ def scenario_event(*, symbol: str, direction: str, level: str, price: Any = None
     text = _scenario_event(symbol=symbol, direction=direction, level=level, price=price)
     if number:
         head, _, rest = text.partition("\n")
-        text = f"{head} · №{int(number):04d}" + (("\n" + rest) if rest else "")
+        text = f"{head} · №{int(number)}" + (("\n" + rest) if rest else "")
     return text
 
 

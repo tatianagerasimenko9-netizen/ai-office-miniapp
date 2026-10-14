@@ -84,8 +84,12 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
 
     no = _seq_label(snap.get("ready_no"))
     L = [f"AI Office · {no}" if no else "AI Office",
-         f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}",
-         "━━━━━━━━━━━━━━━━"]
+         f"{'🟢' if long_ else '🔴'} {ticker(sym)} · {snap['direction']} · READY · {hashtag}"]
+    lcx = th.get("lifecycle") or {}
+    if lcx.get("relation") == "REENTRY" and lcx.get("parent_seq"):
+        ended = ", ".join(lcx.get("parent_terminal") or []) or "завершено"
+        L.append(f"↻ ПОВТОРНИЙ ВХІД · після №{int(lcx['parent_seq'])} ({ended})")
+    L.append("━━━━━━━━━━━━━━━━")
     if v["zone"]:
         L.append(f"🟡 ВХІД  {n(v['zone'][0])}–{n(v['zone'][1])}")
         L.append(f"    План: {n(entry)}")
@@ -328,7 +332,9 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                 return 0
             cap = build_caption(dict(snap, ready_no=ready_no), now=clk())
             t_a = time.time()
-            mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "")
+            _lc = th.get("lifecycle") or {}
+            _reply = {"reply_to_message_id": int(_lc["parent_msg_id"])} if _lc.get("relation") == "REENTRY" and _lc.get("parent_msg_id") else {}      # повторний вхід — відповіддю на повідомлення попереднього сценарію
+            mid = await send(event_type, cap, symbol=sym, kind="CONFIRM", intent="CONFIRM", canonical_id=sid, scenario_event="CONFIRM", photo_path=str(img.get("path") or "") if img.get("ok") else "", **_reply)
             t_sent = time.time()
             tm["send_ms"] = int((t_sent - t_a) * 1000)
             if not mid:
