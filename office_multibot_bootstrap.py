@@ -12,6 +12,16 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_CFG = ROOT / "office_relay_config.json"
 
 
+def child_env() -> Dict[str, str]:
+    """Середовище процесу relay. MALLOC_ARENA_MAX=2: у процесі десятки потоків (asyncio.to_thread, WS, shadow-цикли); без обмеження glibc створює арену на потік,
+    і вільна пам'ять лишається за ними (RSS 485–496 МБ із 512 у production 14.10). Вимкнути або змінити: MALLOC_ARENA_MAX / OFFICE_MALLOC_ARENA_MAX=0."""
+    env = dict(os.environ)
+    want = str(env.get("OFFICE_MALLOC_ARENA_MAX", "2")).strip()
+    if want and want != "0":
+        env.setdefault("MALLOC_ARENA_MAX", want)
+    return env
+
+
 def load_cfg(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -129,7 +139,7 @@ def main() -> int:
 
     # Run relay wizard in the same folder.
     wizard = ROOT / "office_relay_wizard.py"
-    return subprocess.call([sys.executable, str(wizard)], cwd=str(ROOT))
+    return subprocess.call([sys.executable, str(wizard)], cwd=str(ROOT), env=child_env())
 
 
 if __name__ == "__main__":
