@@ -45,6 +45,11 @@ class RateLimited(Exception):
         self.retry_after = float(retry_after)
 
 
+try:
+    _RETRY_AFTER_CAP = max(60.0, float(os.getenv("OFFICE_RETRY_AFTER_CAP_SEC", "1800")))     # раніше 300 с: повтор раніше за Retry-After Binance міг продовжувати бан (418)
+except ValueError:
+    _RETRY_AFTER_CAP = 1800.0
+_LIMIT_LOG_AT = 0.0
 _BACKOFF_UNTIL = 0.0       # справжня пауза: 429/418 від Binance або вага ≥ _WEIGHT_HARD — для всіх
 _SOFT_UNTIL = 0.0          # власна пауза ваги (≥ _WEIGHT_SOFT): проходять лише запити «життя READY» (priority())
 _PRIORITY = threading.local()
@@ -135,13 +140,25 @@ def hard_backoff_left() -> float:
     return max(0.0, _BACKOFF_UNTIL - time.time())
 
 
+def _log_limit(code: int, ra: float) -> None:
+    """Один рядок на хвилину: який саме код (429/418) і який Retry-After повернув Binance — щоб бачити фактичну тривалість обмеження."""
+    global _LIMIT_LOG_AT
+    now = time.time()
+    if now - _LIMIT_LOG_AT >= 60.0:
+        _LIMIT_LOG_AT = now
+        try:
+            print(f"[binance] HTTP {code}, Retry-After={ra:.0f} с (пауза до {min(max(ra, 5.0), _RETRY_AFTER_CAP):.0f} с)", flush=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def note_rate_limited(retry_after: Any = None) -> None:
     global _BACKOFF_UNTIL
     try:
         ra = float(retry_after) if retry_after is not None else 30.0
     except (TypeError, ValueError):
         ra = 30.0
-    _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + min(max(ra, 5.0), 300.0))
+    _BACKOFF_UNTIL = max(_BACKOFF_UNTIL, time.time() + min(max(ra, 5.0), _RETRY_AFTER_CAP))
     _HEALTH["rate_limited"] += 1
     _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -371,7 +388,8 @@ def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLik
                 ra = float(exc.headers.get("Retry-After") or 30)
             except (TypeError, ValueError):
                 ra = 30.0
-            ra = min(max(ra, 5.0), 300.0)
+            _log_limit(exc.code, ra)
+            ra = min(max(ra, 5.0), _RETRY_AFTER_CAP)
             _BACKOFF_UNTIL = time.time() + ra
             _HEALTH["rate_limited"] += 1
             _HEALTH["last_429_at"] = datetime.now(timezone.utc).isoformat()

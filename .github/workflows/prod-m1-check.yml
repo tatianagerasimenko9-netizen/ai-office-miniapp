@@ -1,0 +1,35 @@
+name: Production M1 check (read-only)
+# P0: перевірка торкань ENTRY/TP1/SL сценарію за M1 Binance Futures через публічний GET Mini App. Нічого не змінює.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/prod-m1-check.yml']
+permissions:
+  contents: read
+jobs:
+  m1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: BTC №4 SHORT — M1 з 04:00Z
+        run: |
+          B=https://ai-office-miniapp.onrender.com
+          curl -sS --max-time 60 "$B/api/v2/candles?symbol=BTCUSDT&tf=M1&limit=1000" -o m1.json
+          python3 - <<'PY'
+          import json, datetime as dt
+          d = json.load(open("m1.json"))
+          bars = [b for b in d.get("candles", d.get("bars", [])) if b.get("time")]
+          print("keys", list(d.keys())[:8], "bars", len(bars), "source", d.get("source"), "status", d.get("data_status"))
+          T0, ENTRY, SL, TP1 = 1791950400, 83663.5, 84163.7, 83127.0
+          u = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%d %H:%M")
+          if bars: print("перша", u(bars[0]["time"]), "остання", u(bars[-1]["time"]))
+          sub = [b for b in bars if b["time"] >= T0]
+          lo = min(sub, key=lambda b: float(b["low"])); hi = max(sub, key=lambda b: float(b["high"]))
+          print("мінімум після READY", lo["low"], "о", u(lo["time"]), "UTC; максимум", hi["high"], "о", u(hi["time"]))
+          ent = next((b for b in sub if float(b["high"]) >= ENTRY), None)
+          print("перше торкання входу (high>=entry):", u(ent["time"]) if ent else None)
+          tp = next((b for b in sub if float(b["low"]) <= TP1), None)
+          sl = next((b for b in sub if float(b["high"]) >= SL), None)
+          print("TP1 83127 торкнуто:", u(tp["time"]) if tp else "НІ", "| SL 84163.7 торкнуто:", u(sl["time"]) if sl else "НІ")
+          PY
