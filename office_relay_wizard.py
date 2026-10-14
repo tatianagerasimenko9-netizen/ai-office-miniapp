@@ -7675,8 +7675,16 @@ EV позитивне: {prob.get('ev_positive', '')}
                         import office_ready_seq as _rseq
 
                         _no = await _th(_rseq.number_of, db_path, str(m["scenario_id"]))   # той самий №READY, що в початковому повідомленні
-                    except Exception:  # noqa: BLE001
-                        _no = None
+                    except Exception as _exn:  # noqa: BLE001
+                        # збій читання номера ≠ «без номера»: подію не губимо, повторимо в наступному циклі
+                        print(f"[milestone][WARN] number_of failed, retry next cycle: {type(_exn).__name__}")
+                        continue
+                    # Only delivered, numbered Office2 READY plans are user-facing.
+                    # Older beta/paper scenarios must not emit TP/SL into the one-office chat.
+                    if scope != "o2" or _no is None:
+                        await _th(trk.record_milestone, db_path, m, None)
+                        print(f"[milestone] suppressed unnumbered/legacy {m['symbol']} {m['level']} (db-only)")
+                        continue
                     mid = await send_proactive(
                         EVENT_TRADE_UPDATE,
                         _msgs.scenario_event(symbol=str(m["symbol"]), direction=str(m["direction"]), level=str(m["level"]), price=m.get("price"), number=_no),
@@ -7693,7 +7701,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                 print(f"[milestone][WARN] tick failed: {type(exc_ms).__name__}: {exc_ms}")
             await asyncio.sleep(300 if (scope == "other" and os.getenv("OFFICE_OLD_READY_DELIVERY", "1").strip() == "0") else pause)   # старі плани — лише статистика: рідший огляд (менше Binance REST)
 
-    asyncio.create_task(monitor_scenario_milestones("other", 45, 150))
+    # Legacy signal follow-up is retired. Do not scan hundreds of historical
+    # plans on the user-facing worker; only numbered Office2 plans get TP/SL.
     asyncio.create_task(monitor_scenario_milestones("o2", 15, 20))   # Office2: окремий швидкий цикл (кілька планів), не чекає на огляд сотень старих планів
 
     async def monitor_office2_delivery() -> None:
