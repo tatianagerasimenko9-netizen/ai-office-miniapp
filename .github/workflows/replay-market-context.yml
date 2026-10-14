@@ -1,6 +1,9 @@
 name: replay-market-context
 # Дослідження ринкового контексту READY (сесія / BTC / відносна сила / одночасні сигнали) на ГОТОВИХ артефактах повного replay — без повторного replay.
 on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths: ['.github/workflows/replay-market-context.yml', 'scripts/replay_market_context_study.py']
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -22,7 +25,7 @@ jobs:
         with:
           pattern: replay-*
           path: parts
-          run-id: ${{ inputs.source_run_id }}
+          run-id: ${{ inputs.source_run_id || '38438248492' }}
           github-token: ${{ github.token }}
       - name: Market context study
         run: |
