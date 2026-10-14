@@ -9,6 +9,8 @@ on:
     paths:
       - 'office_*.py'
       - 'office2/**'
+      - 'office_web/**'
+      - 'scripts/ui_*.py'
       - 'scripts/test_pr68_canonical.py'
       - 'scripts/test_telegram_position_gate.py'
       - 'scripts/test_*.py'
