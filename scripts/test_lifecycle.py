@@ -82,7 +82,8 @@ with tempfile.TemporaryDirectory() as td:
     check("текст: не новий вхід, без вигаданих фіксацій/прибутку", "Не є новим входом" in txt and "зафіксовано" not in txt.lower() and "прибуток" not in txt.lower())
     # реальний рівень за початковими цілями — показується як нова ціль, а не вигаданий
     far = child_th([{"kind": "D1H", "p": 1.31, "r": 6.0}, {"kind": "H4SW", "p": 1.2137, "r": 1.9}])
-    check("ціль за найдальшою початковою — лише реальний рівень тези (D1H 1,31)", "D1H 1,31 (реальний рівень за початковими цілями)" in LC.continuation_text(rel, far, "FILUSDT", "LONG", FMT, "FIL"))
+    tfar = LC.continuation_text(rel, far, "FILUSDT", "LONG", FMT, "FIL")
+    check("рівень за найдальшою початковою — лише інформація (D1H 1,31), ціль НЕ додається, стоп не міняється", "Нова запропонована ціль\nПотребує підтвердження" in tfar and "D1H 1,31 (ціль не додано)" in tfar and "Новий захисний стоп\nНе визначено" in tfar, tfar)
     # запис: один раз на (початковий сценарій, ідея); повтори й паралельні цикли не дублюють
     a = LC.record_continuation(db, rel, child_th(), "FILUSDT", "LONG", f"{C_ID}|{int(t8)}", txt, t8)
     b = LC.record_continuation(db, rel, child_th(), "FILUSDT", "LONG", f"{C_ID}|{int(t8) + 900}", txt, t8 + 900)

@@ -167,7 +167,9 @@ def continuation_text(rel: Dict[str, Any], th: Dict[str, Any], symbol: str, dire
     beyond = new_targets_beyond(plan, th, long_)
     L.append("")
     L.append("Нова запропонована ціль")
-    L.append(f"{beyond[0].get('kind') or 'рівень'} {fmt(beyond[0]['p'])} (реальний рівень за початковими цілями)" if beyond else "Потребує підтвердження")
+    L.append("Потребує підтвердження")      # нових цілей (TP4/TP5) автоматично не додаємо: це окрема логіка супроводу, яку спершу перевіряють на історії
+    if beyond:
+        L.append(f"Інформація: рівень нового сетапу за початковими цілями — {beyond[0].get('kind') or 'рівень'} {fmt(beyond[0]['p'])} (ціль не додано)")
     L.append("Новий захисний стоп")
     L.append("Не визначено")
     L.append("")
