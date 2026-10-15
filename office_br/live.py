@@ -225,23 +225,37 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     while True:
         try:
             if enabled():
+                scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
                 for sym in symbols():
                     try:
-                        bars = await asyncio.to_thread(fetch, sym, "15m", 2, closed_only=True)
-                        if not isinstance(bars, list) or not bars:
+                        bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
+                        if not isinstance(bars, list) or len(bars) < 100:
+                            scan_missing += 1
                             continue
                         ts = _epoch(bars[-1])
-                        if seen.get(sym) == ts:
+                        now_ts = time.time()
+                        if ts + 900 > now_ts or now_ts - (ts + 900) > 150:
+                            scan_stale += 1
                             continue
+                        if seen.get(sym) == ts:
+                            scan_ok += 1
+                            continue
+                        # Do not mark a bar as processed before the detector succeeds.
+                        found = await asyncio.to_thread(
+                            scan_symbol, db, sym,
+                            lambda _symbol, _tf, _limit, *, closed_only: bars,
+                            now_ts,
+                        )
                         seen[sym] = ts
-                        await asyncio.to_thread(scan_symbol, db, sym, fetch)
+                        scan_ok += 1
+                        new_signals += found
                     except Exception as exc:
+                        scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                if int(time.time()) % 900 < 65:
-                    print(f"[br-live] heartbeat symbols_seen={len(seen)}/{len(symbols())} delivered={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
