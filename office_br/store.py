@@ -62,6 +62,36 @@ def rows(db: str, where: str = "", args: tuple = ()) -> List[Dict[str, Any]]:
     return [dict(zip(cols.replace(" ", "").split(","), r)) for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal {where} ORDER BY created_ts", args)]
 
 
+
+def init_manual_actions(db: str) -> None:
+    """Owner-reported actions only. Never place an exchange order."""
+    from office_bridge import _execute
+    _execute(db, """CREATE TABLE IF NOT EXISTS br_manual_action (
+        sig_id TEXT NOT NULL, action TEXT NOT NULL, noted_ts DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (sig_id, action))""")
+
+
+def record_manual_action(db: str, sid: str, action: str) -> bool:
+    """Explicit user acknowledgement; price touching a level does not imply a fill."""
+    from office_bridge import _execute, _fetchone
+    allowed = {"OPENED", "TP1_30", "SL_BE", "TP2_40", "TP3_REST", "CLOSED"}
+    if action not in allowed:
+        raise ValueError("unsupported B&R manual action")
+    init(db)
+    init_manual_actions(db)
+    if not _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)):
+        return False
+    _execute(db, "INSERT INTO br_manual_action(sig_id, action, noted_ts) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+             (sid, action, time.time()))
+    return True
+
+
+def manual_actions(db: str, sid: str) -> List[str]:
+    from office_bridge import _fetchall
+    init_manual_actions(db)
+    return [str(x[0]) for x in _fetchall(db, "SELECT action FROM br_manual_action WHERE sig_id = ? ORDER BY noted_ts", (sid,))]
+
+
 def events(db: str, sid: str) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
