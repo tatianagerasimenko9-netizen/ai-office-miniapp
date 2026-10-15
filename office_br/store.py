@@ -92,6 +92,43 @@ def manual_actions(db: str, sid: str) -> List[str]:
     return [str(x[0]) for x in _fetchall(db, "SELECT action FROM br_manual_action WHERE sig_id = ? ORDER BY noted_ts", (sid,))]
 
 
+
+def paper_metrics(db: str) -> Dict[str, Any]:
+    """Observed first TP1 vs SL after ENTRY; not actual user PnL or backtest edge."""
+    from office_bridge import _fetchall
+    init(db)
+    sql = """SELECT s.direction, s.entry, s.sl, s.targets_json, e.level
+             FROM br_test_signal s JOIN br_test_event e ON e.sig_id=s.sig_id
+             WHERE e.level IN ('TP1','SL') AND EXISTS
+                (SELECT 1 FROM br_test_event i WHERE i.sig_id=s.sig_id AND i.level='ENTRY')
+             AND NOT EXISTS
+                (SELECT 1 FROM br_test_event a WHERE a.sig_id=s.sig_id AND a.level='AMBIGUOUS')
+             AND e.touched_ts = (SELECT MIN(x.touched_ts) FROM br_test_event x
+                 WHERE x.sig_id=s.sig_id AND x.level IN ('TP1','SL'))"""
+    wins = losses = 0
+    r_values = []
+    for direction, entry, sl, targets_raw, level in _fetchall(db, sql):
+        if level == "SL":
+            losses += 1
+            r_values.append(-1.0)
+        else:
+            try:
+                t = json.loads(targets_raw)[0]["p"]
+                risk = abs(float(entry)-float(sl))
+                reward = (float(t)-float(entry)) if direction == "LONG" else (float(entry)-float(t))
+                if risk <= 0 or reward <= 0:
+                    continue
+                wins += 1
+                r_values.append(reward/risk)
+            except (ValueError, TypeError, IndexError, KeyError):
+                continue
+    n = len(r_values)
+    return {"n": n, "wins": wins, "losses": losses,
+            "win_rate_pct": round(100*wins/n, 1) if n else None,
+            "avg_r": round(sum(r_values)/n, 3) if n else None,
+            "expectancy_r": round(sum(r_values)/n, 3) if n else None,
+            "basis": "paper first TP1/SL after observed ENTRY; no fees, no actual fills; not historical backtest"}
+
 def events(db: str, sid: str) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
