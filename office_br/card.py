@@ -26,8 +26,8 @@ def build_card(row: Dict[str, Any]) -> str:
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
-    L = [f"B&R · LIVE · ЕКСПЕРИМЕНТ · {tag(row.get('seq'))}",
-         "🧪 Живе спостереження Breakout & Retest. Replay V1/V2 збитковий. НЕ основний READY; пороги — гіпотези, ордерів немає.",
+    L = [f"B&R LIVE · {tag(row.get('seq'))}",
+         "Breakout & Retest · пробій → ретест → підтвердження. Сигнал для ручного рішення; Office не відкриває ордерів. Історичний replay V1/V2 збитковий.",
          f"{'🟢' if long_ else '🔴'} {sym.replace('USDT', '')} · {d} · #{sym}",
          "━━━━━━━━━━━━━━━━",
          f"Рівень пробою: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} рівня підтверджено",
@@ -43,4 +43,17 @@ def build_card(row: Dict[str, Any]) -> str:
 def event_text(row: Dict[str, Any], level: str, price: Any = None) -> str:
     names = {"ENTRY": "вхід досягнуто", "TP1": "TP1 досягнуто", "TP2": "TP2 досягнуто", "TP3": "TP3 досягнуто", "SL": "стоп-лосс", "CANCEL": "скасовано"}
     px = f" ({_n(price, row['symbol'])})" if price is not None else ""
-    return f"B&R · LIVE · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}: {names.get(level, level)}{px}"
+    return f"B&R LIVE · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}: {names.get(level, level)}{px}"
+
+
+def reminder_text(row: Dict[str, Any], level: str) -> str:
+    """Price-triggered manual-action prompt, never an assertion of an executed order."""
+    base = f"B&R LIVE · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}"
+    actions = {
+        "ENTRY": "🟡 Ціна торкнулася планового входу. Якщо ти відкрила позицію вручну — підтвердь це в Mini App. Торкання ≠ виконання ордера.",
+        "TP1": "🟢 TP1 досягнуто. Якщо позиція відкрита: розглянь фіксацію 30% вручну. Після фактичної фіксації — розглянь перенесення SL у беззбиток. Office нічого не виконував.",
+        "TP2": "🟢 TP2 досягнуто. Якщо позиція відкрита: розглянь фіксацію ще 40% вручну. Office нічого не виконував.",
+        "TP3": "🟢 TP3 досягнуто. Якщо позиція відкрита: розглянь закриття залишку вручну. Office нічого не виконував.",
+        "SL": "🔴 Рівня SL досягнуто. Перевір фактичний стан позиції на біржі. Office не виконував ордерів.",
+    }
+    return base + "\n" + actions.get(level, level)
