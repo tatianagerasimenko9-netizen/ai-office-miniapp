@@ -31,6 +31,15 @@ def main():
         except Exception:  # noqa: BLE001
             pass                                                                        # таблиці немає зовсім — теж «не зачеплено»
         assert store.record_event(db, a, "TP1", 6000.0, 105.0) and not store.record_event(db, a, "TP1", 6000.0, 105.0)
+        assert store.record_manual_action(db, a, "OPENED")
+        assert store.record_manual_action(db, a, "TP1_30")
+        assert store.manual_actions(db, a) == ["OPENED", "TP1_30"]
+        assert not store.record_manual_action(db, "missing", "OPENED")
+        try:
+            store.record_manual_action(db, a, "EXECUTE_ORDER")
+            assert False, "Exchange execution must not be supported"
+        except ValueError:
+            pass
         txt = card.build_card(rs[0])
         assert txt.startswith("B&R LIVE · B&R-1") and "Office не відкриває ордерів" in txt and "AI Office" not in txt
         assert "ВХІД  102" in txt and "SL     99" in txt and "TP3" in txt and "Скасування" in txt
