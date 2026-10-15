@@ -40,6 +40,9 @@ def main():
             assert False, "Exchange execution must not be supported"
         except ValueError:
             pass
+        metrics = store.paper_metrics(db)
+        assert metrics["n"] == 0  # TP1 without observed ENTRY cannot count
+        assert metrics["win_rate_pct"] is None
         txt = card.build_card(rs[0])
         assert txt.startswith("B&R LIVE · B&R-1") and "Office не відкриває ордерів" in txt and "AI Office" not in txt
         assert "ВХІД  102" in txt and "SL     99" in txt and "TP3" in txt and "Скасування" in txt
