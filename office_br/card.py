@@ -26,8 +26,8 @@ def build_card(row: Dict[str, Any]) -> str:
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
-    L = [f"B&R · TEST · {tag(row.get('seq'))}",
-         "🧪 Експериментальна система Breakout & Retest. НЕ основний сигнал Office2, пороги — гіпотези; рішення про вхід — твоє.",
+    L = [f"B&R · LIVE · ЕКСПЕРИМЕНТ · {tag(row.get('seq'))}",
+         "🧪 Живе спостереження Breakout & Retest. Replay V1/V2 збитковий. НЕ основний READY; пороги — гіпотези, ордерів немає.",
          f"{'🟢' if long_ else '🔴'} {sym.replace('USDT', '')} · {d} · #{sym}",
          "━━━━━━━━━━━━━━━━",
          f"Рівень пробою: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} рівня підтверджено",
@@ -43,4 +43,4 @@ def build_card(row: Dict[str, Any]) -> str:
 def event_text(row: Dict[str, Any], level: str, price: Any = None) -> str:
     names = {"ENTRY": "вхід досягнуто", "TP1": "TP1 досягнуто", "TP2": "TP2 досягнуто", "TP3": "TP3 досягнуто", "SL": "стоп-лосс", "CANCEL": "скасовано"}
     px = f" ({_n(price, row['symbol'])})" if price is not None else ""
-    return f"B&R · TEST · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}: {names.get(level, level)}{px}"
+    return f"B&R · LIVE · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}: {names.get(level, level)}{px}"
