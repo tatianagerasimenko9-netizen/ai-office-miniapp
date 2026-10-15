@@ -43,6 +43,26 @@ def main():
         metrics = store.paper_metrics(db)
         assert metrics["n"] == 0  # TP1 without observed ENTRY cannot count
         assert metrics["win_rate_pct"] is None
+        # A later ENTRY cannot retroactively convert an earlier TP into a win.
+        assert store.record_event(db, a, "ENTRY", 7000.0, 102.0)
+        assert store.paper_metrics(db)["n"] == 0
+        # A new signal with a valid ENTRY -> SL is one paper loss.
+        c = store.record_signal(db, "ADAUSDT", dict(_sig(), break_ts=3000.0), D.HYP, now=5003.0)
+        assert c and store.record_event(db, c, "ENTRY", 8000.0, 102.0)
+        assert store.record_event(db, c, "SL", 8100.0, 99.0)
+        loss = store.paper_metrics(db)
+        assert loss["n"] == 1 and loss["losses"] == 1 and loss["wins"] == 0
+        # A genuine ENTRY -> TP1 counts, while same-timestamp levels do not.
+        d = store.record_signal(db, "LINKUSDT", dict(_sig(), break_ts=4000.0), D.HYP, now=5004.0)
+        assert d and store.record_event(db, d, "ENTRY", 8000.0, 102.0)
+        assert store.record_event(db, d, "TP1", 8100.0, 105.0)
+        result = store.paper_metrics(db)
+        assert result["n"] == 2 and result["wins"] == 1 and result["losses"] == 1
+        e = store.record_signal(db, "XRPUSDT", dict(_sig(), break_ts=5000.0), D.HYP, now=5005.0)
+        assert e and store.record_event(db, e, "ENTRY", 8000.0, 102.0)
+        assert store.record_event(db, e, "TP1", 8100.0, 105.0)
+        assert store.record_event(db, e, "SL", 8100.0, 99.0)
+        assert store.paper_metrics(db)["n"] == 2
         txt = card.build_card(rs[0])
         assert txt.startswith("B&R LIVE · B&R-1") and "Office не відкриває ордерів" in txt and "AI Office" not in txt
         assert "ВХІД  102" in txt and "SL     99" in txt and "TP3" in txt and "Скасування" in txt
