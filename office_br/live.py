@@ -220,7 +220,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
-    print("[br-live] monitor initialized", flush=True)
+    print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
@@ -237,8 +237,11 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         await asyncio.to_thread(scan_symbol, db, sym, fetch)
                     except Exception as exc:
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
-                await deliver(db, send)
-                await track(db, fetch, send)
+                delivered = await deliver(db, send)
+                tracked = await track(db, fetch, send)
+                # Operational heartbeat: an empty scan is not a delivery failure.
+                if int(time.time()) % 900 < 65:
+                    print(f"[br-live] heartbeat symbols_seen={len(seen)}/{len(symbols())} delivered={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
