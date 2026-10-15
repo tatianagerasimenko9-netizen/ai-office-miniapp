@@ -49,6 +49,16 @@ def test_isolated_number_and_experimental_disclosure():
     assert "Торкання ≠ виконання ордера" in reminder_text(row, "ENTRY")
 
 
+def test_br_ui_is_manual_and_has_both_charts():
+    page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
+    assert "chart_a" in page and "chart_b" in page
+    assert "/api/v2/candles" in page and "Binance Futures" in page
+    assert "Я відкрила угоду" in page and "Я перенесла SL у BE" in page
+    assert "/api/br/manual" in page and "X-Telegram-Init-Data" in page
+    assert "Н/Д" in page
+    assert "exchange_order" not in page
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
