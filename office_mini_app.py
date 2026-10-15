@@ -1421,7 +1421,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/br/signals":
             from office_br import store
             db = _db_target_for_identity()
-            signals = store.rows(db, "ORDER BY created_ts DESC LIMIT 50") if False else store.rows(db)
+            signals = store.rows(db)
             signals = list(reversed(signals[-50:]))
             for sig in signals:
                 sig["targets"] = safe_json_objects(sig.pop("targets_json", "[]"))
