@@ -109,7 +109,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     active = store.rows(db, "WHERE status = 'SENT'")
     for row in active:
         sid = row["sig_id"]
-        last = _cursor(db, sid, float(row["confirm_ts"]))
+        last = _cursor(db, sid, float(row["confirm_ts"]) + 840)
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
         if not isinstance(candles, list) or not candles:
             continue
