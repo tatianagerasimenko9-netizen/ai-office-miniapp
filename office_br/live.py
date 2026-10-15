@@ -109,6 +109,12 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     active = store.rows(db, "WHERE status = 'SENT'")
     for row in active:
         sid = row["sig_id"]
+        if time.time() - (float(row["confirm_ts"]) + 900) > 48 * 3600:
+            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
+                                reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+            if msg_id:
+                _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
+            continue
         last = _cursor(db, sid, float(row["confirm_ts"]) + 840)
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
         if not isinstance(candles, list) or not candles:
@@ -117,6 +123,10 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         first_ts = _epoch(candles[0])
         if first_ts > last + 60:
             print(f"[br-live] DATA_GAP {sid} last={last} first={first_ts}; no outcome assumed", flush=True)
+            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
+                                reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+            if msg_id:
+                _execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (sid,))
             continue
         tg = json.loads(row["targets_json"])
         sg = 1 if row["direction"] == "LONG" else -1
