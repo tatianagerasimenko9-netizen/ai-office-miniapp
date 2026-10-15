@@ -37,7 +37,7 @@ def test_isolated_number_and_experimental_disclosure():
     row = {"symbol": "BTCUSDT", "direction": "LONG", "seq": 1,
            "entry": 100, "sl": 99, "level": 100, "targets": [{"p": 101, "src": "structure"}]}
     text = build_card(row)
-    assert "B&R · LIVE" in text
+    assert "B&R LIVE" in text
     assert "replay V1/V2 збитковий" in text
     assert "B&R-1" in text
     assert "AI Office · №" not in text
