@@ -216,6 +216,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    print("[br-live] monitor initialized", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
