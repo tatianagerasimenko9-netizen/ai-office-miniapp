@@ -148,8 +148,14 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                 msg_id = await send(msg, reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
                 if not msg_id:
                     break  # don't advance cursor; retry
-                store.record_event(db, sid, level, ts, price, int(msg_id))
-                prev.add(level)
+                if level.startswith("TP"):
+                    # Higher target crossed implies all lower targets crossed.
+                    for i in new_tp:
+                        store.record_event(db, sid, f"TP{i}", ts, float(tg[i - 1]["p"]), int(msg_id))
+                        prev.add(f"TP{i}")
+                else:
+                    store.record_event(db, sid, level, ts, price, int(msg_id))
+                    prev.add(level)
                 n += 1
                 print(f"[br-live] EVENT {sid} {level} tg_id={msg_id}", flush=True)
                 if level in ("SL", "AMBIGUOUS", "TP3"):
