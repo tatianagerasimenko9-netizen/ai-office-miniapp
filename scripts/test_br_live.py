@@ -49,6 +49,15 @@ def test_isolated_number_and_experimental_disclosure():
     assert "Торкання ≠ виконання ордера" in reminder_text(row, "ENTRY")
 
 
+def test_monitor_marks_only_successful_scan_and_reports_coverage():
+    from inspect import getsource
+    source = getsource(live.monitor)
+    assert source.index("found = await asyncio.to_thread(") < source.index("seen[sym] = ts")
+    assert "scan health ok=" in source
+    assert "scan_missing += 1" in source and "scan_stale += 1" in source
+    assert "scan_errors += 1" in source
+
+
 def test_br_ui_is_manual_and_has_both_charts():
     page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
     assert "chart_a" in page and "chart_b" in page
