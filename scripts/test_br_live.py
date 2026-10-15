@@ -38,9 +38,15 @@ def test_isolated_number_and_experimental_disclosure():
            "entry": 100, "sl": 99, "level": 100, "targets": [{"p": 101, "src": "structure"}]}
     text = build_card(row)
     assert "B&R · LIVE" in text
-    assert "Replay V1/V2 збитковий" in text
+    assert "replay V1/V2 збитковий" in text
     assert "B&R-1" in text
     assert "AI Office · №" not in text
+    from office_br.card import reminder_text
+    assert "фіксацію 30%" in reminder_text(row, "TP1")
+    assert "беззбиток" in reminder_text(row, "TP1")
+    assert "ще 40%" in reminder_text(row, "TP2")
+    assert "залишку" in reminder_text(row, "TP3")
+    assert "Торкання ≠ виконання ордера" in reminder_text(row, "ENTRY")
 
 
 if __name__ == "__main__":
