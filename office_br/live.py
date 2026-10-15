@@ -73,7 +73,7 @@ async def deliver(db: str, send: Callable) -> int:
     n = 0
     for row in _pending(db):
         # No stale startup notifications: only signals confirmed in last 4 minutes.
-        if time.time() - float(row["confirm_ts"]) > 240:
+        if time.time() - (float(row["confirm_ts"]) + 900) > 240:
             _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
             continue
         try:
