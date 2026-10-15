@@ -99,12 +99,25 @@ def paper_metrics(db: str) -> Dict[str, Any]:
     init(db)
     sql = """SELECT s.direction, s.entry, s.sl, s.targets_json, e.level
              FROM br_test_signal s JOIN br_test_event e ON e.sig_id=s.sig_id
-             WHERE e.level IN ('TP1','SL') AND EXISTS
-                (SELECT 1 FROM br_test_event i WHERE i.sig_id=s.sig_id AND i.level='ENTRY')
-             AND NOT EXISTS
-                (SELECT 1 FROM br_test_event a WHERE a.sig_id=s.sig_id AND a.level='AMBIGUOUS')
-             AND e.touched_ts = (SELECT MIN(x.touched_ts) FROM br_test_event x
-                 WHERE x.sig_id=s.sig_id AND x.level IN ('TP1','SL'))"""
+             JOIN br_test_event i ON i.sig_id=s.sig_id AND i.level='ENTRY'
+             WHERE e.level IN ('TP1','SL')
+               AND e.touched_ts > i.touched_ts
+               AND NOT EXISTS (
+                   SELECT 1 FROM br_test_event a
+                   WHERE a.sig_id=s.sig_id AND a.level='AMBIGUOUS'
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM br_test_event x
+                   WHERE x.sig_id=s.sig_id AND x.level IN ('TP1','SL')
+                     AND x.touched_ts > i.touched_ts
+                     AND (x.touched_ts < e.touched_ts
+                          OR (x.touched_ts = e.touched_ts AND x.level <> e.level))
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM br_test_event x
+                   WHERE x.sig_id=s.sig_id AND x.level IN ('TP1','SL')
+                     AND x.touched_ts <= i.touched_ts
+               )"""
     wins = losses = 0
     r_values = []
     for direction, entry, sl, targets_raw, level in _fetchall(db, sql):
