@@ -255,6 +255,10 @@ def mini_app_button(
         return None
     sid = str(scenario_id or "").strip()
     sym = str(symbol or "").strip().upper()
+    if sid.startswith("BR-") and sid[3:].isdigit():
+        # B&R has its own observational page; never route to Office2 /v2.
+        url = f"{base}/br/live?seq={quote(sid[3:], safe='')}"
+        return {"inline_keyboard": [[{"text": "📊 Сценарій B&R", "url": url}]]}
     if sid:
         url = f"{base}/v2?scenario={quote(sid, safe='')}"
         return {"inline_keyboard": [[{"text": "📊 Сценарій", "url": url}]]}
