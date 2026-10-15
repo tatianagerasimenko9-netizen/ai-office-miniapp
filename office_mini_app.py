@@ -1418,6 +1418,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_get(self) -> None:
         u = urlparse(self.path)
+        if u.path in ("/br", "/br/live"):
+            from pathlib import Path as _P
+            page = _P(__file__).resolve().parent / "office_web" / "br_live.html"
+            if not page.is_file():
+                return self._send_json(503, {"ok": False, "error": "br_ui_unavailable"})
+            body = page.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path == "/api/br/signals":
             from office_br import store
             db = _db_target_for_identity()
