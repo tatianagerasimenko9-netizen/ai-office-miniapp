@@ -1,0 +1,209 @@
+"""B&R live observational Telegram stream. Paper outcomes only; NEVER submits orders.
+
+Independent from Office2 READY/risk gates. Binance Futures CLOSED M15 for signals,
+CLOSED M1 for outcomes. Separate BR-* IDs and durable DB state.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import time
+from datetime import datetime
+from typing import Any, Callable
+
+from office_br import card, detect, store
+
+SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
+           "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
+DDL = """CREATE TABLE IF NOT EXISTS br_live_cursor (
+    sig_id TEXT PRIMARY KEY, last_bar_ts DOUBLE PRECISION NOT NULL
+)"""
+
+
+def enabled() -> bool:
+    return os.getenv("BR_LIVE_TG", "0").lower() in ("1", "true", "yes", "on")
+
+
+def symbols() -> tuple[str, ...]:
+    raw = os.getenv("BR_LIVE_SYMBOLS", "").strip()
+    return tuple(x.strip().upper() for x in raw.split(",") if x.strip()) if raw else SYMBOLS
+
+
+def _epoch(row: dict) -> float:
+    return datetime.fromisoformat(str(row["ts"]).replace("Z", "+00:00")).timestamp()
+
+
+def _bars(rows: Any) -> tuple[list, list, list, list, list]:
+    return ([ _epoch(x) for x in rows],
+            [float(x["open"]) for x in rows],
+            [float(x["high"]) for x in rows],
+            [float(x["low"]) for x in rows],
+            [float(x["close"]) for x in rows])
+
+
+def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None) -> int:
+    """Only newly closed confirmation bar; never replay old discoveries into Telegram."""
+    now = time.time() if now is None else now
+    bars = fetch(symbol, "15m", 240, closed_only=True)
+    if not isinstance(bars, list) or len(bars) < 100:
+        return 0
+    t, o, h, l, c = _bars(bars)
+    if now - (t[-1] + 900) > 150 or t[-1] + 900 > now:
+        return 0
+    hits = detect.scan(t, o, h, l, c)
+    new = 0
+    for s in hits:
+        if s["confirm_i"] != len(t) - 1:
+            continue
+        sid = store.record_signal(db, symbol, s, detect.HYP, now=now)
+        if sid:
+            new += 1
+            print(f"[br-live] NEW {symbol} {s['direction']} id={sid}", flush=True)
+    return new
+
+
+def _pending(db: str) -> list[dict]:
+    return store.rows(db, "WHERE status = 'NEW' AND msg_id IS NULL")
+
+
+async def deliver(db: str, send: Callable) -> int:
+    """Send first; acknowledge DB only with real Telegram message id. Retry on failure."""
+    from office_bridge import _execute
+    n = 0
+    for row in _pending(db):
+        # No stale startup notifications: only signals confirmed in last 4 minutes.
+        if time.time() - (float(row["confirm_ts"]) + 900) > 240:
+            _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
+            continue
+        try:
+            msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
+            if not msg_id:
+                print(f"[br-live] delivery pending {row['sig_id']}", flush=True)
+                continue
+            _execute(db, "UPDATE br_test_signal SET status = 'SENT', msg_id = ?, sent_ts = ?, last_error = NULL WHERE sig_id = ? AND msg_id IS NULL",
+                     (int(msg_id), time.time(), row["sig_id"]))
+            n += 1
+            print(f"[br-live] SENT {row['sig_id']} tg_id={msg_id}", flush=True)
+        except Exception as exc:
+            _execute(db, "UPDATE br_test_signal SET last_error = ? WHERE sig_id = ?", (type(exc).__name__, row["sig_id"]))
+            print(f"[br-live] send error {type(exc).__name__}: {exc}", flush=True)
+    return n
+
+
+def _cursor(db: str, sid: str, fallback: float) -> float:
+    from office_bridge import _fetchone
+    row = _fetchone(db, "SELECT last_bar_ts FROM br_live_cursor WHERE sig_id = ?", (sid,))
+    return float(row[0]) if row else fallback
+
+
+def _save_cursor(db: str, sid: str, ts: float) -> None:
+    from office_bridge import _execute
+    _execute(db, "INSERT INTO br_live_cursor(sig_id, last_bar_ts) VALUES (?,?) ON CONFLICT (sig_id) DO UPDATE SET last_bar_ts = EXCLUDED.last_bar_ts", (sid, ts))
+
+
+async def track(db: str, fetch: Callable, send: Callable) -> int:
+    """Conservative M1 paper tracking. Ambiguous same-bar TP/SL is NOT counted as a win."""
+    from office_bridge import _execute
+    n = 0
+    active = store.rows(db, "WHERE status = 'SENT'")
+    for row in active:
+        sid = row["sig_id"]
+        if time.time() - (float(row["confirm_ts"]) + 900) > 48 * 3600:
+            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
+                                reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+            if msg_id:
+                _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
+            continue
+        last = _cursor(db, sid, float(row["confirm_ts"]) + 840)
+        candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
+        if not isinstance(candles, list) or not candles:
+            continue
+        # Never silently skip an interval if worker restarted or Futures was unavailable.
+        first_ts = _epoch(candles[0])
+        if first_ts > last + 60:
+            print(f"[br-live] DATA_GAP {sid} last={last} first={first_ts}; no outcome assumed", flush=True)
+            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
+                                reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+            if msg_id:
+                _execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (sid,))
+            continue
+        tg = json.loads(row["targets_json"])
+        sg = 1 if row["direction"] == "LONG" else -1
+        prev = {x["level"] for x in store.events(db, sid)}
+        for b in candles:
+            ts = _epoch(b)
+            if ts <= last:
+                continue
+            high, low = float(b["high"]), float(b["low"])
+            stop = low <= float(row["sl"]) if sg > 0 else high >= float(row["sl"])
+            reached = [i + 1 for i, t in enumerate(tg[:3])
+                       if (high >= float(t["p"]) if sg > 0 else low <= float(t["p"]))]
+            new_tp = [i for i in reached if f"TP{i}" not in prev]
+            if stop and new_tp:
+                level = "AMBIGUOUS"
+            elif stop:
+                level = "SL"
+            elif new_tp:
+                level = f"TP{max(new_tp)}"
+            else:
+                _save_cursor(db, sid, ts)
+                last = ts
+                continue
+            price = float(row["sl"]) if level == "SL" else (float(tg[max(new_tp)-1]["p"]) if new_tp and level != "AMBIGUOUS" else None)
+            msg = (f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: "
+                   + ("TP і SL торкнулися однієї M1-свічки — порядок НЕВІДОМИЙ" if level == "AMBIGUOUS"
+                      else card.event_text(row, level, price)))
+            try:
+                msg_id = await send(msg, reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+                if not msg_id:
+                    break  # don't advance cursor; retry
+                if level.startswith("TP"):
+                    # Higher target crossed implies all lower targets crossed.
+                    for i in new_tp:
+                        store.record_event(db, sid, f"TP{i}", ts, float(tg[i - 1]["p"]), int(msg_id))
+                        prev.add(f"TP{i}")
+                else:
+                    store.record_event(db, sid, level, ts, price, int(msg_id))
+                    prev.add(level)
+                n += 1
+                print(f"[br-live] EVENT {sid} {level} tg_id={msg_id}", flush=True)
+                if level in ("SL", "AMBIGUOUS", "TP3"):
+                    _execute(db, "UPDATE br_test_signal SET status = ? WHERE sig_id = ?", (level, sid))
+                    _save_cursor(db, sid, ts)
+                    break
+                _save_cursor(db, sid, ts)
+                last = ts
+            except Exception as exc:
+                print(f"[br-live] event retry {sid}: {type(exc).__name__}: {exc}", flush=True)
+                break
+    return n
+
+
+async def monitor(db: str, send: Callable, fetch: Callable) -> None:
+    """One low-frequency, isolated loop; failures never interrupt Office2."""
+    from office_bridge import _execute
+    _execute(db, DDL)
+    store.init(db)
+    seen: dict[str, float] = {}
+    await asyncio.sleep(45)
+    while True:
+        try:
+            if enabled():
+                for sym in symbols():
+                    try:
+                        bars = await asyncio.to_thread(fetch, sym, "15m", 2, closed_only=True)
+                        if not isinstance(bars, list) or not bars:
+                            continue
+                        ts = _epoch(bars[-1])
+                        if seen.get(sym) == ts:
+                            continue
+                        seen[sym] = ts
+                        await asyncio.to_thread(scan_symbol, db, sym, fetch)
+                    except Exception as exc:
+                        print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
+                await deliver(db, send)
+                await track(db, fetch, send)
+        except Exception as exc:
+            print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
+        await asyncio.sleep(60)

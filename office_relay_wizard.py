@@ -7727,6 +7727,23 @@ EV позитивне: {prob.get('ev_positive', '')}
                 print(f"[office2][WARN] delivery pass failed: {type(exc_o2d).__name__}: {exc_o2d}")
             await asyncio.sleep(2)   # outbox читається кожні 2 с (було 10): запит дешевий, а черга не додає до 10 с затримки
 
+    # B&R: окремий LIVE потік спостережень (не Office2 READY, не ордери).
+    # Доставка лише при BR_LIVE_TG=1; незалежні DB/номери/події.
+    async def _send_br_observation(message: str, *, reply_to: Optional[int] = None,
+                                   symbol: str = "", direction: str = "") -> Optional[int]:
+        return await send_office(
+            message, reply_to_message_id=reply_to, stream="general",
+            intent="BR_LIVE_EXPERIMENT", event_type=EVENT_TRADE_UPDATE,
+            symbol=symbol, direction=direction, skip_gate=True,
+        )
+
+    async def _monitor_br_observation() -> None:
+        from office_br.live import monitor as _br_monitor
+        from office_market_data import fetch_candles_futures as _br_futures
+        await _br_monitor(db_path, _send_br_observation, _br_futures)
+
+    asyncio.create_task(_monitor_br_observation())
+
     asyncio.create_task(monitor_office2_delivery())
 
     async def monitor_office2_radar() -> None:
