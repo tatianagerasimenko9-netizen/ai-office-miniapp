@@ -1441,6 +1441,7 @@ class Handler(BaseHTTPRequestHandler):
                 sig["events"] = store.events(db, sig["sig_id"])
                 sig["manual_actions"] = store.manual_actions(db, sig["sig_id"])
             return self._send_json(200, {"ok": True, "signals": signals,
+                                         "paper_metrics": store.paper_metrics(db),
                                          "exchange_order_enabled": False})
         if u.path == "/api/review_draft":
             qs = parse_qs(u.query)
