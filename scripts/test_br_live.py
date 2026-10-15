@@ -37,10 +37,26 @@ def test_isolated_number_and_experimental_disclosure():
     row = {"symbol": "BTCUSDT", "direction": "LONG", "seq": 1,
            "entry": 100, "sl": 99, "level": 100, "targets": [{"p": 101, "src": "structure"}]}
     text = build_card(row)
-    assert "B&R · LIVE" in text
-    assert "Replay V1/V2 збитковий" in text
+    assert "B&R LIVE" in text
+    assert "replay V1/V2 збитковий" in text
     assert "B&R-1" in text
     assert "AI Office · №" not in text
+    from office_br.card import reminder_text
+    assert "фіксацію 30%" in reminder_text(row, "TP1")
+    assert "беззбиток" in reminder_text(row, "TP1")
+    assert "ще 40%" in reminder_text(row, "TP2")
+    assert "залишку" in reminder_text(row, "TP3")
+    assert "Торкання ≠ виконання ордера" in reminder_text(row, "ENTRY")
+
+
+def test_br_ui_is_manual_and_has_both_charts():
+    page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
+    assert "chart_a" in page and "chart_b" in page
+    assert "/api/v2/candles" in page and "Binance Futures" in page
+    assert "Я відкрила угоду" in page and "Я перенесла SL у BE" in page
+    assert "/api/br/manual" in page and "X-Telegram-Init-Data" in page
+    assert "Н/Д" in page
+    assert "exchange_order" not in page
 
 
 if __name__ == "__main__":

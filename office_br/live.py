@@ -110,7 +110,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     for row in active:
         sid = row["sig_id"]
         if time.time() - (float(row["confirm_ts"]) + 900) > 48 * 3600:
-            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
+            msg_id = await send(f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
@@ -123,7 +123,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         first_ts = _epoch(candles[0])
         if first_ts > last + 60:
             print(f"[br-live] DATA_GAP {sid} last={last} first={first_ts}; no outcome assumed", flush=True)
-            msg_id = await send(f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
+            msg_id = await send(f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (sid,))
@@ -131,11 +131,41 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         tg = json.loads(row["targets_json"])
         sg = 1 if row["direction"] == "LONG" else -1
         prev = {x["level"] for x in store.events(db, sid)}
+        entry_seen = "ENTRY" in prev
         for b in candles:
             ts = _epoch(b)
             if ts <= last:
                 continue
             high, low = float(b["high"]), float(b["low"])
+            entry = float(row["entry"])
+            if not entry_seen:
+                if not (low <= entry <= high):
+                    _save_cursor(db, sid, ts)
+                    last = ts
+                    continue
+                entry_msg = await send(card.reminder_text(row, "ENTRY"),
+                                       reply_to=int(row["msg_id"]), symbol=row["symbol"],
+                                       direction=row["direction"])
+                if not entry_msg:
+                    break
+                store.record_event(db, sid, "ENTRY", ts, entry, int(entry_msg))
+                prev.add("ENTRY")
+                entry_seen = True
+                # A first-touch candle containing TP/SL has unknown ordering.
+                stop_same = low <= float(row["sl"]) if sg > 0 else high >= float(row["sl"])
+                tp_same = any((high >= float(t["p"]) if sg > 0 else low <= float(t["p"])) for t in tg[:3])
+                if stop_same or tp_same:
+                    warning = await send(
+                        f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: вхід і TP/SL у тій самій M1-свічці. Порядок невідомий; результат не зараховано.",
+                        reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+                    if warning:
+                        store.record_event(db, sid, "AMBIGUOUS", ts, None, int(warning))
+                        _execute(db, "UPDATE br_test_signal SET status = 'AMBIGUOUS' WHERE sig_id = ?", (sid,))
+                        _save_cursor(db, sid, ts)
+                    break
+                _save_cursor(db, sid, ts)
+                last = ts
+                continue
             stop = low <= float(row["sl"]) if sg > 0 else high >= float(row["sl"])
             reached = [i + 1 for i, t in enumerate(tg[:3])
                        if (high >= float(t["p"]) if sg > 0 else low <= float(t["p"]))]
@@ -151,9 +181,9 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                 last = ts
                 continue
             price = float(row["sl"]) if level == "SL" else (float(tg[max(new_tp)-1]["p"]) if new_tp and level != "AMBIGUOUS" else None)
-            msg = (f"B&R · LIVE ЕКСПЕРИМЕНТ · B&R-{row['seq']} · {row['symbol']}: "
+            msg = (f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: "
                    + ("TP і SL торкнулися однієї M1-свічки — порядок НЕВІДОМИЙ" if level == "AMBIGUOUS"
-                      else card.event_text(row, level, price)))
+                      else card.reminder_text(row, level)))
             try:
                 msg_id = await send(msg, reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
                 if not msg_id:

@@ -1270,8 +1270,51 @@ class Handler(BaseHTTPRequestHandler):
         code, data = trade_action(action, body)
         self._send_json(code, data)
 
+    def _post_br_manual(self, u) -> None:
+        """Authorized owner acknowledgement; no exchange execution."""
+        from office_write_auth import MAX_BODY, authorize
+        from office_br import store
+        ok, why = authorize(dict(self.headers.items()), client_ip=self._client_ip())
+        if not ok:
+            return self._send_json({"write_disabled": 403, "rate_limited": 429}.get(why, 401),
+                                   {"ok": False, "error": why})
+        if "application/json" not in (self.headers.get("Content-Type", "") or "").lower():
+            return self._send_json(415, {"ok": False, "error": "json_required"})
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY:
+            return self._send_json(413, {"ok": False, "error": "bad_body_size"})
+        try:
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        if not isinstance(data, dict):
+            return self._send_json(400, {"ok": False, "error": "bad_json"})
+        sid = str(data.get("sig_id") or "").strip()
+        action = str(data.get("action") or "").strip()
+        if not sid or len(sid) > 180:
+            return self._send_json(400, {"ok": False, "error": "bad_signal"})
+        if action not in {"OPENED", "TP1_30", "SL_BE", "TP2_40", "TP3_REST", "CLOSED"}:
+            return self._send_json(400, {"ok": False, "error": "bad_action"})
+        db = _db_target_for_identity()
+        if not store.record_manual_action(db, sid, action):
+            return self._send_json(404, {"ok": False, "error": "signal_not_found"})
+        return self._send_json(200, {"ok": True, "sig_id": sid,
+                                     "manual_actions": store.manual_actions(db, sid),
+                                     "exchange_order_sent": False})
+
     def do_POST(self) -> None:
         u = urlparse(self.path)
+        if u.path == "/api/br/manual":
+            try:
+                return self._post_br_manual(u)
+            except (BrokenPipeError, ConnectionResetError):
+                raise
+            except Exception as exc:
+                print(f"[mini] B&R manual action failed: {type(exc).__name__}")
+                return self._send_json(500, {"ok": False, "error": "internal_error"})
         if u.path.startswith("/api/v2/trade/"):
             try:
                 return self._post_trade(u)
@@ -1375,6 +1418,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_get(self) -> None:
         u = urlparse(self.path)
+        if u.path in ("/br", "/br/live"):
+            from pathlib import Path as _P
+            page = _P(__file__).resolve().parent / "office_web" / "br_live.html"
+            if not page.is_file():
+                return self._send_json(503, {"ok": False, "error": "br_ui_unavailable"})
+            body = page.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path == "/api/br/signals":
+            from office_br import store
+            db = _db_target_for_identity()
+            signals = store.rows(db)
+            signals = list(reversed(signals[-50:]))
+            for sig in signals:
+                sig["targets"] = safe_json_objects(sig.pop("targets_json", "[]"))
+                sig["events"] = store.events(db, sig["sig_id"])
+                sig["manual_actions"] = store.manual_actions(db, sig["sig_id"])
+            return self._send_json(200, {"ok": True, "signals": signals,
+                                         "paper_metrics": store.paper_metrics(db),
+                                         "exchange_order_enabled": False})
         if u.path == "/api/review_draft":
             qs = parse_qs(u.query)
             tid = (qs.get("trade_id") or [""])[0].strip()
