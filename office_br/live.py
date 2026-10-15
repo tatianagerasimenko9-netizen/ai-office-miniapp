@@ -181,9 +181,13 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                 last = ts
                 continue
             price = float(row["sl"]) if level == "SL" else (float(tg[max(new_tp)-1]["p"]) if new_tp and level != "AMBIGUOUS" else None)
+            if level.startswith("TP") and len(new_tp) > 1:
+                message_detail = "\\n".join(card.reminder_text(row, f"TP{i}") for i in new_tp)
+            else:
+                message_detail = card.reminder_text(row, level)
             msg = (f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: "
                    + ("TP і SL торкнулися однієї M1-свічки — порядок НЕВІДОМИЙ" if level == "AMBIGUOUS"
-                      else card.reminder_text(row, level)))
+                      else message_detail))
             try:
                 msg_id = await send(msg, reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
                 if not msg_id:
