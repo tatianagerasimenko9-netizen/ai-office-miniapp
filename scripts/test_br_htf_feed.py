@@ -7,7 +7,7 @@ from office_br.htf_feed import snapshot,TF_SECONDS
 def fetch_ok(symbol,tf,limit,closed_only):
     assert closed_only
     sec=TF_SECONDS[tf]
-    return [{"ts":i*sec,"close":100+i} for i in range(24)]
+    return [{"ts":(24*86400//sec-24+i)*sec,"close":100+i} for i in range(24)]
 
 def test_closed_htf_bars():
     x=snapshot("ETHUSDT",24*86400,fetch_ok)
