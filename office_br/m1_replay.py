@@ -28,6 +28,10 @@ def replay(signal: Mapping[str, Any], candles: Sequence[Mapping[str, Any]]) -> d
         hi, lo = float(candle["high"]), float(candle["low"])
         if hi < lo:
             return {"status": "INVALID", "reason": "OHLC"}
+        # An M1 bar may only be evaluated after the confirmation M15 bar closed.
+        # Earlier bars can make a hindsight entry look executable.
+        if ts < float(signal.get("eligible_ts", float("-inf"))):
+            continue
         if not entered:
             if not lo <= entry <= hi:
                 continue
