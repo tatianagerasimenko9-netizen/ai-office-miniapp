@@ -18,6 +18,12 @@ def test_missing_tf_fail_closed():
     x=classify({"1d":bars(86400),"4h":bars(14400)},confirm_ts=22*86400)
     assert x["direction"]=="UNKNOWN"
 
+def test_missing_close_is_unknown():
+    broken=bars(86400)
+    broken[-1].pop("close")
+    x=classify({"1d":broken,"4h":bars(14400),"1h":bars(3600)},confirm_ts=22*86400)
+    assert x["direction"]=="UNKNOWN"
+
 def test_mixed():
     down=[dict(x,close=200-i) for i,x in enumerate(bars(3600))]
     x=classify({"1d":bars(86400),"4h":bars(14400),"1h":down},confirm_ts=22*86400)
