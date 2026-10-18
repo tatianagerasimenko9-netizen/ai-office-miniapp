@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 def _direction(bars: Sequence[Mapping[str, Any]], *, lookback: int = 20) -> str:
     if len(bars) < lookback + 1:
         return "UNKNOWN"
-    closes = [float(x["close"]) for x in bars]
+    closes = [float(x.get("close", 0)) for x in bars]
     if any(x <= 0 for x in closes):
         return "UNKNOWN"
     current = closes[-1]
