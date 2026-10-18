@@ -43,13 +43,13 @@ def _bars(rows: Any) -> tuple[list, list, list, list, list]:
 
 
 def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None) -> int:
-    """Only newly closed confirmation bar; never replay old discoveries into Telegram."""
+    """Only latest closed confirmation bar, within its 15-minute validity; never replay older discoveries."""
     now = time.time() if now is None else now
     bars = fetch(symbol, "15m", 240, closed_only=True)
     if not isinstance(bars, list) or len(bars) < 100:
         return 0
     t, o, h, l, c = _bars(bars)
-    if now - (t[-1] + 900) > 150 or t[-1] + 900 > now:
+    if now - (t[-1] + 900) > 900 or t[-1] + 900 > now:
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
@@ -234,7 +234,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             continue
                         ts = _epoch(bars[-1])
                         now_ts = time.time()
-                        if ts + 900 > now_ts or now_ts - (ts + 900) > 150:
+                        if ts + 900 > now_ts or now_ts - (ts + 900) > 900:
                             scan_stale += 1
                             continue
                         if seen.get(sym) == ts:
