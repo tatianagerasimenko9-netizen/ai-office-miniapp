@@ -32,3 +32,10 @@
 
 ## Operational note
 The existing B&R LIVE observational stream is NOT equivalent to validated profitable active trading. Production activation is contingent on #06–20. This checklist is the source of truth; no unsupported green checkmarks.
+
+## 19.10.2026 — додатковий фактичний контроль (без зміни статусу пунктів)
+- B&R LIVE production DB: 376 total; SL 287, TP3 78, AMBIGUOUS 7, SENT 3, TIMEOUT 1. Web і Worker Render підписані на main, autoDeploy=yes; це НЕ доказ поточної версії deploy або повної готовності.
+- 365 terminal ENTRY-phase cohort, NY DST/calendar-aware: premarket weekday 52 (48 SL, 4 TP3); regular weekday 87 (57 SL, 30 TP3); afterhours weekday 8 (8 SL, 0 TP3); weekday overnight 49 (44 SL, 5 TP3); weekend 169 (130 SL, 39 TP3).
+- Research evidence: docs/BR_FULL_DATE_WEEKDAY_HOUR_SYMBOL_AUDIT_2026-10-19.md, docs/BR_US_PREMARKET_VS_REGULAR_ENTRY_EXIT_2026-10-19.md, docs/BR_SESSION_STOP_COUNTERFACTUAL_AUDIT_2026-10-19.md. Описова статистика не є перевіреним прибутковим production gate.
+- Latest research commit b851aba GitHub workflow runs 39282598284 and 39282598294 were QUEUED at inspection; no pass claim. Items #07–#20 remain open until their own code/test/deploy evidence exists.
+- Release criterion unchanged: no automatic trading, no merging unverified filters; Office2 untouched. Production go/no-go requires evidence, not deadline alone.
