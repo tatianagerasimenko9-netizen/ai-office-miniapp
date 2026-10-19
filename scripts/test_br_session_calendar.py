@@ -1,5 +1,10 @@
 """Offline regression tests: B&R calendar and DST phase classification."""
+import sys
+from pathlib import Path
 from datetime import datetime, timezone
+
+# Direct script execution by full-regression CI needs the repository root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from office_br.session_calendar import classify_us_equity_clock as phase
 
 
