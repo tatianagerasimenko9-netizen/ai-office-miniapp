@@ -40,7 +40,7 @@ def replay(signal: Mapping[str, Any], candles: Sequence[Mapping[str, Any]]) -> d
             if (lo <= stop if sign > 0 else hi >= stop) or any(
                 hi >= t if sign > 0 else lo <= t for t in targets
             ):
-                return {"status": "AMBIGUOUS", "events": hits}
+                return {"status": "AMBIGUOUS", "events": hits, "terminal_ts": ts}
             continue
         stop_hit = lo <= stop if sign > 0 else hi >= stop
         tp_hits = [i for i, t in enumerate(targets, 1) if (hi >= t if sign > 0 else lo <= t)]
@@ -48,11 +48,11 @@ def replay(signal: Mapping[str, Any], candles: Sequence[Mapping[str, Any]]) -> d
             return {"status": "AMBIGUOUS", "events": hits}
         if stop_hit:
             hits.append("SL")
-            return {"status": "SL", "events": hits}
+            return {"status": "SL", "events": hits, "terminal_ts": ts}
         for i in tp_hits:
             if f"TP{i}" not in hits:
                 hits.append(f"TP{i}")
         if f"TP{len(targets)}" in hits:
-            return {"status": f"TP{len(targets)}", "events": hits}
+            return {"status": f"TP{len(targets)}", "events": hits, "terminal_ts": ts}
     return {"status": "OPEN" if entered else "UNFILLED", "events": hits,
             "exchange_fills_verified": False}
