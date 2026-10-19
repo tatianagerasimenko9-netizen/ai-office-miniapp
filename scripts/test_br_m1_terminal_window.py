@@ -1,5 +1,8 @@
 """Regression: terminal M1 replay must not request candles beyond terminal touch."""
 import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from office_br.m1_batch_replay import run
 
 
@@ -34,3 +37,10 @@ def test_unresolved_still_requires_full_horizon():
     result = run([signal], [], fetch=fetch)
     assert calls == [(eligible, eligible + 48 * 3600)]
     assert result["results"][0]["verdict"] == "M1_DATA_INCOMPLETE"
+
+
+if __name__ == "__main__":
+    for name, fn in sorted(globals().copy().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print("ok", name)
