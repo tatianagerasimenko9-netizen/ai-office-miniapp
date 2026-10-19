@@ -25,7 +25,7 @@
 - [ ] 14. Cost model: maker/taker fees, spread, slippage, funding where applicable, position size, leverage, and realized net R; distinguish underlying price % from leveraged ROI.
 - [ ] 15. Manual position tracking: “Я відкрила угоду”, partials, BE only on validated condition, structure trailing, session continuation/invalidations, no auto-orders.
 - [ ] 16. Walk-forward chronological OOS + session/regime stratification + conservative M1 intrabar ambiguity and robustness/uncertainty; no leakage or cherry-picking.
-- [ ] 17. B&R-only Telegram and Mini App cards with entry zone, SL, liquidity targets, session, setup rationale, candle confirmation, TTL, invalidation, source and risk.
+- [ ] 17. B&R-only Telegram and Mini App cards with entry zone, SL, liquidity targets, session, setup rationale, candle confirmation, TTL, invalidation, source and risk. **PARTIAL CODE**: office_br/plain_card.py, telegram_caption.py, telegram_geometry.py, telegram_photo_post.py and tests provide Ukrainian photo caption + «📊 Сценарій» Mini App button, fail-closed verified/risk checks. NOT yet connected to live Telegram sendPhoto, chart rendering, scenario URL, Mini App position confirmation or production. Latest CI pending.
 - [ ] 18. Shadow run and compare baseline vs candidate after costs; require credible evidence of positive expectancy before enabling live recommendation gates.
 - [ ] 19. Isolated B&R release: PR review, full CI, migration/compatibility, feature flags default off, backup, deploy smoke, rollback, explicit proof that Office2 signals unchanged.
 - [ ] 20. Production verification: live B&R data freshness, cards, event timestamps, manual confirmation and alerts; publish evidence-backed final checklist.
