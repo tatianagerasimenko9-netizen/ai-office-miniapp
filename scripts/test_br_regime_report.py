@@ -4,7 +4,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from office_br.regime_report import report
 
 def make(i,status,asof=None,trend="LONG",obstacle=2):
-    return {"created_ts":i,"feature_asof_ts":i if asof is None else asof,
+    return {"created_ts":i+900,"confirm_ts":i,"feature_asof_ts":i+900 if asof is None else asof,
       "status":status,"symbol":"ETHUSDT","direction":"LONG","entry":100,"sl":99,
       "targets":[{"p":101},{"p":102},{"p":103}],
       "htf":{"direction":trend},"obstacle":{"valid":True,"obstacle_r":obstacle}}
@@ -16,7 +16,7 @@ def test_holdout_loss_not_approved():
     assert not x["production_gate_changed"]
 
 def test_future_feature_rejected():
-    rows=[make(10,"TP3",asof=11),make(20,"SL")]
+    rows=[make(10,"TP3",asof=911),make(20,"SL")]
     x=report(rows)
     assert x["excluded_missing_or_future_features"]==1
 
