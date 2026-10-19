@@ -54,7 +54,7 @@ def run(signals: Sequence[Mapping[str, Any]], events: Sequence[Mapping[str, Any]
                 results.append({"sig_id":sid,"verdict":"M1_DATA_INCOMPLETE",
                                 "coverage":coverage})
                 continue
-            results.append(compare(signal, ledger[sid], candles))
+            results.append(compare(signal, ledger[sid], candles, expected_end_ts=end))
         except (ValueError, TypeError, KeyError, OSError, TimeoutError) as exc:
             results.append({"sig_id":sid,"verdict":"FETCH_OR_INPUT_ERROR",
                             "error_type":type(exc).__name__})
