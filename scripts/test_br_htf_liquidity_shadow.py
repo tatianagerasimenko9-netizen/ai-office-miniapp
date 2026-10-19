@@ -18,6 +18,15 @@ def test_calendar_close_required():
 def test_missing_invalid():
     b=candles();b[2]["low"]=-1
     assert not levels(b,timeframe="1h",asof_ts=8*3600)["complete"]
+def test_missing_htf_candle_blocks_pivots():
+    b=candles()
+    b.pop(3)
+    r=levels(b,timeframe="1h",asof_ts=8*3600)
+    assert not r["complete"] and not r["pivots_high"]
+def test_duplicate_htf_candle_blocks_pivots():
+    b=candles()
+    b.insert(2,dict(b[2]))
+    assert not levels(b,timeframe="1h",asof_ts=8*3600)["complete"]
 if __name__=="__main__":
     for n,f in list(globals().items()):
         if n.startswith("test_"):f()
