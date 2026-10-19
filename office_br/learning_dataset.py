@@ -75,3 +75,31 @@ def chronological_split(rows: Sequence[Mapping[str, Any]], *, train_fraction: fl
             "validation" if float(r["confirm_ts"]) < t2 else "test")
         result[part].append(dict(r))
     return result
+
+
+def purged_chronological_split(rows: Sequence[Mapping[str, Any]], *,
+                               embargo_seconds: float = 900,
+                               train_fraction: float = 0.6,
+                               validation_fraction: float = 0.2) -> dict[str, list[dict]]:
+    """Avoid train/validation/test contamination from overlapping trade lifetimes.
+
+    A labeled training example is admitted only if its outcome was observed
+    strictly before the next split starts minus embargo. Same for validation.
+    Rows without outcome timestamps cannot enter scored training partitions.
+    """
+    if not isfinite(embargo_seconds) or embargo_seconds < 0:
+        raise ValueError("invalid embargo")
+    partitions = chronological_split(rows, train_fraction=train_fraction,
+                                     validation_fraction=validation_fraction)
+    validation_start = min(float(r["confirm_ts"]) for r in partitions["validation"])
+    test_start = min(float(r["confirm_ts"]) for r in partitions["test"])
+    for name, boundary in (("train", validation_start), ("validation", test_start)):
+        partitions[name] = [
+            r for r in partitions[name]
+            if r.get("label") is not None
+            and r.get("label_observed_at") is not None
+            and float(r["label_observed_at"]) < boundary - embargo_seconds
+        ]
+    partitions["test"] = [r for r in partitions["test"] if r.get("label") is not None
+                          and r.get("label_observed_at") is not None]
+    return partitions
