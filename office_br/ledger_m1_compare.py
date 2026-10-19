@@ -21,6 +21,12 @@ def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
         return {"verdict": "INSUFFICIENT_M1", "sig_id": signal["sig_id"]}
     ordered = sorted((x for x in candles if float(x["ts"]) >= eligibility),
                      key=lambda x: float(x["ts"]))
+    # An M1 gap anywhere in the downloaded history invalidates comparison;
+    # do not claim a matched SL/TP3 from a truncated or discontinuous feed.
+    if any(float(b["ts"]) != float(a["ts"]) + 60 for a,b in zip(ordered,ordered[1:])):
+        return {"sig_id": signal["sig_id"], "verdict": "INSUFFICIENT_M1",
+                "reason": "M1_GAP", "mode": "READ_ONLY_REPLAY",
+                "exchange_fills_verified": False}
     outcome = replay(dict(signal, eligible_ts=eligibility), ordered)
     # Never call a 48h replay complete if the terminal event was not found
     # and the downloaded M1 history ends before the expected horizon.
