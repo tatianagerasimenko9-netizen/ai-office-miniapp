@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from office_br.ml_baseline_shadow import train,predict,evaluate
+from office_br.ml_baseline_shadow import train,predict,evaluate,walk_forward
 
 def test_fit_and_holdout_brier():
     rows=[{"features":{"volume_ratio":float(i)},"label":"TP3" if i>=5 else "SL"}
@@ -27,6 +27,17 @@ def test_invalid_feature_is_rejected():
         assert False
     except ValueError:
         pass
+
+def test_walk_forward_never_promotes_model():
+    rows=[{"sig_id":str(i), "confirm_ts":float(i*1000),
+           "label_observed_at":float(i*1000+100),
+           "features":{"volume_ratio":float(i)},
+           "label":"TP3" if i>=5 else "SL"} for i in range(10)]
+    report=walk_forward(rows,feature="volume_ratio",threshold=5,embargo_seconds=100)
+    assert report["train_n"]==6
+    assert report["test"]["n"]==2
+    assert report["promotion_approved"] is False
+
 
 if __name__=="__main__":
     for name,fn in sorted(globals().copy().items()):
