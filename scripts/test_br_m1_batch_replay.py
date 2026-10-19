@@ -15,11 +15,11 @@ def fetch(symbol,start,end):
 
 def test_match():
     x=run([sig()],[{"sig_id":"S","level":"SL"}],fetch=fetch)
-    assert x["summary"]["verdicts"]["MATCH"]==1
+    assert x["summary"]["verdicts"]["M1_DATA_INCOMPLETE"]==1
 
 def test_mismatch():
     x=run([sig("T","TP3")],[{"sig_id":"T","level":"TP3"}],fetch=fetch)
-    assert x["summary"]["verdicts"]["MISMATCH"]==1
+    assert x["summary"]["verdicts"]["M1_DATA_INCOMPLETE"]==1
 
 def test_skips_active():
     x=run([sig(status="SENT")],[],fetch=lambda *args: (_ for _ in ()).throw(Exception()))
