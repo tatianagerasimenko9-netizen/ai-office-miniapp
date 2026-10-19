@@ -8,7 +8,7 @@ S={"sig_id":"X","confirm_ts":0,"direction":"LONG","entry":100,"sl":99,
 def bars(seq):
     return [{"ts":900+i*60,"high":hi,"low":lo} for i,(hi,lo) in enumerate(seq)]
 def test_match():
-    x=compare(S,[{"level":"SL"}],bars([(100.1,99.9),(100.1,98.9)]))
+    x=compare(S,[{"level":"SL","touched_ts":960}],bars([(100.1,99.9),(100.1,98.9)]))
     assert x["verdict"]=="MATCH" and x["m1_status"]=="SL"
 def test_mismatch():
     x=compare(S,[{"level":"TP3"}],bars([(100.1,99.9),(100.1,98.9)]))
