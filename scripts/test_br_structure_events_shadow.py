@@ -22,7 +22,7 @@ def test_no_future():
     b.append({"high":100000,"low":0,"close":999})
     assert analyze(b,upto=11)==x
 def test_sweep():
-    b=fixture();b[11]={"high":13,"low":9,"close":11}
+    b=fixture();b[11]={"high":13,"low":9,"close":10.5}
     x=analyze(b,upto=11)
     assert any(e["type"]=="LIQUIDITY_SWEEP" for e in x["events"])
 def test_fvg():
