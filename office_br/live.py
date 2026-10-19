@@ -214,6 +214,18 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     return n
 
 
+def _m15_health(closed_at: float, now: float) -> str:
+    """Observability only: distinguish normal M15 waiting from genuinely stale data."""
+    age = now - closed_at
+    if age < 0:
+        return "stale"
+    if age <= 150:
+        return "fresh"
+    if age <= 900:
+        return "idle"
+    return "stale"
+
+
 async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     """One low-frequency, isolated loop; failures never interrupt Office2."""
     from office_bridge import _execute
@@ -225,7 +237,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     while True:
         try:
             if enabled():
-                scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
+                scan_ok = scan_missing = scan_idle = scan_stale = scan_errors = new_signals = 0
                 for sym in symbols():
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
@@ -234,8 +246,12 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             continue
                         ts = _epoch(bars[-1])
                         now_ts = time.time()
-                        if ts + 900 > now_ts or now_ts - (ts + 900) > 150:
-                            scan_stale += 1
+                        health = _m15_health(ts + 900, now_ts)
+                        if health != "fresh":
+                            if health == "idle":
+                                scan_idle += 1
+                            else:
+                                scan_stale += 1
                             continue
                         if seen.get(sym) == ts:
                             scan_ok += 1
@@ -255,7 +271,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} idle={scan_idle} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
