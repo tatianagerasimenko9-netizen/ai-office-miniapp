@@ -53,9 +53,18 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None)
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
+    # A single closed M15 bar may produce multiple nearby breakout levels.
+    # Emit at most one scenario per direction for that confirmation candle.
+    # Keep the first detector-ranked candidate; the signal ledger remains
+    # immutable and the existing durable sig_id guard still applies.
+    emitted_directions: set[str] = set()
     for s in hits:
         if s["confirm_i"] != len(t) - 1:
             continue
+        direction = str(s["direction"])
+        if direction in emitted_directions:
+            continue
+        emitted_directions.add(direction)
         sid = store.record_signal(db, symbol, s, detect.HYP, now=now)
         if sid:
             new += 1
