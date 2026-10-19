@@ -18,7 +18,7 @@ def candidates(bars:Sequence[Mapping[str,Any]],*,upto:int,pivot_k:int=2,
         i=event["index"]
         if i>upto:continue
         # An order-block hypothesis requires a strong, closed break candle.
-        try: displacement=evaluate(bars,upto=i)
+        try: displacement=evaluate(bars,upto=i,atr_n=min(14,i))
         except ValueError:continue
         if not displacement["displacement_candidate"]:continue
         direction=event["direction"]
