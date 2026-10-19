@@ -5,7 +5,7 @@ from office_br.telegram_photo_post import build_photo_post
 def plan():
     return {"symbol":"NEARUSDT","direction":"LONG","verified":True,
       "risk_ok":True,"confirmation":"Пробій і ретест M5 підтверджені",
-      "entry":5.065,"sl":4.996,"tp1":5.135,"tp2":5.198,"tp3":5.391,
+      "entry":5.065,"sl":4.996,"tp1":5.145,"tp2":5.198,"tp3":5.391,
       "expires":"17:30 (Київ)","invalidation":"M15 нижче 5,011"}
 def make(p=None,**kw):
     return build_photo_post(p or plan(),chart_bytes=b"PNG-fixture",
