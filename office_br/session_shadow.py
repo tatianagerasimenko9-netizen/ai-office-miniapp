@@ -62,11 +62,19 @@ def pre_session_range(bars: Sequence[Mapping[str,Any]], *, asof_ts:float,
     begin_utc=(local_start-timedelta(minutes=minutes)).astimezone(timezone.utc).timestamp()
     expected={begin_utc+900*i for i in range(minutes//15)}
     selected={}
+    invalid=False
     for b in bars:
         stamp=float(b["ts"])
         if stamp in expected and stamp+900<=asof_ts:
+            if stamp in selected: invalid=True
             selected[stamp]=b
-    complete=local_now.weekday()<5 and len(selected)==len(expected)
+            try:
+                hi,lo=float(b["high"]),float(b["low"])
+                if not (0<lo<=hi): invalid=True
+            except (TypeError,ValueError,KeyError):
+                invalid=True
+    complete=(local_now.weekday()<5 and asof_ts>=end_utc
+              and len(selected)==len(expected) and not invalid)
     return {"session":name,"date":local_now.date().isoformat(),
             "high":max(float(b["high"]) for b in selected.values()) if complete else None,
             "low":min(float(b["low"]) for b in selected.values()) if complete else None,
