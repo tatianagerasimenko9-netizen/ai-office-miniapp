@@ -9,9 +9,11 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Mapping, Sequence
 
-SCHEMA_VERSION = "br_features_v1"
+SCHEMA_VERSION = "br_features_v2"
 FEATURES = ("breakout_strength", "close_location", "volume_ratio",
-            "retest_depth_r", "obstacle_r", "spread_bps", "atr_pct")
+            "retest_depth_r", "obstacle_r", "spread_bps", "atr_pct",
+            "risk_pct", "break_to_retest_minutes",
+            "retest_to_confirm_minutes", "break_level_distance_r")
 OUTCOMES = ("SL", "TP3", "AMBIGUOUS", "TIMEOUT", "DATA_GAP")
 
 
