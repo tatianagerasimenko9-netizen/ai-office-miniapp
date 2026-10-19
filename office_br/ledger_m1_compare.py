@@ -37,17 +37,28 @@ def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
                 "last_m1_ts": float(ordered[-1]["ts"]) if ordered else None,
                 "mode": "READ_ONLY_REPLAY", "exchange_fills_verified": False}
     recorded = {str(e["level"]) for e in events}
+    terminal_times = [float(e["touched_ts"]) for e in events
+                      if str(e.get("level")) == outcome.get("status")
+                      and e.get("touched_ts") is not None]
+    replay_terminal_ts = outcome.get("terminal_ts")
     if outcome["status"] in ("INVALID", "DATA_GAP", "AMBIGUOUS"):
         verdict = "REVIEW"
     elif outcome["status"] in ("OPEN", "UNFILLED"):
         verdict = "PENDING_OR_MISSING_HISTORY"
     elif outcome["status"] in ("SL", "TP3"):
-        verdict = "MATCH" if outcome["status"] in recorded else "MISMATCH"
+        if outcome["status"] not in recorded:
+            verdict = "MISMATCH"
+        elif replay_terminal_ts is not None and terminal_times and float(replay_terminal_ts) not in terminal_times:
+            verdict = "MISMATCH_TIME"
+        else:
+            verdict = "MATCH"
     else:
         verdict = "REVIEW"
     return {"sig_id": signal["sig_id"], "verdict": verdict,
             "m1_status": outcome["status"], "ledger_levels": sorted(recorded),
             "m1_events": outcome.get("events", []), "eligible_ts": eligibility,
+            "m1_terminal_ts": replay_terminal_ts,
+            "ledger_terminal_times": terminal_times,
             "exchange_fills_verified": False, "mode": "READ_ONLY_REPLAY"}
 
 
