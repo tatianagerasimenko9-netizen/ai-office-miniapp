@@ -28,6 +28,18 @@ def test_grouped_chronological_split():
     sets = [set(r["confirm_ts"] for r in parts[k]) for k in ("train","validation","test")]
     assert not (sets[0]&sets[1] or sets[1]&sets[2] or sets[0]&sets[2])
 
+def test_outcome_timestamp_must_follow_features():
+    signal = {"sig_id":"s1","symbol":"BTCUSDT","direction":"LONG","confirm_ts":1000}
+    for kwargs in ({"label":"SL"}, {"label":"SL","label_observed_at":999}):
+        try:
+            build_row(signal, {}, observed_at=1000, **kwargs)
+            assert False
+        except ValueError:
+            pass
+    row = build_row(signal, {}, observed_at=1000, label="SL", label_observed_at=1060)
+    assert row["label"] == "SL" and row["label_observed_at"] == 1060
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().copy().items()):
         if name.startswith("test_") and callable(fn):
