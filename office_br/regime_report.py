@@ -17,10 +17,11 @@ def report(rows: Sequence[Mapping[str, Any]], *, min_test: int = 20) -> dict[str
     for row in rows:
         if row.get("status") not in ("SL", "TP3"):
             continue
-        if "created_ts" not in row or "htf" not in row or "obstacle" not in row:
+        if "created_ts" not in row or "confirm_ts" not in row or "htf" not in row or "obstacle" not in row:
             missing += 1
             continue
-        if row.get("feature_asof_ts") is None or float(row["feature_asof_ts"]) > float(row["created_ts"]):
+        if (row.get("feature_asof_ts") is None or
+            float(row["feature_asof_ts"]) > float(row["confirm_ts"]) + 900 or\n            float(row["created_ts"]) < float(row["confirm_ts"]) + 900):
             missing += 1
             continue
         regime = assess(row, row["htf"], row["obstacle"])
