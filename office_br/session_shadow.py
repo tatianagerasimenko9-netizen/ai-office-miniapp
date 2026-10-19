@@ -43,3 +43,33 @@ def closed_session_range(bars: Sequence[Mapping[str,Any]], *, asof_ts:float,
             "low":min(float(x["low"]) for x in used) if used else None,
             "closed_bars":len(used),"asof_ts":asof_ts,
             "mode":"SHADOW_ONLY","method":"LOCAL_SESSION_CLOSED_M15"}
+
+def pre_session_range(bars: Sequence[Mapping[str,Any]], *, asof_ts:float,
+                      name:str, minutes:int=60) -> dict[str,Any]:
+    """Research-only pre-session range, ending at local session start.
+
+    Requires complete M15 coverage of the pre-session window. Missing candles
+    return no levels rather than an apparently valid partial range.
+    """
+    from datetime import timedelta
+    if name not in WINDOWS: raise ValueError("unknown session")
+    if minutes<=0 or minutes%15: raise ValueError("minutes must be positive multiple of 15")
+    zone,start,_=WINDOWS[name]
+    local_now=datetime.fromtimestamp(asof_ts,timezone.utc).astimezone(ZoneInfo(zone))
+    local_start=datetime.combine(local_now.date(),start,tzinfo=ZoneInfo(zone))
+    start_utc=local_start.astimezone(timezone.utc).timestamp()
+    end_utc=start_utc
+    begin_utc=(local_start-timedelta(minutes=minutes)).astimezone(timezone.utc).timestamp()
+    expected={begin_utc+900*i for i in range(minutes//15)}
+    selected={}
+    for b in bars:
+        stamp=float(b["ts"])
+        if stamp in expected and stamp+900<=asof_ts:
+            selected[stamp]=b
+    complete=local_now.weekday()<5 and len(selected)==len(expected)
+    return {"session":name,"date":local_now.date().isoformat(),
+            "high":max(float(b["high"]) for b in selected.values()) if complete else None,
+            "low":min(float(b["low"]) for b in selected.values()) if complete else None,
+            "complete":complete,"closed_bars":len(selected),
+            "expected_bars":len(expected),"mode":"SHADOW_ONLY",
+            "method":"PRE_SESSION_COMPLETE_CLOSED_M15"}
