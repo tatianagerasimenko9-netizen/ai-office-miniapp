@@ -33,6 +33,17 @@ def test_pre_session_complete():
 def test_pre_session_future_bar():
     b=[{"ts":ts(f"2026-07-20T06:{m:02d}:00Z"),"high":100,"low":90} for m in (0,15,30,45)]
     assert not pre_session_range(b,asof_ts=ts("2026-07-20T06:50:00Z"),name="LONDON")["complete"]
+def test_pre_session_duplicate_blocks():
+    b=[{"ts":ts(f"2026-07-20T06:{m:02d}:00Z"),"high":100,"low":90}
+       for m in (0,15,30,45)]
+    b.append(dict(b[0]))
+    r=pre_session_range(b,asof_ts=ts("2026-07-20T07:10:00Z"),name="LONDON")
+    assert not r["complete"] and r["high"] is None
+def test_pre_session_bad_ohlc_blocks():
+    b=[{"ts":ts(f"2026-07-20T06:{m:02d}:00Z"),"high":100,"low":90}
+       for m in (0,15,30,45)]
+    b[0]["low"]=101
+    assert not pre_session_range(b,asof_ts=ts("2026-07-20T07:10:00Z"),name="LONDON")["complete"]
 if __name__=="__main__":
     for k,v in list(globals().items()):
         if k.startswith("test_"):v()
