@@ -16,13 +16,20 @@ OUTCOMES = ("SL", "TP3", "AMBIGUOUS", "TIMEOUT", "DATA_GAP")
 
 
 def build_row(signal: Mapping[str, Any], features: Mapping[str, Any],
-              *, observed_at: float, label: str | None = None) -> dict[str, Any]:
+              *, observed_at: float, label: str | None = None,
+              label_observed_at: float | None = None) -> dict[str, Any]:
     """Freeze features known at observation time; labels must be joined later."""
     signal_ts = float(signal["confirm_ts"])
     if not isfinite(signal_ts) or not isfinite(observed_at) or observed_at < signal_ts:
         raise ValueError("invalid feature observation time")
     if label is not None and label not in OUTCOMES:
         raise ValueError("unsupported outcome")
+    if label is not None and (label_observed_at is None
+                              or not isfinite(float(label_observed_at))
+                              or float(label_observed_at) < observed_at):
+        raise ValueError("labeled rows require a valid post-feature outcome timestamp")
+    if label is None and label_observed_at is not None:
+        raise ValueError("unlabeled row cannot have outcome timestamp")
     clean = {}
     for name in FEATURES:
         val = features.get(name)
@@ -37,7 +44,9 @@ def build_row(signal: Mapping[str, Any], features: Mapping[str, Any],
     row = {"schema_version": SCHEMA_VERSION, "sig_id": sid,
            "symbol": str(signal["symbol"]), "direction": str(signal["direction"]),
            "confirm_ts": signal_ts, "observed_at": float(observed_at),
-           "features": clean, "label": label, "mode": "SHADOW_ONLY"}
+           "features": clean, "label": label,
+           "label_observed_at": float(label_observed_at) if label_observed_at is not None else None,
+           "mode": "SHADOW_ONLY"}
     row["row_hash"] = hashlib.sha256(json.dumps(
         {k:v for k,v in row.items() if k != "row_hash"},
         sort_keys=True, separators=(",", ":")).encode()).hexdigest()
