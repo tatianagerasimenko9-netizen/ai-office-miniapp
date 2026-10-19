@@ -22,6 +22,14 @@ def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
     ordered = sorted((x for x in candles if float(x["ts"]) >= eligibility),
                      key=lambda x: float(x["ts"]))
     outcome = replay(dict(signal, eligible_ts=eligibility), ordered)
+    # Never call a 48h replay complete if the terminal event was not found
+    # and the downloaded M1 history ends before the expected horizon.
+    horizon_end = eligibility + 48 * 3600
+    if outcome["status"] in ("OPEN", "UNFILLED") and (not ordered or float(ordered[-1]["ts"]) < horizon_end - 60):
+        return {"sig_id": signal["sig_id"], "verdict": "INSUFFICIENT_M1",
+                "m1_status": outcome["status"], "eligible_ts": eligibility,
+                "last_m1_ts": float(ordered[-1]["ts"]) if ordered else None,
+                "mode": "READ_ONLY_REPLAY", "exchange_fills_verified": False}
     recorded = {str(e["level"]) for e in events}
     if outcome["status"] in ("INVALID", "DATA_GAP", "AMBIGUOUS"):
         verdict = "REVIEW"
