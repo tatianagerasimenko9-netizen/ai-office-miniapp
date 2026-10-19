@@ -79,8 +79,17 @@ def for_signal(symbol: str, direction: str, now: Optional[float] = None) -> Dict
             coin_ts = tstruct.snapshot(now, c15[-1]["close"], _c(coin + "USDT", "1d", 120)) if c15 else None
         except Exception:  # noqa: BLE001
             coin_ts = None
+        phase = None
+        try:
+            import office_phase as _ph
+
+            c5 = _c(coin + "USDT", "5m", 320)
+            if c5 and _fresh(c5, now, 300):
+                phase = _ph.phase_of(_ph.sigma_extension([float(x["close"]) for x in c5], direction), direction)
+        except Exception:  # noqa: BLE001
+            phase = None
         m = base["market"]
-        snap = {"built_at": base["built_at"], "bias": m["bias"], "long": m["long"], "short": m["short"], "checked": m["checked"],
+        snap = {"phase": phase, "built_at": base["built_at"], "bias": m["bias"], "long": m["long"], "short": m["short"], "checked": m["checked"],
                 "facts": [f["text"] for f in m["facts"]], "btc_1h": m["btc_1h"], "btc_4h": m["btc_4h"], "eth_4h": m["eth_4h"],
                 "alignment": al, "lines": lines, "calendar": cal, "time": {k: base["btc_time"][k] for k in ("weekday", "week", "month", "quarter", "sessions", "closing")},
                 "coin_time": ({k: coin_ts[k] for k in ("week", "month", "quarter")} if coin_ts else None)}
