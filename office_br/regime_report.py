@@ -21,7 +21,8 @@ def report(rows: Sequence[Mapping[str, Any]], *, min_test: int = 20) -> dict[str
             missing += 1
             continue
         if (row.get("feature_asof_ts") is None or
-            float(row["feature_asof_ts"]) > float(row["confirm_ts"]) + 900 or\n            float(row["created_ts"]) < float(row["confirm_ts"]) + 900):
+            float(row["feature_asof_ts"]) > float(row["confirm_ts"]) + 900 or
+            float(row["created_ts"]) < float(row["confirm_ts"]) + 900):
             missing += 1
             continue
         regime = assess(row, row["htf"], row["obstacle"])
