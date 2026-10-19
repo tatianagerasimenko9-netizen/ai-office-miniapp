@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from office_br.binance_m1_history import fetch_m1
 from office_br.ledger_m1_compare import compare, summarize
+from office_br.m1_coverage_shadow import audit_m1
 
 
 def run(signals: Sequence[Mapping[str, Any]], events: Sequence[Mapping[str, Any]],
@@ -38,6 +39,11 @@ def run(signals: Sequence[Mapping[str, Any]], events: Sequence[Mapping[str, Any]
                 targets = json.loads(row["targets_json"])
             signal = dict(row, targets=targets)
             candles = fetch(str(row["symbol"]), eligible, eligible+48*3600)
+            coverage = audit_m1(candles, start_ts=eligible, end_ts=eligible+48*3600)
+            if not coverage["complete"]:
+                results.append({"sig_id":sid,"verdict":"M1_DATA_INCOMPLETE",
+                                "coverage":coverage})
+                continue
             results.append(compare(signal, ledger[sid], candles))
         except (ValueError, TypeError, KeyError, OSError, TimeoutError) as exc:
             results.append({"sig_id":sid,"verdict":"FETCH_OR_INPUT_ERROR",
