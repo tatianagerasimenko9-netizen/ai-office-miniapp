@@ -9,7 +9,7 @@ from office_br.m1_replay import replay
 
 
 def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
-            candles: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+            candles: Sequence[Mapping[str, Any]], *, expected_end_ts: float | None = None) -> dict[str, Any]:
     required = ("sig_id", "confirm_ts", "direction", "entry", "sl", "targets")
     if any(k not in signal for k in required):
         return {"verdict": "INVALID_INPUT", "missing": [k for k in required if k not in signal]}
@@ -30,7 +30,7 @@ def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
     outcome = replay(dict(signal, eligible_ts=eligibility), ordered)
     # Never call a 48h replay complete if the terminal event was not found
     # and the downloaded M1 history ends before the expected horizon.
-    horizon_end = eligibility + 48 * 3600
+    horizon_end = expected_end_ts if expected_end_ts is not None else eligibility + 48 * 3600
     if outcome["status"] in ("OPEN", "UNFILLED") and (not ordered or float(ordered[-1]["ts"]) < horizon_end - 60):
         return {"sig_id": signal["sig_id"], "verdict": "INSUFFICIENT_M1",
                 "m1_status": outcome["status"], "eligible_ts": eligibility,
