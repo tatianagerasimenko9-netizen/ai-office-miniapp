@@ -48,7 +48,9 @@ def compare(signal: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
     elif outcome["status"] in ("SL", "TP3"):
         if outcome["status"] not in recorded:
             verdict = "MISMATCH"
-        elif replay_terminal_ts is not None and terminal_times and float(replay_terminal_ts) not in terminal_times:
+        elif replay_terminal_ts is None or not terminal_times:
+            verdict = "MISSING_TERMINAL_TIMESTAMP"
+        elif float(replay_terminal_ts) not in terminal_times:
             verdict = "MISMATCH_TIME"
         else:
             verdict = "MATCH"
