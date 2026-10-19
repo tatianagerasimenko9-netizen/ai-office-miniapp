@@ -65,7 +65,7 @@ def main() -> None:
     result = extract(db)
     Path(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2),
                                  encoding="utf-8")
-    print(json.dumps({"source_rows":result["source_rows"],
+    if result["skipped"] or len(result["rows"]) != result["source_rows"]:\n        raise SystemExit("FAIL_CLOSED: production rows missing or invalid; no dataset published")\n    print(json.dumps({"source_rows":result["source_rows"],
                       "usable_rows":len(result["rows"]),
                       "skipped":result["skipped"]}))
 
