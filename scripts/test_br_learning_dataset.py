@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from office_br.learning_dataset import build_row, chronological_split
+from office_br.learning_dataset import build_row, chronological_split, purged_chronological_split
 
 def test_frozen_features_and_hash():
     signal = {"sig_id":"s1","symbol":"BTCUSDT","direction":"LONG","confirm_ts":1000}
@@ -38,6 +38,18 @@ def test_outcome_timestamp_must_follow_features():
             pass
     row = build_row(signal, {}, observed_at=1000, label="SL", label_observed_at=1060)
     assert row["label"] == "SL" and row["label_observed_at"] == 1060
+
+
+def test_purge_overlapping_outcomes_and_embargo():
+    rows = [{"sig_id":str(i), "confirm_ts":float(i*1000),
+             "label":"SL", "label_observed_at":float(i*1000+100)} for i in range(10)]
+    rows[5]["label_observed_at"] = 7000.0  # training row overlaps validation
+    rows[7]["label_observed_at"] = 9000.0  # validation row overlaps test
+    parts = purged_chronological_split(rows, embargo_seconds=100)
+    assert "5" not in {r["sig_id"] for r in parts["train"]}
+    assert "7" not in {r["sig_id"] for r in parts["validation"]}
+    assert all(r["label_observed_at"] < 6000 - 100 for r in parts["train"])
+    assert all(r["label_observed_at"] < 8000 - 100 for r in parts["validation"])
 
 
 if __name__ == "__main__":
