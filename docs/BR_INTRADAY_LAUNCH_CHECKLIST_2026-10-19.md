@@ -11,7 +11,7 @@
 ## Execution checklist (mark [x] only with commit, tests, and evidence)
 - [x] 01. Inventory current B&R implementation and explicitly separate its hypotheses from verified source methodology. Evidence: office_br/detect.py HYP; office_br/live.py; 2026-10-19 review.
 - [x] 02. Preserve isolated B&R LIVE namespace and observational/manual-only operation. Evidence: office_br/live.py; separate br_test_signal tables.
-- [x] 03. Read-only production outcome audit (334 terminal: TP3=76, SL=258 at inspection). Evidence: Render PostgreSQL read-only query, 2026-10-19.
+- [x] 03. Read-only production outcome audit (365 TP3/SL terminal: TP3=78, SL=287 at latest inspection; 7 AMBIGUOUS, 3 SENT, 1 TIMEOUT). Evidence: Render PostgreSQL read-only query, 2026-10-19 (376 signals total).
 - [x] 04. Add causal breakout strength, close location, volume ratio, retest depth and risk metrics in SHADOW_ONLY. Evidence: office_br/structure_metrics.py and scripts/test_br_structure_metrics.py. **CI of latest revision still pending; this item is code-complete only.**
 - [x] 05. Implement independent historical M1 replay and event ledger comparator (code-complete, not yet validated against entire production cohort). Evidence: office_br/m1_replay.py, ledger_m1_compare.py, binance_m1_history.py, m1_batch_replay.py, m1_export.py, m1_run_production.py.
 - [x] 06. Run current-commit CI and new-module tests; fix all failures. Evidence: commit fbf89a8 GitHub Actions B&R live observational safety run 39248433742 SUCCESS and PR68 offline safety tests run 39248433488 SUCCESS (2026-10-19). Future commits require fresh CI.
