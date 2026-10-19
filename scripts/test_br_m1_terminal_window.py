@@ -39,6 +39,24 @@ def test_unresolved_still_requires_full_horizon():
     assert result["results"][0]["verdict"] == "M1_DATA_INCOMPLETE"
 
 
+def test_impossible_terminal_time_fails_closed():
+    eligible = 1800000000.0
+    calls = []
+    def fetch(*args):
+        calls.append(args)
+        return []
+    signal = {"sig_id": "s3", "symbol": "BTCUSDT", "direction": "LONG",
+              "confirm_ts": eligible - 900, "entry": 100., "sl": 99.,
+              "targets_json": '[{"p":101}]', "status": "SL"}
+    too_early = [{"sig_id": "s3", "level": "SL", "touched_ts": eligible - 60}]
+    result = run([signal], too_early, fetch=fetch)
+    assert result["results"][0]["verdict"] == "INVALID_TERMINAL_TIME"
+    too_late = [{"sig_id": "s3", "level": "SL", "touched_ts": eligible + 48 * 3600 + 60}]
+    result = run([signal], too_late, fetch=fetch)
+    assert result["results"][0]["verdict"] == "TERMINAL_AFTER_48H"
+    assert calls == []
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().copy().items()):
         if name.startswith("test_") and callable(fn):
