@@ -26,6 +26,11 @@ def test_unverified():
     try:make(p)
     except ValueError:return
     assert False
+def test_private_link():
+    try:build_photo_post(plan(),chart_bytes=b"x",scenario_url="https://192.168.1.1/scenario",
+        round_trip_cost_pct=0.02)
+    except ValueError:return
+    assert False
 def test_invalid_link():
     try:build_photo_post(plan(),chart_bytes=b"x",scenario_url="http://example.org",
         round_trip_cost_pct=0.02)
