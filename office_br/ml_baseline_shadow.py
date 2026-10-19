@@ -58,3 +58,21 @@ def evaluate(model: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> dic
             "improvement":round(constant-brier,8),
             "mode":"SHADOW_ONLY",
             "caution":"Classification calibration is not trading net expectancy"}
+
+
+def walk_forward(rows: Sequence[Mapping[str, Any]], *, feature: str,
+                 threshold: float, embargo_seconds: float = 900) -> dict[str, Any]:
+    """Freeze one feature/threshold, fit on purged train, score untouched test.
+
+    Validation is reserved for future model selection, not combined into training.
+    """
+    from office_br.learning_dataset import purged_chronological_split
+    parts = purged_chronological_split(rows, embargo_seconds=embargo_seconds)
+    model = train(parts["train"], feature=feature, threshold=threshold)
+    result = evaluate(model, parts["test"])
+    return {"train_n":sum(model["counts"].values()),
+            "validation_n":len(parts["validation"]),
+            "test":result,"model":model,
+            "promotion_approved":False,
+            "mode":"OFFLINE_RESEARCH",
+            "caution":"No live gates without net-R after costs, repeated chronological OOS and uncertainty"}
