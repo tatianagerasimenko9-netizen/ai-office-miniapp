@@ -14,7 +14,7 @@ def test_one_command_read_only():
         return [{"ts":900,"high":100.1,"low":99.9},
                 {"ts":960,"high":100.1,"low":98.9}]
     x=execute("test-db",query=query,fetch=fetch)
-    assert x["summary"]["verdicts"]["MATCH"]==1
+    assert x["summary"]["verdicts"]["M1_DATA_INCOMPLETE"]==1
     assert x["source_signal_count"]==1 and x["source_event_count"]==2
     assert x["db_write_count"]==0
 
