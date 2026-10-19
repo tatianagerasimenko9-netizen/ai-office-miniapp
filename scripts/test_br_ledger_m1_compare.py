@@ -22,7 +22,7 @@ def test_missing_first_bar():
 def test_gap_review():
     x=compare(S,[],[{"ts":900,"high":100.1,"low":99.9},
                      {"ts":1020,"high":100.1,"low":98.9}])
-    assert x["verdict"]=="REVIEW"
+    assert x["verdict"]=="INSUFFICIENT_M1"
 def test_truncated_window_not_claimed_complete():
     x=compare(S,[],bars([(100.1,99.9),(100.1,99.9)]))
     assert x["verdict"]=="INSUFFICIENT_M1"
