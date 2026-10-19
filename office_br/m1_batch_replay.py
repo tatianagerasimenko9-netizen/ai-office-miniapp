@@ -38,8 +38,18 @@ def run(signals: Sequence[Mapping[str, Any]], events: Sequence[Mapping[str, Any]
             if targets is None:
                 targets = json.loads(row["targets_json"])
             signal = dict(row, targets=targets)
-            candles = fetch(str(row["symbol"]), eligible, eligible+48*3600)
-            coverage = audit_m1(candles, start_ts=eligible, end_ts=eligible+48*3600)
+            # Do not request future M1 bars after an already recorded terminal event.
+            terminal = [float(e["touched_ts"]) for e in ledger[sid]
+                        if str(e.get("level")) in ("SL", "TP3", "AMBIGUOUS")
+                        and e.get("touched_ts") is not None]
+            horizon = eligible + 48 * 3600
+            if terminal:
+                terminal_end = (int(max(terminal) // 60) + 1) * 60
+                end = min(horizon, max(eligible + 60, terminal_end))
+            else:
+                end = horizon
+            candles = fetch(str(row["symbol"]), eligible, end)
+            coverage = audit_m1(candles, start_ts=eligible, end_ts=end)
             if not coverage["complete"]:
                 results.append({"sig_id":sid,"verdict":"M1_DATA_INCOMPLETE",
                                 "coverage":coverage})
