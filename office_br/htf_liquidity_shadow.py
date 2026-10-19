@@ -27,6 +27,11 @@ def levels(bars:Sequence[Mapping[str,Any]],*,timeframe:str,asof_ts:float,
             return {"timeframe":timeframe,"mode":"SHADOW_ONLY","complete":False,
                     "high":None,"low":None,"pivots_high":[],"pivots_low":[]}
     valid.sort(key=lambda x:x["ts"])
+    duration=SECONDS[timeframe]
+    if duration is not None and any(valid[i]["ts"]-valid[i-1]["ts"]!=duration
+                                    for i in range(1,len(valid))):
+        return {"timeframe":timeframe,"mode":"SHADOW_ONLY","complete":False,
+                "high":None,"low":None,"pivots_high":[],"pivots_low":[]}
     if len(valid)<left+right+1 or any(valid[i]["ts"]<=valid[i-1]["ts"] for i in range(1,len(valid))):
         return {"timeframe":timeframe,"mode":"SHADOW_ONLY","complete":False,
                 "high":None,"low":None,"pivots_high":[],"pivots_low":[]}
