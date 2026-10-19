@@ -43,6 +43,12 @@ def run(signals: Sequence[Mapping[str, Any]], events: Sequence[Mapping[str, Any]
                         if str(e.get("level")) in ("SL", "TP3", "AMBIGUOUS")
                         and e.get("touched_ts") is not None]
             horizon = eligible + 48 * 3600
+            if terminal and max(terminal) < eligible:
+                results.append({"sig_id": sid, "verdict": "INVALID_TERMINAL_TIME"})
+                continue
+            if terminal and max(terminal) > horizon:
+                results.append({"sig_id": sid, "verdict": "TERMINAL_AFTER_48H"})
+                continue
             if terminal:
                 terminal_end = (int(max(terminal) // 60) + 1) * 60
                 end = min(horizon, max(eligible + 60, terminal_end))
