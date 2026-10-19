@@ -6,6 +6,7 @@ The existing Mini App URL must be supplied by the caller; never invented.
 from __future__ import annotations
 from typing import Any,Mapping
 from urllib.parse import urlsplit
+from ipaddress import ip_address
 from office_br.telegram_caption import caption
 from office_br.telegram_geometry import validate
 
@@ -17,8 +18,15 @@ def build_photo_post(plan:Mapping[str,Any],*,chart_bytes:bytes,
     parsed=urlsplit(scenario_url)
     if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("invalid Mini App HTTPS URL")
-    if parsed.hostname in ("localhost","127.0.0.1") or parsed.hostname.endswith(".local"):
+    host=parsed.hostname
+    if host in ("localhost",) or host.endswith((".local",".internal",".localhost")):
         raise ValueError("Mini App must use a public HTTPS host")
+    try:
+        if not ip_address(host).is_global:
+            raise ValueError("Mini App must use a public HTTPS host")
+    except ValueError as exc:
+        if "public HTTPS host" in str(exc):
+            raise
     if not (0<min_net_rr_tp1<100):
         raise ValueError("invalid minimum R:R")
     if plan.get("verified") is not True or plan.get("risk_ok") is not True:
