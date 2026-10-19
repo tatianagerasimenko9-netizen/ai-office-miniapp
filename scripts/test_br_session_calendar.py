@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 
 # Direct script execution by full-regression CI needs the repository root on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from office_br.session_calendar import classify_us_equity_clock as phase
 
 
@@ -35,3 +38,10 @@ def test_no_claim_of_verified_exchange_calendar():
     result = phase(at("2026-10-19T13:30:00+00:00"))
     assert result["calendar_verified"] is False
     assert result["scope"] == "SHADOW_ONLY"
+
+
+if __name__ == "__main__":
+    for name, fn in sorted(globals().copy().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print("ok", name)
