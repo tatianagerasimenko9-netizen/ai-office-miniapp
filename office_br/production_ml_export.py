@@ -51,3 +51,23 @@ def extract(db: str, *, query: Callable[..., list[tuple]] | None = None) -> dict
     return {"schema_version":"br_features_v2","rows":data,
             "skipped":skipped,"source_rows":len(rows),
             "mode":"READ_ONLY_OFFLINE","production_changed":False}
+
+
+def main() -> None:
+    import os
+    import sys
+    from pathlib import Path
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m office_br.production_ml_export dataset.json")
+    db = os.environ.get("DATABASE_URL") or os.environ.get("OFFICE_DB_URL")
+    if not db:
+        raise SystemExit("DATABASE_URL or OFFICE_DB_URL required")
+    result = extract(db)
+    Path(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2),
+                                 encoding="utf-8")
+    print(json.dumps({"source_rows":result["source_rows"],
+                      "usable_rows":len(result["rows"]),
+                      "skipped":result["skipped"]}))
+
+if __name__ == "__main__":
+    main()
