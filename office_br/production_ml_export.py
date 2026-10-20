@@ -63,9 +63,14 @@ def main() -> None:
     if not db:
         raise SystemExit("DATABASE_URL or OFFICE_DB_URL required")
     result = extract(db)
-    Path(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2),
-                                 encoding="utf-8")
-    if result["skipped"] or len(result["rows"]) != result["source_rows"]:\n        raise SystemExit("FAIL_CLOSED: production rows missing or invalid; no dataset published")\n    print(json.dumps({"source_rows":result["source_rows"],
+    if result["skipped"] or len(result["rows"]) != result["source_rows"]:
+        raise SystemExit("FAIL_CLOSED: production rows missing or invalid; no dataset published")
+    # Publish only after all source rows passed validation.
+    target = Path(sys.argv[1])
+    temporary = target.with_name(target.name + ".tmp")
+    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(target)
+    print(json.dumps({"source_rows":result["source_rows"],
                       "usable_rows":len(result["rows"]),
                       "skipped":result["skipped"]}))
 
