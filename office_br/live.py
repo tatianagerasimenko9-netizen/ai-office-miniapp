@@ -42,7 +42,7 @@ def _bars(rows: Any) -> tuple[list, list, list, list, list]:
             [float(x["close"]) for x in rows])
 
 
-def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None) -> int:
+def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None, *, htf_fetch: Callable | None = None) -> int:
     """Only newly closed confirmation bar; never replay old discoveries into Telegram."""
     now = time.time() if now is None else now
     bars = fetch(symbol, "15m", 240, closed_only=True)
@@ -65,7 +65,7 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None)
             try:
                 from office_br.htf_map import build, scenario
                 asof = t[-1] + 900
-                market = build(symbol, asof, fetch)
+                market = build(symbol, asof, htf_fetch or fetch)
                 hypothesis = scenario(market, float(s["entry"]))
                 print("[br-htf-shadow] " + json.dumps({
                     "id": sid, "symbol": symbol, "asof": asof,
@@ -259,6 +259,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             scan_symbol, db, sym,
                             lambda _symbol, _tf, _limit, *, closed_only: bars,
                             now_ts,
+                            htf_fetch=fetch,
                         )
                         seen[sym] = ts
                         scan_ok += 1
