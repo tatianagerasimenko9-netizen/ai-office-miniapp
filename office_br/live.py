@@ -254,6 +254,8 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
+                if scan_stale or scan_missing or scan_errors:
+                    print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
                 print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
