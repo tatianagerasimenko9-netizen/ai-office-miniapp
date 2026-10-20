@@ -13,7 +13,7 @@ def classify(last_open_ts: float | None, now_ts: float, *,
     lag=float(now_ts)-close_ts
     if lag < 0:
         return {"state":"NOT_CLOSED","allow_new_signals":False,"lag_seconds":lag}
-    if lag > max_lag_seconds:
+    if lag >= max_lag_seconds:
         return {"state":"STALE","allow_new_signals":False,"lag_seconds":lag}
     return {"state":"FRESH","allow_new_signals":True,"lag_seconds":lag}
 
