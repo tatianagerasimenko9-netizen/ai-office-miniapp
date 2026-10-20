@@ -5,6 +5,7 @@ on:
       - 'office_br/**'
       - 'office_relay_wizard.py'
       - 'scripts/test_br_live.py'
+      - 'scripts/test_br_analyst_evidence.py'
       - '.github/workflows/br-live-safety.yml'
   workflow_dispatch: {}
 permissions:
@@ -19,6 +20,6 @@ jobs:
         with:
           python-version: '3.11'
       - name: Compile only
-        run: python -m py_compile office_br/live.py office_br/card.py office_relay_wizard.py scripts/test_br_live.py
+        run: python -m py_compile office_br/live.py office_br/card.py office_br/analyst_evidence.py office_relay_wizard.py scripts/test_br_live.py scripts/test_br_analyst_evidence.py
       - name: Offline safety checks
-        run: python scripts/test_br_live.py
+        run: python scripts/test_br_live.py && python scripts/test_br_analyst_evidence.py
