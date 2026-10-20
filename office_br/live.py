@@ -236,6 +236,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
+                stale_ages: dict[str, int] = {}
                 for sym in symbols():
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
@@ -247,6 +248,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         health = classify(ts, now_ts)
                         if not health["allow_new_signals"]:
                             scan_stale += 1
+                            stale_ages[sym] = round(float(health.get("lag_seconds", 0)))
                             continue
                         if seen.get(sym) == ts:
                             scan_ok += 1
@@ -266,7 +268,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
-                    print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; no stale new signal admitted", flush=True)
+                    print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors} age_sec={stale_ages}; no stale new signal admitted", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
                 print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
