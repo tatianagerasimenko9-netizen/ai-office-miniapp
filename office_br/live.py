@@ -49,7 +49,7 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None)
     if not isinstance(bars, list) or len(bars) < 100:
         return 0
     t, o, h, l, c = _bars(bars)
-    if now - (t[-1] + 900) > 150 or t[-1] + 900 > now:
+    if now - (t[-1] + 900) >= 900 or t[-1] + 900 > now:
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
@@ -234,7 +234,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             continue
                         ts = _epoch(bars[-1])
                         now_ts = time.time()
-                        if ts + 900 > now_ts or now_ts - (ts + 900) > 150:
+                        if ts + 900 > now_ts or now_ts - (ts + 900) >= 900:
                             scan_stale += 1
                             continue
                         if seen.get(sym) == ts:
@@ -254,6 +254,8 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
+                if scan_stale or scan_missing or scan_errors:
+                    print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
                 print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
