@@ -67,10 +67,12 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
                 asof = t[-1] + 900
                 market = build(symbol, asof, htf_fetch or fetch)
                 hypothesis = scenario(market, float(s["entry"]), s["direction"])
+                from office_br.ltf_confirmation import evaluate
+                lower = evaluate(symbol, s, asof, htf_fetch or fetch)
                 print("[br-htf-shadow] " + json.dumps({
                     "id": sid, "symbol": symbol, "asof": asof,
                     "direction": market["trend"]["direction"],
-                    "health": market["health"], "scenario": hypothesis
+                    "health": market["health"], "scenario": hypothesis, "ltf": lower
                 }, ensure_ascii=False), flush=True)
             except Exception as exc:
                 print(f"[br-htf-shadow] UNKNOWN {symbol} {type(exc).__name__}", flush=True)
