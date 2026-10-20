@@ -68,3 +68,26 @@ def evaluate(records, *, min_train=100, min_test=50, cost_r=0.15):
             "train_net_r": round(avg_train, 4), "test_net_r": round(avg_test, 4),
             "trained": False, "edge_verified": False,
             "reason": "No causal feature snapshots, fees/slippage only assumed; no proven edge"}
+
+
+def evaluate_database(db, *, cost_r=0.15):
+    """Read actual B&R paper events from database; never use synthetic labels."""
+    import json
+    from office_bridge import _fetchall
+    from office_br.store import init
+    init(db)
+    signals = []
+    for sid, symbol, direction, confirm_ts, entry, sl, targets_raw in _fetchall(
+        db, "SELECT sig_id,symbol,direction,confirm_ts,entry,sl,targets_json FROM br_test_signal"
+    ):
+        try:
+            targets = json.loads(targets_raw)
+            tp1 = float(targets[0]["p"])
+            signals.append({"sig_id":sid,"symbol":symbol,"direction":direction,
+                            "confirm_ts":confirm_ts,"entry":entry,"sl":sl,"tp1":tp1})
+        except (ValueError, TypeError, KeyError, IndexError):
+            continue
+    events = [{"sig_id":sid,"level":level,"touched_ts":ts} for sid,level,ts in _fetchall(
+        db, "SELECT sig_id,level,touched_ts FROM br_test_event"
+    )]
+    return evaluate(labels(signals, events), cost_r=cost_r)
