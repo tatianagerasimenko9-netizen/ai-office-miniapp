@@ -91,3 +91,34 @@ def evaluate_database(db, *, cost_r=0.15):
         db, "SELECT sig_id,level,touched_ts FROM br_test_event"
     )]
     return evaluate(labels(signals, events), cost_r=cost_r)
+
+
+def evaluate_db(db, *, min_train=100, min_test=50, cost_r=0.15):
+    """Read actual B&R paper tables; never train on synthetic or unresolved data."""
+    import json
+    from office_bridge import _fetchall
+    from office_br.store import init
+    init(db)
+    raw = _fetchall(db, """SELECT sig_id, symbol, direction, confirm_ts, entry, sl,
+                                   targets_json FROM br_test_signal ORDER BY confirm_ts, sig_id""")
+    signals = []
+    for sid, symbol, direction, ts, entry, sl, targets in raw:
+        try:
+            tp1 = float(json.loads(targets)[0]["p"])
+            signals.append({"sig_id": sid, "symbol": symbol, "direction": direction,
+                            "confirm_ts": ts, "entry": entry, "sl": sl, "tp1": tp1})
+        except (ValueError, TypeError, KeyError, IndexError):
+            continue
+    raw_events = _fetchall(db, """SELECT sig_id, level, touched_ts
+                                  FROM br_test_event ORDER BY touched_ts""")
+    events = [{"sig_id": sid, "level": level, "touched_ts": ts}
+              for sid, level, ts in raw_events]
+    observed = labels(signals, events)
+    report = evaluate(observed, min_train=min_train, min_test=min_test, cost_r=cost_r)
+    report["source"] = "br_test_signal + br_test_event"
+    report["total_signals"] = len(raw)
+    report["resolved_unambiguous"] = len(observed)
+    report["excluded_or_unresolved"] = len(raw) - len(observed)
+    report["cost_r_assumption"] = cost_r
+    report["execution"] = "PAPER_ONLY"
+    return report
