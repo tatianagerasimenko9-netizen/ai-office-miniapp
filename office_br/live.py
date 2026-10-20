@@ -60,6 +60,20 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None)
         if sid:
             new += 1
             print(f"[br-live] NEW {symbol} {s['direction']} id={sid}", flush=True)
+            # Read-only SHADOW: independent from delivery and Office2. The
+            # confirmation timestamp is the close of the newest M15 bar.
+            try:
+                from office_br.htf_map import build, scenario
+                asof = t[-1] + 900
+                market = build(symbol, asof, fetch)
+                hypothesis = scenario(market, float(s["entry"]))
+                print("[br-htf-shadow] " + json.dumps({
+                    "id": sid, "symbol": symbol, "asof": asof,
+                    "direction": market["trend"]["direction"],
+                    "health": market["health"], "scenario": hypothesis
+                }, ensure_ascii=False), flush=True)
+            except Exception as exc:
+                print(f"[br-htf-shadow] UNKNOWN {symbol} {type(exc).__name__}", flush=True)
     return new
 
 
