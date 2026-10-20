@@ -43,6 +43,18 @@ def test_future_pivot_never_used():
             for pivot in ctx.get(key, []):
                 assert pivot.get("confirmed_ts", 0) <= ASOF
 
+
+def test_conflicting_signal_is_neutral():
+    m = build("ETHUSDT", ASOF, history)
+    assert m["trend"]["direction"] == "LONG"
+    s = scenario(m, 120, "SHORT")
+    assert s["scenario"] == "NEUTRAL"
+    assert s["reason"] == "HTF_SIGNAL_CONFLICT"
+
+def test_invalid_signal_direction_is_neutral():
+    m = build("ETHUSDT", ASOF, history)
+    assert scenario(m, 120, "UNKNOWN")["scenario"] == "NEUTRAL"
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

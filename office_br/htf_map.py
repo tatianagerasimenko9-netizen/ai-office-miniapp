@@ -45,11 +45,19 @@ def build(symbol, confirm_ts, fetch, *, lookback=20, limit=120):
     return {"symbol": symbol, "confirm_ts": confirm_ts, "trend": trend,
             "liquidity": contexts, "health": health, "mode": "SHADOW_ONLY"}
 
-def scenario(market_map, entry):
-    """Research scenarios, not recommendations. No unknown map -> no directional claim."""
+def scenario(market_map, entry, signal_direction=None):
+    """Observational alignment, not a trade gate.
+
+    The detected B&R direction and HTF direction must agree before reporting
+    a directional scenario. A disagreement is NEUTRAL, not an opposite trade.
+    """
     direction = market_map["trend"]["direction"]
+    if signal_direction is not None and signal_direction not in ("LONG", "SHORT"):
+        return {"scenario": "NEUTRAL", "reason": "INVALID_SIGNAL_DIRECTION", "obstacle": None}
     if direction not in ("LONG", "SHORT"):
         return {"scenario": "NEUTRAL", "reason": "UNKNOWN_OR_MIXED_HTF", "obstacle": None}
+    if signal_direction is not None and signal_direction != direction:
+        return {"scenario": "NEUTRAL", "reason": "HTF_SIGNAL_CONFLICT", "obstacle": None}
     result = obstacle(float(entry), direction, market_map["liquidity"])
     if result["status"] != "FOUND":
         return {"scenario": "NEUTRAL", "reason": result["status"], "obstacle": result}

@@ -66,7 +66,7 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
                 from office_br.htf_map import build, scenario
                 asof = t[-1] + 900
                 market = build(symbol, asof, htf_fetch or fetch)
-                hypothesis = scenario(market, float(s["entry"]))
+                hypothesis = scenario(market, float(s["entry"]), s["direction"])
                 print("[br-htf-shadow] " + json.dumps({
                     "id": sid, "symbol": symbol, "asof": asof,
                     "direction": market["trend"]["direction"],
