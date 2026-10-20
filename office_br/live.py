@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.feed_health import classify
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -43,19 +44,28 @@ def _bars(rows: Any) -> tuple[list, list, list, list, list]:
 
 
 def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None) -> int:
-    """Only newly closed confirmation bar; never replay old discoveries into Telegram."""
+    """Only latest closed confirmation bar, within its 15-minute validity; never replay older discoveries."""
     now = time.time() if now is None else now
     bars = fetch(symbol, "15m", 240, closed_only=True)
     if not isinstance(bars, list) or len(bars) < 100:
         return 0
     t, o, h, l, c = _bars(bars)
-    if now - (t[-1] + 900) > 150 or t[-1] + 900 > now:
+    if not classify(t[-1], now)["allow_new_signals"]:
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
+    # A single closed M15 bar may produce multiple nearby breakout levels.
+    # Emit at most one scenario per direction for that confirmation candle.
+    # Keep the first detector-ranked candidate; the signal ledger remains
+    # immutable and the existing durable sig_id guard still applies.
+    emitted_directions: set[str] = set()
     for s in hits:
         if s["confirm_i"] != len(t) - 1:
             continue
+        direction = str(s["direction"])
+        if direction in emitted_directions:
+            continue
+        emitted_directions.add(direction)
         sid = store.record_signal(db, symbol, s, detect.HYP, now=now)
         if sid:
             new += 1
@@ -226,6 +236,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
+                stale_ages: dict[str, int] = {}
                 for sym in symbols():
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
@@ -234,8 +245,10 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             continue
                         ts = _epoch(bars[-1])
                         now_ts = time.time()
-                        if ts + 900 > now_ts or now_ts - (ts + 900) > 150:
+                        health = classify(ts, now_ts)
+                        if not health["allow_new_signals"]:
                             scan_stale += 1
+                            stale_ages[sym] = round(float(health.get("lag_seconds", 0)))
                             continue
                         if seen.get(sym) == ts:
                             scan_ok += 1
@@ -254,6 +267,8 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
+                if scan_stale or scan_missing or scan_errors:
+                    print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors} age_sec={stale_ages}; no stale new signal admitted", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
                 print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:

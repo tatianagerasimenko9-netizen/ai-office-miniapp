@@ -1,0 +1,107 @@
+"""Versioned, causal B&R feature rows for Hugging Face-style offline datasets.
+
+No HF account or external upload. No orders or production gates.
+"""
+from __future__ import annotations
+import hashlib
+import json
+from datetime import datetime, timezone
+from math import isfinite
+from typing import Any, Mapping, Sequence
+
+SCHEMA_VERSION = "br_features_v2"
+FEATURES = ("breakout_strength", "close_location", "volume_ratio",
+            "retest_depth_r", "obstacle_r", "spread_bps", "atr_pct",
+            "risk_pct", "break_to_retest_minutes",
+            "retest_to_confirm_minutes", "break_level_distance_r")
+OUTCOMES = ("SL", "TP3", "AMBIGUOUS", "TIMEOUT", "DATA_GAP")
+
+
+def build_row(signal: Mapping[str, Any], features: Mapping[str, Any],
+              *, observed_at: float, label: str | None = None,
+              label_observed_at: float | None = None) -> dict[str, Any]:
+    """Freeze features known at observation time; labels must be joined later."""
+    signal_ts = float(signal["confirm_ts"])
+    if not isfinite(signal_ts) or not isfinite(observed_at) or observed_at < signal_ts:
+        raise ValueError("invalid feature observation time")
+    if label is not None and label not in OUTCOMES:
+        raise ValueError("unsupported outcome")
+    if label is not None and (label_observed_at is None
+                              or not isfinite(float(label_observed_at))
+                              or float(label_observed_at) < observed_at):
+        raise ValueError("labeled rows require a valid post-feature outcome timestamp")
+    if label is None and label_observed_at is not None:
+        raise ValueError("unlabeled row cannot have outcome timestamp")
+    clean = {}
+    for name in FEATURES:
+        val = features.get(name)
+        if val is None:
+            clean[name] = None
+        else:
+            val = float(val)
+            if not isfinite(val):
+                raise ValueError("non-finite feature: " + name)
+            clean[name] = val
+    sid = str(signal["sig_id"])
+    row = {"schema_version": SCHEMA_VERSION, "sig_id": sid,
+           "symbol": str(signal["symbol"]), "direction": str(signal["direction"]),
+           "confirm_ts": signal_ts, "observed_at": float(observed_at),
+           "features": clean, "label": label,
+           "label_observed_at": float(label_observed_at) if label_observed_at is not None else None,
+           "mode": "SHADOW_ONLY"}
+    row["row_hash"] = hashlib.sha256(json.dumps(
+        {k:v for k,v in row.items() if k != "row_hash"},
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return row
+
+
+def chronological_split(rows: Sequence[Mapping[str, Any]], *, train_fraction: float = 0.6,
+                        validation_fraction: float = 0.2) -> dict[str, list[dict]]:
+    """Group same confirmation timestamps; never split simultaneous signals."""
+    if not (0 < train_fraction < 1 and 0 < validation_fraction < 1
+            and train_fraction + validation_fraction < 1):
+        raise ValueError("invalid split")
+    ordered = sorted(rows, key=lambda r: (float(r["confirm_ts"]), str(r["sig_id"])))
+    timestamps = sorted({float(r["confirm_ts"]) for r in ordered})
+    if len(timestamps) < 5:
+        raise ValueError("insufficient independent timestamp groups")
+    n = len(timestamps)
+    a = max(1, int(n * train_fraction))
+    b = max(a+1, int(n * (train_fraction+validation_fraction)))
+    if b >= n:
+        raise ValueError("no test timestamps")
+    t1, t2 = timestamps[a], timestamps[b]
+    result = {"train": [], "validation": [], "test": []}
+    for r in ordered:
+        part = "train" if float(r["confirm_ts"]) < t1 else (
+            "validation" if float(r["confirm_ts"]) < t2 else "test")
+        result[part].append(dict(r))
+    return result
+
+
+def purged_chronological_split(rows: Sequence[Mapping[str, Any]], *,
+                               embargo_seconds: float = 900,
+                               train_fraction: float = 0.6,
+                               validation_fraction: float = 0.2) -> dict[str, list[dict]]:
+    """Avoid train/validation/test contamination from overlapping trade lifetimes.
+
+    A labeled training example is admitted only if its outcome was observed
+    strictly before the next split starts minus embargo. Same for validation.
+    Rows without outcome timestamps cannot enter scored training partitions.
+    """
+    if not isfinite(embargo_seconds) or embargo_seconds < 0:
+        raise ValueError("invalid embargo")
+    partitions = chronological_split(rows, train_fraction=train_fraction,
+                                     validation_fraction=validation_fraction)
+    validation_start = min(float(r["confirm_ts"]) for r in partitions["validation"])
+    test_start = min(float(r["confirm_ts"]) for r in partitions["test"])
+    for name, boundary in (("train", validation_start), ("validation", test_start)):
+        partitions[name] = [
+            r for r in partitions[name]
+            if r.get("label") is not None
+            and r.get("label_observed_at") is not None
+            and float(r["label_observed_at"]) < boundary - embargo_seconds
+        ]
+    partitions["test"] = [r for r in partitions["test"] if r.get("label") is not None
+                          and r.get("label_observed_at") is not None]
+    return partitions

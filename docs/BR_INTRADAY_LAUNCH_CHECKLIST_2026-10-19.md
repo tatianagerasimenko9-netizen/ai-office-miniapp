@@ -1,0 +1,41 @@
+# B&R-only intraday launch checklist — 2026-10-19
+
+## Scope / safety
+- **ONLY** B&R LIVE and its isolated research, data, signal cards, manual-trade tracking.
+- Do not change Office2 READY, its detector, gates, notifications, risk, or existing main signal flow.
+- No automatic order placement. User makes the trade decision and confirms “Я відкрила угоду”.
+- All new rules are hypotheses until tested. Do not attribute invented thresholds to a blogger, Gerchik, ICT, Wyckoff, or Smart Money.
+- Do not merge into main or enable production filters without CI, independent historical replay, out-of-sample evidence, and a rollback path.
+- Do not optimize for TP3 count > SL by shifting TP. Optimize validated net expectancy after costs and risk.
+
+## Execution checklist (mark [x] only with commit, tests, and evidence)
+- [x] 01. Inventory current B&R implementation and explicitly separate its hypotheses from verified source methodology. Evidence: office_br/detect.py HYP; office_br/live.py; 2026-10-19 review.
+- [x] 02. Preserve isolated B&R LIVE namespace and observational/manual-only operation. Evidence: office_br/live.py; separate br_test_signal tables.
+- [x] 03. Read-only production outcome audit (365 TP3/SL terminal: TP3=78, SL=287 at latest inspection; 7 AMBIGUOUS, 3 SENT, 1 TIMEOUT). Evidence: Render PostgreSQL read-only query, 2026-10-19 (376 signals total).
+- [x] 04. Add causal breakout strength, close location, volume ratio, retest depth and risk metrics in SHADOW_ONLY. Evidence: office_br/structure_metrics.py and scripts/test_br_structure_metrics.py. **CI of latest revision still pending; this item is code-complete only.**
+- [x] 05. Implement independent historical M1 replay and event ledger comparator (code-complete, not yet validated against entire production cohort). Evidence: office_br/m1_replay.py, ledger_m1_compare.py, binance_m1_history.py, m1_batch_replay.py, m1_export.py, m1_run_production.py.
+- [x] 06. Run current-commit CI and new-module tests; fix all failures. Evidence: commit fbf89a8 GitHub Actions B&R live observational safety run 39248433742 SUCCESS and PR68 offline safety tests run 39248433488 SUCCESS (2026-10-19). Future commits require fresh CI.
+- [ ] 07. Complete historical M1 Futures replay for entire terminal B&R cohort; report mismatches, ambiguous bars, missing candles, Binance errors.
+- [ ] 08. Define session clock with DST: Asia, London, New York, session premarket, session high/low and previous-day/week high/low. **PARTIAL CODE**: office_br/session_shadow.py has DST-aware Tokyo/London/New York local clocks and closed-M15 same-day high/low; tests added. Added UTC previous-day/week high/low in office_br/reference_levels_shadow.py with completeness flags. Still missing premarket, session-calendar decisions, live integration, full CI. Session windows are explicit operational assumptions, not source-verified author rules.
+- [ ] 09. Causal HTF-to-LTF context: MN/W1/D1/H4/H1 -> M15/M5/M1. Closed-candle-only pivots, trend/range, PDH/PDL, HTF liquidity and obstacle distance. **PARTIAL CODE**: office_br/htf_shadow.py classify_extended uses explicit calendar close_ts for MN/W1; office_br/htf_liquidity_shadow.py provides causally confirmed swing highs/lows with tests. Added office_br/htf_obstacle_shadow.py to calculate nearest opposing confirmed HTF liquidity distance, rejecting incomplete context; tests added. Still missing verified continuous HTF feed, integration into candidate decisions, full replay and latest CI.
+- [ ] 10. Implement separate measurable BOS, CHOCH, liquidity sweep, displacement, FVG, order block, breaker; no future-candle leakage, each has source/time/strength metadata. **PARTIAL CODE**: office_br/structure_events_shadow.py has causal pivot structure-break, sweep and three-candle FVG research events with tests. Added office_br/displacement_shadow.py with pre-event ATR and close-location displacement candidates (explicitly hypothesis thresholds). Added office_br/bos_choch_shadow.py causal confirmed-pivot BOS/CHOCH research classifier (initial break UNCLASSIFIED); validation pending. Added office_br/ob_shadow.py as an unvalidated opposite-candle order-block CANDIDATE after displacement+structure break. Mitigation, breaker, HTF context, full CI and replay are NOT done.
+- [ ] 11. Define and validate Gerchik-style mirror support/resistance, breakout/retest quality, rejection/false breakout and Wyckoff spring/upthrust as **separate** setups; do not claim author equivalence without source.
+- [ ] 12. Define B&R intraday candidate pipeline: session context -> HTF map -> M15/M5 setup -> M1/M5 closed-candle trigger -> structural invalidation SL; dedup/TTL/cancellation.
+- [ ] 13. TP1/TP2/TP3 from real opposing liquidity/structure only, no forced R or percentage target; evaluate 3–7% move opportunities as *observed outcomes*, not fabricated goals. Reject setups without adequate net reward/risk.
+- [ ] 14. Cost model: maker/taker fees, spread, slippage, funding where applicable, position size, leverage, and realized net R; distinguish underlying price % from leveraged ROI.
+- [ ] 15. Manual position tracking: “Я відкрила угоду”, partials, BE only on validated condition, structure trailing, session continuation/invalidations, no auto-orders.
+- [ ] 16. Walk-forward chronological OOS + session/regime stratification + conservative M1 intrabar ambiguity and robustness/uncertainty; no leakage or cherry-picking.
+- [ ] 17. B&R-only Telegram and Mini App cards with entry zone, SL, liquidity targets, session, setup rationale, candle confirmation, TTL, invalidation, source and risk. **PARTIAL CODE**: office_br/plain_card.py, telegram_caption.py, telegram_geometry.py, telegram_photo_post.py and tests provide Ukrainian photo caption + «📊 Сценарій» Mini App button, fail-closed verified/risk checks. NOT yet connected to live Telegram sendPhoto, chart rendering, scenario URL, Mini App position confirmation or production. Latest CI pending.
+- [ ] 18. Shadow run and compare baseline vs candidate after costs; require credible evidence of positive expectancy before enabling live recommendation gates.
+- [ ] 19. Isolated B&R release: PR review, full CI, migration/compatibility, feature flags default off, backup, deploy smoke, rollback, explicit proof that Office2 signals unchanged.
+- [ ] 20. Production verification: live B&R data freshness, cards, event timestamps, manual confirmation and alerts; publish evidence-backed final checklist.
+
+## Operational note
+The existing B&R LIVE observational stream is NOT equivalent to validated profitable active trading. Production activation is contingent on #06–20. This checklist is the source of truth; no unsupported green checkmarks.
+
+## 19.10.2026 — додатковий фактичний контроль (без зміни статусу пунктів)
+- B&R LIVE production DB: 376 total; SL 287, TP3 78, AMBIGUOUS 7, SENT 3, TIMEOUT 1. Web і Worker Render підписані на main, autoDeploy=yes; це НЕ доказ поточної версії deploy або повної готовності.
+- 365 terminal ENTRY-phase cohort, NY DST/calendar-aware: premarket weekday 52 (48 SL, 4 TP3); regular weekday 87 (57 SL, 30 TP3); afterhours weekday 8 (8 SL, 0 TP3); weekday overnight 49 (44 SL, 5 TP3); weekend 169 (130 SL, 39 TP3).
+- Research evidence: docs/BR_FULL_DATE_WEEKDAY_HOUR_SYMBOL_AUDIT_2026-10-19.md, docs/BR_US_PREMARKET_VS_REGULAR_ENTRY_EXIT_2026-10-19.md, docs/BR_SESSION_STOP_COUNTERFACTUAL_AUDIT_2026-10-19.md. Описова статистика не є перевіреним прибутковим production gate.
+- Latest research commit b851aba GitHub workflow runs 39282598284 and 39282598294 were QUEUED at inspection; no pass claim. Items #07–#20 remain open until their own code/test/deploy evidence exists.
+- Release criterion unchanged: no automatic trading, no merging unverified filters; Office2 untouched. Production go/no-go requires evidence, not deadline alone.
