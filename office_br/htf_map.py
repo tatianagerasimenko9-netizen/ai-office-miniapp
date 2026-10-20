@@ -51,7 +51,7 @@ def scenario(market_map, entry):
     if direction not in ("LONG", "SHORT"):
         return {"scenario": "NEUTRAL", "reason": "UNKNOWN_OR_MIXED_HTF", "obstacle": None}
     result = obstacle(float(entry), direction, market_map["liquidity"])
-    if result["status"] != "OK":
+    if result["status"] != "FOUND":
         return {"scenario": "NEUTRAL", "reason": result["status"], "obstacle": result}
     return {"scenario": direction, "reason": "HTF_ALIGNMENT_RESEARCH_ONLY",
             "obstacle": result}
