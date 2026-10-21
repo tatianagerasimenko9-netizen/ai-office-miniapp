@@ -22,6 +22,9 @@ def main():
         OB.init_office_db(db)
         a = store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5000.0)
         assert a and store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5001.0) is None        # ідемпотентно
+        # Same breakout + identical trade plan, but a different detected level:
+        # do not send two Telegram READY cards for the same exposure.
+        assert store.record_signal(db, "ETHUSDT", dict(_sig(), level=100.5), D.HYP, now=5001.5) is None
         s2 = dict(_sig(), break_ts=2000.0)
         b = store.record_signal(db, "SOLUSDT", s2, D.HYP, now=5002.0)
         rs = store.rows(db)
@@ -67,6 +70,15 @@ def main():
         assert txt.startswith("B&R LIVE · B&R-1") and "Office не відкриває ордерів" in txt and "AI Office" not in txt
         assert "ВХІД  102" in txt and "SL     99" in txt and "TP3" in txt and "Скасування" in txt
         assert card.event_text(rs[0], "TP1", 105.0).startswith("B&R LIVE · B&R-1")
+        # Distinct breakout time or genuinely different risk/targets remain independent.
+        db2 = os.path.join(td, "dedup.db")
+        base = store.record_signal(db2, "ETHUSDT", _sig(), D.HYP, now=9000.0)
+        assert base
+        assert store.record_signal(db2, "ETHUSDT", dict(_sig(), level=101.0), D.HYP, now=9001.0) is None
+        assert store.record_signal(db2, "ETHUSDT", dict(_sig(), level=101.0, break_ts=2000.0), D.HYP, now=9002.0)
+        assert store.record_signal(db2, "ETHUSDT", dict(_sig(), level=102.0, sl=98.0), D.HYP, now=9003.0)
+        assert store.record_signal(db2, "ETHUSDT", dict(_sig(), level=103.0, targets=[{"p": 106.0, "src": "structure"}]), D.HYP, now=9004.0)
+        assert len(store.rows(db2)) == 4
     print("OK")
 
 
