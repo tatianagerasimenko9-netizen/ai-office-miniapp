@@ -1,0 +1,27 @@
+name: Recon vs exchange (read-only)
+
+# run-id: rc-1. Звірка супроводу Office2 з сирими 1-хв свічками Binance Futures (data.binance.vision) за знімком production у docs/office2/recon/. Нічого не пише в БД/Render/Telegram.
+on:
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/recon-vs-exchange.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy tzdata
+      - run: python -u scripts/recon_vs_exchange.py docs/office2/recon/plans_2026-10-14_20.json docs/office2/recon/milestones_2026-10-14_20.json recon.json | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recon
+          path: recon.json
