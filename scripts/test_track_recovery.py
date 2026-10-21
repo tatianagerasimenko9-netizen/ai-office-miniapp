@@ -110,6 +110,13 @@ WT._WATCH["ETHUSDT"][t0 + 60] = [2990.0, 3055.0, 2949.5, 2951.0]     # SL і ц�
 fb3 = T._ws_fallback(pp, seen_entry, _t.time())
 check("WS-запас: SL і ціль в одну хвилину → лише SL", [m["level"] for m in fb3] == ["SL"], fb3)
 
+# 5b) регресія (звірка з біржею 14–19.10): запасний WS-контур не генерує TP/SL для сценарію, що вже завершився (SL / TP3 / EXPIRED / останній TP)
+for done_lv in ("SL", "TP3", "EXPIRED"):
+    check(f"WS-запас: після {done_lv} нових подій немає", T._ws_fallback(pp, seen_entry | {(sid2, CT2, done_lv)}, _t.time()) == [])
+pp2 = dict(pp, tp3=None)
+check("WS-запас: без TP3 останній TP2 завершує сценарій", T._ws_fallback(pp2, seen_entry | {(sid2, CT2, "TP2")}, _t.time()) == [])
+check("WS-запас: TP1 ще не завершує (SL/TP2/TP3 лишаються можливими)", {m["level"] for m in T._ws_fallback(pp, seen_entry | {(sid2, CT2, "TP1")}, _t.time())} >= {"SL"})
+
 # 6) уточнення часу до хвилини для старшого плану (5m → 1m)
 plan("O2|ref|1", "SOLUSDT", "SHORT", 100.0, 102.0, (98.0, 96.0, 94.0), 10591)
 five = c5([(100, 100.2, 99.5, 99.8)] + [(99.8, 99.9, 99.0, 99.2)] * 3 + [(99.2, 99.3, 97.5, 98.5)] + [(98.5, 98.6, 98.2, 98.3)] * 3)

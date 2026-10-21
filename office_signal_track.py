@@ -435,6 +435,9 @@ def _ws_fallback(p: Dict[str, Any], seen: set, now: float) -> List[Dict[str, Any
     sid, ct = p.get("scenario_id"), p.get("confirmed_ts")
     if (sid, ct, "ENTRY") not in seen:
         return []
+    done = {lv for (s_, c_, lv) in seen if s_ == sid and c_ == ct}
+    if "SL" in done or "TP3" in done or "EXPIRED" in done or (_f(p.get("tp3")) is None and "TP2" in done):
+        return []      # сценарій уже завершено (SL / останній TP): запасний контур не має давати нових подій (зв'язок із біржею 14–19.10: 14 подій після завершення)
     short = str(p.get("direction") or "").upper() == "SHORT"
     bars = WT.watched_bars(str(p.get("symbol") or ""), float(ct or 0))
     if not bars:

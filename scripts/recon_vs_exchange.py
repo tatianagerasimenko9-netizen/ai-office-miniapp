@@ -102,13 +102,26 @@ def main(pf, mf, outf):
                 if lv not in calc and got[0]["touched"] < data_end - 3600:
                     row["issues"].append(f"EXTRA_IN_DB {lv} db={int(got[0]['touched'])} (біржа цього рівня не підтверджує)")
             rows.append(row)
+    # інваріант без біржі: після SL / останнього TP подій бути не може (ENTRY не рахуємо)
+    post = []
+    pl = {p_[0]: p_ for p_ in plans}
+    for sid, lvs in db.items():
+        flat = sorted((x["sent"], lv, x["msg"], x["src"]) for lv, xs in lvs.items() for x in xs)
+        term = None
+        for sent, lv, msg, src in flat:
+            if term and lv != "ENTRY":
+                post.append({"sid": sid, "level": lv, "msg": msg, "src": src, "after": term})
+            if term is None and (lv in ("SL", "TP3") or (lv == "TP2" and sid in pl and pl[sid][7] is None)):
+                term = lv
     v = sorted(x["lat_max"] for x in lat)
     n = len(v)
     summ = {"plans": len(rows), "events_compared": n, "lat_max_p50": v[n // 2] if n else None, "lat_max_p90": v[int(n * .9)] if n else None, "lat_max_p95": v[int(n * .95)] if n else None, "lat_max_max": v[-1] if n else None,
             "over_120s": sum(1 for x in v if x > 120), "over_300s": sum(1 for x in v if x > 300),
-            "issues": sum(len(r.get("issues", [])) for r in rows), "plans_with_issues": sum(1 for r in rows if r.get("issues"))}
-    Path(outf).write_text(json.dumps({"summary": summ, "rows": rows, "latency": lat}, ensure_ascii=False, indent=1))
+            "issues": sum(len(r.get("issues", [])) for r in rows), "plans_with_issues": sum(1 for r in rows if r.get("issues")), "post_terminal_events": len(post)}
+    Path(outf).write_text(json.dumps({"summary": summ, "rows": rows, "latency": lat, "post_terminal": post}, ensure_ascii=False, indent=1))
     print(json.dumps(summ, ensure_ascii=False, indent=1))
+    for x in post:
+        print("POST_TERMINAL", x["sid"], x["level"], "msg", x["msg"], x["src"], "після", x["after"])
     for r in rows:
         for i in r.get("issues", []):
             print(r["sid"], r["sym"], i)
