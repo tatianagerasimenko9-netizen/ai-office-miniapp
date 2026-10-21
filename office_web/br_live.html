@@ -21,7 +21,7 @@ async function drawCharts(s){
    [["BREAKOUT",s.level,"#f6bb6a"],["ENTRY",s.entry,"#c6a1ff"],["SL",s.sl,"#ff7186"],...(s.targets||[]).slice(0,3).map((t,i)=>["TP"+(i+1),t.p,"#45d4a1"])].forEach(([title,p,color])=>{if(Number.isFinite(+p))series.createPriceLine({price:+p,color,title,lineWidth:1,axisLabelVisible:true})});
    const stamps=[["Пробій",s.break_ts],["Ретест",s.retest_ts],["Підтвердження",s.confirm_ts]];const markers=stamps.filter(([,ts])=>Number.isFinite(+ts)).map(([text,ts])=>({time:Math.floor(+ts/60)*60,position:"aboveBar",color:"#f6bb6a",shape:"circle",text})).filter(m=>bars.some(b=>+b.time===m.time));if(markers.length)series.setMarkers(markers.sort((a,b)=>a.time-b.time));c.timeScale().fitContent();charts.push(c)
   }
-  $("chart_status").textContent="Binance Futures · "+$("tf").value;
+  $("chart_status").textContent="Binance Futures · "+$("tf").value+" · Пробій "+new Date(s.break_ts*1000).toLocaleString("uk-UA")+" → ретест "+new Date(s.retest_ts*1000).toLocaleString("uk-UA")+" → підтвердження "+new Date(s.confirm_ts*1000).toLocaleString("uk-UA");
  }catch(e){$("chart_status").textContent="Помилка графіка; підміни даних немає"}
 }
 function render(){const s=data.find(x=>x.sig_id===$("signal").value)||data[0];current=s;if(!s){$("symbol").textContent="Поки немає сигналів B&R";return}
