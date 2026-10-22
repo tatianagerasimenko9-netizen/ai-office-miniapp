@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.idea_matcher import same_idea
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -55,6 +56,14 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
     new = 0
     for s in hits:
         if s["confirm_i"] != len(t) - 1:
+            continue
+        # A fresh confirmation of an existing trade idea is not a new READY.
+        # Persist one idempotent confirmation for audit; no duplicate Telegram message.
+        active = store.rows(db, "WHERE symbol = ? AND status IN ('NEW', 'SENT')", (symbol,))
+        matched = next((row for row in active if same_idea(row, symbol, s, now)), None)
+        if matched:
+            store.record_confirmation(db, matched["sig_id"], s, now)
+            print(f"[br-live] CONFIRM {symbol} parent={matched['sig_id']} (silent)", flush=True)
             continue
         sid = store.record_signal(db, symbol, s, detect.HYP, now=now)
         if sid:
