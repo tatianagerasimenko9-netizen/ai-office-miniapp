@@ -12,11 +12,13 @@ def route_event(event: str, *, status: str, original_message_id: int | None,
     """
     if not changed or event in {"NEAR_DUPLICATE", "CONFIRMATION_MINOR"}:
         return "SILENT"
-    if status in TERMINAL and event not in {"CLOSED", "CORRECTION"}:
-        return "JOURNAL"
+    # Terminal transitions are themselves actionable: route their SL/TP3/
+    # INVALIDATED/AMBIGUOUS event before suppressing subsequent updates.
     if event in {"ENTRY_TOUCHED", "SL", "TP1", "TP2", "TP3", "INVALIDATED",
                  "AMBIGUOUS", "CLOSED"}:
         return "ALERT"
+    if status in TERMINAL and event not in {"CLOSED", "CORRECTION"}:
+        return "JOURNAL"
     if event == "DATA_GAP":
         return "JOURNAL"
     if event in {"CONFIRMATION_MATERIAL", "LEVELS_CHANGED", "STATUS_CHANGED"}:
