@@ -386,7 +386,10 @@ def _escalate(ra: float) -> float:
     _BAN_STREAK = _BAN_STREAK + 1 if (now - _LAST_BAN_END) < 600.0 else 0
     _LAST_BAN_END = now
     _NEED_PROBE = True
-    return min(max(ra, 5.0, 60.0 * (2 ** min(_BAN_STREAK, 6)) if _BAN_STREAK else ra), _RETRY_AFTER_CAP)
+    # Binance Retry-After is authoritative, especially for HTTP 418 IP bans.
+    # Limit only our OWN exponential backoff, never the server-specified wait.
+    own_delay = min(60.0 * (2 ** min(_BAN_STREAK, 6)), _RETRY_AFTER_CAP) if _BAN_STREAK else 5.0
+    return max(ra, 5.0, own_delay)
 
 
 def _http_get_json(url: str, params: Dict[str, Any], scope: str = "") -> JSONLike:
