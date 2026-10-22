@@ -43,6 +43,26 @@ def record_signal(db: str, symbol: str, s: Dict[str, Any], hyp: Dict[str, Any], 
     return sid
 
 
+
+def record_confirmation(db: str, parent_id: str, signal: Dict[str, Any], now: float) -> None:
+    """Keep every unique confirming candle, without creating a second trade outcome."""
+    from office_bridge import _execute
+    _execute(db, """CREATE TABLE IF NOT EXISTS br_idea_confirmation (
+        parent_id TEXT NOT NULL,
+        confirm_ts DOUBLE PRECISION NOT NULL,
+        level DOUBLE PRECISION NOT NULL,
+        entry DOUBLE PRECISION NOT NULL,
+        sl DOUBLE PRECISION NOT NULL,
+        noted_ts DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (parent_id, confirm_ts)
+    )""")
+    _execute(db, """INSERT INTO br_idea_confirmation
+        (parent_id, confirm_ts, level, entry, sl, noted_ts)
+        VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+        (parent_id, float(signal["confirm_ts"]), float(signal["level"]),
+         float(signal["entry"]), float(signal["sl"]), now))
+
+
 def record_event(db: str, sid: str, level: str, touched_ts: float, price: Optional[float], msg_id: Optional[int] = None) -> bool:
     from office_bridge import _execute, _fetchone
 
