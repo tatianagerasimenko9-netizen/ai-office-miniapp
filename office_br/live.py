@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from office_br import card, detect, store
 from office_br.idea_matcher import same_idea
+from office_br.feed_health import FeedHealth
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -245,6 +246,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    feed_health = FeedHealth(outage_cycles=3)
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
@@ -278,6 +280,20 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                     except Exception as exc:
                         scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
+                feed_event = feed_health.observe(scan_ok, len(symbols()))
+                if feed_event:
+                    if feed_event == "OUTAGE":
+                        body = (f"⚠️ B&R LIVE · ДАНІ НЕДОСТУПНІ: "
+                                f"0/{len(symbols())} пар отримали надійні M15-свічки "
+                                f"протягом 3 циклів. Нові входи не підтверджуються.")
+                    else:
+                        body = (f"✅ B&R LIVE · ПОТІК ВІДНОВЛЕНО: "
+                                f"{scan_ok}/{len(symbols())} пар отримали M15-свічки. "
+                                "Це не торговий сигнал.")
+                    try:
+                        await send(body)
+                    except Exception as exc:
+                        print(f"[br-live] health notification failed: {type(exc).__name__}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
