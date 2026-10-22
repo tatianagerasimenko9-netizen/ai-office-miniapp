@@ -1,4 +1,9 @@
 import unittest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from office_br.idea_matcher import same_idea
 
 BASE = dict(symbol="ETHUSDT", direction="SHORT", status="SENT", entry=2350., sl=2360., level=2355., created_ts=1000.)
