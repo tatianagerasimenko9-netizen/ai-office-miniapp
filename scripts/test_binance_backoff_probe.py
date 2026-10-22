@@ -31,6 +31,8 @@ try:
     M._http_get_json(URL, {"symbol": "BTCUSDT"}); check("429 → RateLimited", False)
 except M.RateLimited as e:
     check("429 → RateLimited, Retry-After 900 с не обрізано до 300", abs(M._BACKOFF_UNTIL - time.time() - 900) < 5, M._BACKOFF_UNTIL - time.time())
+# A long exchange-imposed ban must never be shortened by OFFICE_RETRY_AFTER_CAP_SEC.
+check("Binance long Retry-After wins over local cap", M._escalate(22435.0) >= 22435.0)
 n = len(calls)
 try: M._http_get_json(URL, {})
 except M.RateLimited: pass
