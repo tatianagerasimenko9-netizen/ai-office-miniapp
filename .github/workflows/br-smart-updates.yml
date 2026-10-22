@@ -4,10 +4,12 @@ on:
     paths:
       - 'office_br/idea_matcher.py'
       - 'office_br/universe.py'
+      - 'office_br/notification_policy.py'
       - 'office_br/live.py'
       - 'office_br/store.py'
       - 'scripts/test_br_smart_updates.py'
       - 'scripts/test_br_universe.py'
+      - 'scripts/test_br_notification_policy.py'
   workflow_dispatch: {}
 jobs:
   unit:
@@ -19,3 +21,4 @@ jobs:
           python-version: '3.11'
       - run: python -m unittest discover -s scripts -p 'test_br_smart_updates.py'
       - run: python -m unittest discover -s scripts -p 'test_br_universe.py'
+      - run: python -m unittest discover -s scripts -p 'test_br_notification_policy.py'
