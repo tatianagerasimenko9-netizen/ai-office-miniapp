@@ -1,0 +1,21 @@
+name: B&R smart updates isolated tests
+on:
+  pull_request:
+    paths:
+      - 'office_br/idea_matcher.py'
+      - 'office_br/universe.py'
+      - 'office_br/live.py'
+      - 'office_br/store.py'
+      - 'scripts/test_br_smart_updates.py'
+      - 'scripts/test_br_universe.py'
+  workflow_dispatch: {}
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s scripts -p 'test_br_smart_updates.py'
+      - run: python -m unittest discover -s scripts -p 'test_br_universe.py'
