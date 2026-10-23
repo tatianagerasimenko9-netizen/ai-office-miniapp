@@ -15,6 +15,7 @@ from typing import Any, Callable
 from office_br import card, detect, store
 from office_br.idea_matcher import same_idea
 from office_br.feed_health import FeedHealth
+from office_br.scheduler import Scheduler
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -247,13 +248,23 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     store.init(db)
     seen: dict[str, float] = {}
     feed_health = FeedHealth(outage_cycles=3)
+    dynamic = Scheduler()
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
-                for sym in symbols():
+                dynamic_on = os.getenv("BR_LIVE_DYNAMIC_UNIVERSE", "0").lower() in ("1", "true", "yes")
+                batch = symbols()
+                if dynamic_on:
+                    from office_market_data import _http_get_json, hard_backoff_left
+                    batch = await asyncio.to_thread(
+                        dynamic.batch,
+                        lambda: _http_get_json("https://fapi.binance.com/fapi/v1/exchangeInfo", {}),
+                        hard_backoff=hard_backoff_left(),
+                    )
+                for sym in batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
                         if not isinstance(bars, list) or len(bars) < 100:
@@ -280,11 +291,11 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                     except Exception as exc:
                         scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
-                feed_event = feed_health.observe(scan_ok, len(symbols()))
+                feed_event = feed_health.observe(scan_ok, len(batch))
                 if feed_event:
                     if feed_event == "OUTAGE":
                         body = (f"⚠️ B&R LIVE · ДАНІ НЕДОСТУПНІ: "
-                                f"0/{len(symbols())} пар отримали надійні M15-свічки "
+                                f"0/{len(batch)} пар отримали надійні M15-свічки "
                                 f"протягом 3 циклів. Нові входи не підтверджуються.")
                     elif feed_event == "DEGRADED":
                         body = (f"⚠️ B&R LIVE · ЧАСТКОВИЙ ЗБІЙ ДАНИХ: "
@@ -303,7 +314,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
