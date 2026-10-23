@@ -236,13 +236,23 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    data_alert_sent = False
+    consecutive_partial = 0
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
-                for sym in symbols():
+                from office_market_data import hard_backoff_left
+                hard_ban = hard_backoff_left()
+                # During an exchange IP ban, don't fan out historical REST
+                # requests every minute. Delivery/tracking still run safely
+                # (tracking keeps its own fail-closed data-gap protection).
+                scan_batch = symbols() if hard_ban <= 0 else ()
+                if hard_ban > 0:
+                    print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
+                for sym in scan_batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
                         if not isinstance(bars, list) or len(bars) < 100:
@@ -269,6 +279,34 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                     except Exception as exc:
                         scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
+                # One operational alert per sustained coverage degradation,
+                # not a new trading signal, and one recovery notice.
+                if hard_ban > 0 or (scan_ok < len(symbols())):
+                    consecutive_partial += 1
+                else:
+                    consecutive_partial = 0
+                if consecutive_partial >= 3 and not data_alert_sent:
+                    try:
+                        alert_id = await send(
+                            f"⚠️ B&R LIVE · СКАНУВАННЯ ОБМЕЖЕНО: "
+                            f"{scan_ok}/{len(symbols())} пар; "
+                            f"Binance backoff {hard_ban:.0f} с. "
+                            "Непідтверджені входи не надсилаються."
+                        )
+                        if alert_id:
+                            data_alert_sent = True
+                    except Exception as exc:
+                        print(f"[br-live] feed alert error: {type(exc).__name__}", flush=True)
+                if data_alert_sent and consecutive_partial == 0:
+                    try:
+                        recovered_id = await send(
+                            f"✅ B&R LIVE · М15 ВІДНОВЛЕНО: "
+                            f"{scan_ok}/{len(symbols())}. Це не сигнал для входу."
+                        )
+                        if recovered_id:
+                            data_alert_sent = False
+                    except Exception as exc:
+                        print(f"[br-live] recovery alert error: {type(exc).__name__}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
