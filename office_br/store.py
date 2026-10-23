@@ -38,20 +38,38 @@ def record_signal(db: str, symbol: str, s: Dict[str, Any], hyp: Dict[str, Any], 
         return None
     nxt = _fetchone(db, "SELECT COALESCE(MAX(seq), 0) + 1 FROM br_test_signal")
     seq = int(nxt[0]) if nxt else 1
-    _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, seq, symbol, s["direction"], s["level"], s["break_ts"], s["retest_ts"], s["confirm_ts"], s["entry"], s["sl"], json.dumps(s["targets"]), json.dumps(hyp, default=str), now or time.time(), "NEW"))
-    return sid
+    return str(inserted[0]) if inserted else None
+
+
+
+def record_confirmation(db: str, parent_id: str, signal: Dict[str, Any], now: float) -> None:
+    """Keep every unique confirming candle, without creating a second trade outcome."""
+    from office_bridge import _execute
+    _execute(db, """CREATE TABLE IF NOT EXISTS br_idea_confirmation (
+        parent_id TEXT NOT NULL,
+        confirm_ts DOUBLE PRECISION NOT NULL,
+        level DOUBLE PRECISION NOT NULL,
+        entry DOUBLE PRECISION NOT NULL,
+        sl DOUBLE PRECISION NOT NULL,
+        noted_ts DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (parent_id, confirm_ts)
+    )""")
+    _execute(db, """INSERT INTO br_idea_confirmation
+        (parent_id, confirm_ts, level, entry, sl, noted_ts)
+        VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+        (parent_id, float(signal["confirm_ts"]), float(signal["level"]),
+         float(signal["entry"]), float(signal["sl"]), now))
 
 
 def record_event(db: str, sid: str, level: str, touched_ts: float, price: Optional[float], msg_id: Optional[int] = None) -> bool:
     from office_bridge import _execute, _fetchone
 
     init(db)
-    if _fetchone(db, "SELECT 1 FROM br_test_event WHERE sig_id = ? AND level = ?", (sid, level)):
-        return False
-    _execute(db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, level, touched_ts, price, time.time(), msg_id, time.time() if msg_id else None))
-    return True
+    return bool(inserted)
 
 
 def rows(db: str, where: str = "", args: tuple = ()) -> List[Dict[str, Any]]:
@@ -81,9 +99,9 @@ def record_manual_action(db: str, sid: str, action: str) -> bool:
     init_manual_actions(db)
     if not _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)):
         return False
-    _execute(db, "INSERT INTO br_manual_action(sig_id, action, noted_ts) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_manual_action(sig_id, action, noted_ts) VALUES (?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, action, time.time()))
-    return True
+    return bool(inserted)
 
 
 def manual_actions(db: str, sid: str) -> List[str]:

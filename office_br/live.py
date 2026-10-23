@@ -13,6 +13,9 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.idea_matcher import same_idea
+from office_br.feed_health import FeedHealth
+from office_br.scheduler import Scheduler
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -55,6 +58,14 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
     new = 0
     for s in hits:
         if s["confirm_i"] != len(t) - 1:
+            continue
+        # A fresh confirmation of an existing trade idea is not a new READY.
+        # Persist one idempotent confirmation for audit; no duplicate Telegram message.
+        active = store.rows(db, "WHERE symbol = ? AND status IN ('NEW', 'SENT')", (symbol,))
+        matched = next((row for row in active if same_idea(row, symbol, s, now)), None)
+        if matched:
+            store.record_confirmation(db, matched["sig_id"], s, now)
+            print(f"[br-live] CONFIRM {symbol} parent={matched['sig_id']} (silent)", flush=True)
             continue
         sid = store.record_signal(db, symbol, s, detect.HYP, now=now)
         if sid:
@@ -236,13 +247,24 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    feed_health = FeedHealth(outage_cycles=3)
+    dynamic = Scheduler()
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
-                for sym in symbols():
+                dynamic_on = os.getenv("BR_LIVE_DYNAMIC_UNIVERSE", "0").lower() in ("1", "true", "yes")
+                batch = symbols()
+                if dynamic_on:
+                    from office_market_data import _http_get_json, hard_backoff_left
+                    batch = await asyncio.to_thread(
+                        dynamic.batch,
+                        lambda: _http_get_json("https://fapi.binance.com/fapi/v1/exchangeInfo", {}),
+                        hard_backoff=hard_backoff_left(),
+                    )
+                for sym in batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
                         if not isinstance(bars, list) or len(bars) < 100:
@@ -269,12 +291,30 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                     except Exception as exc:
                         scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
+                feed_event = feed_health.observe(scan_ok, len(batch))
+                if feed_event:
+                    if feed_event == "OUTAGE":
+                        body = (f"⚠️ B&R LIVE · ДАНІ НЕДОСТУПНІ: "
+                                f"0/{len(batch)} пар отримали надійні M15-свічки "
+                                f"протягом 3 циклів. Нові входи не підтверджуються.")
+                    elif feed_event == "DEGRADED":
+                        body = (f"⚠️ B&R LIVE · ЧАСТКОВИЙ ЗБІЙ ДАНИХ: "
+                                f"лише {scan_ok}/{len(symbols())} пар мають надійні M15-свічки "
+                                f"щонайменше 3 цикли. Неперевірені пари не генерують сигналів.")
+                    else:
+                        body = (f"✅ B&R LIVE · ПОТІК ВІДНОВЛЕНО: "
+                                f"{scan_ok}/{len(symbols())} пар отримали M15-свічки. "
+                                "Це не торговий сигнал.")
+                    try:
+                        await send(body)
+                    except Exception as exc:
+                        print(f"[br-live] health notification failed: {type(exc).__name__}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
