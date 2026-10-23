@@ -1,0 +1,19 @@
+name: B&R feed recovery isolated
+on:
+  pull_request:
+    paths:
+      - 'office_br/live.py'
+      - '.github/workflows/br-feed-recovery.yml'
+  workflow_dispatch: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q office_br/live.py
+      - run: python scripts/test_br_live.py
+      - run: python scripts/test_br_m15_cadence_fix.py
