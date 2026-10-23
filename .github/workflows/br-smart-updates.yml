@@ -7,6 +7,7 @@ on:
       - 'office_br/universe.py'
       - 'office_br/notification_policy.py'
       - 'office_br/feed_health.py'
+      - 'office_br/telegram_edit.py'
       - 'office_br/live.py'
       - 'office_br/store.py'
       - 'scripts/test_br_smart_updates.py'
@@ -14,6 +15,7 @@ on:
       - 'scripts/test_br_notification_policy.py'
       - 'scripts/test_br_feed_health.py'
       - 'scripts/test_br_signal_atomic.py'
+      - 'scripts/test_br_telegram_edit.py'
   workflow_dispatch: {}
 jobs:
   unit:
@@ -30,3 +32,4 @@ jobs:
       - run: python -m unittest discover -s scripts -p 'test_br_notification_policy.py'
       - run: python -m unittest discover -s scripts -p 'test_br_feed_health.py'
       - run: python -m unittest discover -s scripts -p 'test_br_signal_atomic.py'
+      - run: python -m unittest discover -s scripts -p 'test_br_telegram_edit.py'
