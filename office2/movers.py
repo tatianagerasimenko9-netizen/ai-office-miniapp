@@ -5,9 +5,7 @@ discovery input, NOT a trade direction or an entry trigger.
 """
 from __future__ import annotations
 
-import json
 import math
-from urllib.request import Request, urlopen
 
 BASE = "https://fapi.binance.com"
 MIN_QUOTE_VOLUME = 10_000_000.0
@@ -58,9 +56,15 @@ def rank_movers(exchange_info, tickers, *, limit=8, min_quote_volume=MIN_QUOTE_V
 
 
 def _get(path, timeout=8):
-    req = Request(BASE + path, headers={"User-Agent": "AI-Office-movers-shadow/1.0"})
-    with urlopen(req, timeout=timeout) as response:
-        return json.load(response)
+    """Share Binance 418/429 backoff, probe lock and weight accounting with the Worker.
+
+    Do not use a separate urllib opener here: it bypasses the global IP-ban
+    guard and can keep sending 24hr/exchangeInfo/bookTicker requests while
+    the rest of Office is correctly paused. The shared client owns timeout.
+    """
+    from office_market_data import _http_get_json
+
+    return _http_get_json(BASE + path, {}, scope="movers")
 
 
 def fetch_movers(*, limit=8, min_quote_volume=MIN_QUOTE_VOLUME, timeout=8):
