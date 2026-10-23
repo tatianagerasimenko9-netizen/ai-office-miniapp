@@ -439,7 +439,9 @@ def _http_get_json_inner(url: str, params: Dict[str, Any], scope: str = "") -> J
             if "fapi.binance.com" in url:
                 _note_weight(getattr(resp, "headers", None))
     except HTTPError as exc:
-        if exc.code in (418, 429) and scope == "depth":
+        # HTTP 418 is an IP-wide ban even when the triggering call was order-book
+        # depth. Only 429 may be scoped to the optional depth subsystem.
+        if exc.code == 429 and scope == "depth":
             try:
                 ra_d = float(exc.headers.get("Retry-After") or 60)
             except (TypeError, ValueError):
