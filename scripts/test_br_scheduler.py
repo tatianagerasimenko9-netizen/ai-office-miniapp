@@ -16,6 +16,15 @@ class Tests(unittest.TestCase):
             self.assertTrue({"XAUUSDT","CLUSDT","BZUSDT","NATGASUSDT"}.issubset(visited))
             self.assertTrue(all(len(b)<=12 for b in batches))
         finally: os.environ.pop("BR_LIVE_DYNAMIC_BATCH",None)
+    def test_automatic_batch_covers_more_than_100_in_time(self):
+        os.environ.pop("BR_LIVE_DYNAMIC_BATCH",None)
+        s=Scheduler()
+        batches=[s.batch(market,now=2000+i*60) for i in range(15)]
+        universe={v for b in batches for v in b}
+        self.assertGreaterEqual(len(universe),150)
+        self.assertTrue(any("XAUUSDT" in b for b in batches))
+        self.assertTrue(any("CLUSDT" in b for b in batches))
+        self.assertTrue(all(len(b)<=64 for b in batches))
     def test_ban_means_no_binance_access(self):
         s=Scheduler()
         self.assertEqual(s.batch(lambda: self.fail("must not fetch"), hard_backoff=123),())
