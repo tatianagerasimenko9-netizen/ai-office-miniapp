@@ -23,7 +23,8 @@ def eligible_symbols(exchange_info: dict) -> tuple[str, ...]:
     return tuple(sorted(result))
 
 # Curated priority is a *subset*, not a fixed market universe.
-PRIORITY = ("BTCUSDT", "ETHUSDT", "XAUUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT")
+PRIORITY = ("BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT",
+            "COPPERUSDT", "XPTUSDT", "XPDUSDT")
 
 def rotate(universe: tuple[str, ...], cursor: int, size: int,
            priority: tuple[str, ...] = PRIORITY) -> tuple[tuple[str, ...], int]:
@@ -37,7 +38,8 @@ def rotate(universe: tuple[str, ...], cursor: int, size: int,
     if not items:
         return (), 0
     # Reserve at least half the budget for discovery/rotation even for tiny batches.
-    pin_budget = min(len(priority), max(1, size // 2)) if size > 1 else 0
+    # Reserve most batch slots for market-wide rotation; TradFi priority rotates.
+    pin_budget = min(len(priority), max(1, min(4, size // 5))) if size > 1 else 0
     available_priority = tuple(p for p in priority if p in items)
     pinned = tuple(available_priority[(cursor + i) % len(available_priority)] for i in range(pin_budget)) if available_priority else ()
     remaining = tuple(x for x in items if x not in pinned)
