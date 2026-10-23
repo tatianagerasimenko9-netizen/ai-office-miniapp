@@ -38,7 +38,8 @@ def rotate(universe: tuple[str, ...], cursor: int, size: int,
         return (), 0
     # Reserve at least half the budget for discovery/rotation even for tiny batches.
     pin_budget = min(len(priority), max(1, size // 2)) if size > 1 else 0
-    pinned = tuple(p for p in priority if p in items)[:pin_budget]
+    available_priority = tuple(p for p in priority if p in items)
+    pinned = tuple(available_priority[(cursor + i) % len(available_priority)] for i in range(pin_budget)) if available_priority else ()
     remaining = tuple(x for x in items if x not in pinned)
     slots = size - len(pinned)
     if not remaining or slots <= 0:
