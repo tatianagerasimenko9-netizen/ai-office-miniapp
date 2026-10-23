@@ -1,0 +1,22 @@
+name: B&R Futures bounded rotation
+on:
+  pull_request:
+    paths:
+      - 'office_br/live.py'
+      - 'office_br/universe.py'
+      - 'office_br/scheduler.py'
+      - 'scripts/test_br_scheduler.py'
+      - 'scripts/test_br_universe.py'
+      - '.github/workflows/br-futures-rotation.yml'
+  workflow_dispatch: {}
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s scripts -p 'test_br_universe.py'
+      - run: python -m unittest discover -s scripts -p 'test_br_scheduler.py'
+      - run: python -m compileall -q office_br/live.py office_br/universe.py office_br/scheduler.py
