@@ -67,11 +67,9 @@ def record_event(db: str, sid: str, level: str, touched_ts: float, price: Option
     from office_bridge import _execute, _fetchone
 
     init(db)
-    if _fetchone(db, "SELECT 1 FROM br_test_event WHERE sig_id = ? AND level = ?", (sid, level)):
-        return False
-    _execute(db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, level, touched_ts, price, time.time(), msg_id, time.time() if msg_id else None))
-    return True
+    return bool(inserted)
 
 
 def rows(db: str, where: str = "", args: tuple = ()) -> List[Dict[str, Any]]:
@@ -101,9 +99,9 @@ def record_manual_action(db: str, sid: str, action: str) -> bool:
     init_manual_actions(db)
     if not _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)):
         return False
-    _execute(db, "INSERT INTO br_manual_action(sig_id, action, noted_ts) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_manual_action(sig_id, action, noted_ts) VALUES (?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, action, time.time()))
-    return True
+    return bool(inserted)
 
 
 def manual_actions(db: str, sid: str) -> List[str]:
