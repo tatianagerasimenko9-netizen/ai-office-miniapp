@@ -21,8 +21,8 @@ def fake(req, timeout=0):
     calls.append(req.full_url)
     if mode["gate"] is not None:
         mode["gate"].wait(3)
-    if mode["v"] == "429":
-        raise HTTPError(req.full_url, 429, "Too Many", {"Retry-After": mode["ra"]}, io.BytesIO(b'{"code":-1003,"msg":"IP(1.2.3.4) banned until 1"}'))
+    if mode["v"] in ("429", "418"):
+        raise HTTPError(req.full_url, int(mode["v"]), "Too Many", {"Retry-After": mode["ra"]}, io.BytesIO(b'{"code":-1003,"msg":"IP(1.2.3.4) banned until 1"}'))
     return Resp()
 M.urlopen = fake
 M._pace_fapi = lambda *a, **k: None
@@ -61,4 +61,14 @@ try: M._http_get_json(URL, {})
 except M.RateLimited: pass
 check("серія 429: очікування зростає (≥120 с на третьому)", M._BACKOFF_UNTIL - time.time() >= 119, M._BACKOFF_UNTIL - time.time())
 check("source_health віддає egress_ip і серію", "egress_ip" in M.source_health() and "ban_streak" in M.source_health())
+# HTTP 418 from depth must pause ALL Futures REST, not just depth.
+M._BACKOFF_UNTIL = 0.0
+M._NEED_PROBE = False
+mode["v"] = "418"
+mode["ra"] = "5400"
+try:
+    M._http_get_json("https://fapi.binance.com/fapi/v1/depth", {"symbol": "BTCUSDT"}, scope="depth")
+    check("depth 418 propagates global ban", False)
+except M.RateLimited:
+    check("depth 418 propagates global ban", M._BACKOFF_UNTIL - time.time() >= 5395)
 sys.exit(1 if bad else 0)
