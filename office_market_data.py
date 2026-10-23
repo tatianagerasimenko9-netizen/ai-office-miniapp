@@ -212,7 +212,9 @@ _STARTED_AT = time.time()
 _RAMP_SEC = 180.0           # перші 3 хв після старту процесу — повільніший темп (web і worker перезапускаються одночасно з одного IP)
 _RAMP_GAP = 0.25
 _FAPI_LAST = 0.0
-_FAPI_GAP = 0.06            # ≥60 мс між запитами до fapi (~16/с): рівномірний потік замість пачки на старті
+# Conservative shared Worker pacing: throttle broad scanning before Binance's 2400 weight/min IP ceiling.
+# Must remain configurable in Render so operations can recover without a new code deploy.
+_FAPI_GAP = max(0.06, min(10.0, float(os.getenv("OFFICE_FAPI_MIN_GAP_SEC", "1.0"))))
 _WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
 _WEIGHT_HARD = 2200         # після цього пауза для всіх, включно з «життям READY»
 _WEIGHT_LAST: Dict[str, Any] = {"used": None, "at": 0.0}
@@ -222,7 +224,7 @@ _PACE_LOCK = threading.Lock()
 def _pace_fapi() -> None:
     global _FAPI_LAST
     with _PACE_LOCK:
-        gap = _RAMP_GAP if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
+        gap = max(_RAMP_GAP, _FAPI_GAP) if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
         wait = gap - (time.time() - _FAPI_LAST)
         if wait > 0:
             time.sleep(wait)
