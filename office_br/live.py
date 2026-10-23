@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.scheduler import Scheduler
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -236,13 +237,25 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    dynamic = Scheduler()
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
+        iteration_started = time.monotonic()
+        dynamic_on = False
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
-                for sym in symbols():
+                dynamic_on = os.getenv("BR_LIVE_DYNAMIC_UNIVERSE", "0").lower() in ("1", "true", "yes")
+                batch = symbols()
+                if dynamic_on:
+                    from office_market_data import _http_get_json, hard_backoff_left
+                    batch = await asyncio.to_thread(
+                        dynamic.batch,
+                        lambda: _http_get_json("https://fapi.binance.com/fapi/v1/exchangeInfo", {}),
+                        hard_backoff=hard_backoff_left(),
+                    )
+                for sym in batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
                         if not isinstance(bars, list) or len(bars) < 100:
@@ -271,10 +284,15 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
                 delivered = await deliver(db, send)
                 tracked = await track(db, fetch, send)
+                if dynamic_on:
+                    print(f"[br-live] universe={len(dynamic.universe)} batch={len(batch)} cursor={dynamic.cursor} scan_ok={scan_ok}", flush=True)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
-        await asyncio.sleep(60)
+        # Dynamic batches are paced by the Binance client itself. Avoid an extra
+        # minute of sleep after a large batch: that would lose M15 confirmations.
+        elapsed = time.monotonic() - iteration_started
+        await asyncio.sleep(max(1.0, 60.0 - elapsed) if dynamic_on else 60)
