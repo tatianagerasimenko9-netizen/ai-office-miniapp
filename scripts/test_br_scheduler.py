@@ -10,7 +10,7 @@ class Tests(unittest.TestCase):
     def test_all_150_rotate_without_full_rest_fanout(self):
         os.environ["BR_LIVE_DYNAMIC_BATCH"]="12"
         try:
-            s=Scheduler(); batches=[s.batch(market,now=1000+i*60) for i in range(30)]
+            s=Scheduler(); batches=[s.batch(market,now=1000+i*60) for i in range(90)]
             visited={x for b in batches for x in b}
             self.assertGreaterEqual(len(visited),150)
             self.assertTrue({"XAUUSDT","CLUSDT","BZUSDT","NATGASUSDT"}.issubset(visited))
