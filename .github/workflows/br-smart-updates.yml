@@ -5,6 +5,7 @@ on:
       - '.github/workflows/br-smart-updates.yml'
       - 'office_br/idea_matcher.py'
       - 'office_br/universe.py'
+      - 'office_br/scheduler.py'
       - 'office_br/notification_policy.py'
       - 'office_br/feed_health.py'
       - 'office_br/telegram_edit.py'
@@ -12,6 +13,7 @@ on:
       - 'office_br/store.py'
       - 'scripts/test_br_smart_updates.py'
       - 'scripts/test_br_universe.py'
+      - 'scripts/test_br_scheduler.py'
       - 'scripts/test_br_notification_policy.py'
       - 'scripts/test_br_feed_health.py'
       - 'scripts/test_br_signal_atomic.py'
@@ -29,6 +31,7 @@ jobs:
         run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s scripts -p 'test_br_smart_updates.py'
       - run: python -m unittest discover -s scripts -p 'test_br_universe.py'
+      - run: python -m unittest discover -s scripts -p 'test_br_scheduler.py'
       - run: python -m unittest discover -s scripts -p 'test_br_notification_policy.py'
       - run: python -m unittest discover -s scripts -p 'test_br_feed_health.py'
       - run: python -m unittest discover -s scripts -p 'test_br_signal_atomic.py'
