@@ -286,6 +286,10 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                         body = (f"⚠️ B&R LIVE · ДАНІ НЕДОСТУПНІ: "
                                 f"0/{len(symbols())} пар отримали надійні M15-свічки "
                                 f"протягом 3 циклів. Нові входи не підтверджуються.")
+                    elif feed_event == "DEGRADED":
+                        body = (f"⚠️ B&R LIVE · ЧАСТКОВИЙ ЗБІЙ ДАНИХ: "
+                                f"лише {scan_ok}/{len(symbols())} пар мають надійні M15-свічки "
+                                f"щонайменше 3 цикли. Неперевірені пари не генерують сигналів.")
                     else:
                         body = (f"✅ B&R LIVE · ПОТІК ВІДНОВЛЕНО: "
                                 f"{scan_ok}/{len(symbols())} пар отримали M15-свічки. "
