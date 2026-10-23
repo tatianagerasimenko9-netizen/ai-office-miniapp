@@ -38,9 +38,9 @@ def record_signal(db: str, symbol: str, s: Dict[str, Any], hyp: Dict[str, Any], 
         return None
     nxt = _fetchone(db, "SELECT COALESCE(MAX(seq), 0) + 1 FROM br_test_signal")
     seq = int(nxt[0]) if nxt else 1
-    _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+    inserted = _fetchone(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING sig_id",
              (sid, seq, symbol, s["direction"], s["level"], s["break_ts"], s["retest_ts"], s["confirm_ts"], s["entry"], s["sl"], json.dumps(s["targets"]), json.dumps(hyp, default=str), now or time.time(), "NEW"))
-    return sid
+    return str(inserted[0]) if inserted else None
 
 
 
