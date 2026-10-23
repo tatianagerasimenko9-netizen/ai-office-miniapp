@@ -215,8 +215,10 @@ _FAPI_LAST = 0.0
 # Conservative shared Worker pacing: throttle broad scanning before Binance's 2400 weight/min IP ceiling.
 # Must remain configurable in Render so operations can recover without a new code deploy.
 _FAPI_GAP = max(0.06, min(10.0, float(os.getenv("OFFICE_FAPI_MIN_GAP_SEC", "1.0"))))
-_WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
-_WEIGHT_HARD = 2200         # після цього пауза для всіх, включно з «життям READY»
+# These limits leave generous capacity for other Office processes sharing the same Binance egress IP.
+# The exchange reports global IP weight; do not wait until the actual 2400/min ceiling.
+_WEIGHT_SOFT = max(200, min(1400, int(os.getenv("OFFICE_FAPI_WEIGHT_SOFT", "1000"))))
+_WEIGHT_HARD = max(_WEIGHT_SOFT + 100, min(2000, int(os.getenv("OFFICE_FAPI_WEIGHT_HARD", "1400"))))
 _WEIGHT_LAST: Dict[str, Any] = {"used": None, "at": 0.0}
 _PACE_LOCK = threading.Lock()
 
