@@ -2,6 +2,7 @@ name: B&R smart updates isolated tests
 on:
   pull_request:
     paths:
+      - '.github/workflows/br-smart-updates.yml'
       - 'office_br/idea_matcher.py'
       - 'office_br/universe.py'
       - 'office_br/notification_policy.py'
@@ -22,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s scripts -p 'test_br_smart_updates.py'
       - run: python -m unittest discover -s scripts -p 'test_br_universe.py'
       - run: python -m unittest discover -s scripts -p 'test_br_notification_policy.py'
