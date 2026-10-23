@@ -241,6 +241,8 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     await asyncio.sleep(45)
     while True:
+        iteration_started = time.monotonic()
+        dynamic_on = False
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
@@ -290,4 +292,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                 print(f"[br-live] scan health ok={scan_ok}/{len(batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
-        await asyncio.sleep(60)
+        # Dynamic batches are paced by the Binance client itself. Avoid an extra
+        # minute of sleep after a large batch: that would lose M15 confirmations.
+        elapsed = time.monotonic() - iteration_started
+        await asyncio.sleep(max(1.0, 60.0 - elapsed) if dynamic_on else 60)
