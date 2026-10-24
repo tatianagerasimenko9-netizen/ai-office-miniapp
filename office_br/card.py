@@ -26,14 +26,12 @@ def build_card(row: Dict[str, Any]) -> str:
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
-    L = [f"B&R LIVE · {tag(row.get('seq'))}",
-         "Breakout & Retest · пробій → ретест → підтвердження. Сигнал для ручного рішення; Office не відкриває ордерів. Історичний replay V1/V2 збитковий.",
-         f"{'🟢' if long_ else '🔴'} {sym.replace('USDT', '')} · {d} · #{sym}",
-         "━━━━━━━━━━━━━━━━",
-         f"Рівень пробою: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} рівня підтверджено",
-         "Ретест рівня і відбій підтверджені закритою свічкою",
-         f"🟡 ВХІД  {_n(entry, sym)}",
-         f"🔴 SL     {_n(sl, sym)}  (−{pc(sl)}%) — за екстремумом ретесту"]
+    L = [
+        f"{tag(row.get('seq'))} · {sym} · {d}",
+        f"Пробій: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} підтверджено",
+        f"🟡 ВХІД {_n(entry, sym)}",
+        f"🔴 SL {_n(sl, sym)} (−{pc(sl)}%)",
+    ]
     for i, t in enumerate(tg[:3], 1):
         L.append(f"🟢 TP{i}  {_n(t['p'], sym)}  (+{pc(t['p'])}% · {rr(t['p'])}R){' · ' + t['src'] if t.get('src', '').startswith('R') else ''}")
     L.append(f"❌ Скасування: закриття {'нижче' if long_ else 'вище'} {_n(row['level'], sym)} до входу")
