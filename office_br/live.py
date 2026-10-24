@@ -93,7 +93,20 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
             _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
             continue
         try:
-            msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
+            if send_image is not None and fetch is not None:
+                import os
+                from office_br.live_image import render
+                candles = await asyncio.to_thread(fetch, row["symbol"], "15m", 240, closed_only=True)
+                png = await asyncio.to_thread(render, row, candles)
+                try:
+                    msg_id = await send_image(
+                        png, card.build_card(row), row
+                    )
+                finally:
+                    try: os.unlink(png)
+                    except OSError: pass
+            else:
+                msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
             if not msg_id:
                 print(f"[br-live] delivery pending {row['sig_id']}", flush=True)
                 continue
@@ -230,7 +243,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     return n
 
 
-async def monitor(db: str, send: Callable, fetch: Callable) -> None:
+async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable | None = None) -> None:
     """One low-frequency, isolated loop; failures never interrupt Office2."""
     from office_bridge import _execute
     _execute(db, DDL)
@@ -307,7 +320,7 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             data_alert_sent = False
                     except Exception as exc:
                         print(f"[br-live] recovery alert error: {type(exc).__name__}", flush=True)
-                delivered = await deliver(db, send)
+                delivered = await deliver(db, send, send_image=send_image, fetch=fetch)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
