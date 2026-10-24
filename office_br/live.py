@@ -83,7 +83,7 @@ def _pending(db: str) -> list[dict]:
     return store.rows(db, "WHERE status = 'NEW' AND msg_id IS NULL")
 
 
-async def deliver(db: str, send: Callable) -> int:
+async def deliver(db: str, send: Callable, send_image: Callable | None = None, fetch: Callable | None = None) -> int:
     """Send first; acknowledge DB only with real Telegram message id. Retry on failure."""
     from office_bridge import _execute
     n = 0
