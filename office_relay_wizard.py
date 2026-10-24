@@ -7740,10 +7740,18 @@ EV позитивне: {prob.get('ev_positive', '')}
             symbol=symbol, direction=direction, skip_gate=True,
         )
 
+    async def _send_br_image(path: str, caption: str, row: dict) -> Optional[int]:
+        return await send_office_photo(
+            path, caption, stream="general",
+            scenario_id=str(row["seq"]),
+            intent="BR_LIVE_EXPERIMENT", event_type=EVENT_TRADE_UPDATE,
+            symbol=row["symbol"], direction=row["direction"], skip_gate=True,
+        )
+
     async def _monitor_br_observation() -> None:
         from office_br.live import monitor as _br_monitor
         from office_market_data import fetch_candles_futures as _br_futures
-        await _br_monitor(db_path, _send_br_observation, _br_futures)
+        await _br_monitor(db_path, _send_br_observation, _br_futures, send_image=_send_br_image)
 
     asyncio.create_task(_monitor_br_observation())
 
