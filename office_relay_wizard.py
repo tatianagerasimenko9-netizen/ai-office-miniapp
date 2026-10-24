@@ -3469,6 +3469,31 @@ async def run() -> None:
     last_main_fingerprint_by_msg: Dict[int, str] = {}
     main_lev_automation_last = 0.0
 
+    @client.on(events.CallbackQuery(pattern=b"^br_open:[0-9]+$"))
+    async def on_br_manual_open(event):
+        from office_br.telegram_ui import authorized_open
+        try:
+            seq = int(event.data.decode("ascii").split(":")[1])
+            result = await asyncio.to_thread(
+                authorized_open, db_path, seq,
+                owner_id=owner_user_id,
+                actor_id=int(event.sender_id or 0),
+                chat_id=int(event.chat_id or 0),
+                expected_chat_id=int(office_chat_id),
+                message_id=int(event.message_id or 0),
+            )
+            msg = {
+                "RECORDED": "✅ Ручне відкриття угоди зафіксовано. Ордери не надсилалися.",
+                "ALREADY_RECORDED": "✅ Цю угоду вже позначено відкритою.",
+                "DENIED": "Доступ лише власниці AI Office.",
+                "WRONG_CARD": "Не знайдено відповідної картки B&R.",
+            }.get(result, "Не вдалося зберегти відкриття угоди.")
+            await event.answer(msg, alert=result not in ("RECORDED", "ALREADY_RECORDED"))
+            print(f"[br-manual] seq={seq} state={result}", flush=True)
+        except Exception as exc:
+            print(f"[br-manual] callback error: {type(exc).__name__}", flush=True)
+            await event.answer("Технічна помилка; відкриття не підтверджено.", alert=True)
+
     @client.on(events.NewMessage())
     async def on_message(event):  # type: ignore[no-redef]
         try:
