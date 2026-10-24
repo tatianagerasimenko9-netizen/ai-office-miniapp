@@ -4,6 +4,10 @@ on:
     paths:
       - 'office_br/card.py'
       - 'office_br/live_image.py'
+      - 'office_br/universe.py'
+      - 'office_br/scheduler.py'
+      - 'scripts/test_br_scheduler.py'
+      - 'scripts/test_br_universe.py'
       - 'scripts/test_br_live_image.py'
       - 'scripts/test_br_telegram_ui.py'
       - '.github/workflows/br-image-acceptance.yml'
@@ -19,4 +23,6 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python scripts/test_br_live_image.py
       - run: python scripts/test_br_telegram_ui.py
+      - run: python scripts/test_br_universe.py
+      - run: python scripts/test_br_scheduler.py
       - run: python scripts/test_br_live.py
