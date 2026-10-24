@@ -21,13 +21,14 @@ class SmartUpdatesTests(unittest.TestCase):
         self.assertFalse(same_idea(BASE,"ETHUSDT",dict(direction="SHORT",entry=2350.,sl=2360.,level=2355.),1000.+25*3600))
 
     def test_production_same_break_alternate_levels(self):
-        # Read-only fixtures from 24 Oct production: 634/635, 638/639, 641/642.
+        # Read-only fixtures from 24 Oct production: 634/635, 638/639, 641/642, 649/650.
         # Both READYs had the same symbol, direction, break, entry and SL;
         # their detector levels differed enough to evade the prior 0.35R rule.
         fixtures = (
             ("SEIUSDT", 1792826100, .05516, .055325, .05525, .05532),
             ("ONDOUSDT", 1792826100, .4082, .41147285714285714, .4116, .4113),
             ("NEARUSDT", 1792827900, 4.567, 4.586821428571429, 4.583, 4.59),
+            ("SOLUSDT", 1792832400, 101.38, 101.70964285714287, 101.63, 101.7),
         )
         for symbol, break_ts, entry, sl, first_level, second_level in fixtures:
             with self.subTest(symbol=symbol):
