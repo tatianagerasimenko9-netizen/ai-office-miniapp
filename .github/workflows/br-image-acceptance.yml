@@ -5,6 +5,7 @@ on:
       - 'office_br/card.py'
       - 'office_br/live_image.py'
       - 'scripts/test_br_live_image.py'
+      - 'scripts/test_br_telegram_ui.py'
       - '.github/workflows/br-image-acceptance.yml'
   workflow_dispatch: {}
 jobs:
@@ -17,4 +18,5 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - run: python scripts/test_br_live_image.py
+      - run: python scripts/test_br_telegram_ui.py
       - run: python scripts/test_br_live.py
