@@ -2959,7 +2959,7 @@ async def run() -> None:
                 return None
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
-        token = tg_bot_token if intent == "BR_LIVE_EXPERIMENT" else (agent_bot_tokens.get("lev") or tg_bot_token)
+        token = tg_bot_token if intent in ("BR_LIVE_EXPERIMENT", "BR_LIVE_TEST") else (agent_bot_tokens.get("lev") or tg_bot_token)
         from office_telegram_policy import mini_app_button
 
         photo_btn = mini_app_button(
@@ -2971,9 +2971,9 @@ async def run() -> None:
             from office_telegram_policy import radar_card_button
 
             photo_btn = radar_card_button(cap, os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com")) or photo_btn
-        if intent == "BR_LIVE_EXPERIMENT":
+        if intent in ("BR_LIVE_EXPERIMENT", "BR_LIVE_TEST"):
             from office_br.telegram_ui import markup
-            photo_btn = markup(int(scenario_id), os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"))
+            photo_btn = markup(int(scenario_id), os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"), test=intent == "BR_LIVE_TEST")
         if token:
             _dk = delivery_key("PHOTO|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, "" if scenario_id else cap)
 
@@ -3468,6 +3468,10 @@ async def run() -> None:
     last_desk_qa_mono = 0.0
     last_main_fingerprint_by_msg: Dict[int, str] = {}
     main_lev_automation_last = 0.0
+
+    @client.on(events.CallbackQuery(pattern=b"^br_test:[0-9]+$"))
+    async def on_br_preview_callback(event):
+        await event.answer("Тест картки: угоду не записано. Реальна кнопка працюватиме на нових B&R.", alert=True)
 
     @client.on(events.CallbackQuery(pattern=b"^br_open:[0-9]+$"))
     async def on_br_manual_open(event):
@@ -7765,6 +7769,12 @@ EV позитивне: {prob.get('ev_positive', '')}
             symbol=symbol, direction=direction, skip_gate=True,
         )
 
+    async def _send_br_preview(path: str, caption: str, row: dict) -> Optional[int]:
+        return await send_office_photo(path, caption, stream="general",
+                                       scenario_id=str(row["seq"]),
+                                       intent="BR_LIVE_TEST", event_type=EVENT_TRADE_UPDATE,
+                                       symbol=row["symbol"], direction=row["direction"], skip_gate=True)
+
     async def _send_br_image(path: str, caption: str, row: dict) -> Optional[int]:
         return await send_office_photo(
             path, caption, stream="general",
@@ -7776,6 +7786,9 @@ EV позитивне: {prob.get('ev_positive', '')}
     async def _monitor_br_observation() -> None:
         from office_br.live import monitor as _br_monitor
         from office_market_data import fetch_candles_futures as _br_futures
+        from office_br.preview import send_preview_once
+        if os.getenv("BR_CARD_TEST_ON_START", "0") == "1":
+            await send_preview_once(db_path, _br_futures, _send_br_preview)
         await _br_monitor(db_path, _send_br_observation, _br_futures, send_image=_send_br_image)
 
     asyncio.create_task(_monitor_br_observation())
