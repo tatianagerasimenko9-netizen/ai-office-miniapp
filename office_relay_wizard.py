@@ -2959,7 +2959,7 @@ async def run() -> None:
                 return None
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
-        token = agent_bot_tokens.get("lev") or tg_bot_token
+        token = tg_bot_token if intent == "BR_LIVE_EXPERIMENT" else (agent_bot_tokens.get("lev") or tg_bot_token)
         from office_telegram_policy import mini_app_button
 
         photo_btn = mini_app_button(
@@ -2971,6 +2971,9 @@ async def run() -> None:
             from office_telegram_policy import radar_card_button
 
             photo_btn = radar_card_button(cap, os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com")) or photo_btn
+        if intent == "BR_LIVE_EXPERIMENT":
+            from office_br.telegram_ui import markup
+            photo_btn = markup(int(scenario_id), os.getenv("OFFICE_MINI_PUBLIC_URL", "https://ai-office-miniapp.onrender.com"))
         if token:
             _dk = delivery_key("PHOTO|" + str(event_type or intent or ""), scenario_id or ("n" + os.urandom(6).hex()), office_chat_id, thread_id, "" if scenario_id else cap)
 
