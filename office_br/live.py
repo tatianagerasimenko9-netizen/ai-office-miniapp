@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.scheduler import Scheduler
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -249,6 +250,7 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    scheduler = Scheduler()
     data_alert_sent = False
     consecutive_partial = 0
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
@@ -263,6 +265,19 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                 # requests every minute. Delivery/tracking still run safely
                 # (tracking keeps its own fail-closed data-gap protection).
                 scan_batch = symbols() if hard_ban <= 0 else ()
+                dynamic = os.getenv("BR_LIVE_DYNAMIC_UNIVERSE", "0").strip() == "1"
+                if dynamic:
+                    from office_market_data import _http_get_json, source_health
+                    weight = source_health().get("used_weight_1m")
+                    if hard_ban > 0 or (isinstance(weight, (int, float)) and weight >= 1000):
+                        scan_batch = ()
+                    else:
+                        scan_batch = await asyncio.to_thread(
+                            scheduler.batch,
+                            lambda: _http_get_json("https://fapi.binance.com/fapi/v1/exchangeInfo", {}),
+                            hard_backoff=hard_ban,
+                        )
+                    print(f"[br-live] futures_universe={len(scheduler.universe)} batch={len(scan_batch)} weight={weight}",flush=True)
                 if hard_ban > 0:
                     print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
                 for sym in scan_batch:
@@ -325,7 +340,7 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(scan_batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)
