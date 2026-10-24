@@ -2,12 +2,12 @@
 from __future__ import annotations
 from urllib.parse import quote
 
-def markup(seq: int, base_url: str) -> dict:
+def markup(seq: int, base_url: str, *, test: bool = False) -> dict:
     if int(seq)<=0 or not base_url.startswith("https://"):
         raise ValueError("invalid B&R button input")
     return {"inline_keyboard":[[
         {"text":"Сценарій","url":f"{base_url.rstrip('/')}/br?signal={int(seq)}","style":"danger"},
-        {"text":"Я відкрила угоду","callback_data":f"br_open:{int(seq)}","style":"success"},
+        {"text":"Я відкрила угоду","callback_data":f"{'br_test' if test else 'br_open'}:{int(seq)}","style":"success"},
     ]]}
 
 def authorized_open(db: str, seq: int, *, owner_id: int|None, actor_id: int,
