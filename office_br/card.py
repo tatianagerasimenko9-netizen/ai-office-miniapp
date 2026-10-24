@@ -27,7 +27,7 @@ def build_card(row: Dict[str, Any]) -> str:
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
     L = [
-        f"{tag(row.get('seq'))} · {sym} · {d}",
+        f"B&R LIVE · {tag(row.get('seq'))} · {sym} · {d}",
         f"Пробій: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} підтверджено",
         f"🟡 ВХІД {_n(entry, sym)}",
         f"🔴 SL {_n(sl, sym)} (−{pc(sl)}%)",
@@ -35,6 +35,7 @@ def build_card(row: Dict[str, Any]) -> str:
     for i, t in enumerate(tg[:3], 1):
         L.append(f"🟢 TP{i}  {_n(t['p'], sym)}  (+{pc(t['p'])}% · {rr(t['p'])}R){' · ' + t['src'] if t.get('src', '').startswith('R') else ''}")
     L.append(f"❌ Скасування: закриття {'нижче' if long_ else 'вище'} {_n(row['level'], sym)} до входу")
+    L.append("⚠️ Історичний replay V1/V2 збитковий; тільки ручне рішення.")
     return "\n".join(L)
 
 
