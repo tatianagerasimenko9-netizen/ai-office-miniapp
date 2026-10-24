@@ -16,6 +16,17 @@ class TestImage(unittest.TestCase):
         bad=[dict(x) for x in self.bars]
         bad[-1]["ts"]=datetime.datetime.fromtimestamp(self.t+36000,datetime.timezone.utc).isoformat()
         with self.assertRaises(ValueError): render(self.row,bad)
+    def test_full_bleed_dark_background(self):
+        from matplotlib.image import imread
+        path=render(self.row,self.bars)
+        try:
+            pixels=imread(path)
+            h,w=pixels.shape[:2]
+            # Telegram image viewer enlarges the entire PNG: no white margins.
+            for y,x in [(3,3),(3,w-4),(h-4,3),(h-4,w-4)]:
+                self.assertLess(float(max(pixels[y,x,:3])),0.20)
+        finally:
+            os.unlink(path)
     def test_valid_chart(self):
         path=render(self.row,self.bars)
         try:
