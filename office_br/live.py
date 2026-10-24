@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from office_br import card, detect, store
+from office_br.scheduler import Scheduler
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT",
            "AVAXUSDT", "LINKUSDT", "NEARUSDT", "TIAUSDT", "SEIUSDT", "ONDOUSDT")
@@ -83,7 +84,7 @@ def _pending(db: str) -> list[dict]:
     return store.rows(db, "WHERE status = 'NEW' AND msg_id IS NULL")
 
 
-async def deliver(db: str, send: Callable) -> int:
+async def deliver(db: str, send: Callable, send_image: Callable | None = None, fetch: Callable | None = None) -> int:
     """Send first; acknowledge DB only with real Telegram message id. Retry on failure."""
     from office_bridge import _execute
     n = 0
@@ -93,7 +94,20 @@ async def deliver(db: str, send: Callable) -> int:
             _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
             continue
         try:
-            msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
+            if send_image is not None and fetch is not None:
+                import os
+                from office_br.live_image import render
+                candles = await asyncio.to_thread(fetch, row["symbol"], "15m", 240, closed_only=True)
+                png = await asyncio.to_thread(render, row, candles)
+                try:
+                    msg_id = await send_image(
+                        png, '⚠️ B&R — ручне рішення. Replay V1/V2 збитковий.', row
+                    )
+                finally:
+                    try: os.unlink(png)
+                    except OSError: pass
+            else:
+                msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
             if not msg_id:
                 print(f"[br-live] delivery pending {row['sig_id']}", flush=True)
                 continue
@@ -230,12 +244,13 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     return n
 
 
-async def monitor(db: str, send: Callable, fetch: Callable) -> None:
+async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable | None = None) -> None:
     """One low-frequency, isolated loop; failures never interrupt Office2."""
     from office_bridge import _execute
     _execute(db, DDL)
     store.init(db)
     seen: dict[str, float] = {}
+    scheduler = Scheduler()
     data_alert_sent = False
     consecutive_partial = 0
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
@@ -250,6 +265,19 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                 # requests every minute. Delivery/tracking still run safely
                 # (tracking keeps its own fail-closed data-gap protection).
                 scan_batch = symbols() if hard_ban <= 0 else ()
+                dynamic = os.getenv("BR_LIVE_DYNAMIC_UNIVERSE", "0").strip() == "1"
+                if dynamic:
+                    from office_market_data import _http_get_json, source_health
+                    weight = source_health().get("used_weight_1m")
+                    if hard_ban > 0 or (isinstance(weight, (int, float)) and weight >= 1000):
+                        scan_batch = ()
+                    else:
+                        scan_batch = await asyncio.to_thread(
+                            scheduler.batch,
+                            lambda: _http_get_json("https://fapi.binance.com/fapi/v1/exchangeInfo", {}),
+                            hard_backoff=hard_ban,
+                        )
+                    print(f"[br-live] futures_universe={len(scheduler.universe)} batch={len(scan_batch)} weight={weight}",flush=True)
                 if hard_ban > 0:
                     print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
                 for sym in scan_batch:
@@ -307,12 +335,12 @@ async def monitor(db: str, send: Callable, fetch: Callable) -> None:
                             data_alert_sent = False
                     except Exception as exc:
                         print(f"[br-live] recovery alert error: {type(exc).__name__}", flush=True)
-                delivered = await deliver(db, send)
+                delivered = await deliver(db, send, send_image=send_image, fetch=fetch)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
-                print(f"[br-live] scan health ok={scan_ok}/{len(symbols())} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
+                print(f"[br-live] scan health ok={scan_ok}/{len(scan_batch)} missing={scan_missing} stale={scan_stale} errors={scan_errors} new={new_signals} sent={delivered} events={tracked}", flush=True)
         except Exception as exc:
             print(f"[br-live] loop: {type(exc).__name__}: {exc}", flush=True)
         await asyncio.sleep(60)

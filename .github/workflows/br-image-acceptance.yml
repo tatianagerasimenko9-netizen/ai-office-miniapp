@@ -1,0 +1,28 @@
+name: B&R image acceptance
+on:
+  pull_request:
+    paths:
+      - 'office_br/card.py'
+      - 'office_br/live_image.py'
+      - 'office_br/universe.py'
+      - 'office_br/scheduler.py'
+      - 'scripts/test_br_scheduler.py'
+      - 'scripts/test_br_universe.py'
+      - 'scripts/test_br_live_image.py'
+      - 'scripts/test_br_telegram_ui.py'
+      - '.github/workflows/br-image-acceptance.yml'
+  workflow_dispatch: {}
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python scripts/test_br_live_image.py
+      - run: python scripts/test_br_telegram_ui.py
+      - run: python scripts/test_br_universe.py
+      - run: python scripts/test_br_scheduler.py
+      - run: python scripts/test_br_live.py
