@@ -101,7 +101,7 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
                 png = await asyncio.to_thread(render, row, candles)
                 try:
                     msg_id = await send_image(
-                        png, card.build_card(row), row
+                        png, '⚠️ B&R — ручне рішення. Replay V1/V2 збитковий.', row
                     )
                 finally:
                     try: os.unlink(png)
