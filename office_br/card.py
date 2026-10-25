@@ -35,7 +35,7 @@ def build_card(row: Dict[str, Any]) -> str:
     for i, t in enumerate(tg[:3], 1):
         L.append(f"🟢 TP{i}  {_n(t['p'], sym)}  (+{pc(t['p'])}% · {rr(t['p'])}R){' · ' + t['src'] if t.get('src', '').startswith('R') else ''}")
     L.append(f"❌ Скасування: закриття {'нижче' if long_ else 'вище'} {_n(row['level'], sym)} до входу")
-    L.append("⚠️ Історичний replay V1/V2 збитковий; тільки ручне рішення.")
+    L.append("⚠️ Replay V1/V2 збитковий · тільки ручне рішення. Office не відкриває ордерів.")
     return "\n".join(L)
 
 
@@ -49,10 +49,10 @@ def reminder_text(row: Dict[str, Any], level: str) -> str:
     """Price-triggered manual-action prompt, never an assertion of an executed order."""
     base = f"B&R LIVE · {tag(row.get('seq'))} · {row['symbol'].replace('USDT', '')} {row['direction']}"
     actions = {
-        "ENTRY": "🟡 Ціна торкнулася планового входу. Якщо ти відкрила позицію вручну — підтвердь це в Mini App. Торкання ≠ виконання ордера.",
-        "TP1": "🟢 TP1 досягнуто. Якщо позиція відкрита: розглянь фіксацію 30% вручну. Після фактичної фіксації — розглянь перенесення SL у беззбиток. Office нічого не виконував.",
-        "TP2": "🟢 TP2 досягнуто. Якщо позиція відкрита: розглянь фіксацію ще 40% вручну. Office нічого не виконував.",
-        "TP3": "🟢 TP3 досягнуто. Якщо позиція відкрита: розглянь закриття залишку вручну. Office нічого не виконував.",
-        "SL": "🔴 Рівня SL досягнуто. Перевір фактичний стан позиції на біржі. Office не виконував ордерів.",
+        "ENTRY": "🟡 Ціну входу торкнуто",
+        "TP1": "🟢 TP1 досягнуто",
+        "TP2": "🟢 TP2 досягнуто",
+        "TP3": "🟢 TP3 досягнуто",
+        "SL": "🔴 SL досягнуто",
     }
-    return base + "\n" + actions.get(level, level)
+    return base + " · " + actions.get(level, level)
