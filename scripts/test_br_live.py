@@ -1,5 +1,6 @@
 """Offline safety checks for live B&R observational stream (no network, no Telegram)."""
 import os
+import re
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -66,6 +67,17 @@ def test_br_ui_is_manual_and_has_both_charts():
     assert "/api/br/manual" in page and "X-Telegram-Init-Data" in page
     assert "Угоду відкрито вручну" in page
     assert "exchange_order" not in page
+
+
+
+def test_br_ui_javascript_references_existing_elements():
+    """Prevent runtime failure when removed panels leave stale JS DOM writes."""
+    page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
+    ids = set(re.findall(r'\\bid="([^"]+)"', page))
+    referenced = set(re.findall(r'\\$\\("([A-Za-z_][A-Za-z0-9_]*)"\\)', page))
+    assert referenced <= ids, f"Missing B&R DOM nodes: {sorted(referenced - ids)}"
+    assert '$("signal").replaceChildren()' in page
+
 
 
 if __name__ == "__main__":
