@@ -60,6 +60,20 @@ def test_short_is_mirror():
     assert sigs and sigs[0]["sl"] > sigs[0]["entry"] > sigs[0]["targets"][0]["p"]
 
 
+def test_structural_targets_skip_duplicate_pivot_prices():
+    # Repeated pivot prices must not produce TP2 == TP3 (observed in SEI #758).
+    for direction, prices, expected in (
+        ("LONG", [102.0, 102.0, 103.0, 104.0], [102.0, 103.0, 104.0]),
+        ("SHORT", [98.0, 98.0, 97.0, 96.0], [98.0, 97.0, 96.0]),
+    ):
+        targets = D._targets(direction, 100.0, 1.0, [{"p": p} for p in prices], D.HYP)
+        assert [t["p"] for t in targets] == expected
+    # When there are fewer than three unique structural levels, use existing
+    # hypothesis fallback rather than duplicating a structural target.
+    targets = D._targets("LONG", 100.0, 1.0, [{"p": 102.0}, {"p": 102.0}], D.HYP)
+    assert len({t["p"] for t in targets}) == len(targets)
+
+
 def test_hypotheses_are_declared():
     assert set(["pivot_k", "retest_window", "retest_tol_atr", "confirm_window", "sl_buffer_atr"]) <= set(D.HYP)
 
