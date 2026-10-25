@@ -22,6 +22,9 @@ def main():
         OB.init_office_db(db)
         a = store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5000.0)
         assert a and store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5001.0) is None        # ідемпотентно
+        # Different broken pivots but the SAME M15 entry/SL/targets are one plan.
+        same_plan = dict(_sig(), level=100.25, break_ts=1100.0)
+        assert store.record_signal(db, "ETHUSDT", same_plan, D.HYP, now=5001.5) is None
         s2 = dict(_sig(), break_ts=2000.0)
         b = store.record_signal(db, "SOLUSDT", s2, D.HYP, now=5002.0)
         rs = store.rows(db)
@@ -67,6 +70,12 @@ def main():
         assert txt.startswith("B&R LIVE · B&R-1") and "Office не відкриває ордерів" in txt and "AI Office" not in txt
         assert "ВХІД  102" in txt and "SL     99" in txt and "TP3" in txt and "Скасування" in txt
         assert card.event_text(rs[0], "TP1", 105.0).startswith("B&R LIVE · B&R-1")
+        # Preserve independent execution plans and new confirmations.
+        different_entry = dict(same_plan, entry=102.5)
+        assert store.record_signal(db, "ETHUSDT", different_entry, D.HYP, now=5006.0)
+        next_candle = dict(same_plan, confirm_ts=3700.0)
+        assert store.record_signal(db, "ETHUSDT", next_candle, D.HYP, now=5007.0)
+        assert len(store.rows(db)) == 7
     print("OK")
 
 
