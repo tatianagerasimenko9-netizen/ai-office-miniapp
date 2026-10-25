@@ -35,6 +35,7 @@ def build_card(row: Dict[str, Any]) -> str:
     for i, t in enumerate(tg[:3], 1):
         L.append(f"🟢 TP{i}  {_n(t['p'], sym)}  (+{pc(t['p'])}% · {rr(t['p'])}R){' · ' + t['src'] if t.get('src', '').startswith('R') else ''}")
     L.append(f"❌ Скасування: закриття {'нижче' if long_ else 'вище'} {_n(row['level'], sym)} до входу")
+    L.append("⚠️ Replay V1/V2 збитковий · тільки ручне рішення. Office не відкриває ордерів.")
     return "\n".join(L)
 
 
