@@ -74,7 +74,7 @@ def main():
         # Preserve independent execution plans and new confirmations.
         different_entry = dict(same_plan, entry=102.5)
         assert store.record_signal(db, "ETHUSDT", different_entry, D.HYP, now=5006.0)
-        next_candle = dict(same_plan, confirm_ts=3700.0)
+        next_candle = dict(same_plan, break_ts=2900.0, retest_ts=3400.0, confirm_ts=3700.0)
         assert store.record_signal(db, "ETHUSDT", next_candle, D.HYP, now=5007.0)
         assert len(store.rows(db)) == 7
     print("OK")
