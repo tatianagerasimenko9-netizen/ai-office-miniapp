@@ -36,10 +36,20 @@ def record_signal(db: str, symbol: str, s: Dict[str, Any], hyp: Dict[str, Any], 
     sid = sig_id(symbol, s["direction"], s["level"], s["break_ts"])
     if _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)):
         return None
+    # Distinct pivot levels can produce one identical executable plan on the same
+    # M15 confirmation candle. Count and notify that plan only once.
+    targets_json = json.dumps(s["targets"])
+    duplicate = _fetchone(db, """SELECT 1 FROM br_test_signal
+        WHERE symbol = ? AND direction = ? AND confirm_ts = ?
+          AND entry = ? AND sl = ? AND targets_json = ?
+        LIMIT 1""", (symbol, s["direction"], s["confirm_ts"],
+                      s["entry"], s["sl"], targets_json))
+    if duplicate:
+        return None
     nxt = _fetchone(db, "SELECT COALESCE(MAX(seq), 0) + 1 FROM br_test_signal")
     seq = int(nxt[0]) if nxt else 1
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-             (sid, seq, symbol, s["direction"], s["level"], s["break_ts"], s["retest_ts"], s["confirm_ts"], s["entry"], s["sl"], json.dumps(s["targets"]), json.dumps(hyp, default=str), now or time.time(), "NEW"))
+             (sid, seq, symbol, s["direction"], s["level"], s["break_ts"], s["retest_ts"], s["confirm_ts"], s["entry"], s["sl"], targets_json, json.dumps(hyp, default=str), now or time.time(), "NEW"))
     return sid
 
 
