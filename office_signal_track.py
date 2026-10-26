@@ -189,15 +189,23 @@ def _remember_bar(kind: str, key: Any, candles: Any, now: float, tf_sec: float =
         pass
 
 
-def _events(db: str, etype: str, since_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Події типу etype за зростанням id. since_ts — лише події не старші за цей момент (ts_utc ISO, порівняння рядків): гарячі цикли (супровід кожні 15–45 с) не читають і не розбирають усю історію."""
+def _events(db: str, etype: str, since_ts: Optional[float] = None,
+            signal_prefix: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Read journal events in id order. Filter the Office2 signal-id prefix in SQL
+    before fetching/decoding payload_json, rather than loading all legacy plans.
+    None retains the original unfiltered behavior for replay and reports.
+    """
     from office_bridge import _fetchall
 
+    sql = "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ?"
+    params: List[Any] = [etype]
     if since_ts is not None:
-        iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
-        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? AND ts_utc >= ? ORDER BY id", (etype, iso))
-    else:
-        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? ORDER BY id", (etype,))
+        sql += " AND ts_utc >= ?"
+        params.append(datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat())
+    if signal_prefix is not None:
+        sql += " AND signal_id LIKE ?"
+        params.append(signal_prefix + "%")
+    rows = _fetchall(db, sql + " ORDER BY id", tuple(params))
     out = []
     for r in rows or []:
         try:
@@ -531,7 +539,11 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon)}
     out: List[Dict[str, Any]] = []
     fetched: Dict[Any, Any] = {}      # (символ, tf, ліміт) → свічки за ЦЕЙ прохід
-    for ev in _events(db, EV_PLAN, horizon):
+    # The fast Office2 tracker must not deserialize tens of thousands of
+    # unrelated legacy plans on every pass. record_plan() stores scenario_id
+    # as office_events.signal_id, so this SQL predicate preserves O2 semantics.
+    plans = _events(db, EV_PLAN, horizon, signal_prefix="O2|") if scope == "o2" else _events(db, EV_PLAN, horizon)
+    for ev in plans:
         p = ev["p"]
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue
