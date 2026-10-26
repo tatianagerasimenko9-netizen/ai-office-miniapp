@@ -41,8 +41,13 @@ def _targets(direction: str, entry: float, risk: float, piv: List[Dict[str, Any]
     sg = 1 if direction == "LONG" else -1
     struct = sorted((x["p"] for x in piv if sg * (x["p"] - entry) >= cfg["min_struct_target_r"] * risk), key=lambda p: sg * (p - entry))
     out: List[Dict[str, Any]] = []
-    for p in struct[:3]:
+    for p in struct:
+        # Distinct structural price levels only: duplicate pivots are not new TPs.
+        if any(p == target["p"] for target in out):
+            continue
         out.append({"p": p, "src": "structure"})
+        if len(out) >= 3:
+            break
     for r in cfg["r_targets"]:
         if len(out) >= 3:
             break
