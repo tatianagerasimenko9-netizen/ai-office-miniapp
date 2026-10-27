@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from office_bridge import _fetchall, log_event, signal_get_active
+from office_bridge import _fetchall, log_event
 from office_level_parse import zone_is_plausible
 
 # Вікно ключа expiry — як історичний WATCHING_COOLDOWN (4 год), не ATR T0.
@@ -82,15 +82,32 @@ def find_active_watching_same_setup(
     """Збіг відкритого WATCHING без expiry — щоб не дублювати живу зону."""
     want_sym = str(symbol or "").strip().upper()
     want_setup = str(setup or "").strip()
-    for row in signal_get_active(db_path):
-        if str(row.get("status") or "").upper() != "WATCHING":
-            continue
-        if str(row.get("symbol") or "").strip().upper() != want_sym:
-            continue
+    if not want_sym or not want_setup:
+        return None
+    # Preserve newest-first and setup matching, but query only this symbol.
+    # Production symbols are uppercase; the old global read loaded ~8k rows.
+    fields = (
+        "signal_id", "symbol", "direction", "entry_low", "entry_high",
+        "sl", "tp1", "tp2", "rr", "status", "ts_created", "ts_updated",
+        "outcome", "analysis_note",
+    )
+    rows = _fetchall(
+        db_path,
+        """
+        SELECT signal_id, symbol, direction, entry_low, entry_high, sl,
+               tp1, tp2, rr, status, ts_created, ts_updated, outcome,
+               analysis_note
+        FROM office_signals
+        WHERE symbol = ? AND status = ?
+        ORDER BY ts_created DESC
+        """,
+        (want_sym, "WATCHING"),
+    )
+    for values in rows:
+        row = dict(zip(fields, values))
         got = setup_from_levels(row.get("direction"), row.get("entry_low"), row.get("entry_high"))
-        if got != want_setup:
-            continue
-        return row
+        if got == want_setup:
+            return row
     return None
 
 
