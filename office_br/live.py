@@ -280,6 +280,10 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     print(f"[br-live] futures_universe={len(scheduler.universe)} batch={len(scan_batch)} weight={weight}",flush=True)
                 if hard_ban > 0:
                     print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
+                # Drain fresh B&R signals as soon as each symbol is scanned.
+                # A batch-wide queue can let later candidates expire while earlier
+                # photo cards are rendered/sent serially (4-minute freshness gate).
+                delivered = 0
                 for sym in scan_batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
@@ -304,6 +308,8 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                         seen[sym] = ts
                         scan_ok += 1
                         new_signals += found
+                        if found:
+                            delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
                     except Exception as exc:
                         scan_errors += 1
                         print(f"[br-live] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
@@ -335,7 +341,8 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                             data_alert_sent = False
                     except Exception as exc:
                         print(f"[br-live] recovery alert error: {type(exc).__name__}", flush=True)
-                delivered = await deliver(db, send, send_image=send_image, fetch=fetch)
+                # Final drain also retries previously pending deliveries.
+                delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
                 tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
