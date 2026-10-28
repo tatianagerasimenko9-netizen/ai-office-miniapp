@@ -145,7 +145,13 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
             continue
-        last = _cursor(db, sid, float(row["confirm_ts"]) + 840)
+        # Paper ENTRY tracking starts only after the READY card was actually sent.
+        # Clamp any persisted cursor too, so a restart cannot replay pre-delivery candles.
+        ready_sent_ts = row.get("sent_ts")
+        if ready_sent_ts is None:
+            print(f"[br-live] missing READY sent_ts {sid}; tracking deferred", flush=True)
+            continue
+        last = max(_cursor(db, sid, float(ready_sent_ts)), float(ready_sent_ts))
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
         if not isinstance(candles, list) or not candles:
             continue

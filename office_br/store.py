@@ -68,7 +68,7 @@ def rows(db: str, where: str = "", args: tuple = ()) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
     init(db)
-    cols = "sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, created_ts, status, msg_id"
+    cols = "sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, created_ts, status, msg_id, sent_ts"
     return [dict(zip(cols.replace(" ", "").split(","), r)) for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal {where} ORDER BY created_ts", args)]
 
 
@@ -111,6 +111,8 @@ def paper_metrics(db: str) -> Dict[str, Any]:
              FROM br_test_signal s JOIN br_test_event e ON e.sig_id=s.sig_id
              JOIN br_test_event i ON i.sig_id=s.sig_id AND i.level='ENTRY'
              WHERE e.level IN ('TP1','SL')
+               AND s.sent_ts IS NOT NULL
+               AND i.touched_ts >= s.sent_ts
                AND e.touched_ts > i.touched_ts
                AND NOT EXISTS (
                    SELECT 1 FROM br_test_event a
