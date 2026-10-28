@@ -111,6 +111,8 @@ def paper_metrics(db: str) -> Dict[str, Any]:
              FROM br_test_signal s JOIN br_test_event e ON e.sig_id=s.sig_id
              JOIN br_test_event i ON i.sig_id=s.sig_id AND i.level='ENTRY'
              WHERE e.level IN ('TP1','SL')
+               AND s.sent_ts IS NOT NULL
+               AND i.touched_ts >= s.sent_ts
                AND e.touched_ts > i.touched_ts
                AND NOT EXISTS (
                    SELECT 1 FROM br_test_event a
