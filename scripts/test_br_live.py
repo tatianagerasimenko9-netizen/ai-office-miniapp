@@ -90,6 +90,7 @@ def test_track_does_not_replay_entry_before_ready_delivery():
         {"ts": "2026-10-28T15:45:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
         {"ts": "2026-10-28T15:46:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
         {"ts": "2026-10-28T15:47:00Z", "open": 99.7, "high": 99.8, "low": 99.5, "close": 99.7},
+        {"ts": "2026-10-28T15:48:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
     ]
     captured = {"fallback": None, "events": [], "sent": []}
     bridge = types.ModuleType("office_bridge")
@@ -113,9 +114,11 @@ def test_track_does_not_replay_entry_before_ready_delivery():
                             ))
 
     assert captured["fallback"] == ready_sent
-    assert result == 0
-    assert captured["sent"] == []
-    assert captured["events"] == []
+    assert result == 0  # ENTRY is recorded; terminal TP/SL events remain zero.
+    assert len(captured["sent"]) == 1
+    assert len(captured["events"]) == 1
+    assert captured["events"][0][2] == "ENTRY"
+    assert captured["events"][0][3] == epoch("2026-10-28T15:48:00Z")
 
 
 def test_paper_metrics_excludes_pre_ready_entries():
