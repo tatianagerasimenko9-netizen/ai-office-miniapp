@@ -68,7 +68,7 @@ def rows(db: str, where: str = "", args: tuple = ()) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
 
     init(db)
-    cols = "sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, created_ts, status, msg_id"
+    cols = "sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, created_ts, status, msg_id, sent_ts"
     return [dict(zip(cols.replace(" ", "").split(","), r)) for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal {where} ORDER BY created_ts", args)]
 
 
