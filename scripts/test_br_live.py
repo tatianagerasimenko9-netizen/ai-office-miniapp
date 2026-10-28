@@ -118,6 +118,28 @@ def test_track_does_not_replay_entry_before_ready_delivery():
     assert captured["events"] == []
 
 
+def test_paper_metrics_excludes_pre_ready_entries():
+    """Historical paper stats must exclude ENTRY touches before the READY send."""
+    import types
+    from office_br import store
+
+    captured = {}
+    bridge = types.ModuleType("office_bridge")
+    bridge._execute = lambda *args, **kwargs: None
+
+    def fetchall(db, sql):
+        captured["sql"] = sql
+        return []
+
+    bridge._fetchall = fetchall
+    with patch.dict(sys.modules, {"office_bridge": bridge}):
+        metrics = store.paper_metrics("offline-test-db")
+
+    assert "s.sent_ts IS NOT NULL" in captured["sql"]
+    assert "i.touched_ts >= s.sent_ts" in captured["sql"]
+    assert metrics["n"] == 0
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
