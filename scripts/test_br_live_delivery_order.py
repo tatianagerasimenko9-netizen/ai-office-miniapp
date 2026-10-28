@@ -67,13 +67,15 @@ def test_fresh_signal_is_delivered_before_scanning_next_symbol(monkeypatch):
 
     asyncio.run(run_one_cycle())
 
-    # A new candidate is sent immediately after its symbol scan, not after the
-    # remaining symbols have been scanned. The final drain still retries pending
-    # deliveries, so one extra deliver call is expected at the end.
-    assert events[:4] == [
+    # Existing lifecycle tracking must run before any new symbol scan, so a
+    # slow scan/card delivery cannot postpone an already-open signal's TP/SL.
+    # Fresh candidates are still delivered after their own symbol scan; the final
+    # drain retries pending deliveries at the end of the cycle.
+    assert events[:5] == [
+        ("track",),
         ("scan", "BTCUSDT"),
         ("deliver",),
         ("scan", "ETHUSDT"),
         ("deliver",),
     ]
-    assert events[-2:] == [("deliver",), ("track",)]
+    assert events[-1:] == [("deliver",)]
