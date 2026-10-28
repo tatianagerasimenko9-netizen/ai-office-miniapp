@@ -1,6 +1,8 @@
 """Offline safety checks for live B&R observational stream (no network, no Telegram)."""
+import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -66,6 +68,54 @@ def test_br_ui_is_manual_and_has_both_charts():
     assert "/api/br/manual" in page and "X-Telegram-Init-Data" in page
     assert "Н/Д" in page
     assert "exchange_order" not in page
+
+
+def test_track_does_not_replay_entry_before_ready_delivery():
+    """Paper tracking must not count an entry touched before READY reached Telegram."""
+    import json
+    import types
+
+    def epoch(ts):
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+
+    ready_sent = epoch("2026-10-28T15:46:51Z")
+    row = {
+        "sig_id": "BR|BTCUSDT|LONG|100|test", "seq": 1, "symbol": "BTCUSDT",
+        "direction": "LONG", "confirm_ts": epoch("2026-10-28T15:30:00Z"),
+        "created_ts": epoch("2026-10-28T15:46:47Z"), "sent_ts": ready_sent,
+        "status": "SENT", "msg_id": 123, "entry": 100.0, "sl": 98.0,
+        "targets_json": json.dumps([{"p": 110.0, "src": "structure"}]),
+    }
+    bars = [
+        {"ts": "2026-10-28T15:45:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
+        {"ts": "2026-10-28T15:46:00Z", "open": 100, "high": 101, "low": 99, "close": 100},
+        {"ts": "2026-10-28T15:47:00Z", "open": 99.7, "high": 99.8, "low": 99.5, "close": 99.7},
+    ]
+    captured = {"fallback": None, "events": [], "sent": []}
+    bridge = types.ModuleType("office_bridge")
+    bridge._execute = lambda *args, **kwargs: None
+    with patch.dict(sys.modules, {"office_bridge": bridge}):
+        with patch.object(live.store, "rows", lambda *args, **kwargs: [row]):
+            with patch.object(live.store, "events", lambda *args, **kwargs: []):
+                with patch.object(live.store, "record_event",
+                                  lambda *args, **kwargs: captured["events"].append(args)):
+                    with patch.object(live, "_cursor",
+                                      lambda db, sid, fallback: captured.update(fallback=fallback) or fallback - 120):
+                        with patch.object(live, "_save_cursor", lambda *args, **kwargs: None):
+                            async def send(*args, **kwargs):
+                                captured["sent"].append((args, kwargs))
+                                return 456
+
+                            result = asyncio.run(live.track(
+                                "offline-test-db",
+                                lambda *args, **kwargs: bars,
+                                send,
+                            ))
+
+    assert captured["fallback"] == ready_sent
+    assert result == 0
+    assert captured["sent"] == []
+    assert captured["events"] == []
 
 
 if __name__ == "__main__":
