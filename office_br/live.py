@@ -151,6 +151,14 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         if ready_sent_ts is None:
             print(f"[br-live] missing READY sent_ts {sid}; tracking deferred", flush=True)
             continue
+        # Check persisted ENTRY before reading cursors/candles: legacy entries
+        # touched before READY delivery cannot produce later paper outcomes.
+        existing_events = store.events(db, sid)
+        existing_entry = next((x for x in existing_events if x["level"] == "ENTRY"), None)
+        if existing_entry and float(existing_entry["touched_ts"]) < float(ready_sent_ts):
+            _execute(db, "UPDATE br_test_signal SET status = 'AMBIGUOUS' WHERE sig_id = ? AND status = 'SENT'", (sid,))
+            print(f"[br-live] PRE_READY_ENTRY {sid}; outcome suppressed", flush=True)
+            continue
         last = max(_cursor(db, sid, float(ready_sent_ts)), float(ready_sent_ts))
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
         if not isinstance(candles, list) or not candles:
@@ -166,14 +174,6 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             continue
         tg = json.loads(row["targets_json"])
         sg = 1 if row["direction"] == "LONG" else -1
-        existing_events = store.events(db, sid)
-        existing_entry = next((x for x in existing_events if x["level"] == "ENTRY"), None)
-        # A legacy ENTRY can predate READY delivery. It must not be allowed to
-        # drive later TP/SL paper outcomes after this fix; no order is inferred.
-        if existing_entry and float(existing_entry["touched_ts"]) < float(ready_sent_ts):
-            _execute(db, "UPDATE br_test_signal SET status = 'AMBIGUOUS' WHERE sig_id = ? AND status = 'SENT'", (sid,))
-            print(f"[br-live] PRE_READY_ENTRY {sid}; outcome suppressed", flush=True)
-            continue
         prev = {x["level"] for x in existing_events}
         entry_seen = "ENTRY" in prev
         for b in candles:
