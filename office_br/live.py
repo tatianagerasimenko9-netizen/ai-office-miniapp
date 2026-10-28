@@ -166,7 +166,15 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             continue
         tg = json.loads(row["targets_json"])
         sg = 1 if row["direction"] == "LONG" else -1
-        prev = {x["level"] for x in store.events(db, sid)}
+        existing_events = store.events(db, sid)
+        existing_entry = next((x for x in existing_events if x["level"] == "ENTRY"), None)
+        # A legacy ENTRY can predate READY delivery. It must not be allowed to
+        # drive later TP/SL paper outcomes after this fix; no order is inferred.
+        if existing_entry and float(existing_entry["touched_ts"]) < float(ready_sent_ts):
+            _execute(db, "UPDATE br_test_signal SET status = 'AMBIGUOUS' WHERE sig_id = ? AND status = 'SENT'", (sid,))
+            print(f"[br-live] PRE_READY_ENTRY {sid}; outcome suppressed", flush=True)
+            continue
+        prev = {x["level"] for x in existing_events}
         entry_seen = "ENTRY" in prev
         for b in candles:
             ts = _epoch(b)
