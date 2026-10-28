@@ -259,6 +259,13 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
+                # Prioritize existing paper-position lifecycle updates before fresh scans.
+                # A slow scan/card send must not hold TP/SL notifications until cycle end.
+                tracked = 0
+                try:
+                    tracked = await track(db, fetch, send)
+                except Exception as exc:
+                    print(f"[br-live] track: {type(exc).__name__}: {exc}", flush=True)
                 from office_market_data import hard_backoff_left
                 hard_ban = hard_backoff_left()
                 # During an exchange IP ban, don't fan out historical REST
@@ -343,7 +350,6 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                         print(f"[br-live] recovery alert error: {type(exc).__name__}", flush=True)
                 # Final drain also retries previously pending deliveries.
                 delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
-                tracked = await track(db, fetch, send)
                 if scan_stale or scan_missing or scan_errors:
                     print(f"[br-live] DEGRADED_FEED stale={scan_stale} missing={scan_missing} errors={scan_errors}; stale bars blocked", flush=True)
                 # Operational heartbeat: an empty scan is not a delivery failure.
