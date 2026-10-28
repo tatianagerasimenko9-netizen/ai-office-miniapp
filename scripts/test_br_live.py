@@ -143,6 +143,48 @@ def test_paper_metrics_excludes_pre_ready_entries():
     assert metrics["n"] == 0
 
 
+
+def test_pre_ready_entry_cannot_drive_later_paper_outcome():
+    """A legacy ENTRY touched before READY delivery is terminalized, not tracked."""
+    import types
+
+    def epoch(ts):
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+
+    ready_sent = epoch("2026-10-28T15:46:51Z")
+    row = {
+        "sig_id": "BR|BTCUSDT|LONG|100|pre-ready", "seq": 2, "symbol": "BTCUSDT",
+        "direction": "LONG", "confirm_ts": epoch("2026-10-28T15:30:00Z"),
+        "created_ts": epoch("2026-10-28T15:46:47Z"), "sent_ts": ready_sent,
+        "status": "SENT", "msg_id": 123, "entry": 100.0, "sl": 98.0,
+        "targets_json": '[{"p":110.0,"src":"structure"}]',
+    }
+    captured = {"updates": [], "fetch": 0, "sent": []}
+    bridge = types.ModuleType("office_bridge")
+    bridge._execute = lambda db, sql, args=(): captured["updates"].append((sql, args))
+    with patch.dict(sys.modules, {"office_bridge": bridge}):
+        with patch.object(live.store, "rows", lambda *args, **kwargs: [row]):
+            with patch.object(live.store, "events", lambda *args, **kwargs: [
+                {"level": "ENTRY", "touched_ts": epoch("2026-10-28T15:45:00Z"),
+                 "price": 100.0, "msg_id": 456}
+            ]):
+                async def send(*args, **kwargs):
+                    captured["sent"].append((args, kwargs))
+                    return 789
+
+                def fetch(*args, **kwargs):
+                    captured["fetch"] += 1
+                    return []
+
+                result = asyncio.run(live.track("offline-test-db", fetch, send))
+
+    assert result == 0
+    assert captured["fetch"] == 0
+    assert captured["sent"] == []
+    assert any("status = 'AMBIGUOUS'" in sql and args == (row["sig_id"],)
+               for sql, args in captured["updates"])
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
