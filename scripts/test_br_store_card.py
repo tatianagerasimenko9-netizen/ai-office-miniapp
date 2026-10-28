@@ -16,12 +16,19 @@ def _sig():
             "targets": [{"p": 105.0, "src": "R1 (ГІПОТЕЗА)"}, {"p": 108.0, "src": "structure"}, {"p": 111.0, "src": "R3 (ГІПОТЕЗА)"}]}
 
 
+def _mark_ready_sent(db, sig_id, sent_ts, msg_id):
+    """Test fixture: the READY card was actually sent before paper ENTRY."""
+    OB._execute(db, "UPDATE br_test_signal SET status = 'SENT', msg_id = ?, sent_ts = ? WHERE sig_id = ?",
+                (msg_id, sent_ts, sig_id))
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         db = os.path.join(td, "t.db")
         OB.init_office_db(db)
         a = store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5000.0)
-        assert a and store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5001.0) is None        # ідемпотентно
+        assert a and store.record_signal(db, "ETHUSDT", _sig(), D.HYP, now=5001.0) is None
+        _mark_ready_sent(db, a, 5500.0, 101)        # ідемпотентно
         # Different broken pivots but the SAME M15 entry/SL/targets are one plan.
         same_plan = dict(_sig(), level=100.25, break_ts=1100.0)
         assert store.record_signal(db, "ETHUSDT", same_plan, D.HYP, now=5001.5) is None
@@ -51,18 +58,24 @@ def main():
         assert store.paper_metrics(db)["n"] == 0
         # A new signal with a valid ENTRY -> SL is one paper loss.
         c = store.record_signal(db, "ADAUSDT", dict(_sig(), break_ts=3000.0), D.HYP, now=5003.0)
-        assert c and store.record_event(db, c, "ENTRY", 8000.0, 102.0)
+        assert c
+        _mark_ready_sent(db, c, 7500.0, 103)
+        assert store.record_event(db, c, "ENTRY", 8000.0, 102.0)
         assert store.record_event(db, c, "SL", 8100.0, 99.0)
         loss = store.paper_metrics(db)
         assert loss["n"] == 1 and loss["losses"] == 1 and loss["wins"] == 0
         # A genuine ENTRY -> TP1 counts, while same-timestamp levels do not.
         d = store.record_signal(db, "LINKUSDT", dict(_sig(), break_ts=4000.0), D.HYP, now=5004.0)
-        assert d and store.record_event(db, d, "ENTRY", 8000.0, 102.0)
+        assert d
+        _mark_ready_sent(db, d, 7500.0, 104)
+        assert store.record_event(db, d, "ENTRY", 8000.0, 102.0)
         assert store.record_event(db, d, "TP1", 8100.0, 105.0)
         result = store.paper_metrics(db)
         assert result["n"] == 2 and result["wins"] == 1 and result["losses"] == 1
         e = store.record_signal(db, "XRPUSDT", dict(_sig(), break_ts=5000.0), D.HYP, now=5005.0)
-        assert e and store.record_event(db, e, "ENTRY", 8000.0, 102.0)
+        assert e
+        _mark_ready_sent(db, e, 7500.0, 105)
+        assert store.record_event(db, e, "ENTRY", 8000.0, 102.0)
         assert store.record_event(db, e, "TP1", 8100.0, 105.0)
         assert store.record_event(db, e, "SL", 8100.0, 99.0)
         assert store.paper_metrics(db)["n"] == 2
