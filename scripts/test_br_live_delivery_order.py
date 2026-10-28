@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
+import types
 from datetime import datetime, timezone
 
-import office_bridge
-import office_market_data
 from office_br import live
 
 
@@ -16,8 +16,12 @@ def test_fresh_signal_is_delivered_before_scanning_next_symbol(monkeypatch):
     monkeypatch.setenv("BR_LIVE_TG", "1")
     monkeypatch.setenv("BR_LIVE_SYMBOLS", "BTCUSDT,ETHUSDT")
     monkeypatch.setenv("BR_LIVE_DYNAMIC_UNIVERSE", "0")
-    monkeypatch.setattr(office_bridge, "_execute", lambda *args, **kwargs: None)
-    monkeypatch.setattr(office_market_data, "hard_backoff_left", lambda: 0.0)
+    bridge = types.ModuleType("office_bridge")
+    bridge._execute = lambda *args, **kwargs: None
+    market_data = types.ModuleType("office_market_data")
+    market_data.hard_backoff_left = lambda: 0.0
+    monkeypatch.setitem(sys.modules, "office_bridge", bridge)
+    monkeypatch.setitem(sys.modules, "office_market_data", market_data)
     monkeypatch.setattr(live.store, "init", lambda *args, **kwargs: None)
 
     now = time.time()
