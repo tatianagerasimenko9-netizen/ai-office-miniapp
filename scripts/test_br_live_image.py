@@ -1,5 +1,6 @@
 """B&R image must reject missing or misaligned market evidence."""
 import datetime, json, os, sys, tempfile, unittest
+from PIL import Image
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from office_br.live_image import render
@@ -20,5 +21,7 @@ class TestImage(unittest.TestCase):
         path=render(self.row,self.bars)
         try:
             self.assertGreater(os.path.getsize(path),10000)
+            with Image.open(path) as image:
+                self.assertEqual(image.size, (984, 1248))
         finally:os.unlink(path)
 if __name__=="__main__":unittest.main()
