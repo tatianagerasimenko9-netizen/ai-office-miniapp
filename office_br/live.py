@@ -275,19 +275,18 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
                 # Prioritize existing paper-position lifecycle updates before fresh scans.
                 # A slow scan/card send must not hold TP/SL notifications until cycle end.
-                tracked = 0
-                try:
-                    tracked = await track(db, fetch, send)
-                except Exception as exc:
-                    print(f"[br-live] track: {type(exc).__name__}: {exc}", flush=True)
-                # On restart, drain persisted READY candidates before the next
-                # scan batch. Otherwise an unsent NEW row waits behind all scans
-                # and can age past the four-minute delivery window.
+                # On restart, drain persisted READY candidates before lifecycle
+                # tracking and scans. The four-minute guard still blocks stale cards.
                 delivered = 0
                 try:
                     delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
                 except Exception as exc:
                     print(f"[br-live] pending delivery: {type(exc).__name__}: {exc}", flush=True)
+                tracked = 0
+                try:
+                    tracked = await track(db, fetch, send)
+                except Exception as exc:
+                    print(f"[br-live] track: {type(exc).__name__}: {exc}", flush=True)
                 from office_market_data import hard_backoff_left
                 hard_ban = hard_backoff_left()
                 # During an exchange IP ban, don't fan out historical REST
