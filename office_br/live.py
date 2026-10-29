@@ -280,6 +280,14 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     tracked = await track(db, fetch, send)
                 except Exception as exc:
                     print(f"[br-live] track: {type(exc).__name__}: {exc}", flush=True)
+                # On restart, drain persisted READY candidates before the next
+                # scan batch. Otherwise an unsent NEW row waits behind all scans
+                # and can age past the four-minute delivery window.
+                delivered = 0
+                try:
+                    delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
+                except Exception as exc:
+                    print(f"[br-live] pending delivery: {type(exc).__name__}: {exc}", flush=True)
                 from office_market_data import hard_backoff_left
                 hard_ban = hard_backoff_left()
                 # During an exchange IP ban, don't fan out historical REST
@@ -301,10 +309,8 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     print(f"[br-live] futures_universe={len(scheduler.universe)} batch={len(scan_batch)} weight={weight}",flush=True)
                 if hard_ban > 0:
                     print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
-                # Drain fresh B&R signals as soon as each symbol is scanned.
-                # A batch-wide queue can let later candidates expire while earlier
-                # photo cards are rendered/sent serially (4-minute freshness gate).
-                delivered = 0
+                # Drain each fresh candidate immediately after its symbol scan.
+                # Keep the running delivery count, including the restart drain above.
                 for sym in scan_batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
