@@ -71,6 +71,6 @@ def render(row, bars):
              " "+number(float(row["level"]))+" до входу",fontsize=10.5,color="#bd2636",weight="bold")
     fd,path=tempfile.mkstemp(prefix="br_live_",suffix=".png")
     os.close(fd)
-    try:fig.savefig(path,dpi=170,facecolor=fig.get_facecolor())
+    try:fig.savefig(path,dpi=120,facecolor=fig.get_facecolor())
     finally:plt.close(fig)
     return path
