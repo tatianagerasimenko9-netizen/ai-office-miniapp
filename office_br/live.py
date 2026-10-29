@@ -50,7 +50,9 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
     if not isinstance(bars, list) or len(bars) < 100:
         return 0
     t, o, h, l, c = _bars(bars)
-    if now - (t[-1] + 900) >= 900 or t[-1] + 900 > now:
+    # A signal must still fit the same four-minute freshness window used by
+    # deliver(); otherwise it is inserted only to be immediately EXPIRED_UNSENT.
+    if now - (t[-1] + 900) > 240 or t[-1] + 900 > now:
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
@@ -275,6 +277,13 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
                 # Prioritize existing paper-position lifecycle updates before fresh scans.
                 # A slow scan/card send must not hold TP/SL notifications until cycle end.
+                # On restart, drain persisted READY candidates before lifecycle
+                # tracking and scans. The four-minute guard still blocks stale cards.
+                delivered = 0
+                try:
+                    delivered += await deliver(db, send, send_image=send_image, fetch=fetch)
+                except Exception as exc:
+                    print(f"[br-live] pending delivery: {type(exc).__name__}: {exc}", flush=True)
                 tracked = 0
                 try:
                     tracked = await track(db, fetch, send)
@@ -301,10 +310,8 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     print(f"[br-live] futures_universe={len(scheduler.universe)} batch={len(scan_batch)} weight={weight}",flush=True)
                 if hard_ban > 0:
                     print(f"[br-live] BINANCE_BACKOFF remaining={hard_ban:.0f}s; new B&R scans paused", flush=True)
-                # Drain fresh B&R signals as soon as each symbol is scanned.
-                # A batch-wide queue can let later candidates expire while earlier
-                # photo cards are rendered/sent serially (4-minute freshness gate).
-                delivered = 0
+                # Drain each fresh candidate immediately after its symbol scan.
+                # Keep the running delivery count, including the restart drain above.
                 for sym in scan_batch:
                     try:
                         bars = await asyncio.to_thread(fetch, sym, "15m", 240, closed_only=True)
