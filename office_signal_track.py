@@ -189,15 +189,30 @@ def _remember_bar(kind: str, key: Any, candles: Any, now: float, tf_sec: float =
         pass
 
 
-def _events(db: str, etype: str, since_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Події типу etype за зростанням id. since_ts — лише події не старші за цей момент (ts_utc ISO, порівняння рядків): гарячі цикли (супровід кожні 15–45 с) не читають і не розбирають усю історію."""
+def _events(
+    db: str,
+    etype: str,
+    since_ts: Optional[float] = None,
+    signal_id_prefix: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Події типу etype за зростанням id; опційно обмежуємо часовим вікном і префіксом signal_id.
+
+    Office2 має окремий швидкий трекер: фільтруємо O2| на рівні SQL, а не читаємо й
+    розбираємо десятки тисяч legacy SIGNAL_PLAN із office_events у Python.
+    """
     from office_bridge import _fetchall
 
+    where = ["event_type = ?"]
+    params: List[Any] = [etype]
     if since_ts is not None:
         iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
-        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? AND ts_utc >= ? ORDER BY id", (etype, iso))
-    else:
-        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? ORDER BY id", (etype,))
+        where.append("ts_utc >= ?")
+        params.append(iso)
+    if signal_id_prefix:
+        where.append("signal_id LIKE ?")
+        params.append(f"{signal_id_prefix}%")
+    sql = "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE " + " AND ".join(where) + " ORDER BY id"
+    rows = _fetchall(db, sql, tuple(params))
     out = []
     for r in rows or []:
         try:
@@ -528,10 +543,12 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     now = time.time() if now_ts is None else now_ts
     since = milestone_since(db)
     horizon = now - HOT_WINDOW_SEC
-    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon)}
+    # Office2's dedicated fast tracker must not hydrate the full 14-day legacy plan history.
+    event_prefix = "O2|" if scope == "o2" else None
+    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon, signal_id_prefix=event_prefix)}
     out: List[Dict[str, Any]] = []
     fetched: Dict[Any, Any] = {}      # (символ, tf, ліміт) → свічки за ЦЕЙ прохід
-    for ev in _events(db, EV_PLAN, horizon):
+    for ev in _events(db, EV_PLAN, horizon, signal_id_prefix=event_prefix):
         p = ev["p"]
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue

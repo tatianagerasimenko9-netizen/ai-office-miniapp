@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 db = str(Path(tempfile.mkdtemp()) / "l.db")
 os.environ.update(OFFICE_DB_PATH=db, DATABASE_URL="", OFFICE_DEPO_USDT="1000", OFFICE_EXINFO_SEED="1")
 import office_signal_track as T  # noqa: E402
+import office_bridge as OB  # noqa: E402
 from office_bridge import init_office_db  # noqa: E402
 
 init_office_db(db)
@@ -136,8 +137,19 @@ plan("O2|abc|1", "FASTUSDT", "SHORT", 10.0, 10.5, [9.5])
 plan("SCN|OLD|SHORT|H1|9", "OLDUSDT", "SHORT", 10.0, 10.5, [9.5])
 cf = c1(T0, [(10.0, 10.0, 9.9, 9.95), (9.95, 9.96, 9.4, 9.45)])
 seen_calls = []
-ms_o2 = T.pending_milestones(db, lambda s, tf, lim: (seen_calls.append(s), {"FASTUSDT": cf, "OLDUSDT": cf}[s])[1], now_ts=T0 + 5 * 60, scope="o2")
+scoped_plan_queries = []
+_original_fetchall = OB._fetchall
+def _fetchall_spy(db_path, sql, params=()):
+    if "FROM office_events" in sql and params and params[0] == T.EV_PLAN:
+        scoped_plan_queries.append((sql, tuple(params)))
+    return _original_fetchall(db_path, sql, params)
+OB._fetchall = _fetchall_spy
+try:
+    ms_o2 = T.pending_milestones(db, lambda s, tf, lim: (seen_calls.append(s), {"FASTUSDT": cf, "OLDUSDT": cf}[s])[1], now_ts=T0 + 5 * 60, scope="o2")
+finally:
+    OB._fetchall = _original_fetchall
 assert set(seen_calls) == {"FASTUSDT"} and {m["symbol"] for m in ms_o2} == {"FASTUSDT"}, (seen_calls, ms_o2)
+assert any("signal_id LIKE ?" in sql and params[-1] == "O2|%" for sql, params in scoped_plan_queries), scoped_plan_queries
 seen_calls.clear()
 ms_ot = T.pending_milestones(db, lambda s, tf, lim: (seen_calls.append(s), {"FASTUSDT": cf, "OLDUSDT": cf}[s])[1], now_ts=T0 + 5 * 60, scope="other")
 assert "FASTUSDT" not in seen_calls and "OLDUSDT" in seen_calls, seen_calls
