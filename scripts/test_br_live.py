@@ -56,9 +56,9 @@ def test_monitor_marks_only_successful_scan_and_reports_coverage():
     source = getsource(live.monitor)
     assert source.index("found = await asyncio.to_thread(") < source.index("seen[sym] = ts")
     # Pending READY rows must be retried before a restart scans all symbols.
-    assert source.index("tracked = await track(db, fetch, send)") < source.index(
+    assert source.index(
         "delivered += await deliver(db, send, send_image=send_image, fetch=fetch)"
-    ) < source.index("for sym in scan_batch")
+    ) < source.index("tracked = await track(db, fetch, send)") < source.index("for sym in scan_batch")
     assert "scan health ok=" in source
     assert "scan_missing += 1" in source and "scan_stale += 1" in source
     assert "scan_errors += 1" in source
