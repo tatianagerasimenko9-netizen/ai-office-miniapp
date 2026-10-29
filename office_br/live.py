@@ -50,7 +50,9 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
     if not isinstance(bars, list) or len(bars) < 100:
         return 0
     t, o, h, l, c = _bars(bars)
-    if now - (t[-1] + 900) >= 900 or t[-1] + 900 > now:
+    # A signal must still fit the same four-minute freshness window used by
+    # deliver(); otherwise it is inserted only to be immediately EXPIRED_UNSENT.
+    if now - (t[-1] + 900) > 240 or t[-1] + 900 > now:
         return 0
     hits = detect.scan(t, o, h, l, c)
     new = 0
