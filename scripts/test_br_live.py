@@ -163,7 +163,7 @@ def test_pre_ready_entry_cannot_drive_later_paper_outcome():
         "status": "SENT", "msg_id": 123, "entry": 100.0, "sl": 98.0,
         "targets_json": '[{"p":110.0,"src":"structure"}]',
     }
-    captured = {"updates": [], "fetch": 0, "sent": []}
+    captured = {"updates": [], "fetch": 0, "sent": [], "events": []}
     bridge = types.ModuleType("office_bridge")
     bridge._execute = lambda db, sql, args=(): captured["updates"].append((sql, args))
     with patch.dict(sys.modules, {"office_bridge": bridge}):
@@ -172,21 +172,65 @@ def test_pre_ready_entry_cannot_drive_later_paper_outcome():
                 {"level": "ENTRY", "touched_ts": epoch("2026-10-28T15:45:00Z"),
                  "price": 100.0, "msg_id": 456}
             ]):
-                async def send(*args, **kwargs):
-                    captured["sent"].append((args, kwargs))
-                    return 789
+                with patch.object(live.store, "record_event",
+                                  lambda *args, **kwargs: captured["events"].append(args) or True):
+                    async def send(*args, **kwargs):
+                        captured["sent"].append((args, kwargs))
+                        return 789
 
-                def fetch(*args, **kwargs):
-                    captured["fetch"] += 1
-                    return []
+                    def fetch(*args, **kwargs):
+                        captured["fetch"] += 1
+                        return []
 
-                result = asyncio.run(live.track("offline-test-db", fetch, send))
+                    result = asyncio.run(live.track("offline-test-db", fetch, send))
 
     assert result == 0
     assert captured["fetch"] == 0
     assert captured["sent"] == []
     assert any("status = 'AMBIGUOUS'" in sql and args == (row["sig_id"],)
                for sql, args in captured["updates"])
+    assert len(captured["events"]) == 1
+    assert captured["events"][0][1] == row["sig_id"]
+    assert captured["events"][0][2] == "AMBIGUOUS"
+    assert captured["events"][0][3] == epoch("2026-10-28T15:45:00Z")
+    assert captured["events"][0][4] is None
+
+
+def test_reconcile_legacy_pre_ready_ambiguous_audit_without_telegram_ids():
+    """Reconcile only missing audit rows for pre-READY ENTRYs; never fake delivery."""
+    captured = {"events": []}
+    rows = [
+        {"sig_id": "legacy-903", "sent_ts": 200.0},
+        {"sig_id": "legacy-904", "sent_ts": 200.0},
+        {"sig_id": "legacy-913", "sent_ts": 200.0},
+        {"sig_id": "already-audited", "sent_ts": 200.0},
+        {"sig_id": "entry-after-ready", "sent_ts": 200.0},
+        {"sig_id": "no-entry", "sent_ts": 200.0},
+    ]
+    event_map = {
+        "legacy-903": [{"level": "ENTRY", "touched_ts": 100.0}],
+        "legacy-904": [{"level": "ENTRY", "touched_ts": 110.0}],
+        "legacy-913": [{"level": "ENTRY", "touched_ts": 120.0}],
+        "already-audited": [
+            {"level": "ENTRY", "touched_ts": 100.0},
+            {"level": "AMBIGUOUS", "touched_ts": 100.0},
+        ],
+        "entry-after-ready": [{"level": "ENTRY", "touched_ts": 300.0}],
+        "no-entry": [],
+    }
+    with patch.object(live.store, "rows", lambda *args, **kwargs: rows):
+        with patch.object(live.store, "events", lambda db, sid: event_map[sid]):
+            with patch.object(
+                live.store, "record_event",
+                lambda *args, **kwargs: captured["events"].append(args) or True,
+            ):
+                repaired = live.reconcile_pre_ready_ambiguous_audit("offline-test-db")
+
+    assert repaired == 3
+    assert len(captured["events"]) == 3
+    assert {call[1] for call in captured["events"]} == {"legacy-903", "legacy-904", "legacy-913"}
+    assert all(call[2] == "AMBIGUOUS" and call[4] is None and len(call) == 5
+               for call in captured["events"])
 
 
 if __name__ == "__main__":
