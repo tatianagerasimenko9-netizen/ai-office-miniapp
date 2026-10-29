@@ -134,6 +134,29 @@ def _save_cursor(db: str, sid: str, ts: float) -> None:
     _execute(db, "INSERT INTO br_live_cursor(sig_id, last_bar_ts) VALUES (?,?) ON CONFLICT (sig_id) DO UPDATE SET last_bar_ts = EXCLUDED.last_bar_ts", (sid, ts))
 
 
+def reconcile_pre_ready_ambiguous_audit(db: str) -> int:
+    """Backfill missing B&R audit rows for legacy PRE_READY_ENTRY terminal states.
+
+    This records only the ambiguous state in the B&R event ledger. It never sends
+    Telegram messages or fabricates Telegram message IDs.
+    """
+    repaired = 0
+    for row in store.rows(db, "WHERE status = 'AMBIGUOUS' AND sent_ts IS NOT NULL"):
+        sid = row["sig_id"]
+        events = store.events(db, sid)
+        if any(event["level"] == "AMBIGUOUS" for event in events):
+            continue
+        entry = next((event for event in events if event["level"] == "ENTRY"), None)
+        ready_sent_ts = row.get("sent_ts")
+        if entry is None or ready_sent_ts is None:
+            continue
+        if float(entry["touched_ts"]) >= float(ready_sent_ts):
+            continue
+        if store.record_event(db, sid, "AMBIGUOUS", float(entry["touched_ts"]), None):
+            repaired += 1
+    return repaired
+
+
 async def track(db: str, fetch: Callable, send: Callable) -> int:
     """Conservative M1 paper tracking. Ambiguous same-bar TP/SL is NOT counted as a win."""
     from office_bridge import _execute
@@ -158,6 +181,11 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         existing_events = store.events(db, sid)
         existing_entry = next((x for x in existing_events if x["level"] == "ENTRY"), None)
         if existing_entry and float(existing_entry["touched_ts"]) < float(ready_sent_ts):
+            # Preserve the audit trail without claiming a Telegram delivery.
+            try:
+                store.record_event(db, sid, "AMBIGUOUS", float(existing_entry["touched_ts"]), None)
+            except Exception as exc:
+                print(f"[br-live] ambiguous audit event {sid}: {type(exc).__name__}", flush=True)
             _execute(db, "UPDATE br_test_signal SET status = 'AMBIGUOUS' WHERE sig_id = ? AND status = 'SENT'", (sid,))
             print(f"[br-live] PRE_READY_ENTRY {sid}; outcome suppressed", flush=True)
             continue
@@ -270,6 +298,13 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
     data_alert_sent = False
     consecutive_partial = 0
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
+    if enabled():
+        try:
+            repaired = await asyncio.to_thread(reconcile_pre_ready_ambiguous_audit, db)
+            if repaired:
+                print(f"[br-live] reconciled PRE_READY_ENTRY audit events={repaired}", flush=True)
+        except Exception as exc:
+            print(f"[br-live] ambiguous audit reconciliation: {type(exc).__name__}", flush=True)
     await asyncio.sleep(45)
     while True:
         try:
