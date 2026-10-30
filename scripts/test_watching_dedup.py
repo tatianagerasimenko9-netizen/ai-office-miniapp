@@ -132,6 +132,55 @@ def main() -> int:
     if str(rows[0].get("status")) != "WATCHING":
         return _fail("skip must keep WATCHING")
 
+    # P0 #169: a per-symbol dedup must not load all WATCHING rows.
+    # Other symbols and non-WATCHING statuses must never suppress this setup.
+    import office_watching_dedup as dedup
+    from unittest.mock import patch
+
+    signal_upsert(
+        db, signal_id="other-symbol", symbol="OTHERUSDT", direction="LONG",
+        entry_low=10.0, entry_high=11.0, sl=9.0, tp1=12.0, tp2=None,
+        rr=2.0, status="WATCHING",
+    )
+    signal_upsert(
+        db, signal_id="same-symbol-active", symbol="T3SKIPUSDT", direction="LONG",
+        entry_low=10.0, entry_high=11.0, sl=9.0, tp1=12.0, tp2=None,
+        rr=2.0, status="ACTIVE",
+    )
+    calls = []
+    original_fetch = dedup._fetchall
+
+    def check_symbol_query(db_path, sql, params=()):
+        if "FROM office_signals" in sql:
+            if "symbol = ?" not in sql or "status = ?" not in sql:
+                raise AssertionError("WATCHING lookup must filter symbol and status in SQL")
+            calls.append(tuple(params))
+        return original_fetch(db_path, sql, params)
+
+    with patch.object(dedup, "_fetchall", side_effect=check_symbol_query):
+        found = dedup.find_active_watching_same_setup(
+            db, symbol="t3skipusdt", timeframe="4h",
+            setup=setup_from_levels("LONG", 10.0, 11.0),
+        )
+        absent = dedup.find_active_watching_same_setup(
+            db, symbol="MISSINGUSDT", timeframe="1h",
+            setup=setup_from_levels("LONG", 10.0, 11.0),
+        )
+        different = dedup.find_active_watching_same_setup(
+            db, symbol="T3SKIPUSDT", timeframe="1h",
+            setup=setup_from_levels("SHORT", 10.0, 11.0),
+        )
+    if not found or found["signal_id"] != "watch-t3-1":
+        return _fail("symbol-scoped WATCHING lookup changed dedup semantics")
+    if absent is not None or different is not None:
+        return _fail("unrelated symbol/setup must not be deduplicated")
+    if calls != [
+        ("T3SKIPUSDT", "WATCHING"),
+        ("MISSINGUSDT", "WATCHING"),
+        ("T3SKIPUSDT", "WATCHING"),
+    ]:
+        return _fail(f"unexpected WATCHING query params: {calls}")
+
     # Активна зона: ZONE_REACHED не глушиться рішенням SKIP.
     plan = plan_watching_zone_hit(
         current_price=10.5,
