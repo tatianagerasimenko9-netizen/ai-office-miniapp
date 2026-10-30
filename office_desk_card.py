@@ -694,11 +694,33 @@ def is_legacy_desk_range(row: Any, note: Any = "") -> bool:
 
 
 def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any]]:
-    from office_bridge import _fetchall, is_confirmed_position_row, signal_get_active
+    from office_bridge import _fetchall, is_confirmed_position_row
 
-    sym = str(symbol or "").upper()
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return None
+    # #169: avoid fetching every active symbol into the main event loop.
+    # Keep the original newest-first ordering and legacy desk-range exclusion.
+    fields = (
+        "signal_id", "symbol", "direction", "entry_low", "entry_high",
+        "sl", "tp1", "tp2", "rr", "status", "ts_created", "ts_updated",
+        "outcome", "analysis_note",
+    )
     try:
-        rows = signal_get_active(db_path) or []
+        values = _fetchall(
+            db_path,
+            """
+            SELECT signal_id, symbol, direction, entry_low, entry_high,
+                   sl, tp1, tp2, rr, status, ts_created, ts_updated,
+                   outcome, analysis_note
+            FROM office_signals
+            WHERE symbol = ?
+              AND status IN ('ACTIVE', 'HIT_ENTRY', 'HIT_TP1', 'HIT_TP2')
+            ORDER BY ts_created DESC
+            """,
+            (sym,),
+        )
+        rows = [dict(zip(fields, r)) for r in (values or [])]
     except Exception:
         rows = []
     for r in rows:
@@ -722,10 +744,10 @@ def latest_open_desk_signal(db_path: str, symbol: str) -> Optional[Dict[str, Any
             SELECT trade_id, symbol, direction, status, entry_price, stop_loss,
                    take_profit, entry_reason, setup_name
             FROM trade_journal
-            WHERE status = 'OPEN'
+            WHERE status = 'OPEN' AND symbol = ?
             ORDER BY ts_open_utc DESC
             """,
-            (),
+            (sym,),
         )
     except Exception:
         jrows = []

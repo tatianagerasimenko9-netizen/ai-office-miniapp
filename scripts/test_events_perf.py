@@ -37,5 +37,17 @@ OB.log_event(db, "SIGNAL_PLAN", {"scenario_id": "new"}, "new")
 check("без since_ts читається вся історія", len(T._events(db, "SIGNAL_PLAN")) == 2)
 rec = T._events(db, "SIGNAL_PLAN", time.time() - 14 * 86400)
 check("з since_ts — лише недавнє вікно", [e["p"]["scenario_id"] for e in rec] == ["new"], str(rec))
+# Office2 fast tracking must select only O2 plans at SQL level; historical
+# and legacy reads retain the original complete result set.
+OB.log_event(db, "SIGNAL_PLAN", {"scenario_id": "O2|fast", "confirmed_ts": 123}, "O2|fast")
+OB.log_event(db, "SIGNAL_PLAN", {"scenario_id": "SCN|slow", "confirmed_ts": 123}, "SCN|slow")
+recent = time.time() - 14 * 86400
+o2 = T._events(db, "SIGNAL_PLAN", recent, signal_prefix="O2|")
+check("Office2 SQL prefix reads only O2 plans", [e["p"]["scenario_id"] for e in o2] == ["O2|fast"], str(o2))
+all_recent = T._events(db, "SIGNAL_PLAN", recent)
+check("unscoped journal retains all recent plans", {e["p"]["scenario_id"] for e in all_recent} == {"new", "O2|fast", "SCN|slow"}, str(all_recent))
+# An empty matching set is safe: never substitute unfiltered history.
+check("unknown scope does not fall back to all plans", T._events(db, "SIGNAL_PLAN", recent, signal_prefix="O2|missing") == [])
+
 print("FAILED:", FAILS) if FAILS else print("ALL OK")
 sys.exit(1 if FAILS else 0)
