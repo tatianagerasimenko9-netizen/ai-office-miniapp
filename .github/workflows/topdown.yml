@@ -19,17 +19,23 @@ jobs:
           python-version: "3.11"
       - run: pip install numpy pandas scikit-learn
       - name: Fetch M15 2022-01..2026-10
+        shell: bash
         run: |
           SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
           echo "SYMS=$SYMS" >> $GITHUB_ENV
           python3 scripts/fetch_binance_klines.py candles $SYMS 15m:2022-01-01:2026-11-01 | tail -2
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED: немає BTCUSDT/15m.csv'; exit 1; }
       - name: LEAKCHECK (підгляд у майбутнє, реальні дані)
+        shell: bash
         run: cd docs/handoff/br-profitability/strategy_search && python3 leakcheck.py ../../../../candles BTCUSDT | tee ../../../../leak_out.txt && python3 leakcheck.py ../../../../candles SOLUSDT | tee -a ../../../../leak_out.txt
       - name: Top-down, модель рівнів (0.10%)
+        shell: bash
         run: cd docs/handoff/br-profitability/strategy_search && MODEL=ml_discover2 python3 topdown.py ../../../../candles "$SYMS" 0.0010 | tee ../../../../td_out.txt
       - name: Top-down, повний інструментарій (0.10%)
+        shell: bash
         run: cd docs/handoff/br-profitability/strategy_search && MODEL=ml_discover3 python3 topdown.py ../../../../candles "$SYMS" 0.0010 | tee -a ../../../../td_out.txt
       - name: Top-down, модель рівнів (0.05%)
+        shell: bash
         run: cd docs/handoff/br-profitability/strategy_search && MODEL=ml_discover2 python3 topdown.py ../../../../candles "$SYMS" 0.0005 | tee -a ../../../../td_out.txt
       - uses: actions/upload-artifact@v4
         with:
