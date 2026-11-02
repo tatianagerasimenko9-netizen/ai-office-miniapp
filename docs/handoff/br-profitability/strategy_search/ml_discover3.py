@@ -104,7 +104,7 @@ def rows_for(sym, d, btc):
             ok_ = np.arange(n)[ii] - k
             oo, hh_, ll_, cc_ = EX["o"][ok_], EX["h"][ok_], EX["l"][ok_], EX["c"][ok_]
             f[f"tail{k}"] = ((np.minimum(oo, cc_) - ll_) if s > 0 else (hh_ - np.maximum(oo, cc_))) / atr[ii]
-        df = pd.DataFrame(f); df["stop_pct"] = sp[ii]; df["t"] = t[ii]; df["r"] = net; df["side"] = s; df["sym"] = sym
+        df = pd.DataFrame(f); df["stop_pct"] = sp[ii]; df["ent"] = e; df["sl"] = sL; df["t"] = t[ii]; df["r"] = net; df["side"] = s; df["sym"] = sym
         out.append(df)
     return pd.concat(out) if out else None
 
@@ -148,7 +148,7 @@ def main():
         r = rows_for(s, d, btc)
         if r is not None: parts.append(r); print(s, len(r), flush=True)
     df = pd.concat(parts).reset_index(drop=True); df["year"] = pd.to_datetime(df.t, unit="s").dt.year
-    X = [c for c in df.columns if c not in ("t", "r", "side", "sym", "year")]
+    X = [c for c in df.columns if c not in ("t", "r", "side", "sym", "year", "ent", "sl")]
     print(f"\nВходів {len(df)}; ознак {len(X)}; комісія {COST*100:.2f}%; сер. R усіх входів по роках:", {int(y): round(g.r.mean(), 3) for y, g in df.groupby("year")})
     tr = df[df.year <= 2023]; va = df[df.year == 2024]; te = df[df.year >= 2025]
     m = HistGradientBoostingRegressor(max_depth=4, learning_rate=0.05, max_iter=250, min_samples_leaf=500, l2_regularization=5.0, random_state=7).fit(tr[X], tr.r)
@@ -171,4 +171,5 @@ def main():
     z = te.copy(); z["s"] = m.predict(z[X]); z["dec"] = pd.qcut(z.s, 10, labels=False, duplicates="drop")
     for dcl, g in z.groupby("dec"): print(f"   дециль {int(dcl)}: n={len(g)} R/угоду={g.r.mean():+.3f} частка плюсових={100*(g.r>0).mean():.1f}%")
     print("\n##### ПІДСУМОК ml_discover3 завершено")
-main()
+if __name__ == "__main__":
+    main()
