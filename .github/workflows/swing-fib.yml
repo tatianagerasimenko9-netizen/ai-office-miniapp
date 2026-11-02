@@ -1,0 +1,31 @@
+name: swing-fib
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/swing-fib.yml
+      - docs/handoff/br-profitability/strategy_search/swing_fib.py
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas scikit-learn
+      - name: Fetch M15 2024-01..2026-10
+        run: |
+          SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
+          echo "SYMS=$SYMS" >> $GITHUB_ENV
+          python3 scripts/fetch_binance_klines.py candles $SYMS 15m:2024-01-01:2026-11-01 | tail -2
+      - name: Swing-Fib (0.05%)
+        run: cd docs/handoff/br-profitability/strategy_search && python3 swing_fib.py ../../../../candles "$SYMS" 0.0005 | tee ../../../../swing_out.txt
+      - name: Swing-Fib (0.10%)
+        run: cd docs/handoff/br-profitability/strategy_search && python3 swing_fib.py ../../../../candles "$SYMS" 0.0010 | tee -a ../../../../swing_out.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swing-fib
+          path: swing_out.txt
