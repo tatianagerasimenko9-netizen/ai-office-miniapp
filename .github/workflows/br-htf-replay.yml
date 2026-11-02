@@ -28,7 +28,7 @@ jobs:
       - name: свічки
         run: |
           SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,NEARUSDT,TIAUSDT,SEIUSDT,ONDOUSDT
-          python3 scripts/fetch_binance_klines.py candles $SYMS 1m:2026-10-15:2026-11-01 1h:2026-09-01:2026-11-01 4h:2026-09-01:2026-11-01 1d:2026-08-01:2026-11-01
+          python3 scripts/fetch_binance_klines.py candles $SYMS 1m:2026-10-10:2026-11-01 1h:2026-09-01:2026-11-01 4h:2026-09-01:2026-11-01 1d:2026-08-01:2026-11-01
       - name: replay
         run: |
           python3 analysis/htf_stop_replay.py --plans "docs/handoff/br-profitability/data/br_plans_*.psv" --candles-dir candles --out htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
@@ -43,6 +43,8 @@ jobs:
         run: python3 docs/handoff/br-profitability/analysis/entry_grid.py "docs/handoff/br-profitability/data/br_plans_*.psv" candles | tee -a "$GITHUB_STEP_SUMMARY"
       - name: нове мислення в доларах (combo)
         run: python3 docs/handoff/br-profitability/analysis/combo_dollars.py "docs/handoff/br-profitability/data/br_plans_*.psv" candles | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: скальп-структура (M15/M30/H1 стоп) у доларах
+        run: python3 docs/handoff/br-profitability/analysis/scalp_structure_grid.py "docs/handoff/br-profitability/data/br_plans_*.psv" candles | tee -a "$GITHUB_STEP_SUMMARY"
       - name: B12 прапорці бази знань (якщо analysis/b12_flags.py є)
         run: |
           if [ -f analysis/b12_flags.py ]; then
