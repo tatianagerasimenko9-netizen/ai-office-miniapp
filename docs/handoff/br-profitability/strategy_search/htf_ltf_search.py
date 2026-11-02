@@ -118,10 +118,18 @@ def trades_for(sym, st, m5, m1, a5, a1m):
     t0 = m5["open_time"][ti]
     # E0: ліміт на рівні в момент дотику, стоп HTF
     sl = st["e0_sl"]; sp = abs(L - sl) / L
-    if MIN_STOP <= sp <= MAX_STOP:
+    # реальне виконання ліміту: ціна має ДІЙТИ до рівня (а не лише наблизитись на tol), вікно 24 год
+    fi = None
+    for q in range(ti, min(ti + 288, len(m5["close"]) - 1)):
+        if (m5["low"][q] <= L) if side > 0 else (m5["high"][q] >= L):
+            fi = q; break
+    if fi is not None and MIN_STOP <= sp <= MAX_STOP:
         for tg in TGTS:
-            r = resolve(m5, ti, side, L, sl, tg, H_BARS["5m"])
-            if r is not None: res.append(("E0 ліміт на рівні", tg, r, sp, t0))
+            if (m5["low"][fi] <= sl) if side > 0 else (m5["high"][fi] >= sl):
+                r = -1.0                                   # консервативно: стоп у тому ж барі виконання
+            else:
+                r = resolve(m5, fi, side, L, sl, tg, H_BARS["5m"])
+            if r is not None: res.append(("E0 ліміт на рівні", tg, r, sp, m5["open_time"][fi]))
     # E1: M5 підтвердження — закриття за рівнем у бік угоди, стоп за екстремумом реакції
     for q in range(ti, min(ti + 36, len(m5["close"]) - 1)):
         if (m5["close"][q] > L) if side > 0 else (m5["close"][q] < L):
