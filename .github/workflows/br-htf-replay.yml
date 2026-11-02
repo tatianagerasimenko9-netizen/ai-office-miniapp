@@ -3,8 +3,8 @@ name: B&R HTF stop replay (read-only)
 # Тягне свічки Binance Futures (data.binance.vision) і запускає analysis/htf_stop_replay.py з гілки PR #311 + агрегацію. Нічого не пише в БД/Render/Telegram.
 on:
   push:
-    branches: ['claude/eager-pascal-t9e1ac']
-    paths: ['.github/workflows/br-htf-replay.yml', 'scripts/fetch_binance_klines.py', 'docs/handoff/br-profitability/analysis/htf_aggregate.py']
+    branches: ['claude/eager-pascal-t9e1ac', 'chatgpt/**']
+    paths: ['.github/workflows/br-htf-replay.yml', 'scripts/fetch_binance_klines.py', 'docs/handoff/br-profitability/analysis/**', 'analysis/**']
   workflow_dispatch: {}
 
 permissions:
@@ -33,5 +33,12 @@ jobs:
         run: |
           python3 analysis/htf_stop_replay.py --plans "docs/handoff/br-profitability/data/br_plans_*.psv" --candles-dir candles --out htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
           python3 docs/handoff/br-profitability/analysis/htf_aggregate.py htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: B12 прапорці бази знань (якщо analysis/b12_flags.py є)
+        run: |
+          if [ -f analysis/b12_flags.py ]; then
+            python3 analysis/b12_flags.py --plans "docs/handoff/br-profitability/data/br_plans_*.psv" --candles-dir candles --out b12.json | tee -a "$GITHUB_STEP_SUMMARY"
+          else echo "analysis/b12_flags.py ще немає" | tee -a "$GITHUB_STEP_SUMMARY"; fi
       - uses: actions/upload-artifact@v4
-        with: { name: htf_replay, path: htf_replay.json }
+        with: { name: htf_replay, path: |
+            htf_replay.json
+            b12.json }
