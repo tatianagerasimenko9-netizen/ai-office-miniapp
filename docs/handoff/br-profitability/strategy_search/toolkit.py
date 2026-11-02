@@ -19,27 +19,27 @@ def family_of(name):
     return "other"
 
 def waves(h, l, c, atr, K=3):
-    n = len(c)
-    ph = (pd.Series(h).rolling(2 * K + 1, center=True).max().to_numpy() == h); pl = (pd.Series(l).rolling(2 * K + 1, center=True).min().to_numpy() == l)
-    piv = []
-    for j in range(K, n - K):
-        for typ, ok, px in (("H", ph[j], h[j]), ("L", pl[j], l[j])):
-            if not ok: continue
-            if piv and piv[-1][1] == typ:
-                if (typ == "H" and px > piv[-1][2]) or (typ == "L" and px < piv[-1][2]): piv[-1] = (j, typ, px)
-            else:
-                if piv and abs(px - piv[-1][2]) < 1.5 * (atr[j] if atr[j] == atr[j] else 1e18): continue   # мінімальний розмір ноги 1.5 ATR (ГІПОТЕЗА)
-                piv.append((j, typ, px))
+    """Хвильова структура СУВОРО причинно: на барі i відомі лише бари <= i. Піворт j=i-K підтверджується на барі i (вікно j-K..j+K повністю в минулому).
+    Список півортів оновлюється послідовно (злиття однотипних, фільтр розміру ноги 1.5 ATR — ГІПОТЕЗА); ознаки рахуються зі СТАНУ на барі i, без ретроспективних змін."""
+    n = len(c); piv = []
     names = ("w_AB", "w_AC", "w_BC", "w_dir", "w3like", "w_lastP", "w_lastA", "w_lastI")
     arr = {k: np.full(n, np.nan) for k in names}
-    for m in range(4, len(piv)):
-        cm = piv[m][0] + K
-        if cm >= n: break
-        P = [piv[m - i][2] for i in range(5)]
-        A, B, C = abs(P[0] - P[1]), abs(P[1] - P[2]), abs(P[2] - P[3])
-        if min(A, B, C) <= 0: continue
-        arr["w_AB"][cm] = A / B; arr["w_AC"][cm] = A / C; arr["w_BC"][cm] = B / C; arr["w_dir"][cm] = 1.0 if P[0] > P[1] else -1.0
-        arr["w3like"][cm] = float(A > B and A > C and B < C); arr["w_lastP"][cm] = P[0]; arr["w_lastA"][cm] = A; arr["w_lastI"][cm] = cm
+    for i in range(2 * K, n):
+        j = i - K; changed = False
+        for typ, px, ok in (("H", h[j], h[j] >= h[j - K:j + K + 1].max()), ("L", l[j], l[j] <= l[j - K:j + K + 1].min())):
+            if not ok: continue
+            if piv and piv[-1][1] == typ:
+                if (typ == "H" and px > piv[-1][2]) or (typ == "L" and px < piv[-1][2]): piv[-1] = (j, typ, px); changed = True
+            else:
+                a_ = atr[i]
+                if piv and a_ == a_ and abs(px - piv[-1][2]) < 1.5 * a_: continue
+                piv.append((j, typ, px)); changed = True
+        if changed and len(piv) >= 5:
+            P = [piv[-1 - q][2] for q in range(5)]
+            A, B, C = abs(P[0] - P[1]), abs(P[1] - P[2]), abs(P[2] - P[3])
+            if min(A, B, C) > 0:
+                arr["w_AB"][i] = A / B; arr["w_AC"][i] = A / C; arr["w_BC"][i] = B / C; arr["w_dir"][i] = 1.0 if P[0] > P[1] else -1.0
+                arr["w3like"][i] = float(A > B and A > C and B < C); arr["w_lastP"][i] = P[0]; arr["w_lastA"][i] = A; arr["w_lastI"][i] = i
     F = {k: pd.Series(v).ffill().to_numpy() for k, v in arr.items()}
     idx = np.arange(n)
     retr = (F["w_lastP"] - c) * F["w_dir"] / F["w_lastA"]          # частка останньої ноги, яку ціна вже відкотила

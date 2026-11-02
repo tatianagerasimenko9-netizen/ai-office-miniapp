@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/topdown.yml
       - docs/handoff/br-profitability/strategy_search/topdown.py
+      - docs/handoff/br-profitability/strategy_search/toolkit.py
+      - docs/handoff/br-profitability/strategy_search/leakcheck.py
   workflow_dispatch:
 jobs:
   run:
@@ -21,6 +23,8 @@ jobs:
           SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
           echo "SYMS=$SYMS" >> $GITHUB_ENV
           python3 scripts/fetch_binance_klines.py candles $SYMS 15m:2022-01-01:2026-11-01 | tail -2
+      - name: LEAKCHECK (підгляд у майбутнє, реальні дані)
+        run: cd docs/handoff/br-profitability/strategy_search && python3 leakcheck.py ../../../../candles BTCUSDT | tee ../../../../leak_out.txt && python3 leakcheck.py ../../../../candles SOLUSDT | tee -a ../../../../leak_out.txt
       - name: Top-down, модель рівнів (0.10%)
         run: cd docs/handoff/br-profitability/strategy_search && MODEL=ml_discover2 python3 topdown.py ../../../../candles "$SYMS" 0.0010 | tee ../../../../td_out.txt
       - name: Top-down, повний інструментарій (0.10%)
