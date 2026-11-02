@@ -112,11 +112,12 @@ def test_track_does_not_replay_entry_before_ready_delivery():
                                 captured["sent"].append((args, kwargs))
                                 return 456
 
-                            result = asyncio.run(live.track(
-                                "offline-test-db",
-                                lambda *args, **kwargs: bars,
-                                send,
-                            ))
+                            with patch.object(live.time, "time", lambda: epoch("2026-10-28T16:00:00Z")):
+                                result = asyncio.run(live.track(
+                                    "offline-test-db",
+                                    lambda *args, **kwargs: bars,
+                                    send,
+                                ))
 
     assert captured["fallback"] == ready_sent
     assert result == 0  # ENTRY is recorded; terminal TP/SL events remain zero.
@@ -183,7 +184,8 @@ def test_pre_ready_entry_cannot_drive_later_paper_outcome():
                         captured["fetch"] += 1
                         return []
 
-                    result = asyncio.run(live.track("offline-test-db", fetch, send))
+                    with patch.object(live.time, "time", lambda: epoch("2026-10-28T16:00:00Z")):
+                        result = asyncio.run(live.track("offline-test-db", fetch, send))
 
     assert result == 0
     assert captured["fetch"] == 0
