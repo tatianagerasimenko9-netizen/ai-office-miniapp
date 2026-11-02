@@ -16,6 +16,7 @@ def load(s):
     g = d.groupby(d.open_time // (TF * 60) * (TF * 60)).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"), volume=("volume", "sum")).reset_index()
     return g
 rs.load = load
+found = []
 def main():
     btc = rs.load("BTCUSDT"); btc_ret = {}
     step = TF * 60
@@ -39,6 +40,8 @@ def main():
     ev = {int(y): round(100 * (g.mfe >= 3).mean(), 1) for y, g in df.groupby("year")}
     print("частка входів, що дійшли ≥3R до стопа (беззбиток ≈ 27%+):", ev)
     tr = df[df.year <= 2023]; tests = {y: df[df.year == y] for y in (2024, 2025, 2026)}
+    global found
+    found = []
     for depth, leaf in ((3, 3000), (4, 2000), (5, 1500)):
         m = DecisionTreeRegressor(max_depth=depth, min_samples_leaf=leaf).fit(tr[rs.FEATS], tr.r)
         lf_tr = m.apply(tr[rs.FEATS]); lf_te = {y: m.apply(g[rs.FEATS]) for y, g in tests.items()}
@@ -54,5 +57,8 @@ def main():
                 for tt, rr in zip(q.t, q.r): pool.setdefault(int(tt // 86400), []).append(rr)
             lo, hi = rs.boot(pool) if pool else (0, 0)
             ok = ok and lo > 0
+            if ok: found.append((depth, lf, len(a), a.r.mean(), cells, lo, hi))
             print(f"| {lf} | {len(a)}/{a.r.mean():+.3f} | " + " | ".join(cells) + f" | [{lo:+.3f}; {hi:+.3f}] | {'✅' if ok else ''} |")
 main()
+print(f"\n##### ПІДСУМОК TF={TF} комісія {COST*100:.2f}%: ✅ листків = {len(found)}")
+for f in found: print("   ✅", f)
