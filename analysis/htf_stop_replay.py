@@ -129,6 +129,9 @@ def main():
             audit_status = "AMBIGUOUS_DB"
         else:
             audit_status = "RECONCILE"
+        if current["stop_at"] is None and current["target_at"] is None:
+            data.append({"seq":p["seq"], "status":"UNRESOLVED_HORIZON", "entry_at":current["entry_at"]})
+            continue
         risk = abs(p["entry"]-p["sl"])
         current_r = (abs(p["tp1"]-p["entry"])/risk
                      if current["target_at"] is not None else -1) - .0015*p["entry"]/risk
@@ -146,6 +149,11 @@ def main():
                 if abs(p["entry"]-proposed)<=0:
                     continue
                 alternative = follow(bars["1m"],p["ts"],p["direction"],p["entry"],proposed,p["tp1"])
+                if alternative["target_at"] is None and alternative["stop_at"] is None:
+                    result["variants"].append({"timeframe":tf,"buffer_ratio":factor,
+                                               "sl_htf_price":proposed,"net_r":None,
+                                               "status":"UNRESOLVED_HORIZON","path":alternative})
+                    continue
                 alternative_risk = abs(p["entry"]-proposed)
                 net = ((abs(p["tp1"]-p["entry"])/alternative_risk)
                        if alternative["target_at"] is not None else -1) - .0015*p["entry"]/alternative_risk
