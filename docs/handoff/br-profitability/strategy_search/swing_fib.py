@@ -140,30 +140,36 @@ def main():
             for x in trades(d, minleg): rows.append((s,) + x)
         if not rows: print("немає угод"); continue
         df = pd.DataFrame(rows, columns=["sym", "entry", "exit", "t", "r", "sp", "planR", "k"])
-        days = (df.t.max() - df.t.min()) / DAY
-        print(f"\n=== Нога >= {minleg} ATR; комісія {COST*100:.2f}%; угод (усі вихід×вхід) {len(df)}; період {days:.0f} діб; $ при $10 ризику на угоду ===")
-        print("| вхід | вихід | сер. план R до T1 | n старе | R старе | $ старе | n нове | R нове | $ нове | CI95 (все) | обидва > 0 |\n|--|--|--|--|--|--|--|--|--|--|--|")
+        df["year"] = pd.to_datetime(df.t, unit="s").dt.year
+        yrs = sorted(df.year.unique()); days = (df.t.max() - df.t.min()) / DAY
+        print(f"\n=== Нога >= {minleg} ATR; комісія {COST*100:.2f}%; угод (усі вхід×вихід) {len(df)}; період {days:.0f} діб ===")
+        print("R/угоду і $ ($10 ризику) по роках; ✅ = плюс у КОЖНОМУ році з n>=20")
+        print("| вхід | вихід | " + " | ".join(f"{y} n/R/$" for y in yrs) + " | усього $ | CI95 | ✅ |\n|--|--|" + "--|" * (len(yrs) + 3))
         good = []
         for e in ENTRIES:
             for x in EXITS:
                 z = df[(df.entry == e) & (df["exit"] == x)]
-                if len(z) < 40: continue
-                o, nw = z[z.t < SPLIT], z[z.t >= SPLIT]
-                if len(o) < 20 or len(nw) < 20: continue
+                cells = []; ok = True; seen = 0
+                for y in yrs:
+                    q = z[z.year == y]
+                    if len(q) < 20: cells.append(f"{len(q)}/–/–"); continue
+                    seen += 1; cells.append(f"{len(q)}/{q.r.mean():+.2f}/{10*q.r.sum():+,.0f}")
+                    if q.r.mean() <= 0: ok = False
+                if seen < 3: ok = False
                 dd = {}
                 for tt, rr in zip(z.t, z.r): dd.setdefault(int(tt // DAY), []).append(rr)
-                lo, hi = boot(dd); ok = o.r.mean() > 0 and nw.r.mean() > 0
+                lo, hi = boot(dd) if len(z) else (0, 0)
                 if ok: good.append((e, x))
-                print(f"| {e} | {x} | {z.planR.mean():.1f} | {len(o)} | {o.r.mean():+.3f} | {10*o.r.sum():+,.0f} | {len(nw)} | {nw.r.mean():+.3f} | {10*nw.r.sum():+,.0f} | [{lo:+.3f}; {hi:+.3f}] | {'✅' if ok else ''} |")
+                print(f"| {e} | {x} | " + " | ".join(cells) + f" | {10*z.r.sum():+,.0f} | [{lo:+.3f}; {hi:+.3f}] | {'✅' if ok else ''} |")
         for e, x in good:
             z = df[(df.entry == e) & (df["exit"] == x)]
-            print(f"\n✅ {e} / {x}: угод на добу {len(z)/days:.1f}; по сесіях UTC (Азія 0-7 / Лондон 7-13 / Нью-Йорк 13-24):", end=" ")
-            for nm, lo_, hi_ in (("Азія", 0, 7), ("Лондон", 7, 13), ("НЙ", 13, 24)):
+            print(f"\n✅ {e} / {x}: угод на добу {len(z)/days:.1f} (12 монет); по сесіях UTC:", end=" ")
+            for nm, lo_, hi_ in (("Азія 0-7", 0, 7), ("Лондон 7-13", 7, 13), ("НЙ 13-24", 13, 24)):
                 hh = (z.t % DAY) // 3600; q = z[(hh >= lo_) & (hh < hi_)]
-                print(f"{nm} n={len(q)} R={q.r.mean() if len(q) else 0:+.3f} $={10*q.r.sum():+,.0f};", end=" ")
+                print(f"{nm}: n={len(q)} R={q.r.mean() if len(q) else 0:+.3f} $={10*q.r.sum():+,.0f};", end=" ")
             print()
-        if not good: print("\nЖодна комбінація не дала плюс на обох періодах.")
-    print("\nПримітка: ~24 комбінації × 2 довжини ноги × 2 комісії — кратне порівняння; ✅ = лише кандидат для shadow.")
+        if not good: print("\nЖодна комбінація не дала плюс у кожному році.")
+    print("\nПримітка: ~24 комбінації × 2 довжини ноги — кратне порівняння; ✅ = лише кандидат для shadow.")
 
 
 main()
