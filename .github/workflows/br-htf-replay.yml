@@ -1,0 +1,37 @@
+name: B&R HTF stop replay (read-only)
+
+# Тягне свічки Binance Futures (data.binance.vision) і запускає analysis/htf_stop_replay.py з гілки PR #311 + агрегацію. Нічого не пише в БД/Render/Telegram.
+on:
+  push:
+    branches: ['claude/eager-pascal-t9e1ac']
+    paths: ['.github/workflows/br-htf-replay.yml', 'scripts/fetch_binance_klines.py', 'docs/handoff/br-profitability/analysis/htf_aggregate.py']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: analysis з гілки PR #311 (якщо ще не в main)
+        run: |
+          git fetch origin chatgpt/a4-a5-a7-shadow-audit-20261102 || true
+          git checkout origin/chatgpt/a4-a5-a7-shadow-audit-20261102 -- analysis scripts/test_htf_stop_replay.py || true
+          ls analysis
+      - run: python3 scripts/test_htf_stop_replay.py
+      - name: свічки
+        run: |
+          SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,NEARUSDT,TIAUSDT,SEIUSDT,ONDOUSDT
+          python3 scripts/fetch_binance_klines.py candles $SYMS 1m:2026-10-15:2026-11-01 1h:2026-09-01:2026-11-01 4h:2026-09-01:2026-11-01 1d:2026-08-01:2026-11-01
+      - name: replay
+        run: |
+          python3 analysis/htf_stop_replay.py --plans "docs/handoff/br-profitability/data/br_plans_*.psv" --candles-dir candles --out htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 docs/handoff/br-profitability/analysis/htf_aggregate.py htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with: { name: htf_replay, path: htf_replay.json }
