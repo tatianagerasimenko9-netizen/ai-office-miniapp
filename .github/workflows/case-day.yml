@@ -1,0 +1,19 @@
+name: case-day
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/case-day.yml
+      - docs/handoff/br-profitability/strategy_search/case_day.py
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy
+      - name: BTC 2026-11-02
+        run: python3 docs/handoff/br-profitability/strategy_search/case_day.py BTCUSDT 2026-11-02 | tee case_out.txt
