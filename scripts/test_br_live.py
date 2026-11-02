@@ -1,6 +1,7 @@
 """Offline safety checks for live B&R observational stream (no network, no Telegram)."""
 import asyncio
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,15 +41,15 @@ def test_isolated_number_and_experimental_disclosure():
            "entry": 100, "sl": 99, "level": 100, "targets": [{"p": 101, "src": "structure"}]}
     text = build_card(row)
     assert "B&R LIVE" in text
-    assert "replay V1/V2 збитковий" in text
+    assert "replay V1/V2 збитковий" not in text
     assert "B&R-1" in text
     assert "AI Office · №" not in text
     from office_br.card import reminder_text
-    assert "фіксацію 30%" in reminder_text(row, "TP1")
-    assert "беззбиток" in reminder_text(row, "TP1")
-    assert "ще 40%" in reminder_text(row, "TP2")
-    assert "залишку" in reminder_text(row, "TP3")
-    assert "Торкання ≠ виконання ордера" in reminder_text(row, "ENTRY")
+    assert "TP1 досягнуто" in reminder_text(row, "TP1")
+    assert "Mini App" not in reminder_text(row, "ENTRY")
+    assert "TP2 досягнуто" in reminder_text(row, "TP2")
+    assert "TP3 досягнуто" in reminder_text(row, "TP3")
+    assert "Ціну входу торкнуто" in reminder_text(row, "ENTRY")
 
 
 def test_monitor_marks_only_successful_scan_and_reports_coverage():
@@ -66,11 +67,11 @@ def test_monitor_marks_only_successful_scan_and_reports_coverage():
 
 def test_br_ui_is_manual_and_has_both_charts():
     page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
-    assert "chart_a" in page and "chart_b" in page
+    assert "chart_a" in page and "chart_b" not in page
     assert "/api/v2/candles" in page and "Binance Futures" in page
     assert "Я відкрила угоду" in page and "Я перенесла SL у BE" in page
     assert "/api/br/manual" in page and "X-Telegram-Init-Data" in page
-    assert "Н/Д" in page
+    assert "Угоду відкрито вручну" in page
     assert "exchange_order" not in page
 
 
@@ -231,6 +232,18 @@ def test_reconcile_legacy_pre_ready_ambiguous_audit_without_telegram_ids():
     assert {call[1] for call in captured["events"]} == {"legacy-903", "legacy-904", "legacy-913"}
     assert all(call[2] == "AMBIGUOUS" and call[4] is None and len(call) == 5
                for call in captured["events"])
+
+
+
+
+def test_br_ui_javascript_references_existing_elements():
+    """Prevent runtime failure when removed panels leave stale JS DOM writes."""
+    page = (Path(__file__).resolve().parents[1] / "office_web" / "br_live.html").read_text(encoding="utf-8")
+    ids = set(re.findall(r'\bid="([^"]+)"', page))
+    referenced = set(re.findall(r'\$\("([A-Za-z_][A-Za-z0-9_]*)"\)', page))
+    assert referenced <= ids, f"Missing B&R DOM nodes: {sorted(referenced - ids)}"
+    assert '$("signal").replaceChildren()' in page
+
 
 
 if __name__ == "__main__":
