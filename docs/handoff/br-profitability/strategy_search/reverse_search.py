@@ -150,4 +150,5 @@ def main():
             x = te[mask]; print(f"  {nm}: n={len(x)}, R={x.r.mean():+.3f}, $={10*x.r.sum():+,.0f}")
 
 
-main()
+if __name__ == "__main__":
+    main()
