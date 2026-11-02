@@ -189,6 +189,48 @@ def _remember_bar(kind: str, key: Any, candles: Any, now: float, tf_sec: float =
         pass
 
 
+_SLIM_CACHE: Dict[Any, Dict[str, Any]] = {}
+_SLIM_LOCK = __import__("threading").Lock()
+_SLIM_OVERLAP = 500
+_SLIM_DROP = ("gate", "chart", "chart_candles", "trace")      # великі службові поля знімка; гарячі цикли супроводу їх не читають
+
+
+def reset_events_cache() -> None:
+    with _SLIM_LOCK:
+        _SLIM_CACHE.clear()
+
+
+def _events_slim(db: str, etype: str, since_ts: float) -> List[Dict[str, Any]]:
+    """Те саме, що _events(db, etype, since_ts), але для ГАРЯЧИХ циклів: події append-only, тому читаємо з БД лише нові (id > останнього) і не тримаємо важкі поля (gate/trace/chart).
+    Раніше кожен прохід (кожні 15–20 с, кілька потоків) заново вичитував і розбирав JSON усіх планів за 14 діб (десятки МБ на прохід) — піки пам'яті біля ліміту 512 МБ і db-slow до 13 с."""
+    from office_bridge import _fetchall
+
+    iso = datetime.fromtimestamp(float(since_ts), tz=timezone.utc).isoformat()
+    key = (db, etype)
+    with _SLIM_LOCK:
+        c = _SLIM_CACHE.get(key)
+        if c is None:
+            c = {"last_id": 0, "rows": [], "ids": set()}
+            _SLIM_CACHE[key] = c
+        rows = _fetchall(db, "SELECT id, ts_utc, signal_id, payload_json FROM office_events WHERE event_type = ? AND id > ? AND ts_utc >= ? ORDER BY id", (etype, max(0, int(c["last_id"]) - _SLIM_OVERLAP), iso))      # перекриття: у Postgres id з пізнішим комітом може з'явитись нижче вже прочитаного
+        for r in rows or []:
+            c["last_id"] = max(int(c["last_id"]), int(r[0]))
+            if r[0] in c["ids"]:
+                continue
+            c["ids"].add(r[0])
+            try:
+                pj = json.loads(r[3]) if isinstance(r[3], str) else dict(r[3] or {})
+            except (TypeError, ValueError):
+                continue
+            for k in _SLIM_DROP:
+                pj.pop(k, None)
+            c["rows"].append({"id": r[0], "ts": r[1], "signal_id": r[2], "p": pj})
+        if c["rows"] and str(c["rows"][0]["ts"]) < iso:
+            c["rows"] = [e for e in c["rows"] if str(e["ts"]) >= iso]
+            c["ids"] = {e["id"] for e in c["rows"]} | {r[0] for r in (rows or [])}
+        return list(c["rows"])
+
+
 def _events(db: str, etype: str, since_ts: Optional[float] = None) -> List[Dict[str, Any]]:
     """Події типу etype за зростанням id. since_ts — лише події не старші за цей момент (ts_utc ISO, порівняння рядків): гарячі цикли (супровід кожні 15–45 с) не читають і не розбирають усю історію."""
     from office_bridge import _fetchall
@@ -216,10 +258,10 @@ def tick(db: str, fetch: Optional[Callable[[str, str, int], Any]] = None, now_ts
         from office_market_data import fetch_candles_futures as fetch  # type: ignore[assignment]   # супровід сигналу — лише ф'ючерси Binance
     now = time.time() if now_ts is None else now_ts
     horizon = now - HOT_WINDOW_SEC
-    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events(db, EV_RESULT, horizon)}
+    done = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts")) for e in _events_slim(db, EV_RESULT, horizon)}
     written: List[Dict[str, Any]] = []
     cache: Dict[str, Any] = {}      # символ → свічки 15m за ЦЕЙ прохід: раніше кожен план (у т.ч. відхилені, ~1700 за 14 діб) робив власний REST-запит до Binance, хоча символів ~150
-    for ev in _events(db, EV_PLAN, horizon):
+    for ev in _events_slim(db, EV_PLAN, horizon):
         p = ev["p"]
         key = (p.get("scenario_id"), p.get("confirmed_ts"))
         if key in done:
@@ -528,10 +570,10 @@ def pending_milestones(db: str, fetch: Optional[Callable[[str, str, int], Any]] 
     now = time.time() if now_ts is None else now_ts
     since = milestone_since(db)
     horizon = now - HOT_WINDOW_SEC
-    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events(db, EV_MILESTONE, horizon)}
+    seen = {(e["p"].get("scenario_id"), e["p"].get("confirmed_ts"), e["p"].get("level")) for e in _events_slim(db, EV_MILESTONE, horizon)}
     out: List[Dict[str, Any]] = []
     fetched: Dict[Any, Any] = {}      # (символ, tf, ліміт) → свічки за ЦЕЙ прохід
-    for ev in _events(db, EV_PLAN, horizon):
+    for ev in _events_slim(db, EV_PLAN, horizon):
         p = ev["p"]
         if p.get("rejected") or not p.get("confirm_msg_id") or float(p.get("confirmed_ts") or 0) < since - MILESTONE_GRACE_SEC:
             continue
