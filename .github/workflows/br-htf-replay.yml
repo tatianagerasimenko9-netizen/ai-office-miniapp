@@ -35,6 +35,8 @@ jobs:
           python3 docs/handoff/br-profitability/analysis/htf_aggregate.py htf_replay.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: сітка рішень (стоп за HTF-swing × ціль)
         run: python3 docs/handoff/br-profitability/analysis/solution_grid.py "docs/handoff/br-profitability/data/br_plans_*.psv" candles | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: постмортем (виграшні vs програшні входи)
+        run: python3 docs/handoff/br-profitability/analysis/postmortem.py "docs/handoff/br-profitability/data/br_plans_*.psv" candles | tee -a "$GITHUB_STEP_SUMMARY"
       - name: B12 прапорці бази знань (якщо analysis/b12_flags.py є)
         run: |
           if [ -f analysis/b12_flags.py ]; then
