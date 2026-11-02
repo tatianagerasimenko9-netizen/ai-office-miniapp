@@ -22,6 +22,6 @@ class TestImage(unittest.TestCase):
         try:
             self.assertGreater(os.path.getsize(path),10000)
             with Image.open(path) as image:
-                self.assertEqual(image.size, (984, 1248))
+                self.assertEqual(image.size, (984, 1128))  # #292: футер прибрано з PNG (було 1248), менший растр
         finally:os.unlink(path)
 if __name__=="__main__":unittest.main()

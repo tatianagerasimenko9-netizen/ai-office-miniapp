@@ -78,7 +78,7 @@ def main():
         assert store.paper_metrics(db)["n"] == 2
         txt = card.build_card(rs[0])
         assert txt.startswith("B&R LIVE · B&R-1") and "AI Office" not in txt
-        assert "Історичний replay V1/V2 збитковий" in txt and "тільки ручне рішення" in txt
+        assert "Replay V1/V2 збитковий" in txt and "тільки ручне рішення" in txt and "Office не відкриває ордерів" in txt
         assert "🟡 ВХІД " in txt and "🔴 SL " in txt and "🟢 TP3 " in txt and "❌ Скасування:" in txt
         assert card.event_text(rs[0], "TP1", 105.0).startswith("B&R LIVE · B&R-1")
         # Preserve independent execution plans and new confirmations.
