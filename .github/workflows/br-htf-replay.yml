@@ -39,6 +39,9 @@ jobs:
             python3 analysis/b12_flags.py --plans "docs/handoff/br-profitability/data/br_plans_*.psv" --candles-dir candles --out b12.json | tee -a "$GITHUB_STEP_SUMMARY"
           else echo "analysis/b12_flags.py ще немає" | tee -a "$GITHUB_STEP_SUMMARY"; fi
       - uses: actions/upload-artifact@v4
-        with: { name: htf_replay, path: |
+        with:
+          name: htf_replay
+          path: |
             htf_replay.json
-            b12.json }
+            b12.json
+          if-no-files-found: ignore
