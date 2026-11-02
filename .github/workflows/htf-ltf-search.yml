@@ -1,0 +1,31 @@
+name: htf-ltf-search
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/htf-ltf-search.yml
+      - docs/handoff/br-profitability/strategy_search/htf_ltf_search.py
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch candles (per symbol)
+        run: |
+          SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT
+          echo "SYMS=$SYMS" >> $GITHUB_ENV
+          for S in ${SYMS//,/ }; do
+            python3 scripts/fetch_binance_klines.py candles $S 1d:2025-08-01:2026-11-01 4h:2025-08-01:2026-11-01 5m:2025-11-01:2026-11-01 1m:2026-02-01:2026-11-01 | tr '\n' ' '; echo
+          done
+      - name: Search
+        run: python3 docs/handoff/br-profitability/strategy_search/htf_ltf_search.py candles "$SYMS" | tee htf_ltf_out.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: htf-ltf-search
+          path: htf_ltf_out.txt

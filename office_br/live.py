@@ -96,6 +96,14 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
             _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
             continue
         try:
+            v2_line = None
+            if not card.is_td(row):      # v2-мітка — лише для B&R; TD-V1 має власну картку
+                try:
+                    from office_br import v2
+                    bucket = int(float(row["created_ts"]) // 900) * 900
+                    v2_line = v2.line(row, store.rows(db, "WHERE created_ts >= ? AND created_ts < ?", (bucket, bucket + 900)))
+                except Exception as exc_v2:  # мітка інформаційна: збій не має блокувати доставку
+                    print(f"[br-live] v2 label skipped: {type(exc_v2).__name__}", flush=True)
             if send_image is not None and fetch is not None:
                 import os
                 from office_br.live_image import render
@@ -103,13 +111,13 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
                 png = await asyncio.to_thread(render, row, candles)
                 try:
                     msg_id = await send_image(
-                        png, card.build_card(row), row
+                        png, card.build_card(row, v2_line), row
                     )
                 finally:
                     try: os.unlink(png)
                     except OSError: pass
             else:
-                msg_id = await send(card.build_card(row), symbol=row["symbol"], direction=row["direction"])
+                msg_id = await send(card.build_card(row, v2_line), symbol=row["symbol"], direction=row["direction"])
             if not msg_id:
                 print(f"[br-live] delivery pending {row['sig_id']}", flush=True)
                 continue
@@ -165,7 +173,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     for row in active:
         sid = row["sig_id"]
         if time.time() - (float(row["confirm_ts"]) + 900) > 48 * 3600:
-            msg_id = await send(f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
+            msg_id = await send(f"{card.head(row)} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
@@ -197,7 +205,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         first_ts = _epoch(candles[0])
         if first_ts > last + 60:
             print(f"[br-live] DATA_GAP {sid} last={last} first={first_ts}; no outcome assumed", flush=True)
-            msg_id = await send(f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
+            msg_id = await send(f"{card.head(row)} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (sid,))
@@ -230,7 +238,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                 tp_same = any((high >= float(t["p"]) if sg > 0 else low <= float(t["p"])) for t in tg[:3])
                 if stop_same or tp_same:
                     warning = await send(
-                        f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: вхід і TP/SL у тій самій M1-свічці. Порядок невідомий; результат не зараховано.",
+                        f"{card.head(row)} · {row['symbol']}: вхід і TP/SL у тій самій M1-свічці. Порядок невідомий; результат не зараховано.",
                         reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
                     if warning:
                         store.record_event(db, sid, "AMBIGUOUS", ts, None, int(warning))
@@ -259,7 +267,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                 message_detail = "\n".join(card.reminder_text(row, f"TP{i}") for i in new_tp)
             else:
                 message_detail = card.reminder_text(row, level)
-            msg = (f"B&R LIVE · B&R-{row['seq']} · {row['symbol']}: "
+            msg = (f"{card.head(row)} · {row['symbol']}: "
                    + ("TP і SL торкнулися однієї M1-свічки — порядок НЕВІДОМИЙ" if level == "AMBIGUOUS"
                       else message_detail))
             try:
@@ -276,7 +284,7 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                     prev.add(level)
                 n += 1
                 print(f"[br-live] EVENT {sid} {level} tg_id={msg_id}", flush=True)
-                if level in ("SL", "AMBIGUOUS", "TP3"):
+                if level in ("SL", "AMBIGUOUS", f"TP{min(3, len(tg))}"):
                     _execute(db, "UPDATE br_test_signal SET status = ? WHERE sig_id = ?", (level, sid))
                     _save_cursor(db, sid, ts)
                     break
@@ -310,6 +318,7 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
         try:
             if enabled():
                 scan_ok = scan_missing = scan_stale = scan_errors = new_signals = 0
+                # TD-V1 (ТЕСТ) рахується в сервісі Mini App (office_td.service) і пише сигнали в БД; тут лише доставка/супровід (без важких обчислень у Worker).
                 # Prioritize existing paper-position lifecycle updates before fresh scans.
                 # A slow scan/card send must not hold TP/SL notifications until cycle end.
                 # On restart, drain persisted READY candidates before lifecycle

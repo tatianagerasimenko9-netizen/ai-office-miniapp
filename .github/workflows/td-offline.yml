@@ -1,0 +1,34 @@
+name: TD-V1 offline checks
+on:
+  pull_request:
+    paths:
+      - 'office_td/**'
+      - 'office_br/**'
+      - 'scripts/test_td_*.py'
+      - '.github/workflows/td-offline.yml'
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - 'office_td/**'
+      - 'scripts/test_td_*.py'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt scikit-learn
+      - name: Compile
+        run: python -m py_compile office_td/*.py office_br/card.py office_br/live.py scripts/test_td_live.py scripts/test_td_features.py
+      - name: Ознаки ідентичні тренуванню
+        run: python scripts/test_td_features.py
+      - name: Логіка TD-V1 (кандидат -> M15 -> сигнал -> картка)
+        run: python scripts/test_td_live.py
+      - name: B&R не зламано
+        run: python scripts/test_br_live.py && python scripts/test_br_store_card.py

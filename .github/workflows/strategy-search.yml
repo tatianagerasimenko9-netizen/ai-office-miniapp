@@ -1,0 +1,28 @@
+name: strategy-search
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/strategy-search.yml
+      - docs/handoff/br-profitability/strategy_search/**
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fetch 12m M15
+        run: |
+          SYMS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,NEARUSDT,TIAUSDT,SEIUSDT,ONDOUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,APTUSDT,ARBUSDT,OPUSDT,INJUSDT
+          echo "SYMS=$SYMS" >> $GITHUB_ENV
+          python3 scripts/fetch_binance_klines.py candles $SYMS 15m:2025-11-01:2026-11-01 | tail -25
+      - name: Search
+        run: python3 docs/handoff/br-profitability/strategy_search/strategy_search.py candles "$SYMS" | tee strategy_search_out.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: strategy-search
+          path: strategy_search_out.txt

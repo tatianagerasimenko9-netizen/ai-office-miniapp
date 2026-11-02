@@ -1797,6 +1797,11 @@ def main() -> None:
         print(f"[warn] DB file not found yet: {DB_PATH}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     __import__("threading").Thread(target=_summary_refresh, args=(("", "", "", "", "summary"),), daemon=True, name="summary-warm").start()   # перший health-check не чекає на БД
+    try:
+        from office_td import service as _td_service   # TD-V1 (ТЕСТ): сигнали рахуються тут, не у Worker; вимкнути TD_LIVE=0
+        _td_service.start(_db_target_for_identity())
+    except Exception as exc_td:  # noqa: BLE001
+        print(f"[td] не запущено: {type(exc_td).__name__}: {exc_td}")
     print(f"mini-app: http://{HOST}:{PORT}")
     srv.serve_forever()
 

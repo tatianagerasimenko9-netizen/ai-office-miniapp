@@ -13,17 +13,24 @@ for spec in sys.argv[3:]:
 def get(j):
     s, tf, d = j
     url = f"https://data.binance.vision/data/futures/um/daily/klines/{s}/{tf}/{s}-{tf}-{d}.zip"
-    try:
-        raw = urllib.request.urlopen(url, timeout=60).read()
-    except urllib.error.HTTPError:
-        return j, []
+    import time
+    raw = None
+    for attempt in range(5):
+        try:
+            raw = urllib.request.urlopen(url, timeout=60).read(); break
+        except urllib.error.HTTPError as e:
+            if e.code == 404: return j, []          # файлу за цю добу немає (ще не опублікований / монета не існувала)
+            time.sleep(2 * (attempt + 1))
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+    if raw is None: return j, []
     rows = []
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
         for ln in z.read(z.namelist()[0]).decode().splitlines():
             p = ln.split(",")
             if not p[0].isdigit(): continue
             t = int(p[0]); t = t // 1000 if t > 10**11 else t
-            rows.append((t, p[1], p[2], p[3], p[4]))
+            rows.append((t, p[1], p[2], p[3], p[4], p[5]))
     return j, rows
 data = {}
 with ThreadPoolExecutor(16) as ex:
@@ -31,5 +38,5 @@ with ThreadPoolExecutor(16) as ex:
 for (s, tf), rows in data.items():
     rows.sort(); p = out / s; p.mkdir(parents=True, exist_ok=True)
     with open(p / f"{tf}.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["open_time", "open", "high", "low", "close"]); w.writerows(rows)
+        w = csv.writer(f); w.writerow(["open_time", "open", "high", "low", "close", "volume"]); w.writerows(rows)
     print(s, tf, len(rows))
