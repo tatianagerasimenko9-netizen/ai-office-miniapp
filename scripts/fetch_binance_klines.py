@@ -23,7 +23,7 @@ def get(j):
             p = ln.split(",")
             if not p[0].isdigit(): continue
             t = int(p[0]); t = t // 1000 if t > 10**11 else t
-            rows.append((t, p[1], p[2], p[3], p[4]))
+            rows.append((t, p[1], p[2], p[3], p[4], p[5]))
     return j, rows
 data = {}
 with ThreadPoolExecutor(16) as ex:
@@ -31,5 +31,5 @@ with ThreadPoolExecutor(16) as ex:
 for (s, tf), rows in data.items():
     rows.sort(); p = out / s; p.mkdir(parents=True, exist_ok=True)
     with open(p / f"{tf}.csv", "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["open_time", "open", "high", "low", "close"]); w.writerows(rows)
+        w = csv.writer(f); w.writerow(["open_time", "open", "high", "low", "close", "volume"]); w.writerows(rows)
     print(s, tf, len(rows))
