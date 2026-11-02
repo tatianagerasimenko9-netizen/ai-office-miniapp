@@ -20,11 +20,12 @@ def render(row, bars):
     from office_price_format import format_px
     sym=row["symbol"]
     target=json.loads(row["targets_json"]) if isinstance(row["targets_json"],str) else row["targets_json"]
-    vals=[("Пробій",float(row["level"]),"#62b7fd"),("Вхід",float(row["entry"]),"#facb45"),("SL",float(row["sl"]),"#fb465a")]
+    td=str(row.get("sig_id","")).startswith("TD|")
+    vals=[("План H1" if td else "Пробій",float(row["level"]),"#62b7fd"),("Вхід",float(row["entry"]),"#facb45"),("SL",float(row["sl"]),"#fb465a")]
     vals.extend((f"TP{i}",float(z["p"]),"#32db86") for i,z in enumerate(target[:3],1))
     fig,ax=plt.subplots(figsize=(8.2,9.4),facecolor="#071521")
     fig.subplots_adjust(left=.09,right=.88,bottom=.07,top=.87)
-    fig.text(.07,.958,f"B&R-{row['seq']}",color="#b9c6d6",fontsize=12,fontweight="bold")
+    fig.text(.07,.958,(f"TD-{row['seq']} · ТЕСТ" if td else f"B&R-{row['seq']}"),color="#b9c6d6",fontsize=12,fontweight="bold")
     fig.text(.07,.907,sym+"  ·  "+row["direction"],color="#f4434b" if row["direction"]=="SHORT" else "#119f6a",fontsize=21,fontweight="bold")
     ax.set_facecolor("#071521")
     sample=prices[-95:]
