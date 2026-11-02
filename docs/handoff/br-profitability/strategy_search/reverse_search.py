@@ -11,7 +11,8 @@ random.seed(7)
 CD = Path(sys.argv[1]); SYMS = sys.argv[2].split(",")
 DAY = 86400; COST = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0010
 FEATS = ["hour", "sess_asia", "sess_london", "sess_ny", "dow", "dist_open_atr", "pos_range24", "atr_ratio", "pullback_atr",
-         "ema_align", "h1_align", "vol_ratio", "day_used", "btc_h1_align", "stop_pct"]
+         "ema_align", "h1_align", "vol_ratio", "day_used", "btc_h1_align", "stop_pct",
+         "sweep24", "compress", "prevday_dist_atr", "asia_pos"]
 
 
 def load(s):
@@ -42,6 +43,11 @@ def build(d, btc_ret):
     day_hi = pd.Series(h).groupby(day).cummax().to_numpy(); day_lo = pd.Series(l).groupby(day).cummin().to_numpy()
     dr = pd.Series(h - l).groupby(day).sum()  # грубий добовий діапазон як відносна база
     day_atr = pd.Series(day).map(pd.Series((pd.Series(h).groupby(day).max() - pd.Series(l).groupby(day).min()).rolling(14).mean().shift(1))).to_numpy()
+    pdl = pd.Series(pd.Series(l).groupby(day).min()).shift(1); pdh = pd.Series(pd.Series(h).groupby(day).max()).shift(1)
+    prev_lo = pd.Series(day).map(pdl).to_numpy(); prev_hi = pd.Series(day).map(pdh).to_numpy()
+    asia = (hour < 7)
+    a_hi = pd.Series(np.where(asia, h, np.nan)).groupby(day).transform("max").to_numpy()
+    a_lo = pd.Series(np.where(asia, l, np.nan)).groupby(day).transform("min").to_numpy()
     sess_open = np.empty(n)
     for i in range(n):
         s0 = 0 if hour[i] < 7 else (7 if hour[i] < 13 else 13)
@@ -55,14 +61,17 @@ def build(d, btc_ret):
             sl = ext - side * 0.1 * atr14[i]; ent = c[i]; risk = (ent - sl) * side
             sp = risk / ent
             if risk <= 0 or not (0.003 <= sp <= 0.02): continue
-            tp = ent + side * 2 * risk
-            hi_, lo_ = h[i + 1:i + 49], l[i + 1:i + 49]
+            HZ = 96
+            tp = ent + side * 3 * risk
+            hi_, lo_ = h[i + 1:i + 1 + HZ], l[i + 1:i + 1 + HZ]
             if side > 0:
-                si = np.argmax(lo_ <= sl) if (lo_ <= sl).any() else 99; ti = np.argmax(hi_ >= tp) if (hi_ >= tp).any() else 99
+                si = int(np.argmax(lo_ <= sl)) if (lo_ <= sl).any() else 999; ti = int(np.argmax(hi_ >= tp)) if (hi_ >= tp).any() else 999
+                mf = (hi_[:min(si, len(hi_))].max() - ent) / risk if min(si, len(hi_)) > 0 else 0
             else:
-                si = np.argmax(hi_ >= sl) if (hi_ >= sl).any() else 99; ti = np.argmax(lo_ <= tp) if (lo_ <= tp).any() else 99
-            if si == 99 and ti == 99: r = side * (c[i + 48] - ent) / risk
-            else: r = -1.0 if si <= ti else 2.0
+                si = int(np.argmax(hi_ >= sl)) if (hi_ >= sl).any() else 999; ti = int(np.argmax(lo_ <= tp)) if (lo_ <= tp).any() else 999
+                mf = (ent - lo_[:min(si, len(lo_))].min()) / risk if min(si, len(lo_)) > 0 else 0
+            if si == 999 and ti == 999: r = side * (c[min(i + HZ, n - 1)] - ent) / risk
+            else: r = -1.0 if si <= ti else 3.0
             r -= COST / sp
             imp = (h[i - 11:i + 1].max() - l[i - 11:i + 1].min())
             last_ext = h[i - 11:i + 1].max() if side > 0 else l[i - 11:i + 1].min()
@@ -75,7 +84,11 @@ def build(d, btc_ret):
                              atr_ratio=atr14[i] / atr96[i], pullback_atr=pull,
                              ema_align=side * np.sign(e20[i] - e50[i]), h1_align=side * np.sign(c[i] - c[i - 4]),
                              vol_ratio=v[i] / (v[i - 20:i].mean() or 1), day_used=(day_hi[i] - day_lo[i]) / day_atr[i],
-                             btc_h1_align=side * br, stop_pct=sp, side=side))
+                             btc_h1_align=side * br, stop_pct=sp, side=side, mfe=mf,
+                             sweep24=int((l[i - 7:i + 1].min() < l[i - 103:i - 7].min()) if side > 0 else (h[i - 7:i + 1].max() > h[i - 103:i - 7].max())) if i >= 104 else 0,
+                             compress=(h[i - 7:i + 1].max() - l[i - 7:i + 1].min()) / max(h[i - 47:i + 1].max() - l[i - 47:i + 1].min(), 1e-12),
+                             prevday_dist_atr=((c[i] - prev_lo[i]) if side > 0 else (prev_hi[i] - c[i])) / atr14[i] if prev_lo[i] == prev_lo[i] else 0,
+                             asia_pos=((c[i] - a_lo[i]) / (a_hi[i] - a_lo[i]) if (a_hi[i] == a_hi[i] and a_hi[i] > a_lo[i] and hr >= 7) else 0.5) if side > 0 else (1 - (c[i] - a_lo[i]) / (a_hi[i] - a_lo[i]) if (a_hi[i] == a_hi[i] and a_hi[i] > a_lo[i] and hr >= 7) else 0.5)))
     return rows
 
 
@@ -107,6 +120,15 @@ def main():
     t0, t1 = df.t.min(), df.t.max(); cut = t0 + .55 * (t1 - t0); emb = cut + 2 * DAY
     tr, te = df[df.t < cut], df[df.t >= emb]
     print(f"\nМоментів: TRAIN {len(tr)}, TEST {len(te)}; середній R (всі входи без фільтра): TRAIN {tr.r.mean():+.3f}, TEST {te.r.mean():+.3f}; комісія {COST*100:.2f}%")
+    # ---- ПОДІЇ: сильні рухи з структурним стопом (стоп = екстремум 8 барів), SL-first ----
+    print("\n=== ПОДІЇ (сильні рухи після входу зі структурним стопом; горизонт 24 год) ===")
+    days = max(1, (t1 - t0) / DAY)
+    for nm, mask in (("усі", df.t > 0), ("Азія 00-07", df.sess_asia == 1), ("Лондон 07-13", df.sess_london == 1), ("Нью-Йорк 13-24", df.sess_ny == 1)):
+        x = df[mask]
+        ev = x[x.mfe >= 3].sort_values(["sym", "side", "t"])
+        newc = ((ev.sym != ev.sym.shift()) | (ev.side != ev.side.shift()) | (ev.t - ev.t.shift() > 7200)).sum() if len(ev) else 0
+        print(f"  {nm}: ≥3R {100*(x.mfe>=3).mean():.1f}% | ≥5R {100*(x.mfe>=5).mean():.1f}% | ≥7R {100*(x.mfe>=7).mean():.1f}% входів; "
+              f"окремих рухів ≥3R за добу на 12 монет: {newc/days:.1f}; беззбитковий відсоток для 3R ≈ {100*(1+COST/ x.stop_pct.median())/4:.0f}%")
     for depth, leaf in ((3, 500), (4, 400)):
         m = DecisionTreeRegressor(max_depth=depth, min_samples_leaf=leaf).fit(tr[FEATS], tr.r)
         print(f"\n=== Дерево depth={depth}, мін. листок {leaf} ===")
