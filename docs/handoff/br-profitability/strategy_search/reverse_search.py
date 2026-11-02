@@ -84,7 +84,7 @@ def build(d, btc_ret):
                              atr_ratio=atr14[i] / atr96[i], pullback_atr=pull,
                              ema_align=side * np.sign(e20[i] - e50[i]), h1_align=side * np.sign(c[i] - c[i - 4]),
                              vol_ratio=v[i] / (v[i - 20:i].mean() or 1), day_used=(day_hi[i] - day_lo[i]) / day_atr[i],
-                             btc_h1_align=side * br, stop_pct=sp, side=side, mfe=mf,
+                             btc_h1_align=side * br, stop_pct=sp, side=side, mfe=mf, i=i, ent=ent, sl=sl,
                              sweep24=int((l[i - 7:i + 1].min() < l[i - 103:i - 7].min()) if side > 0 else (h[i - 7:i + 1].max() > h[i - 103:i - 7].max())) if i >= 104 else 0,
                              compress=(h[i - 7:i + 1].max() - l[i - 7:i + 1].min()) / max(h[i - 47:i + 1].max() - l[i - 47:i + 1].min(), 1e-12),
                              prevday_dist_atr=((c[i] - prev_lo[i]) if side > 0 else (prev_hi[i] - c[i])) / atr14[i] if prev_lo[i] == prev_lo[i] else 0,
