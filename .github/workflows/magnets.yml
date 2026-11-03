@@ -1,0 +1,42 @@
+name: magnets
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/magnets.yml
+      - docs/handoff/br-profitability/strategy_search/magnets.py
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas scikit-learn
+      - name: Fetch 12 монет
+        shell: bash
+        run: |
+          for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT BNBUSDT LTCUSDT DOTUSDT ATOMUSDT; do
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2022-01-01:2026-11-01 | tr '\n' ' '; echo
+          done
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Магніти
+        shell: bash
+        run: |
+          T=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
+          cd docs/handoff/br-profitability/strategy_search
+          python3 magnets.py ../../../../candles $T 0.0005 | tee ../magnets_out.txt
+          python3 magnets.py ../../../../candles $T 0.0010 | tee -a ../magnets_out.txt
+      - name: Зберегти результат у гілку
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/magnets_out.txt
+          git commit -m "magnets: результат угод TD-V1 (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
