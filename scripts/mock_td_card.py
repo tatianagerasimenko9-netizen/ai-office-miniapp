@@ -49,8 +49,8 @@ def render(path, with_add):
     for s in ax.spines.values(): s.set_visible(False)
     ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
     for p, lab, col in ((ent, "ВХІД", YEL), (sl, "СТОП", RED)):
-        fig.text(.835, ax.transData.transform((0, p))[1] / (fig.get_figheight() * fig.dpi), f"{lab}\n{fmt(p)}", color=col, fontsize=9.5, fontweight="bold", va="center")
-    fig.text(.835, .855, f"ЦІЛЬ\n{fmt(tp)}", color=GRN, fontsize=9.5, fontweight="bold", va="top")
+        fig.text(.835, ax.transData.transform((0, p))[1] / (fig.get_figheight() * fig.dpi), f"{lab}\n{fmt(p)}" + (f"\n−{pct(p):.2f}% · −\\${risk_usd}".replace(".", ",") if lab == "СТОП" else ""), color=col, fontsize=9.5, fontweight="bold", va="center")
+    fig.text(.835, .855, f"ЦІЛЬ\n{fmt(tp)}\n+{pct(tp):.2f}% · +\\${risk_usd * (tp - ent) / risk:.0f}".replace(".", ","), color=GRN, fontsize=9.5, fontweight="bold", va="top")
     # блоки значень
     rows = [("ВХІД", fmt(ent), "ринком або лімітом біля цієї ціни", YEL), ("СТОП", fmt(sl), f"−{pct(sl):.2f}% · збиток при спрацюванні −\\${risk_usd}".replace(".", ","), RED),
             ("ЦІЛЬ", fmt(tp), f"+{pct(tp):.2f}% · прибуток при ризику \\${risk_usd}: +\\${risk_usd * (tp - ent) / risk:.0f}".replace(".", ","), GRN)]
