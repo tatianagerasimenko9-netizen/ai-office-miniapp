@@ -69,4 +69,4 @@ def main():
     for s_, v in sorted(per.items(), key=lambda kv: -sum(kv[1])):
         if len(v) >= 15: print(f"   {s_}: n={len(v)} R={np.mean(v):+.3f} $={10*sum(v):+,.0f}")
     print("\n##### ПІДСУМОК newcoins завершено")
-main()
+if __name__ == "__main__": main()
