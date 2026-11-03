@@ -20,7 +20,7 @@ def candles(n=72, seed=11, start=76400.0):
 
 def fmt(x): return f"{x:,.1f}".replace(",", " ").replace(".", ",")
 
-def render(path, with_add):
+def render(path, with_add, book=None):
     K = candles(); ent = K[-1, 3]; lo8 = K[-8:, 2].min(); sl = lo8 - 40; risk = ent - sl; tp = ent + 5.2 * risk
     sym, side = "BTCUSDT", "LONG"; risk_usd = 10; pct = lambda p: abs(p - ent) / ent * 100
     fig = plt.figure(figsize=(7.2, 11.2), facecolor=BG, dpi=150)
@@ -30,7 +30,7 @@ def render(path, with_add):
     fig.text(.06, .905, sym, color=TXT, fontsize=30, fontweight="bold")
     fig.text(.94, .905, "▲ LONG" if side == "LONG" else "▼ SHORT", color=GRN if side == "LONG" else RED, fontsize=26, fontweight="bold", ha="right")
     fig.text(.06, .878, "Біржа Binance Futures · графік M15", color=DIM, fontsize=10)
-    ax = fig.add_axes([.04, .42, .78, .44]); ax.set_facecolor(BG)
+    ax = fig.add_axes([.04, .47, .78, .39]); ax.set_facecolor(BG)
     vis = K[-56:]; ybot = min(sl, vis[:, 2].min()) - .25 * risk; ytop = ent + max(1.6 * risk, .45 * (vis[:, 1].max() - ybot))
     n = len(K)
     for i, (o, h, l, c) in enumerate(K):
@@ -54,19 +54,25 @@ def render(path, with_add):
     # блоки значень
     rows = [("ВХІД", fmt(ent), "ринком або лімітом біля цієї ціни", YEL), ("СТОП", fmt(sl), f"−{pct(sl):.2f}% · збиток при спрацюванні −\\${risk_usd}".replace(".", ","), RED),
             ("ЦІЛЬ", fmt(tp), f"+{pct(tp):.2f}% · прибуток при ризику \\${risk_usd}: +\\${risk_usd * (tp - ent) / risk:.0f}".replace(".", ","), GRN)]
-    y = .375
+    y = .405
     for lab, val, sub, col in rows:
-        fig.patches.append(FancyBboxPatch((.05, y - .075), .90, .085, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
-        fig.patches.append(Rectangle((.05, y - .075), .012, .085, transform=fig.transFigure, facecolor=col, edgecolor="none"))
+        fig.patches.append(FancyBboxPatch((.05, y - .07), .90, .08, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
+        fig.patches.append(Rectangle((.05, y - .07), .012, .08, transform=fig.transFigure, facecolor=col, edgecolor="none"))
         fig.text(.09, y - .012, lab, color=col, fontsize=12, fontweight="bold", va="top")
         fig.text(.92, y - .012, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
-        fig.text(.09, y - .052, sub, color=DIM, fontsize=10, va="top")
-        y -= .097
-    fig.text(.06, y - .004, "Тримати до цілі або стопа, максимум 48 годин.", color=TXT, fontsize=11)
-    fig.text(.06, y - .03, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
-    fig.text(.5, .018, "ПРИКЛАД ВИГЛЯДУ · свічки вигадані · тестова стратегія, не гроші", color=DIM, fontsize=9, ha="center")
+        fig.text(.09, y - .047, sub, color=DIM, fontsize=10, va="top")
+        y -= .087
+    if book:
+        fig.patches.append(FancyBboxPatch((.05, y - .052), .90, .058, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=BLU, linewidth=1))
+        fig.text(.07, y - .012, "Заявок біля ціни: " + book[0], color=BLU, fontsize=12, fontweight="bold", va="top")
+        fig.text(.07, y - .034, book[1], color=DIM, fontsize=9.5, va="top")
+        y -= .065
+    fig.text(.06, y - .006, "Тримати до цілі або стопа, максимум 48 годин.", color=TXT, fontsize=11)
+    fig.text(.06, y - .028, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
+    fig.text(.5, .008, "ПРИКЛАД ВИГЛЯДУ · свічки вигадані · тестова стратегія, не гроші", color=DIM, fontsize=9, ha="center")
     fig.savefig(path, facecolor=BG); plt.close(fig)
 
 out = sys.argv[1]; os.makedirs(out, exist_ok=True)
 render(os.path.join(out, "card_A.png"), False)
 render(os.path.join(out, "card_B_dobir.png"), True)
+render(os.path.join(out, "card_C_orders.png"), False, ("МАЛО", "менше, ніж зазвичай — ціна може рухатись швидше"))
