@@ -13,10 +13,10 @@ def one(args):
         try:
             with urllib.request.urlopen(url, timeout=60) as r: raw = r.read()
             df = pd.read_csv(zipfile.ZipFile(io.BytesIO(raw)).open(zipfile.ZipFile(io.BytesIO(raw)).namelist()[0]))
-            df["ts"] = pd.to_datetime(df["timestamp"]); df["h"] = df.ts.dt.floor("h")
+            df = df[df.percentage.isin([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5])].copy(); df["percentage"] = df.percentage.astype(int); df["ts"] = pd.to_datetime(df["timestamp"]); df["h"] = df.ts.dt.floor("h")
             g = df.sort_values("ts").groupby(["h", "percentage"]).first().reset_index()
-            p = g.pivot(index="h", columns="percentage", values="notional"); p.columns = [f"n{int(c)}" for c in p.columns]
-            p["ts"] = p.index.astype("int64") // 10**9; return s, p.reset_index(drop=True)
+            p = g.pivot(index="h", columns="percentage", values="notional"); p.columns = [f"n{c}" for c in p.columns]; p = p.reindex(columns=[f"n{c}" for c in (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5)])
+            p["ts"] = ((p.index - pd.Timestamp("1970-01-01")) // pd.Timedelta("1s")).astype("int64"); return s, p.reset_index(drop=True)
         except urllib.error.HTTPError as e:
             if e.code == 404: return s, None
             time.sleep(2 ** att)
