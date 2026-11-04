@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 
 from office_td import features as F
+from office_td import levels as LV
 from office_td.model import Model, _DEFAULT as MODEL_PATH
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "LTCUSDT", "DOTUSDT", "ATOMUSDT")
@@ -96,6 +97,11 @@ def scan_h1(db: str, fetch: Callable, now: Optional[float] = None, m: Optional[M
             if last_open + 3600 > now or now - (last_open + 3600) > 1800: continue          # лише свіжозакритий бар
             for r in score_symbol(sym, bars, btc, m):
                 if r["score"] < m.threshold: continue
+                try:                                    # тиха позначка (лише запис): рівні зі свічок на момент кандидата
+                    _t, _o, _h, _l, _c, _v = _arrays(bars)
+                    r["feats"]["_lv"] = [round(x, 8) for x in LV.levels_from_h1(_t, _h, _l, r["h1_ts"] + 3600)]
+                except Exception as exc_lv:  # noqa: BLE001
+                    print(f"[td] рівні недоступні {sym}: {type(exc_lv).__name__}", flush=True)
                 if _fetchone(db, "SELECT 1 FROM td_candidate WHERE symbol = ? AND direction = ? AND h1_ts > ? LIMIT 1", (sym, r["direction"], r["h1_ts"] - DEDUPE_S)): continue
                 risk = abs(r["ent"] - r["sl"]); tp = r["ent"] + r["side"] * 3 * risk
                 cid = f"TD|{sym}|{r['direction']}|{int(r['h1_ts'])}"
@@ -141,7 +147,11 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
     if _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)): return None
     nxt = _fetchone(db, "SELECT COALESCE(MAX(seq), 0) + 1 FROM br_test_signal WHERE sig_id LIKE 'TD|%'"); seq = int(nxt[0]) if nxt else 1
     feats = json.loads(cand["feats_json"]) if cand.get("feats_json") else {}
-    hyp = {"strategy": STRATEGY, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
+    try:
+        lv = feats.get("_lv"); stop_tag = LV.stop_tag(lv, 1 if cand["direction"] == "LONG" else -1, res["entry"], res["sl"]) if lv else None
+    except Exception:  # noqa: BLE001
+        stop_tag = None
+    hyp = {"strategy": STRATEGY, "stop_tag": stop_tag, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
            "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, cand["symbol"], cand["direction"], cand["h1_entry"], cand["h1_ts"], cand["h1_close_ts"], res["confirm_ts"], res["entry"], res["sl"],

@@ -15,6 +15,9 @@ def render(row, bars):
     last=datetime.fromisoformat(str(bars[-1]["ts"]).replace("Z","+00:00")).timestamp()
     if float(row["confirm_ts"])-last>900 or last>float(row["confirm_ts"]):
         raise ValueError("candles not aligned with signal confirmation")
+    if str(row.get("sig_id","")).startswith("TD|"):
+        from office_br.td_image import render_td
+        return render_td(row,bars)
     from matplotlib import pyplot as plt
     from matplotlib.patches import Rectangle
     from office_price_format import format_px

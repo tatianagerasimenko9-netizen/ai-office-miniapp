@@ -1,0 +1,43 @@
+name: probe-book
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/probe-book.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - name: Probe
+        shell: bash
+        run: |
+          B=https://data.binance.vision/data/futures/um/daily
+          {
+          for spec in "bookDepth/BTCUSDT/BTCUSDT-bookDepth-2024-03-01.zip" "bookDepth/BTCUSDT/BTCUSDT-bookDepth-2022-03-01.zip" "bookDepth/BTCUSDT/BTCUSDT-bookDepth-2026-10-01.zip" "bookTicker/BTCUSDT/BTCUSDT-bookTicker-2024-03-01.zip" "liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2023-03-01.zip" "liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2024-03-01.zip" "metrics/BTCUSDT/BTCUSDT-metrics-2024-03-01.zip" "metrics/BTCUSDT/BTCUSDT-metrics-2022-03-01.zip"; do
+            code=$(curl -s -o /tmp/f.zip -w "%{http_code} %{size_download}" "$B/$spec"); echo "$spec -> $code"
+          done
+          echo "--- Hyperliquid l2Book"
+          curl -s -m 20 -X POST https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"l2Book","coin":"BTC"}' | head -c 400; echo
+          echo "--- Hyperliquid candles (скільки історії)"
+          curl -s -m 20 -X POST https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"candleSnapshot","req":{"coin":"BTC","interval":"1h","startTime":1640995200000,"endTime":1641081600000}}' | head -c 300; echo
+          echo "--- bookDepth структура"
+          curl -s -o /tmp/bd.zip "$B/bookDepth/BTCUSDT/BTCUSDT-bookDepth-2024-03-01.zip" && unzip -p /tmp/bd.zip | head -12
+          echo "--- liq структура"
+          curl -s -o /tmp/lq.zip "$B/liquidationSnapshot/BTCUSDT/BTCUSDT-liquidationSnapshot-2023-03-01.zip" && unzip -p /tmp/lq.zip | head -5
+          echo "--- metrics структура"
+          curl -s -o /tmp/mt.zip "$B/metrics/BTCUSDT/BTCUSDT-metrics-2024-03-01.zip" && unzip -p /tmp/mt.zip | head -4
+          } 2>&1 | tee probe_book_out.txt
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          mkdir -p docs/handoff/br-profitability && mv probe_book_out.txt docs/handoff/br-profitability/probe_book_out.txt
+          git add docs/handoff/br-profitability/probe_book_out.txt
+          git commit -m "probe-book: які дані стакана є публічно (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
