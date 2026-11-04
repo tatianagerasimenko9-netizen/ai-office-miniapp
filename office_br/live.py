@@ -214,6 +214,14 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
         sg = 1 if row["direction"] == "LONG" else -1
         prev = {x["level"] for x in existing_events}
         entry_seen = "ENTRY" in prev
+        if card.is_td(row) and not entry_seen:
+            # TD-V1: вхід M15 = закриття свічки підтвердження, а картка йде одразу після нього. Тож вхід рахується в момент картки
+            # (так само, як у бектесті, де вхід = закриття свічки), без очікування повернення ціни до рівня входу.
+            store.record_event(db, sid, "ENTRY", float(ready_sent_ts), float(row["entry"]), None)
+            prev.add("ENTRY")
+            entry_seen = True
+            _save_cursor(db, sid, float(ready_sent_ts))
+            last = max(last, float(ready_sent_ts))
         for b in candles:
             ts = _epoch(b)
             if ts <= last:

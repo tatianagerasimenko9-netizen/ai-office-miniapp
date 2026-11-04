@@ -23,8 +23,8 @@ def is_td(row: Dict[str, Any]) -> bool:
 
 
 def head(row: Dict[str, Any]) -> str:
-    """Префікс повідомлень: «B&R LIVE · B&R-n» або «TD ТЕСТ · TD-n»."""
-    return f"TD ТЕСТ · TD-{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
+    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ЗВЕРХУ ВНИЗ ТЕСТ · №n»."""
+    return f"ЗВЕРХУ ВНИЗ ТЕСТ · №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
 
 
 def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,36 +36,23 @@ def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_td_card(row: Dict[str, Any]) -> str:
+    """Проста картка «Зверху вниз»: вхід, стоп, ціль у ціні, % і $ (при ризику $10 на угоду). Без службових термінів."""
     sym, d = row["symbol"], row["direction"]
     entry, sl = float(row["entry"]), float(row["sl"])
     risk = abs(entry - sl)
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
-    hyp = _td_hyp(row)
-    ft = hyp.get("feats") or {}
-
-    def fx(key: str, spec: str = "{:.1f}") -> str:
-        v = ft.get(key)
-        return spec.format(v).replace(".", ",") if isinstance(v, (int, float)) and v == v else "—"
-
-    score = str(round(float(hyp.get("score", 0) or 0), 2)).replace(".", ",")
-    thr = str(round(float(hyp.get("threshold", 0) or 0), 2)).replace(".", ",")
     L = [
-        f"🧪 ТЕСТ · TD-V1 · TD-{int(row['seq'])} · {sym} · {d}",
-        "Стратегія-кандидат (гіпотеза): старші ТФ → вхід на M15 з малим стопом. Не гроші.",
-        f"📊 Старші ТФ (H1): оцінка моделі {score} ≥ поріг {thr} (верхні 3%)",
-        f"   • тижневий рівень: попереду {fx('W_ahead')} ATR · позаду {fx('W_behind')} ATR",
-        f"   • 4-год рівень: попереду {fx('H4_ahead')} ATR · позаду {fx('H4_behind')} ATR",
-        f"   • положення в діапазоні 3 діб: {fx('pos72', '{:.0%}')} (0% — низ, 100% — верх; у бік угоди)",
-        "🕯 M15: підтвердження — свічка в бік угоди закрилась за екстремумом попередньої",
-        f"🟡 ВХІД {_n(entry, sym)}",
-        f"🔴 SL {_n(sl, sym)} (−{pc(sl)}%) · за екстремумом останніх 8 M15-свічок",
+        f"🧪 ТЕСТ · ЗВЕРХУ ВНИЗ · №{int(row['seq'])}",
+        f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+        f"🟡 Вхід {_n(entry, sym)}",
+        f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
     ]
     for t in tg[:1]:
-        rr = abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
-        L.append(f"🟢 TP {_n(t['p'], sym)} (+{pc(t['p'])}% · {str(round(rr, 1)).replace('.', ',')}R) · ціль із плану H1 (3R від H1-стопа)")
-    L.append("⏱ Вихід за часом: 48 год. Часткових TP у цій версії немає.")
-    L.append("⚠️ ТЕСТОВА СТРАТЕГІЯ V1 (гіпотеза) · лише спостереження/ручне рішення · Office не відкриває ордерів.")
+        usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
+        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10)")
+    L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")
+    L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
     return "\n".join(L)
 
 
