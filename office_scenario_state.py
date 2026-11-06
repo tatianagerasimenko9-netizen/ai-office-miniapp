@@ -358,6 +358,13 @@ def _ready_then(plan: Dict[str, Any], side: str, sym: str, price: Optional[float
         st = {"name": None, "why": [], "objects": []}
     ready["setup"] = st
     ctx = g.get("context") or {}   # ринок і календар НА МОМЕНТ сигналу (збережено разом зі знімком; нічого не перераховуємо)
+    ready["phase_line"] = None
+    try:
+        import office_phase as _ph
+
+        ready["phase_line"] = _ph.line(ctx.get("phase")) or None   # фаза руху НА МОМЕНТ сигналу (збережено у знімку), інформація
+    except Exception:  # noqa: BLE001
+        pass
     ready["market"] = {"lines": list(ctx.get("lines") or []), "calendar": list(ctx.get("calendar") or [])} if (ctx.get("lines") or ctx.get("calendar")) else None
     e0 = _f(plan.get("entry"))
 
