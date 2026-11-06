@@ -2164,22 +2164,29 @@ def signal_get_active(db_path: str) -> List[Dict[str, Any]]:
     return out
 
 
-def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
-    """Усі стани канонічних сценаріїв для hydrate/dedup, включно з terminal."""
-    cached = _sig_cache_get("scenarios", db_path)
+def signal_get_scenarios(db_path: str, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Canonical scenario states; optionally scope hot lookups to one symbol.
+
+    No symbol preserves the original full hydrate/dedup read and ordering.
+    Distinct cache keys prevent a filtered result from contaminating full reads.
+    """
+    sym = str(symbol or "").strip().upper()
+    cache_kind = f"scenarios:{sym}" if sym else "scenarios"
+    cached = _sig_cache_get(cache_kind, db_path)
     if cached is not None:
         return cached
-    rows = _fetchall(
-        db_path,
-        """
+    sql = """
         SELECT signal_id, symbol, direction, entry_low, entry_high, sl, tp1, tp2, rr,
                status, ts_created, ts_updated, outcome, analysis_note
         FROM office_signals
         WHERE analysis_note LIKE '%scenario_id=%'
-        ORDER BY COALESCE(NULLIF(ts_updated, ''), ts_created) DESC
-        """,
-        (),
-    )
+    """
+    params: tuple = ()
+    if sym:
+        sql += " AND symbol = ?"
+        params = (sym,)
+    sql += " ORDER BY COALESCE(NULLIF(ts_updated, ''), ts_created) DESC"
+    rows = _fetchall(db_path, sql, params)
     out = [
         {
             "signal_id": r[0],
@@ -2199,7 +2206,7 @@ def signal_get_scenarios(db_path: str) -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
-    _sig_cache_put("scenarios", db_path, out)
+    _sig_cache_put(cache_kind, db_path, out)
     return out
 
 

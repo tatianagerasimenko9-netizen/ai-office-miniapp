@@ -148,7 +148,7 @@ def canonical_scenario_id(db_path: str, cycle: Dict[str, Any]) -> str:
         from office_scenario_memory import find_canonical_scenario, market_basis_key, parse_note_meta
 
         existing = find_canonical_scenario(
-            signal_get_scenarios(db_path),
+            signal_get_scenarios(db_path, symbol=str(draft.get("symbol") or "")),
             symbol=str(draft.get("symbol") or ""),
             direction=str(draft.get("direction") or ""),
             timeframe=str(draft.get("timeframe") or "H1"),
