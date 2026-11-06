@@ -15,12 +15,12 @@ class Hdr(dict):
 M.reset_market_cache()
 M._FAPI_GAP = 0.0
 M._RAMP_GAP = 0.0
-M._note_weight(Hdr({"X-MBX-USED-WEIGHT-1M": "1850"}))
-assert M._SOFT_UNTIL > time.time() and M._BACKOFF_UNTIL == 0.0, "вага 1850 → лише м'яка пауза"
+M._note_weight(Hdr({"X-MBX-USED-WEIGHT-1M": str(M._WEIGHT_SOFT + 50)}))
+assert M._SOFT_UNTIL > time.time() and M._BACKOFF_UNTIL == 0.0, "вага понад SOFT → лише м'яка пауза"
 
 
 class Resp:
-    headers = {"X-MBX-USED-WEIGHT-1M": "1850"}
+    headers = {"X-MBX-USED-WEIGHT-1M": str(M._WEIGHT_SOFT + 50)}
 
     def read(self):
         return b"[]"
@@ -48,8 +48,8 @@ except M.RateLimited:
 assert M.backoff_left() > 0
 
 M.reset_market_cache()
-M._note_weight(Hdr({"X-MBX-USED-WEIGHT-1M": "2250"}))
-assert M._BACKOFF_UNTIL > time.time(), "вага ≥ 2200 → жорстка пауза"
+M._note_weight(Hdr({"X-MBX-USED-WEIGHT-1M": str(M._WEIGHT_HARD + 50)}))
+assert M._BACKOFF_UNTIL > time.time(), "вага понад HARD → жорстка пауза"
 with M.priority():
     try:
         M._http_get_json("https://fapi.binance.com/fapi/v1/klines", {"symbol": "X"})

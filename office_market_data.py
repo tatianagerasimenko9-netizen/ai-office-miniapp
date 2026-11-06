@@ -212,9 +212,13 @@ _STARTED_AT = time.time()
 _RAMP_SEC = 180.0           # перші 3 хв після старту процесу — повільніший темп (web і worker перезапускаються одночасно з одного IP)
 _RAMP_GAP = 0.25
 _FAPI_LAST = 0.0
-_FAPI_GAP = 0.06            # ≥60 мс між запитами до fapi (~16/с): рівномірний потік замість пачки на старті
-_WEIGHT_SOFT = 1800         # X-MBX-USED-WEIGHT-1M із 2400: після цього сповільнюємось до кінця хвилини
-_WEIGHT_HARD = 2200         # після цього пауза для всіх, включно з «життям READY»
+# Conservative shared Worker pacing: throttle broad scanning before Binance's 2400 weight/min IP ceiling.
+# Must remain configurable in Render so operations can recover without a new code deploy.
+_FAPI_GAP = max(0.06, min(10.0, float(os.getenv("OFFICE_FAPI_MIN_GAP_SEC", "1.0"))))
+# These limits leave generous capacity for other Office processes sharing the same Binance egress IP.
+# The exchange reports global IP weight; do not wait until the actual 2400/min ceiling.
+_WEIGHT_SOFT = max(200, min(1400, int(os.getenv("OFFICE_FAPI_WEIGHT_SOFT", "1000"))))
+_WEIGHT_HARD = max(_WEIGHT_SOFT + 100, min(2000, int(os.getenv("OFFICE_FAPI_WEIGHT_HARD", "1400"))))
 _WEIGHT_LAST: Dict[str, Any] = {"used": None, "at": 0.0}
 _PACE_LOCK = threading.Lock()
 
@@ -222,7 +226,7 @@ _PACE_LOCK = threading.Lock()
 def _pace_fapi() -> None:
     global _FAPI_LAST
     with _PACE_LOCK:
-        gap = _RAMP_GAP if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
+        gap = max(_RAMP_GAP, _FAPI_GAP) if (time.time() - _STARTED_AT) < _RAMP_SEC else _FAPI_GAP
         wait = gap - (time.time() - _FAPI_LAST)
         if wait > 0:
             time.sleep(wait)
@@ -435,7 +439,9 @@ def _http_get_json_inner(url: str, params: Dict[str, Any], scope: str = "") -> J
             if "fapi.binance.com" in url:
                 _note_weight(getattr(resp, "headers", None))
     except HTTPError as exc:
-        if exc.code in (418, 429) and scope == "depth":
+        # HTTP 418 is an IP-wide ban even when the triggering call was order-book
+        # depth. Only 429 may be scoped to the optional depth subsystem.
+        if exc.code == 429 and scope == "depth":
             try:
                 ra_d = float(exc.headers.get("Retry-After") or 60)
             except (TypeError, ValueError):
