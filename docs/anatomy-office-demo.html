@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Office — Anatomy concept</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#0a1323;color:#eaf3ff}*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1180px;margin:auto}
+h1{letter-spacing:-.05em;margin:0 0 6px;font-size:32px}p{color:#aabbd1;line-height:1.6}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}.tag{border:1px solid #526b83;color:#d4e3f5;border-radius:20px;padding:7px 12px;font-size:12px}
+.layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(260px,1fr);gap:16px;margin-top:25px}.panel{background:#101f32;border:1px solid #2a405a;border-radius:18px;padding:20px;box-shadow:0 12px 42px #0004}
+svg{width:100%;height:auto;display:block}.node{cursor:pointer;outline:none}.node:focus-visible .topface,.node:hover .topface{stroke:#fff;stroke-width:2.5}.node.selected .topface{stroke:#d9faff;stroke-width:3}.side{fill:#152d46;stroke:#52718d;stroke-width:1}.front{fill:#1b3d5c;stroke:#52718d;stroke-width:1}.topface{stroke:#88abc9;stroke-width:1.2;transition:stroke .15s}.node text{fill:white;text-anchor:middle;pointer-events:none;font-size:11px;font-weight:700}.node .small{font-size:8px;font-weight:400;fill:#ebf5ff}.path{fill:none;stroke:#6eb8d4;stroke-width:2;stroke-dasharray:5 5;opacity:.7}
+h2{margin:4px 0 12px}dl{display:grid;grid-template-columns:110px 1fr;gap:12px;font-size:14px}dt{color:#849fb9}dd{margin:0}.note{border-top:1px solid #2d4560;margin-top:18px;padding-top:16px;font-size:13px;color:#abc0d5}.warn{color:#f6d394}button{background:#1a3955;border:1px solid #527391;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}button:hover{background:#255478}
+@media(max-width:780px){body{padding:18px}.layout{grid-template-columns:1fr}}
+</style></head><body>
+<div class="top"><div><h1>AI Office / Anatomy</h1><p>Клікабельна концепція огляду шляху сигналу</p></div><span class="tag">ДЕМО • НЕ LIVE • ЖОДНОЇ ТОРГІВЛІ</span></div>
+<div class="layout"><section class="panel"><svg viewBox="0 0 600 450" role="group" aria-label="Оберіть модуль для перегляду призначення">
+<path class="path" d="M300 112 L174 171 M300 112 L426 171 M174 250 L300 308 M426 250 L300 308 M300 371 L300 412"/>
+<g id="market" class="node selected" role="button" tabindex="0" aria-label="Джерела ринку" transform="translate(300 65)">
+<polygon class="side" points="-83,0 0,41 0,79 -83,38"/><polygon class="front" points="0,41 83,0 83,38 0,79"/><polygon class="topface" fill="#377ba9" points="-83,0 0,-41 83,0 0,41"/><text y="-7">MARKET DATA</text><text y="7" class="small">Binance Futures</text></g>
+<g id="analyst" class="node" role="button" tabindex="0" aria-label="Аналітика" transform="translate(174 204)">
+<polygon class="side" points="-83,0 0,41 0,79 -83,38"/><polygon class="front" points="0,41 83,0 83,38 0,79"/><polygon class="topface" fill="#346a99" points="-83,0 0,-41 83,0 0,41"/><text y="-7">ANALYST</text><text y="7" class="small">SMC · сценарії</text></g>
+<g id="risk" class="node" role="button" tabindex="0" aria-label="Ризик-контроль" transform="translate(426 204)">
+<polygon class="side" points="-83,0 0,41 0,79 -83,38"/><polygon class="front" points="0,41 83,0 83,38 0,79"/><polygon class="topface" fill="#a97b3f" points="-83,0 0,-41 83,0 0,41"/><text y="-7">RISK GATE</text><text y="7" class="small">SL · RR · блокування</text></g>
+<g id="ready" class="node" role="button" tabindex="0" aria-label="READY та B&R" transform="translate(300 340)">
+<polygon class="side" points="-83,0 0,41 0,79 -83,38"/><polygon class="front" points="0,41 83,0 83,38 0,79"/><polygon class="topface" fill="#268d77" points="-83,0 0,-41 83,0 0,41"/><text y="-7">READY / B&R</text><text y="7" class="small">життєвий цикл</text></g></svg>
+<p style="font-size:13px">Натисни на будь-який блок. На цьому етапі показано структуру, а не реальні показники сервісів.</p>
+</section><aside class="panel" aria-live="polite"><h2 id="name">Ринкові дані</h2><dl><dt>Завдання</dt><dd id="purpose">Надати перевірені котирування та ринковий контекст.</dd><dt>Перевірка</dt><dd id="check">Джерело Futures, час оновлення, пропуски свічок.</dd><dt>Як допоможе</dt><dd id="help">Побачити, де дані відсутні чи застаріли.</dd><dt>Стан</dt><dd class="warn">Не підключено до live API</dd></dl><div class="note">Дані на цій сторінці — пояснювальні. Немає автоматичних висновків про прибутковість чи надійність сигналів.</div><p><button id="reset">Повернутися до першого модуля</button></p></aside></div>
+<script>
+const data={
+market:["Ринкові дані","Надати перевірені котирування та ринковий контекст.","Джерело Futures, час оновлення, пропуски свічок.","Побачити, де дані відсутні чи застаріли."],
+analyst:["Аналітик","Побудувати сценарії та перевірити торгові гіпотези.","Докази для сигналу, логіка входу, умови інвалідації.","Пояснити, чому аналітик обрав або відкинув сценарій."],
+risk:["Ризик-контроль","Перевірити стоп, співвідношення ризику й прибутку та обмеження.","Причина відмови, розрахунок SL і RR, пов'язані ризики.","Виявити блокування до надсилання сигналу."],
+ready:["READY / B&R","Відстежити надісланий план від готовності до TP/SL/expiry.","Час доставки, виконання умов, підсумок життєвого циклу.","Знайти затримки й порівняти план з фактичним результатом."]
+};
+function select(id){document.querySelectorAll(".node").forEach(x=>x.classList.toggle("selected",x.id===id));const d=data[id];["name","purpose","check","help"].forEach((x,i)=>document.getElementById(x).textContent=d[i]);}
+document.querySelectorAll(".node").forEach(n=>{n.addEventListener("click",()=>select(n.id));n.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select(n.id)}})});document.getElementById("reset").addEventListener("click",()=>select("market"));
+</script></body></html>
