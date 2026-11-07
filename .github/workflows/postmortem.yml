@@ -1,0 +1,39 @@
+name: postmortem
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/postmortem.yml
+      - scripts/postmortem_td.py
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch M15
+        shell: bash
+        run: |
+          for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LTCUSDT BNBUSDT DOTUSDT ATOMUSDT XAUUSDT; do
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-10-28:2026-11-08 | tr '\n' ' '; echo
+          done
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Розбір
+        shell: bash
+        run: python3 scripts/postmortem_td.py candles | tee postmortem_out.txt
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          mkdir -p docs/handoff/br-profitability && mv postmortem_out.txt docs/handoff/br-profitability/postmortem_out.txt
+          git add docs/handoff/br-profitability/postmortem_out.txt
+          git commit -m "postmortem: розбір живих TD-угод (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
