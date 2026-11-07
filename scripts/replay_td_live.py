@@ -35,5 +35,5 @@ print(f"Поріг {thr:.4f}; період {T0} .. {T1} (UTC), монети {len
 print("Кандидатів за добами (як у живому скані, дедуплікація 12 год):", per_day)
 print(f"Усього {len(found)}; у середньому {len(found)/max(1,len(per_day)):.1f} на добу")
 for f in found: print("  ", *f)
-print("\nЖивий сервіс записав: 2026-11-03 06:00 ATOMUSDT LONG; 2026-11-03 09:00 SOLUSDT LONG; 2026-11-03 23:00 ATOMUSDT LONG (сервіс працює з 2026-11-02 21:17 UTC)")
+print("\n(Порівняння з БД — окремо)")
 print("##### ПІДСУМОК replay_td_live завершено")
