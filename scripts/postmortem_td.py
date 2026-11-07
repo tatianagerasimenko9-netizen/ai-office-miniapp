@@ -47,6 +47,7 @@ print("| № | монета | напрям | вхід (UTC) | стоп за (х�
 print("|--|--|--|--|--|--|--|--|--|--|--|--|--|--|--|")
 rows = []
 for seq, sym, side, c0, ent, sl, tp, slt in T:
+    if ts(c0) + 900 >= end_ts - 900: print(f"| {seq} | {sym[:-4]} | {'LONG' if side > 0 else 'SHORT'} | свічок за цей час в архіві ще немає (угода відкрита сьогодні) |"); continue
     d = D[sym]; t_c = ts(c0); t_in = t_c + 900; risk = abs(ent - sl); planR = abs(tp - ent) / risk
     i_in = at(d, t_in); a = atr(d, at(d, t_c)); body = abs(d.close.iloc[at(d, t_c)] - d.open.iloc[at(d, t_c)]) / a if a == a else float("nan")
     hi24 = d.high.iloc[max(0, i_in - 96):i_in].max(); lo24 = d.low.iloc[max(0, i_in - 96):i_in].min(); pos = (ent - lo24) / (hi24 - lo24) if hi24 > lo24 else float("nan")
