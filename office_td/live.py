@@ -151,7 +151,13 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
         lv = feats.get("_lv"); stop_tag = LV.stop_tag(lv, 1 if cand["direction"] == "LONG" else -1, res["entry"], res["sl"]) if lv else None
     except Exception:  # noqa: BLE001
         stop_tag = None
-    hyp = {"strategy": STRATEGY, "stop_tag": stop_tag, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
+    try:
+        from office_bridge import _fetchall
+        others = _fetchall(db, "SELECT symbol FROM td_candidate WHERE h1_ts = ? AND direction = ? AND cand_id != ? ORDER BY symbol", (cand["h1_ts"], cand["direction"], cand["cand_id"] if cand.get("cand_id") else f"TD|{cand['symbol']}|{cand['direction']}|{int(cand['h1_ts'])}"))
+        cluster = {"n": len(others), "syms": [str(r[0]).replace("USDT", "") for r in others][:8]}
+    except Exception:  # noqa: BLE001
+        cluster = None
+    hyp = {"strategy": STRATEGY, "stop_tag": stop_tag, "cluster": cluster, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
            "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, cand["symbol"], cand["direction"], cand["h1_entry"], cand["h1_ts"], cand["h1_close_ts"], res["confirm_ts"], res["entry"], res["sl"],

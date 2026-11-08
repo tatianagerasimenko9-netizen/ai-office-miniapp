@@ -47,11 +47,33 @@ def test_card_text_plain():
         assert "TD-" not in text and "ATR" not in text and "оцінка моделі" not in text and "ордерів" in text and len(text) < 600
 
 
+def test_cluster_line_and_record():
+    import tempfile, os
+    h = lambda n, syms=(): json.dumps({"cluster": {"n": n, "syms": list(syms)}})
+    base = {"sig_id": "TD|x", "seq": 1, "symbol": "ETHUSDT", "direction": "SHORT", "entry": 100.0, "sl": 101.0, "targets_json": json.dumps([{"p": 95.0}])}
+    assert card.cluster_line({**base, "hyp_json": "{}"}) is None and card.cluster_line({**base, "hyp_json": h(0)}) is None and card.cluster_line({**base, "hyp_json": "не json"}) is None
+    l1 = card.cluster_line({**base, "hyp_json": h(1, ["BTC"])}); assert "ще 1 монета (BTC) дала сигнал" in l1
+    assert "ще 3 монети" in card.cluster_line({**base, "hyp_json": h(3)}) and "ще 5 монет " in card.cluster_line({**base, "hyp_json": h(5)}) and "ще 21 монета" in card.cluster_line({**base, "hyp_json": h(21)})
+    assert "Купа" in card.build_card({**base, "hyp_json": h(2, ["BTC", "SOL"])}) and "Купа" not in card.build_card({**base, "hyp_json": h(0)})
+    # запис у БД: інші кандидати тієї ж години й напряму
+    from office_td import live as TL
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "t.db"); store.init(db); TL.init(db)
+        from office_bridge import _execute
+        for sym in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
+            _execute(db, "INSERT INTO td_candidate(cand_id, symbol, direction, h1_ts, h1_close_ts, h1_entry, h1_sl, tp, score, feats_json, status, created_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (f"TD|{sym}|SHORT|1000", sym, "SHORT", 1000.0, 4600.0, 100.0, 101.0, 97.0, 0.3, "{}", "PENDING", 1.0))
+        _execute(db, "INSERT INTO td_candidate(cand_id, symbol, direction, h1_ts, h1_close_ts, h1_entry, h1_sl, tp, score, feats_json, status, created_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", ("TD|ADAUSDT|LONG|1000", "ADAUSDT", "LONG", 1000.0, 4600.0, 100.0, 99.0, 103.0, 0.3, "{}", "PENDING", 1.0))
+        cand = {"cand_id": "TD|ETHUSDT|SHORT|1000", "symbol": "ETHUSDT", "direction": "SHORT", "h1_ts": 1000.0, "h1_close_ts": 4600.0, "h1_entry": 100.0, "h1_sl": 101.0, "tp": 97.0, "score": 0.3, "feats_json": "{}"}
+        sid = TL.record_signal(db, cand, {"confirm_ts": 4600.0, "entry": 100.0, "sl": 100.5, "tp": 97.0, "k": 0}, 4700.0, 0.2)
+        hyp = json.loads(store.rows(db, "WHERE sig_id = ?", (sid,))[0]["hyp_json"])
+        assert hyp["cluster"]["n"] == 2 and hyp["cluster"]["syms"] == ["BTC", "SOL"], hyp        # інших SHORT тієї ж години двоє; LONG і сам ETH не рахуються
+
+
 def test_image_long_and_short():
     from PIL import Image
     from office_br.live_image import render
     for d in ("LONG", "SHORT"):
-        row = _row(d); t = row["confirm_ts"]; r = np.random.default_rng(1); px = 92.0; bars = []
+        row = _row(d); row["hyp_json"] = json.dumps({"cluster": {"n": 5, "syms": ["BTC", "LTC", "SOL", "BNB", "ADA"]}}); t = row["confirm_ts"]; r = np.random.default_rng(1); px = 92.0; bars = []
         for i in range(120):
             o = px; c = o + r.normal(0, .12); bars.append({"ts": iso(t - 900 * (119 - i)), "open": o, "high": max(o, c) + .05, "low": min(o, c) - .05, "close": c}); px = c
         path = render(row, bars)

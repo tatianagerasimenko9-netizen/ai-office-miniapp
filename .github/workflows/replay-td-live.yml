@@ -1,0 +1,40 @@
+name: replay-td-live
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/replay-td-live.yml
+      - scripts/replay_td_live.py
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch M15 (12 монет)
+        shell: bash
+        run: |
+          for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT BNBUSDT LTCUSDT DOTUSDT ATOMUSDT; do
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-08-25:2026-11-08 | tr '\n' ' '; echo
+          done
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+          tail -c 200 candles/BTCUSDT/15m.csv
+      - name: Replay
+        shell: bash
+        run: python3 scripts/replay_td_live.py candles 2026-11-02T22:00:00 2026-11-07T00:00:00 | tee replay_td_live_out.txt
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          mkdir -p docs/handoff/br-profitability && mv replay_td_live_out.txt docs/handoff/br-profitability/replay_td_live_out.txt
+          git add docs/handoff/br-profitability/replay_td_live_out.txt
+          git commit -m "replay-td-live: що знайшов би скан TD-V1 (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac

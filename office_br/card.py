@@ -35,6 +35,20 @@ def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 
+def cluster_line(row: Dict[str, Any]) -> str | None:
+    """Купа: скільки інших монет дали сигнал у той самий бік тієї ж години (один рух, ризик складається). Немає даних або 0 — рядка немає."""
+    c = _td_hyp(row).get("cluster") or {}
+    try:
+        n = int(c.get("n") or 0)
+    except Exception:  # noqa: BLE001
+        return None
+    if n < 1: return None
+    word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
+    verb = "дала" if n % 10 == 1 and n % 100 != 11 else "дали"
+    syms = ", ".join(c.get("syms") or [])
+    return f"Купа: ще {n} {word}" + (f" ({syms})" if syms else "") + f" {verb} сигнал у той самий бік цієї години. Це один рух, ризик складається."
+
+
 def build_td_card(row: Dict[str, Any]) -> str:
     """Проста картка «Зверху вниз»: вхід, стоп, ціль у ціні, % і $ (при ризику $10 на угоду). Без службових термінів."""
     sym, d = row["symbol"], row["direction"]
@@ -51,6 +65,8 @@ def build_td_card(row: Dict[str, Any]) -> str:
     for t in tg[:1]:
         usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
         L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10)")
+    cl = cluster_line(row)
+    if cl: L.append("⚠️ " + cl)
     L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")
     L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
     return "\n".join(L)
