@@ -76,6 +76,14 @@ def render_td(row, bars):
             fig.text(.92, y - .012, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
             fig.text(.09, y - .047, sub, color=DIM, fontsize=10, va="top")
             y -= .087
+        from office_br.card import cluster_line
+        cl = cluster_line(row)
+        if cl:
+            import textwrap
+            wr = textwrap.wrap(cl, 62)[:3]
+            fig.patches.append(FancyBboxPatch((.05, y - .018 - .026 * len(wr)), .90, .026 * len(wr) + .012, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
+            for i_, ln in enumerate(wr): fig.text(.07, y - .006 - .026 * i_, ln, color=YEL, fontsize=10, va="top")
+            y -= .026 * len(wr) + .03
         fig.text(.06, y - .006, "Тримати до цілі або стопа, максимум 48 годин.", color=TXT, fontsize=11)
         fig.text(.06, y - .028, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
         fig.text(.5, .008, "Тестова стратегія · ручне рішення · ордерів Office не відкриває", color=DIM, fontsize=9, ha="center")
