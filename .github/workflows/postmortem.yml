@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LTCUSDT BNBUSDT DOTUSDT ATOMUSDT XAUUSDT; do
-            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-10-28:2026-11-08 | tr '\n' ' '; echo
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-10-28:2026-11-09 | tr '\n' ' '; echo
           done
           test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
       - name: Розбір
