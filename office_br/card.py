@@ -18,6 +18,9 @@ def tag(seq: Any) -> str:
     return f"B&R-{int(seq)}" if seq else "B&R"
 
 
+TD_TAG = "#ЗверхуВниз #ТЕСТ"
+
+
 def is_td(row: Dict[str, Any]) -> bool:
     return str(row.get("sig_id", "")).startswith("TD|")
 
@@ -36,7 +39,7 @@ def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def cluster_line(row: Dict[str, Any]) -> str | None:
-    """Купа: скільки інших монет дали сигнал у той самий бік тієї ж години (один рух, ризик складається). Немає даних або 0 — рядка немає."""
+    """Скільки інших монет дали сигнал у той самий бік тієї ж години (один рух, ризик складається). Немає даних або 0 — рядка немає."""
     c = _td_hyp(row).get("cluster") or {}
     try:
         n = int(c.get("n") or 0)
@@ -46,7 +49,7 @@ def cluster_line(row: Dict[str, Any]) -> str | None:
     word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
     verb = "дала" if n % 10 == 1 and n % 100 != 11 else "дали"
     syms = ", ".join(c.get("syms") or [])
-    return f"Купа: ще {n} {word}" + (f" ({syms})" if syms else "") + f" {verb} сигнал у той самий бік цієї години. Це один рух, ризик складається."
+    return f"Ще {n} {word}" + (f" ({syms})" if syms else "") + f" {verb} сигнал у той самий бік цієї години. Це один рух, ризик складається."
 
 
 def build_td_card(row: Dict[str, Any]) -> str:
@@ -69,6 +72,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
     if cl: L.append("⚠️ " + cl)
     L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")
     L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
+    L.append(TD_TAG)
     return "\n".join(L)
 
 
@@ -106,6 +110,7 @@ def event_text(row: Dict[str, Any], level: str, price: Any = None) -> str:
 def reminder_text(row: Dict[str, Any], level: str) -> str:
     """Price-triggered manual-action prompt, never an assertion of an executed order."""
     base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
+    tag_ = (" " + TD_TAG) if is_td(row) else ""
     actions = {
         "ENTRY": "🟡 Ціну входу торкнуто",
         "TP1": "🟢 TP1 досягнуто",
@@ -113,4 +118,4 @@ def reminder_text(row: Dict[str, Any], level: str) -> str:
         "TP3": "🟢 TP3 досягнуто",
         "SL": "🔴 SL досягнуто",
     }
-    return base + " · " + actions.get(level, level)
+    return base + " · " + actions.get(level, level) + tag_

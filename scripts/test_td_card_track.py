@@ -52,9 +52,10 @@ def test_cluster_line_and_record():
     h = lambda n, syms=(): json.dumps({"cluster": {"n": n, "syms": list(syms)}})
     base = {"sig_id": "TD|x", "seq": 1, "symbol": "ETHUSDT", "direction": "SHORT", "entry": 100.0, "sl": 101.0, "targets_json": json.dumps([{"p": 95.0}])}
     assert card.cluster_line({**base, "hyp_json": "{}"}) is None and card.cluster_line({**base, "hyp_json": h(0)}) is None and card.cluster_line({**base, "hyp_json": "не json"}) is None
-    l1 = card.cluster_line({**base, "hyp_json": h(1, ["BTC"])}); assert "ще 1 монета (BTC) дала сигнал" in l1
-    assert "ще 3 монети" in card.cluster_line({**base, "hyp_json": h(3)}) and "ще 5 монет " in card.cluster_line({**base, "hyp_json": h(5)}) and "ще 21 монета" in card.cluster_line({**base, "hyp_json": h(21)})
-    assert "Купа" in card.build_card({**base, "hyp_json": h(2, ["BTC", "SOL"])}) and "Купа" not in card.build_card({**base, "hyp_json": h(0)})
+    l1 = card.cluster_line({**base, "hyp_json": h(1, ["BTC"])}); assert "Ще 1 монета (BTC) дала сигнал" in l1
+    assert "Ще 3 монети" in card.cluster_line({**base, "hyp_json": h(3)}) and "Ще 5 монет " in card.cluster_line({**base, "hyp_json": h(5)}) and "Ще 21 монета" in card.cluster_line({**base, "hyp_json": h(21)})
+    c2 = card.build_card({**base, "hyp_json": h(2, ["BTC", "SOL"])}); assert "Ще 2 монети (BTC, SOL)" in c2 and "Купа" not in c2 and "Купа" not in card.build_card({**base, "hyp_json": h(0)}) and "Ще " not in card.build_card({**base, "hyp_json": h(0)}).split("Тримати")[0].split("Ціль")[1]
+    assert card.TD_TAG in c2 and "#ЗверхуВниз" in card.reminder_text(base, "SL") and "#ЗверхуВниз" not in card.reminder_text({**base, "sig_id": "BR|x"}, "SL")
     # запис у БД: інші кандидати тієї ж години й напряму
     from office_td import live as TL
     with tempfile.TemporaryDirectory() as tmp:
