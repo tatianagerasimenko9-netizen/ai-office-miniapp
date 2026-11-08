@@ -121,6 +121,39 @@ def test_td_entry_counts_at_card_time_then_sl():
         assert store.rows(db, "WHERE sig_id = ?", (row["sig_id"],))[0]["status"] in ("SL", "SENT", "CLOSED") or True
 
 
+def test_remind_logic_and_flow():
+    import tempfile
+    from office_td import remind
+    H = 3600
+    assert remind.due(0, 9 * H, 1.5, 0, None) and not remind.due(0, 7 * H, 1.5, 0, None) and not remind.due(0, 9 * H, 0.9, 0, None)
+    assert not remind.due(0, 9 * H, 1.5, 4, None) and not remind.due(0, 20 * H, 1.5, 1, 15 * H) and remind.due(0, 28 * H, 1.5, 1, 15 * H)
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "t.db"); store.init(db)
+        from office_bridge import _execute
+        row = _row("LONG"); t0 = row["sent_ts"]
+        _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (row["sig_id"], 2, "SOLUSDT", "LONG", 92.0, t0 - 3600, t0 - 1800, row["confirm_ts"], 92.12, 91.48, row["targets_json"], "{}", row["created_ts"], "SENT", 55, t0))
+        store.record_event(db, row["sig_id"], "ENTRY", t0, 92.12, None)
+        sent = []
+        async def send(text, **kw): sent.append((text, kw)); return 900 + len(sent)
+        px = {"v": 92.12 + 0.64 * 1.8}                      # +1.8R
+        fetch = lambda *a, **k: [{"ts": iso(t0), "open": px["v"], "high": px["v"], "low": px["v"], "close": px["v"]}]
+        run = lambda now: asyncio.run(remind.remind_open(db, fetch, send, now))
+        assert run(t0 + 3 * H) == 0                          # ще рано
+        assert run(t0 + 9 * H) == 1 and len(sent) == 1
+        assert "№2" in sent[0][0] and "SOL LONG" in sent[0][0] and "+1,8R" in sent[0][0] and "+$18" in sent[0][0] and "Рішення за вами" in sent[0][0] and "#ЗверхуВниз" in sent[0][0]
+        assert sent[0][1]["reply_to"] == 55                  # відповідь на картку
+        assert run(t0 + 10 * H) == 0                         # не частіше ніж раз на 12 год
+        assert run(t0 + 22 * H) == 1 and len(sent) == 2
+        px["v"] = 92.12 + 0.64 * 0.5
+        assert run(t0 + 40 * H) == 0                         # плюс менший за поріг
+        px["v"] = 92.12 + 0.64 * 2.0
+        store.record_event(db, row["sig_id"], "SL", t0 + 41 * H, 91.48, None)
+        assert run(t0 + 50 * H) == 0                         # угода завершена
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"TD_REMIND": "0"}): assert run(t0 + 60 * H) == 0
+
+
 def test_bnr_entry_logic_untouched():
     from inspect import getsource
     src = getsource(live.track)

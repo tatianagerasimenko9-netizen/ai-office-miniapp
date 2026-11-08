@@ -341,6 +341,11 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     tracked = await track(db, fetch, send)
                 except Exception as exc:
                     print(f"[br-live] track: {type(exc).__name__}: {exc}", flush=True)
+                try:                    # TD-V1: інформаційне нагадування про відкриту угоду в плюсі (відповідь на картку; без дій)
+                    from office_td import remind
+                    await remind.remind_open(db, fetch, send)
+                except Exception as exc:
+                    print(f"[td-remind] {type(exc).__name__}: {exc}", flush=True)
                 from office_market_data import hard_backoff_left
                 hard_ban = hard_backoff_left()
                 # During an exchange IP ban, don't fan out historical REST
