@@ -1,6 +1,7 @@
 """TD-V1 · нагадування про відкриту угоду в плюсі (лише інформація, відповіддю на картку сигналу). Рішення завжди за власницею; жодних дій, ордерів і порад.
-Умова: ENTRY є, SL/TP/інших завершень немає, угода відкрита >= TD_REMIND_H годин, поточний плюс >= TD_REMIND_R (у R від стопа).
-Повторюється не частіше ніж раз на TD_REMIND_EVERY_H годин, не більше TD_REMIND_MAX разів на угоду. Вимкнути: TD_REMIND=0."""
+Нагадування приходить, коли плюс (за останнім закриттям M1) уперше досягає рівня з TD_REMIND_LEVELS (за замовчуванням 1,2,3 R), по одному разу на рівень. ENTRY має бути, SL/TP/інших завершень немає.
+Чому без очікування годин: на історії 2024-2026 медіана часу до першого +1R 2,2 год, а після +1R 49% угод закінчуються стопом (docs/handoff/br-profitability/timing_out.txt).
+Вимкнути: TD_REMIND=0."""
 from __future__ import annotations
 
 import os
@@ -23,16 +24,22 @@ def enabled() -> bool:
     return os.getenv("TD_REMIND", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
-def due(entry_ts: float, now: float, r_now: float, n_sent: int, last_ts: Optional[float]) -> bool:
-    """Чиста логіка: чи пора надсилати нагадування."""
-    if r_now < _f("TD_REMIND_R", 1.0): return False
-    if now - entry_ts < _f("TD_REMIND_H", 8.0) * 3600: return False
-    if n_sent >= int(_f("TD_REMIND_MAX", 4)): return False
-    if last_ts is not None and now - last_ts < _f("TD_REMIND_EVERY_H", 12.0) * 3600: return False
-    return True
+def levels() -> List[float]:
+    raw = os.getenv("TD_REMIND_LEVELS", "1,2,3")
+    try:
+        out = sorted({float(x) for x in raw.split(",") if x.strip()})
+    except ValueError:
+        out = [1.0, 2.0, 3.0]
+    return out or [1.0, 2.0, 3.0]
 
 
-def text(row: Dict[str, Any], hours: float, r_now: float, r_tp: float) -> str:
+def due(r_now: float, n_sent: int) -> int:
+    """Чиста логіка: скільки рівнів уже пройдено (0 = нічого нового). Повертає нове значення n, якщо пора слати нагадування, інакше n_sent."""
+    lv = levels(); reached = sum(1 for x in lv if r_now >= x)
+    return reached if reached > n_sent else n_sent
+
+
+def text(row: Dict[str, Any], r_now: float) -> str:
     from office_br import card
     sym = str(row["symbol"]).replace("USDT", "")
     num = lambda x: f"{x:+.1f}".replace(".", ",")
@@ -51,10 +58,9 @@ async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[fl
         if not card.is_td(row) or row.get("msg_id") is None: continue
         sid = row["sig_id"]; evs = store.events(db, sid); lv = {e["level"] for e in evs}
         if "ENTRY" not in lv or lv & TERMINAL: continue
-        entry_ts = float(next(e["touched_ts"] for e in evs if e["level"] == "ENTRY"))
         st = _fetchone(db, "SELECT n, last_ts FROM td_reminder WHERE sig_id = ?", (sid,))
-        n_sent, last_ts = (int(st[0]), float(st[1])) if st else (0, None)
-        if now - entry_ts < _f("TD_REMIND_H", 8.0) * 3600 or n_sent >= int(_f("TD_REMIND_MAX", 4)): continue     # дешева відсічка до запиту цін
+        n_sent = int(st[0]) if st else 0
+        if n_sent >= len(levels()): continue                  # усі рівні вже надіслано: ціни не запитуємо
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 5, closed_only=True)
         if not isinstance(candles, list) or not candles: continue
         try:
@@ -65,10 +71,11 @@ async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[fl
         if risk <= 0: continue
         tp = float(json.loads(row["targets_json"])[0]["p"]); r_now = side * (px - entry) / risk; r_tp = abs(tp - entry) / risk
         if r_now >= r_tp or r_now <= -1: continue          # ціль/стоп уже за ціною: це справа супроводу, не нагадування
-        if not due(entry_ts, now, r_now, n_sent, last_ts): continue
-        msg = await send(text(row, (now - entry_ts) / 3600, r_now, r_tp), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+        n_new = due(r_now, n_sent)
+        if n_new <= n_sent: continue
+        msg = await send(text(row, r_now), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
         if not msg: continue
-        _execute(db, "INSERT INTO td_reminder(sig_id, n, last_ts) VALUES (?,?,?) ON CONFLICT (sig_id) DO UPDATE SET n = EXCLUDED.n, last_ts = EXCLUDED.last_ts", (sid, n_sent + 1, now))
+        _execute(db, "INSERT INTO td_reminder(sig_id, n, last_ts) VALUES (?,?,?) ON CONFLICT (sig_id) DO UPDATE SET n = EXCLUDED.n, last_ts = EXCLUDED.last_ts", (sid, n_new, now))
         sent += 1
-        print(f"[td-remind] {sid} {r_now:+.2f}R (нагадування {n_sent + 1})", flush=True)
+        print(f"[td-remind] {sid} {r_now:+.2f}R (рівень {n_new})", flush=True)
     return sent

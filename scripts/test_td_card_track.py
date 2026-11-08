@@ -124,9 +124,7 @@ def test_td_entry_counts_at_card_time_then_sl():
 def test_remind_logic_and_flow():
     import tempfile
     from office_td import remind
-    H = 3600
-    assert remind.due(0, 9 * H, 1.5, 0, None) and not remind.due(0, 7 * H, 1.5, 0, None) and not remind.due(0, 9 * H, 0.9, 0, None)
-    assert not remind.due(0, 9 * H, 1.5, 4, None) and not remind.due(0, 20 * H, 1.5, 1, 15 * H) and remind.due(0, 28 * H, 1.5, 1, 15 * H)
+    assert remind.due(0.9, 0) == 0 and remind.due(1.0, 0) == 1 and remind.due(1.5, 1) == 1 and remind.due(2.4, 1) == 2 and remind.due(3.5, 0) == 3 and remind.due(3.5, 3) == 3
     with tempfile.TemporaryDirectory() as tmp:
         db = os.path.join(tmp, "t.db"); store.init(db)
         from office_bridge import _execute
@@ -136,22 +134,25 @@ def test_remind_logic_and_flow():
         store.record_event(db, row["sig_id"], "ENTRY", t0, 92.12, None)
         sent = []
         async def send(text, **kw): sent.append((text, kw)); return 900 + len(sent)
-        px = {"v": 92.12 + 0.64 * 1.8}                      # +1.8R
+        px = {"v": 92.12 + 0.64 * 0.4}                      # +0,4R: ще нічого
         fetch = lambda *a, **k: [{"ts": iso(t0), "open": px["v"], "high": px["v"], "low": px["v"], "close": px["v"]}]
         run = lambda now: asyncio.run(remind.remind_open(db, fetch, send, now))
-        assert run(t0 + 3 * H) == 0                          # ще рано
-        assert run(t0 + 9 * H) == 1 and len(sent) == 1
-        assert sent[0][0] == "ТЕСТ №2 · SOL LONG · зараз +1,8R (+$18) #ТЕСТ", sent[0][0]
+        assert run(t0 + 600) == 0
+        px["v"] = 92.12 + 0.64 * 1.1                         # +1,1R через 40 хв: вже нагадуємо
+        assert run(t0 + 2400) == 1 and len(sent) == 1 and sent[0][0] == "ТЕСТ №2 · SOL LONG · зараз +1,1R (+$11) #ТЕСТ", sent[0][0]
         assert sent[0][1]["reply_to"] == 55                  # відповідь на картку
-        assert run(t0 + 10 * H) == 0                         # не частіше ніж раз на 12 год
-        assert run(t0 + 22 * H) == 1 and len(sent) == 2
-        px["v"] = 92.12 + 0.64 * 0.5
-        assert run(t0 + 40 * H) == 0                         # плюс менший за поріг
-        px["v"] = 92.12 + 0.64 * 2.0
-        store.record_event(db, row["sig_id"], "SL", t0 + 41 * H, 91.48, None)
-        assert run(t0 + 50 * H) == 0                         # угода завершена
+        px["v"] = 92.12 + 0.64 * 1.6; assert run(t0 + 3000) == 0          # той самий рівень вдруге не шлемо
+        px["v"] = 92.12 + 0.64 * 2.3; assert run(t0 + 7200) == 1 and "+2,3R" in sent[1][0]
+        px["v"] = 92.12 + 0.64 * 3.1; assert run(t0 + 9000) == 1 and "+3,1R" in sent[2][0]
+        px["v"] = 92.12 + 0.64 * 3.15; assert run(t0 + 9600) == 0 and len(sent) == 3   # усі рівні вже були
+        # повернення в плюс після спаду не дублює; завершена угода не нагадує
+        row2 = _row("LONG"); row2["sig_id"] = "TD|SOLUSDT|LONG|1792999999"
+        _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 (row2["sig_id"], 3, "SOLUSDT", "LONG", 92.0, t0, t0, row["confirm_ts"], 92.12, 91.48, row["targets_json"], "{}", row["created_ts"], "SENT", 56, t0))
+        store.record_event(db, row2["sig_id"], "ENTRY", t0, 92.12, None); store.record_event(db, row2["sig_id"], "SL", t0 + 100, 91.48, None)
+        px["v"] = 92.12 + 0.64 * 2.0; assert run(t0 + 12000) == 0
         from unittest.mock import patch
-        with patch.dict(os.environ, {"TD_REMIND": "0"}): assert run(t0 + 60 * H) == 0
+        with patch.dict(os.environ, {"TD_REMIND": "0"}): assert run(t0 + 13000) == 0
 
 
 def test_bnr_entry_logic_untouched():
