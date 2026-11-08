@@ -18,7 +18,7 @@ def tag(seq: Any) -> str:
     return f"B&R-{int(seq)}" if seq else "B&R"
 
 
-TD_TAG = "#ЗверхуВниз #ТЕСТ"
+TD_TAG = "#ТЕСТ"
 
 
 def is_td(row: Dict[str, Any]) -> bool:
@@ -26,8 +26,8 @@ def is_td(row: Dict[str, Any]) -> bool:
 
 
 def head(row: Dict[str, Any]) -> str:
-    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ЗВЕРХУ ВНИЗ ТЕСТ · №n»."""
-    return f"ЗВЕРХУ ВНИЗ ТЕСТ · №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
+    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ТЕСТ №n»."""
+    return f"ТЕСТ №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
 
 
 def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -53,14 +53,14 @@ def cluster_line(row: Dict[str, Any]) -> str | None:
 
 
 def build_td_card(row: Dict[str, Any]) -> str:
-    """Проста картка «Зверху вниз»: вхід, стоп, ціль у ціні, % і $ (при ризику $10 на угоду). Без службових термінів."""
+    """Проста картка TD: вхід, стоп, ціль у ціні, % і $ (при ризику $10 на угоду). Без службових термінів."""
     sym, d = row["symbol"], row["direction"]
     entry, sl = float(row["entry"]), float(row["sl"])
     risk = abs(entry - sl)
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     L = [
-        f"🧪 ТЕСТ · ЗВЕРХУ ВНИЗ · №{int(row['seq'])}",
+        f"🧪 ТЕСТ №{int(row['seq'])}",
         f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
         f"🟡 Вхід {_n(entry, sym)}",
         f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",

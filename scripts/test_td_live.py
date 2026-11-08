@@ -72,9 +72,9 @@ def test_candidate_confirm_signal_and_card():
         r = rows[0]; assert float(r["sl"]) < float(r["entry"]) < json.loads(r["targets_json"])[0]["p"]
         assert float(r["confirm_ts"]) == confirm_open and len(json.loads(r["targets_json"])) == 1
         text = card.build_card(r)
-        assert "ТЕСТ" in text and "ЗВЕРХУ ВНИЗ" in text and "№1" in text and "ордерів" in text and "B&R LIVE" not in text
+        assert "ТЕСТ" in text and "ЗВЕРХУ" not in text and "№1" in text and "ордерів" in text and "B&R LIVE" not in text
         assert "TD-" not in text and "−$10" in text and "+$" in text and "Ціль" in text and "Стоп" in text and "Вхід" in text
-        assert card.head(r).startswith("ЗВЕРХУ ВНИЗ ТЕСТ · №1") and "ЗВЕРХУ ВНИЗ ТЕСТ" in card.reminder_text(r, "TP1")
+        assert card.head(r).startswith("ТЕСТ №1") and "ТЕСТ №1" in card.reminder_text(r, "TP1")
         assert json.loads(r["hyp_json"]).get("stop_tag") in (None, "NONE", "BETWEEN", "BEYOND")
         # шорт-кандидат лишається очікувати (підтвердження немає)
         left = live.confirm_all(db, make_fetch(h1, m15), now2, STUB)

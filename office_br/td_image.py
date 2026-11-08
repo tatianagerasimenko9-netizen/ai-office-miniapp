@@ -1,4 +1,4 @@
-"""Зображення-картка «Зверху вниз» (ТЕСТ): графік M15 зі свічками, лінії входу/стопа, ціль, % і $ при ризику $10. Лише реальні свічки Binance Futures; жодних вигаданих рівнів."""
+"""Зображення-картка TD (ТЕСТ): графік M15 зі свічками, лінії входу/стопа, ціль, % і $ при ризику $10. Лише реальні свічки Binance Futures; жодних вигаданих рівнів."""
 from __future__ import annotations
 
 import json
@@ -40,8 +40,7 @@ def render_td(row, bars):
         ytop = hi + .25 * risk; ybot = min(ent - max(1.6 * risk, .45 * (ytop - lo)), lo - .05 * (ytop - lo))
     with matplotlib.rc_context({"text.parse_math": False}):
         fig = plt.figure(figsize=(7.2, 11.2), facecolor=BG, dpi=130)
-        fig.text(.06, .962, "ЗВЕРХУ ВНИЗ", color=DIM, fontsize=13, fontweight="bold")
-        fig.text(.30, .962, f"№{int(row['seq'])}", color=DIM, fontsize=13)
+        fig.text(.06, .962, f"№{int(row['seq'])}", color=DIM, fontsize=14, fontweight="bold")
         fig.patches.append(FancyBboxPatch((.80, .952), .14, .026, boxstyle="round,pad=0.002,rounding_size=0.01", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=1))
         fig.text(.87, .9645, "ТЕСТ", color=YEL, fontsize=11, fontweight="bold", ha="center", va="center")
         fig.text(.06, .905, sym, color=TXT, fontsize=30, fontweight="bold")

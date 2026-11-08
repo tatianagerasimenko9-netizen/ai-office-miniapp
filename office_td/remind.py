@@ -36,8 +36,7 @@ def text(row: Dict[str, Any], hours: float, r_now: float, r_tp: float) -> str:
     from office_br import card
     sym = str(row["symbol"]).replace("USDT", "")
     num = lambda x: f"{x:+.1f}".replace(".", ",")
-    return (f"ЗВЕРХУ ВНИЗ ТЕСТ · №{int(row['seq'])} · {sym} {row['direction']}: відкрита {int(hours)} год, зараз {num(r_now)}R (+${10 * r_now:.0f} при ризику $10). "
-            f"Ціль {num(r_tp)}R, стоп −1R. Рішення за вами. {card.TD_TAG}")
+    return f"ТЕСТ №{int(row['seq'])} · {sym} {row['direction']} · зараз {num(r_now)}R (+${10 * r_now:.0f}) {card.TD_TAG}"
 
 
 async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[float] = None) -> int:

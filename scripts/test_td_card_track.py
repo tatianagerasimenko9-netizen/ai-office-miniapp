@@ -43,7 +43,7 @@ def _row(direction="LONG"):
 def test_card_text_plain():
     for d in ("LONG", "SHORT"):
         text = card.build_card(_row(d))
-        assert "ЗВЕРХУ ВНИЗ" in text and "№2" in text and "−$10" in text and "+$" in text and "Вхід" in text and "Стоп" in text and "Ціль" in text
+        assert "ЗВЕРХУ" not in text and "ТЕСТ №2" in text and "−$10" in text and "+$" in text and "Вхід" in text and "Стоп" in text and "Ціль" in text
         assert "TD-" not in text and "ATR" not in text and "оцінка моделі" not in text and "ордерів" in text and len(text) < 600
 
 
@@ -55,7 +55,7 @@ def test_cluster_line_and_record():
     l1 = card.cluster_line({**base, "hyp_json": h(1, ["BTC"])}); assert "Ще 1 монета (BTC) дала сигнал" in l1
     assert "Ще 3 монети" in card.cluster_line({**base, "hyp_json": h(3)}) and "Ще 5 монет " in card.cluster_line({**base, "hyp_json": h(5)}) and "Ще 21 монета" in card.cluster_line({**base, "hyp_json": h(21)})
     c2 = card.build_card({**base, "hyp_json": h(2, ["BTC", "SOL"])}); assert "Ще 2 монети (BTC, SOL)" in c2 and "Купа" not in c2 and "Купа" not in card.build_card({**base, "hyp_json": h(0)}) and "Ще " not in card.build_card({**base, "hyp_json": h(0)}).split("Тримати")[0].split("Ціль")[1]
-    assert card.TD_TAG in c2 and "#ЗверхуВниз" in card.reminder_text(base, "SL") and "#ЗверхуВниз" not in card.reminder_text({**base, "sig_id": "BR|x"}, "SL")
+    assert card.TD_TAG in c2 and "#ТЕСТ" in card.reminder_text(base, "SL") and "#ТЕСТ" not in card.reminder_text({**base, "sig_id": "BR|x"}, "SL") and "ЗверхуВниз" not in c2
     # запис у БД: інші кандидати тієї ж години й напряму
     from office_td import live as TL
     with tempfile.TemporaryDirectory() as tmp:
@@ -117,7 +117,7 @@ def test_td_entry_counts_at_card_time_then_sl():
             asyncio.run(live.track(db, lambda *a, **k: bars2, send))
         lv = [e["level"] for e in store.events(db, row["sig_id"])]
         assert "SL" in lv and "AMBIGUOUS" not in lv, lv
-        assert len(sent) == 1 and "ЗВЕРХУ ВНИЗ ТЕСТ" in sent[0] and "SL" in sent[0], sent
+        assert len(sent) == 1 and "ТЕСТ №2" in sent[0] and "ЗВЕРХУ" not in sent[0] and "SL" in sent[0], sent
         assert store.rows(db, "WHERE sig_id = ?", (row["sig_id"],))[0]["status"] in ("SL", "SENT", "CLOSED") or True
 
 
@@ -141,7 +141,7 @@ def test_remind_logic_and_flow():
         run = lambda now: asyncio.run(remind.remind_open(db, fetch, send, now))
         assert run(t0 + 3 * H) == 0                          # ще рано
         assert run(t0 + 9 * H) == 1 and len(sent) == 1
-        assert "№2" in sent[0][0] and "SOL LONG" in sent[0][0] and "+1,8R" in sent[0][0] and "+$18" in sent[0][0] and "Рішення за вами" in sent[0][0] and "#ЗверхуВниз" in sent[0][0]
+        assert sent[0][0] == "ТЕСТ №2 · SOL LONG · зараз +1,8R (+$18) #ТЕСТ", sent[0][0]
         assert sent[0][1]["reply_to"] == 55                  # відповідь на картку
         assert run(t0 + 10 * H) == 0                         # не частіше ніж раз на 12 год
         assert run(t0 + 22 * H) == 1 and len(sent) == 2
