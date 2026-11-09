@@ -52,6 +52,16 @@ def cluster_line(row: Dict[str, Any]) -> str | None:
     return f"Ще {n} {word}" + (f" ({syms})" if syms else "") + f" {verb} сигнал у той самий бік цієї години. Це один рух, ризик складається."
 
 
+def td_size(row: Dict[str, Any]) -> float:
+    """Сума позиції в USDT (без плеча), щоб стоп коштував рівно $10: 10 / відстань до стопа."""
+    entry, sl = float(row["entry"]), float(row["sl"])
+    return 10.0 * entry / abs(entry - sl) if entry != sl else 0.0
+
+
+def usd_fmt(x: float) -> str:
+    return f"{x:,.0f}".replace(",", " ")
+
+
 def build_td_card(row: Dict[str, Any]) -> str:
     """Проста картка TD: вхід, стоп, ціль у ціні, % і $ (при ризику $10 на угоду). Без службових термінів."""
     sym, d = row["symbol"], row["direction"]
@@ -62,6 +72,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
     L = [
         f"🧪 ТЕСТ №{int(row['seq'])}",
         f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+        f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
         f"🟡 Вхід {_n(entry, sym)}",
         f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
     ]
