@@ -30,7 +30,7 @@ jobs:
           tail -c 200 candles/BTCUSDT/15m.csv
       - name: Replay
         shell: bash
-        run: python3 scripts/replay_td_live.py candles 2026-11-02T22:00:00 2026-11-07T00:00:00 | tee replay_td_live_out.txt
+        run: python3 scripts/replay_td_live.py candles 2026-11-06T22:00:00 2026-11-09T00:00:00 | tee replay_td_live_out.txt
       - name: Зберегти
         shell: bash
         run: |
