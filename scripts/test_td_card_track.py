@@ -44,6 +44,7 @@ def test_card_text_plain():
     for d in ("LONG", "SHORT"):
         text = card.build_card(_row(d))
         assert "ЗВЕРХУ" not in text and "ТЕСТ №2" in text and "−$10" in text and "+$" in text and "Вхід" in text and "Стоп" in text and "Ціль" in text
+        assert "Відкрий на $" in text and "USDT" in text and abs(card.td_size(_row(d)) * abs(float(_row(d)["entry"]) - float(_row(d)["sl"])) / float(_row(d)["entry"]) - 10) < 1e-9
         assert "TD-" not in text and "ATR" not in text and "оцінка моделі" not in text and "ордерів" in text and len(text) < 600
 
 

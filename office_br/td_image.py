@@ -39,14 +39,14 @@ def render_td(row, bars):
     else:
         ytop = hi + .25 * risk; ybot = min(ent - max(1.6 * risk, .45 * (ytop - lo)), lo - .05 * (ytop - lo))
     with matplotlib.rc_context({"text.parse_math": False}):
-        fig = plt.figure(figsize=(7.2, 11.2), facecolor=BG, dpi=130)
+        fig = plt.figure(figsize=(7.2, 13.2), facecolor=BG, dpi=130)
         fig.text(.06, .962, f"№{int(row['seq'])}", color=DIM, fontsize=14, fontweight="bold")
         fig.patches.append(FancyBboxPatch((.80, .952), .14, .026, boxstyle="round,pad=0.002,rounding_size=0.01", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=1))
         fig.text(.87, .9645, "ТЕСТ", color=YEL, fontsize=11, fontweight="bold", ha="center", va="center")
         fig.text(.06, .905, sym, color=TXT, fontsize=30, fontweight="bold")
         fig.text(.94, .905, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
         fig.text(.06, .878, "Binance Futures · графік M15", color=DIM, fontsize=10)
-        ax = fig.add_axes([.04, .47, .78, .39]); ax.set_facecolor(BG)
+        ax = fig.add_axes([.04, .505, .78, .355]); ax.set_facecolor(BG)
         for i, (o, h, l, c) in enumerate(K):
             col = GRN if c >= o else RED
             ax.vlines(i, l, h, color=col, linewidth=1); ax.add_patch(Rectangle((i - .33, min(o, c)), .66, max(abs(c - o), 1e-12), facecolor=col, edgecolor=col))
@@ -65,16 +65,18 @@ def render_td(row, bars):
         fig.text(.835, ypos(sl), f"СТОП\n{fmt(sl)}\n−{pct(sl)}% · −$10", color=RED, fontsize=9.5, fontweight="bold", va="center")
         ty = ypos(ent + side * (ytop - ent if side > 0 else ent - ybot) * .85)
         fig.text(.835, ty, f"ЦІЛЬ\n{fmt(tp)}\n+{pct(tp)}% · +${usd_tp:.0f}", color=GRN, fontsize=9.5, fontweight="bold", va="center")
-        rows = [("ВХІД", fmt(ent), "ринком або лімітом біля цієї ціни", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
+        from office_br.card import td_size, usd_fmt
+        sz = td_size(row)
+        rows = [("ВІДКРИЙ НА", f"${usd_fmt(sz)}", "USDT, без плеча. З плечем сума та сама, під угоду йде менше", TXT), ("ВХІД", fmt(ent), "ринком або лімітом біля цієї ціни", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
                 ("ЦІЛЬ", fmt(tp), f"+{pct(tp)}% · прибуток при ризику $10: +${usd_tp:.0f}", GRN)]
-        y = .405
+        y = .465
         for lab, val, sub, col in rows:
-            fig.patches.append(FancyBboxPatch((.05, y - .07), .90, .08, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
-            fig.patches.append(Rectangle((.05, y - .07), .012, .08, transform=fig.transFigure, facecolor=col, edgecolor="none"))
+            fig.patches.append(FancyBboxPatch((.05, y - .062), .90, .072, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
+            fig.patches.append(Rectangle((.05, y - .062), .012, .072, transform=fig.transFigure, facecolor=col, edgecolor="none"))
             fig.text(.09, y - .012, lab, color=col, fontsize=12, fontweight="bold", va="top")
             fig.text(.92, y - .012, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
-            fig.text(.09, y - .047, sub, color=DIM, fontsize=10, va="top")
-            y -= .087
+            fig.text(.09, y - .042, sub, color=DIM, fontsize=10, va="top")
+            y -= .074
         from office_br.card import cluster_line
         cl = cluster_line(row)
         if cl:
