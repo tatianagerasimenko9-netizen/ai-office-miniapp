@@ -94,10 +94,12 @@ def scan_h1(db: str, fetch: Callable, now: Optional[float] = None, m: Optional[M
     init(db); now = time.time() if now is None else now; m = m or model(); created = 0
     btc = fetch("BTCUSDT", "1h", H1_BARS, closed_only=True)
     if not isinstance(btc, list) or len(btc) < MIN_H1: return -1      # дані недоступні: повторимо в цю ж годину
+    nodata: List[str] = []
     for sym in symbols:
         try:
             bars = btc if sym == "BTCUSDT" else fetch(sym, "1h", H1_BARS, closed_only=True)
-            if not isinstance(bars, list) or len(bars) < MIN_H1: continue
+            if not isinstance(bars, list) or len(bars) < MIN_H1:
+                nodata.append(f"{sym.replace('USDT', '')}:{len(bars) if isinstance(bars, list) else 0}"); continue
             last_open = _epoch(bars[-1])
             if last_open + 3600 > now or now - (last_open + 3600) > 1800: continue          # лише свіжозакритий бар
             for r in score_symbol(sym, bars, btc, m):
@@ -116,6 +118,7 @@ def scan_h1(db: str, fetch: Callable, now: Optional[float] = None, m: Optional[M
                 print(f"[td] кандидат {cid} score={r['score']:.3f} thr={m.threshold:.3f}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[td] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
+    print(f"[td] H1-скан: {len(symbols) - len(nodata)} із {len(symbols)} інструментів з даними" + (f"; без даних (барів): {', '.join(nodata)}" if nodata else ""), flush=True)
     return created
 
 
