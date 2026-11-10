@@ -19,7 +19,8 @@ from office_td.model import Model, _DEFAULT as MODEL_PATH
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "LTCUSDT", "DOTUSDT", "ATOMUSDT")
 # Золото, срібло, нафта (WTI, Brent), газ: додано за вимогою власниці як ТЕСТ без ордерів. Історія (2024-2026, комісія 0,10%): газ +$38, нафта WTI −$120, срібло −$130, золото −$134, Brent −$144.
-COMMODITIES = ("XAUUSDT", "XAGUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT")
+# NVDA, SPCX (акції-перпи Binance) додано за вимогою власниці; на історії НЕ перевірені (немає даних у тесті).
+COMMODITIES = ("XAUUSDT", "XAGUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT", "NVDAUSDT", "SPCXUSDT")
 if os.getenv("TD_COMMODITIES", "1").strip().lower() in ("1", "true", "yes", "on"):
     SYMBOLS = SYMBOLS + COMMODITIES
 H1_BARS = 1500                    # ≈62 доби: потрібні попередній місяць і 336-барові вікна
