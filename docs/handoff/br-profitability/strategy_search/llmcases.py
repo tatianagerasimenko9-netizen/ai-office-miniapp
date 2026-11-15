@@ -9,6 +9,22 @@ import newcoins as nc
 md, td = nc.md, nc.td
 CUT = pd.Timestamp("2026-07-01", tz="UTC").timestamp()
 
+def path(a, j, side, ent, sl, tp, hz=192):
+    """Шлях угоди (SL-першим): результат, бар виходу, макс. сприятливий рух до виходу (R), і кожен рівень +0.5/+1/+1.5/+2R: бар першого досягнення та бар першого повернення до входу після нього."""
+    h, l = a["high"], a["low"]; risk = abs(ent - sl); out = "TIME"; nb = hz; fav = []; ret = []
+    for k in range(1, hz + 1):
+        q = j + k
+        if q >= len(h): nb = k - 1; break
+        hit_sl = (l[q] <= sl) if side > 0 else (h[q] >= sl); hit_tp = (h[q] >= tp) if side > 0 else (l[q] <= tp)
+        if hit_sl: out, nb = "SL", k; break
+        if hit_tp: out, nb = "TP", k; break
+        fav.append(((h[q] - ent) if side > 0 else (ent - l[q])) / risk); ret.append((l[q] <= ent) if side > 0 else (h[q] >= ent))
+    res = dict(out=out, nb=nb, mfe=round(max(fav), 3) if fav else 0.0)
+    for lv in (0.5, 1.0, 1.5, 2.0):
+        t = next((i + 1 for i, f in enumerate(fav) if f >= lv), None); res[f"t{lv}"] = t
+        res[f"b{lv}"] = next((i + 1 for i in range(t, len(ret)) if ret[i]), None) if t else None
+    return res
+
 def rel(p, e): return round((float(p) / e - 1) * 100, 2)
 
 def main():
@@ -47,7 +63,8 @@ def main():
             bi = int(np.searchsorted(btc.index.to_numpy(float), x.t)); br24 = float(btc.r24.iloc[min(bi, len(btc) - 1)]) * 100
             fwd = [[round(float(h_[q]), 8), round(float(l_[q]), 8), round(float(c_[q]), 8)] for q in range(j + 1, min(j + 673, len(c_)))]
             _r = td.sim(a, j, side, ent, sl, tp, 192) - 0.001 / sp
-            allrows.append((float(a["open_time"][j]), x.sym, side, round(sp * 100, 3), round(at / ent * 100, 3), round(float(x.s), 3), round(-h1[-7][3], 2), round(-h1[-13][3], 2), round(-h1[0][3], 2), round(br24, 2), round(_r, 4)))
+            _p = path(a, j, side, ent, sl, tp)
+            allrows.append((float(a["open_time"][j]), x.sym, side, round(sp * 100, 3), round(at / ent * 100, 3), round(float(x.s), 3), round(-h1[-7][3], 2), round(-h1[-13][3], 2), round(-h1[0][3], 2), round(br24, 2), round(_r, 4), round(abs(tp - ent) / abs(ent - sl), 2), _p["out"], _p["nb"], _p["mfe"], _p["t0.5"], _p["b0.5"], _p["t1.0"], _p["b1.0"], _p["t1.5"], _p["b1.5"], _p["t2.0"], _p["b2.0"]))
             cases.append(dict(t=float(a["open_time"][j]), sym=x.sym, side=side, ent=float(ent), sl=float(sl), tp=float(tp), score=round(float(x.s), 3), case=dict(direction="LONG" if side > 0 else "SHORT", stop_pct=round(sp * 100, 2), target_pct=round(abs(tp - ent) / ent * 100, 2), atr15_pct=round(at / ent * 100, 3), model_score=round(float(x.s), 3), market_btc_24h_pct=round(br24, 2), levels_pct_from_entry=lv, h1_last36_ohlc_pct=h1, m15_last32_ohlc_pct=m15), fwd=fwd)); break
     random.seed(11); post = [c for c in cases if c["t"] >= CUT]; pre = [c for c in cases if c["t"] < CUT]
     pick = random.sample(post, min(100, len(post))) + random.sample(pre, min(50, len(pre))); random.shuffle(pick)
@@ -56,6 +73,6 @@ def main():
         for n, c in enumerate(pick, 1):
             f1.write(json.dumps(dict(id=n, **c["case"]), ensure_ascii=False) + "\n")
             f2.write(json.dumps(dict(id=n, t=c["t"], sym=c["sym"], side=c["side"], ent=c["ent"], sl=c["sl"], tp=c["tp"], post_cutoff=c["t"] >= CUT, fwd=c["fwd"])) + "\n")
-    pd.DataFrame(allrows, columns=["t", "sym", "side", "stop_pct", "atr15_pct", "score", "ret6h", "ret12h", "ret36h", "btc24h", "r48h_cost10"]).to_csv(f"{OUT}/all_signals.csv", index=False)
+    pd.DataFrame(allrows, columns=["t", "sym", "side", "stop_pct", "atr15_pct", "score", "ret6h", "ret12h", "ret36h", "btc24h", "r48h_cost10", "tp_R", "out", "nbars", "mfe", "t05", "b05", "t1", "b1", "t15", "b15", "t2", "b2"]).to_csv(f"{OUT}/all_signals.csv", index=False)
     print(f"усього кейсів {len(cases)} (після 01.07.2026: {len(post)}); у вибірці {len(pick)}")
 if __name__ == "__main__": main()
