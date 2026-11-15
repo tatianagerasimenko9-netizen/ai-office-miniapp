@@ -1,0 +1,43 @@
+name: llmcases
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/llmcases.yml
+      - docs/handoff/br-profitability/strategy_search/llmcases.py
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas scikit-learn
+      - name: Fetch M15
+        shell: bash
+        run: |
+          TRAIN=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
+          NEW=XAUUSDT,XAGUSDT,CLUSDT,BZUSDT,NATGASUSDT,NVDAUSDT,SPCXUSDT
+          echo "TRAIN=$TRAIN" >> $GITHUB_ENV; echo "NEW=$NEW" >> $GITHUB_ENV
+          for S in ${TRAIN//,/ } ${NEW//,/ }; do
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2022-01-01:2026-11-14 | tr '\n' ' '; echo
+          done
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Кейси для сліпої оцінки
+        shell: bash
+        run: |
+          cd docs/handoff/br-profitability/strategy_search
+          python3 llmcases.py ../../../../candles "$TRAIN" "$NEW" ../llm_pilot | tee ../llm_pilot_build.txt
+      - name: Зберегти у гілку
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/llm_pilot docs/handoff/br-profitability/llm_pilot_build.txt
+          git commit -m "llm_pilot: обезличені кейси і результати (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
