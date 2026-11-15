@@ -11,7 +11,7 @@ for r in S.itertuples():
         if r.sym not in H: H[r.sym] = h1(r.sym)
         if "BTCUSDT" not in H: H["BTCUSDT"] = h1("BTCUSDT")
         h = H[r.sym]; t = h.open_time.to_numpy(float); i = int(np.searchsorted(t, r.t0 // 3600 * 3600))   # H1-бар, у якому видано картку (він ще не закритий)
-        if i < 36 or i >= len(t) or t[i] != r.t0 // 3600 * 3600: res.append(None); continue
+        if i < 36 or i >= len(t) or t[i] != r.t0 // 3600 * 3600: print(f"пропуск №{r.seq} {r.sym}: i={i} з {len(t)}, перший H1 {t[0]:.0f}, останній {t[-1]:.0f}, t0 {r.t0}"); res.append(None); continue
         ent = r.entry; c = h.close.to_numpy(float)
         ret = lambda k: (ent / c[i - k] - 1) * 100            # рух від закриття k годин тому до входу
         b = H["BTCUSDT"]; bt = b.open_time.to_numpy(float); bi = int(np.searchsorted(bt, r.t0 // 3600 * 3600)) - 1; bc = b.close.to_numpy(float)
@@ -21,7 +21,7 @@ for r in S.itertuples():
         R = abs(r.tp - ent) / abs(ent - r.sl); usd = {"SL": -10.0, "TP1": 10 * R}.get(r.status)
         res.append(dict(seq=r.seq, sym=r.sym[:-4], side="L" if r.side > 0 else "S", stop=round(sp, 2), r6=round(r6, 1), r12=round(r12, 1), r36=round(r36, 1), btc24=round(btc24, 1), why=("стоп<0.2 " if f1 else "") + ("шорт-проти-росту " if f2 else "") + ("лонг-після-падіння" if f3 else ""), status=r.status, usd=usd))
     except Exception as e:
-        res.append(None)
+        print(f"помилка №{r.seq} {r.sym}: {type(e).__name__}: {e}"); res.append(None)
 D = pd.DataFrame([x for x in res if x]); D["flag"] = D["why"].str.strip() != ""
 print(f"Сигналів з даними: {len(D)} із {len(S)}")
 print(D[D.flag][["seq", "sym", "side", "stop", "r6", "r12", "r36", "btc24", "why", "status", "usd"]].to_string(index=False))
