@@ -5,7 +5,7 @@ CD, SIG = sys.argv[1], sys.argv[2]
 def h1(sym):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
     return d.groupby(d.open_time // 3600 * 3600).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last")).reset_index()
-S = pd.read_csv(SIG); H = {}; res = []
+S = pd.read_csv(SIG); S["sym"] = S.sym.where(S.sym.str.endswith("USDT"), S.sym + "USDT"); H = {}; res = []
 for r in S.itertuples():
     try:
         if r.sym not in H: H[r.sym] = h1(r.sym)
