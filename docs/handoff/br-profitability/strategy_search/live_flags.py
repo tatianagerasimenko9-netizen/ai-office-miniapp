@@ -19,12 +19,12 @@ for r in S.itertuples():
         sp = abs(ent - r.sl) / ent * 100; r6, r12, r36 = ret(6), ret(12), ret(35)
         f1 = sp < 0.2; f2 = r.side < 0 and r36 >= 4 and (r6 >= 2 or r12 >= 2); f3 = r.side > 0 and (r6 <= -2.4 or r12 <= -2.5 or (r36 <= -3.5 and btc24 < 0))
         R = abs(r.tp - ent) / abs(ent - r.sl); usd = {"SL": -10.0, "TP1": 10 * R}.get(r.status)
-        res.append(dict(seq=r.seq, sym=r.sym[:-4], side="L" if r.side > 0 else "S", stop=round(sp, 2), r6=round(r6, 1), r12=round(r12, 1), r36=round(r36, 1), btc24=round(btc24, 1), flags=("стоп<0.2 " if f1 else "") + ("шорт-проти-росту " if f2 else "") + ("лонг-після-падіння" if f3 else ""), status=r.status, usd=usd))
+        res.append(dict(seq=r.seq, sym=r.sym[:-4], side="L" if r.side > 0 else "S", stop=round(sp, 2), r6=round(r6, 1), r12=round(r12, 1), r36=round(r36, 1), btc24=round(btc24, 1), why=("стоп<0.2 " if f1 else "") + ("шорт-проти-росту " if f2 else "") + ("лонг-після-падіння" if f3 else ""), status=r.status, usd=usd))
     except Exception as e:
         res.append(None)
-D = pd.DataFrame([x for x in res if x]); D["flag"] = D.flags.str.strip() != ""
+D = pd.DataFrame([x for x in res if x]); D["flag"] = D["why"].str.strip() != ""
 print(f"Сигналів з даними: {len(D)} із {len(S)}")
-print(D[D.flag][["seq", "sym", "side", "stop", "r6", "r12", "r36", "btc24", "flags", "status", "usd"]].to_string(index=False))
+print(D[D.flag][["seq", "sym", "side", "stop", "r6", "r12", "r36", "btc24", "why", "status", "usd"]].to_string(index=False))
 def tot(x): return f"{x.usd.dropna().sum():+.0f}$ (закритих {x.usd.notna().sum()}, виграшних {(x.usd.dropna() > 0).sum()})"
 print(f"\nЗ попередженням: {D.flag.sum()} сигналів ({D.flag.mean()*100:.0f}%): {tot(D[D.flag])}")
 print(f"Без попередження: {(~D.flag).sum()} сигналів: {tot(D[~D.flag])}")
