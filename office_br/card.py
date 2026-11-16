@@ -83,24 +83,25 @@ def build_td_card(row: Dict[str, Any]) -> str:
     risk = abs(entry - sl)
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
+    hy = _td_hyp(row)
     L = [
-        f"{strat(row)[1]} {strat(row)[0]} №{int(row['seq'])}",
-        f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
-        f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
-        f"🟡 Вхід {_n(entry, sym)} · лімітним ордером",
-        f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
+        f"{strat(row)[1]} {strat(row)[0]} №{int(row['seq'])} · {sym} {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+        f"💰 Сума ${usd_fmt(td_size(row))}",
+        f"🟡 Вхід {_n(entry, sym)} (ліміт)",
+        f"🔴 Стоп {_n(sl, sym)} · −{pc(sl)}% = −$10",
     ]
     for t in tg[:1]:
         usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
-        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10) · лімітним ордером")
+        L.append(f"🟢 Ціль {_n(t['p'], sym)} · +{pc(t['p'])}% = +${usd:.0f} (ліміт)")
     wl = warn_line(row)
-    if wl: L.append("⚠️ " + wl)
-    cl = cluster_line(row)
-    if cl: L.append("⚠️ " + cl)
-    why = _td_hyp(row).get("why")
-    if why: L.append("📌 Чому: " + str(why))
-    L.append("⏱ " + str(_td_hyp(row).get("hold1") or "Тримати до цілі або стопа, максимум 48 год.") + " Стоп виставити на біржі одразу після входу.")
-    L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
+    if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
+    n = (hy.get("cluster") or {}).get("n") or 0
+    if n:
+        syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
+        word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
+        L.append(f"➕ Ще {n} {word}" + (f" ({syms})" if syms else "") + " у той самий бік — це один рух")
+    if hy.get("why"): L.append("📌 " + str(hy["why"]))
+    L.append("⏱ " + str(hy.get("hold") or "до 48 год"))
     L.append(TD_TAG)
     return "\n".join(L)
 

@@ -40,17 +40,17 @@ def render_td(row, bars):
     else:
         ytop = hi + .25 * risk; ybot = min(ent - max(1.6 * risk, .45 * (ytop - lo)), lo - .05 * (ytop - lo))
     with matplotlib.rc_context({"text.parse_math": False}):
-        fig = plt.figure(figsize=(7.2, 16.5), facecolor=BG, dpi=130)
+        fig = plt.figure(figsize=(7.2, 9.4) if os.getenv("TD_CARD_FULL", "0") != "1" else (7.2, 16.5), facecolor=BG, dpi=130)
         from office_br.card import strat
         nm, _em, bcol, dcol, sub = strat(row); nm = _hy.get("label", nm); sub = _hy.get("sub", sub)
-        fig.patches.append(Rectangle((0, .928), 1, .072, transform=fig.transFigure, facecolor=bcol, edgecolor="none"))
-        fig.text(.05, .9700, nm, color=dcol, fontsize=30, fontweight="bold", va="center")
-        fig.text(.95, .9700, f"№{int(row['seq'])}", color=dcol, fontsize=22, fontweight="bold", va="center", ha="right")
-        fig.text(.05, .9395, sub, color=dcol, fontsize=12.5, va="center")
-        fig.text(.06, .885, sym, color=TXT, fontsize=30, fontweight="bold")
-        fig.text(.94, .885, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
-        fig.text(.06, .858, "Binance Futures · " + _hy.get("tf_text", "графік M15"), color=DIM, fontsize=10)
-        ax = fig.add_axes([.04, .545, .78, .30]); ax.set_facecolor(BG)
+        fig.patches.append(Rectangle((0, .905), 1, .095, transform=fig.transFigure, facecolor=bcol, edgecolor="none"))
+        fig.text(.05, .9600, nm, color=dcol, fontsize=30, fontweight="bold", va="center")
+        fig.text(.95, .9600, f"№{int(row['seq'])}", color=dcol, fontsize=22, fontweight="bold", va="center", ha="right")
+        fig.text(.05, .9230, sub, color=dcol, fontsize=12.5, va="center")
+        fig.text(.06, .850, sym, color=TXT, fontsize=30, fontweight="bold")
+        fig.text(.94, .850, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
+        
+        ax = fig.add_axes([.04, .04, .78, .74]) if os.getenv("TD_CARD_FULL", "0") != "1" else fig.add_axes([.04, .545, .78, .30]); ax.set_facecolor(BG)
         for i, (o, h, l, c) in enumerate(K):
             col = GRN if c >= o else RED
             ax.vlines(i, l, h, color=col, linewidth=1); ax.add_patch(Rectangle((i - .33, min(o, c)), .66, max(abs(c - o), 1e-12), facecolor=col, edgecolor=col))
@@ -66,11 +66,16 @@ def render_td(row, bars):
         H = fig.get_figheight() * fig.dpi
         ypos = lambda p: ax.transData.transform((0, p))[1] / H
         fig.text(.835, ypos(ent), f"ВХІД\n{fmt(ent)}", color=YEL, fontsize=9.5, fontweight="bold", va="center")
-        fig.text(.835, ypos(sl), f"СТОП\n{fmt(sl)}\n−{pct(sl)}% · −$10", color=RED, fontsize=9.5, fontweight="bold", va="center")
+        fig.text(.835, ypos(sl), (f"СТОП\n{fmt(sl)}" if os.getenv("TD_CARD_FULL", "0") != "1" else f"СТОП\n{fmt(sl)}\n−{pct(sl)}% · −$10"), color=RED, fontsize=9.5, fontweight="bold", va="center")
         ty = ypos(ent + side * (ytop - ent if side > 0 else ent - ybot) * .85)
-        fig.text(.835, ty, f"ЦІЛЬ\n{fmt(tp)}\n+{pct(tp)}% · +${usd_tp:.0f}", color=GRN, fontsize=9.5, fontweight="bold", va="center")
+        fig.text(.835, ty, (f"ЦІЛЬ\n{fmt(tp)}" if os.getenv("TD_CARD_FULL", "0") != "1" else f"ЦІЛЬ\n{fmt(tp)}\n+{pct(tp)}% · +${usd_tp:.0f}"), color=GRN, fontsize=9.5, fontweight="bold", va="center")
         from office_br.card import td_size, usd_fmt
         sz = td_size(row)
+        if os.getenv("TD_CARD_FULL", "0") != "1":
+            fd, path = tempfile.mkstemp(prefix="td_live_", suffix=".png"); os.close(fd)
+            try: fig.savefig(path, facecolor=BG)
+            finally: plt.close(fig)
+            return path
         rows = [("ВІДКРИЙ НА", f"${usd_fmt(sz)}", "USDT, без плеча. З плечем сума та сама, під угоду йде менше", TXT), ("ВХІД", fmt(ent), "став лімітним ордером за цією ціною (дешевша комісія)", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
                 ("ЦІЛЬ", fmt(tp), f"+{pct(tp)}% · +${usd_tp:.0f} при ризику $10 · став лімітним ордером", GRN)]
         y = .515
