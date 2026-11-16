@@ -17,6 +17,12 @@ import numpy as np
 import pandas as pd
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "LTCUSDT", "DOTUSDT", "ATOMUSDT")
+# метали, нафта, газ, акції (за рішенням власниці 16.11.2026; історія лише з січня 2026 → спостереження): ТЕСТ СВІНГ +$857 на 437 угодах, CL у мінусі, NVDA/SPCX слабше
+COMMODITIES = ("XAUUSDT", "XAGUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT", "NVDAUSDT", "SPCXUSDT")
+CAUTION = {"NVDAUSDT": "акція, історії лише ~10 міс., результат на тесті невеликий", "SPCXUSDT": "акція, історії лише ~10 міс., результат на тесті невеликий",
+           "CLUSDT": "нафта на тесті була в мінусі"}
+if os.getenv("SW_COMMODITIES", "1").strip().lower() in ("1", "true", "yes", "on"):
+    SYMBOLS = SYMBOLS + COMMODITIES
 H1_BARS = 1500
 PER = 14400
 STOP_ATR, TP_R, MIN_SP = 3.0, 6.0, 0.0005
@@ -85,6 +91,7 @@ def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, e
     trend = "вище" if side > 0 else "нижче"
     why = f"Тренд {'вгору' if side > 0 else 'вниз'}: ціна {trend} 200-середньої (4 год). Сигнал: {names}."
     hyp = {"strategy": "SW_TEST", "rules": why_keys, "why": why, "hold": "до 10 діб", "tf_s": PER, "stop_atr": STOP_ATR, "tp_r": TP_R, "atr": atr, "model": "SWING_H4_TREND"}
+    if sym in CAUTION: hyp["caution"] = [CAUTION[sym]]
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, sym, direction, entry, bar_open, bar_open + PER, bar_open, entry, sl, json.dumps([{"p": tp, "src": "SW"}]), json.dumps(hyp, default=str), now, "NEW"))
     return sid
