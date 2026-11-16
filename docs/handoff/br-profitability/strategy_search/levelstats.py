@@ -4,12 +4,12 @@
 import sys, numpy as np, pandas as pd
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import d1lv
-CD, SYMS = sys.argv[1], sys.argv[2].split(",")
+CD, SYMS = sys.argv[1], sys.argv[2].split(","); PER = int(sys.argv[3]) if len(sys.argv) > 3 else 86400
 rows = []
 for s in SYMS:
     d = pd.read_csv(f"{CD}/{s}/15m.csv").drop_duplicates("open_time").sort_values("open_time"); a = {k: d[k].to_numpy(float) for k in ("open_time", "high", "low", "close")}
-    D = d1lv.build(a); hi, lo, cl, atr = D["hi"], D["lo"], D["cl"], D["atr"]; n = len(hi)
-    for L in d1lv.levels(D):
+    D = d1lv.build(a, PER); hi, lo, cl, atr = D["hi"], D["lo"], D["cl"], D["atr"]; n = len(hi)
+    for L in d1lv.levels(D, life=d1lv.LIFE[PER]):
         for k, e in enumerate(L["eps"], 1):
             if e + 8 >= n or not atr[e] == atr[e]: continue
             p, A = L["p"], atr[e]; res = "неясно"; resd = None
@@ -22,8 +22,8 @@ for s in SYMS:
             end = min(n, resd + 8)
             if res == "відбій": ext = ((p - lo[e:end].min()) if L["t"] == "H" else (hi[e:end].max() - p)) / A
             else: ext = ((hi[resd:end].max() - p) if L["t"] == "H" else (p - lo[resd:end].min())) / A
-            rows.append(dict(sym=s, y=pd.Timestamp(int(D["u"][e]) * 86400, unit="s").year, k=min(k, 4), res=res, ext=ext, t=L["t"]))
-R = pd.DataFrame(rows); print(f"Подій: {len(R)}; рівнів: {sum(1 for _ in range(1))}\n")
+            rows.append(dict(sym=s, y=pd.Timestamp(int(D["u"][e]) * PER, unit="s").year, k=min(k, 4), res=res, ext=ext, t=L["t"]))
+R = pd.DataFrame(rows); print(f"ТАЙМФРЕЙМ РІВНІВ: {PER//3600} год; подій: {len(R)}; ATR — цього ж ТФ; наслідок рахується протягом 6 барів цього ТФ\n")
 print("| підхід № | подій | відбій | пробій | далі після відбою (ATR D1): серед. / ≥2 ATR | далі після пробою: серед. / ≥2 ATR |\n|--|--|--|--|--|--|")
 for k in (1, 2, 3, 4):
     g = R[R.k == k]; b = g[g.res == "відбій"]; p_ = g[g.res == "пробій"]

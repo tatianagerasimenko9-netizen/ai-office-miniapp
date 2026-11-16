@@ -30,7 +30,10 @@ jobs:
           test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
       - name: Статистика рівнів
         shell: bash
-        run: python3 docs/handoff/br-profitability/strategy_search/levelstats.py candles "$TRAIN" | tee docs/handoff/br-profitability/levelstats_out.txt
+        run: |
+          python3 docs/handoff/br-profitability/strategy_search/levelstats.py candles "$TRAIN" 86400 | tee docs/handoff/br-profitability/levelstats_out.txt
+          python3 docs/handoff/br-profitability/strategy_search/levelstats.py candles "$TRAIN" 14400 | tee -a docs/handoff/br-profitability/levelstats_out.txt
+          python3 docs/handoff/br-profitability/strategy_search/levelstats.py candles "$TRAIN" 3600 | tee -a docs/handoff/br-profitability/levelstats_out.txt
       - name: Зберегти
         shell: bash
         run: |
