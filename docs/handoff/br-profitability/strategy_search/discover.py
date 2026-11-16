@@ -2,13 +2,13 @@
 Вхід на відкритті наступного бару після сигналу; одна позиція на монету; SL-першим. Виходи: fix (стоп s×ATR, ціль k×стоп, час H) і trail (ATR-стоп, що підтягується).
 Чесна оцінка: параметри НЕ підбираються під результат; показуємо ВСІ конфігурації; окремо — що в плюсі в КОЖНОМУ з 2023, 2024, 2025, 2026 і вибір на 2022-2024 → тест 2025-2026. Усе — ГІПОТЕЗА (OUR_IMPLEMENTATION класичних сигналів).
 Використання: discover.py CANDLES_DIR SYMS FEE"""
-import sys, numpy as np, pandas as pd
+import os, sys, numpy as np, pandas as pd
 try:
     from numba import njit
 except Exception:
     def njit(*a, **k):
         return (lambda f: f) if not (a and callable(a[0])) else a[0]
-CD, SYMS, FEE = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3])
+CD, SYMS, FEE = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3]); ONLY = [x for x in os.environ.get("ONLY", "").split(";") if x]; DETAIL = os.environ.get("DETAIL", "")
 
 def bars(sym, per):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
@@ -50,7 +50,7 @@ def signals(b):
 
 @njit(cache=False)
 def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
-    n = len(c); out_i = []; out_r = []; out_rk = []; i = 1
+    n = len(c); out_i = []; out_r = []; out_rk = []; out_s = []; i = 1
     while i < n - 2:
         side = 0
         if ls[i]: side = 1
@@ -71,9 +71,9 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
             j += 1
         if not done:
             jj = min(j, n - 1); res = (c[jj] - e) * side / risk
-        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e)
+        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e); out_s.append(side)
         i = max(j, i + 1)
-    return out_i, out_r, out_rk
+    return out_i, out_r, out_rk, out_s
 
 EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0)]
 HZ = {3600: 72, 14400: 60, 86400: 40}; TFN = {3600: "H1", 14400: "H4", 86400: "D1"}
@@ -83,11 +83,13 @@ for per in (3600, 14400, 86400):
     SG = {s: signals(B[s]) for s in SYMS}
     for name in SG[SYMS[0]][0]:
         for ename, mode, sm, k, t in EXITS:
+            if ONLY and f"{TFN[per]}|{name}|{ename}" not in ONLY: continue
             for sym in SYMS:
                 b = B[sym]; S, A = SG[sym]; L_, S_ = S[name]
-                idx, rr, rk = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode == 0 else HZ[per] * 3, FEE)
-                for i_, r_ in zip(idx, rr): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_))
-R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r"]); R["usd"] = R.r * 10
+                idx, rr, rk, sd = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode == 0 else HZ[per] * 3, FEE)
+                for i_, r_, sd_, rk_ in zip(idx, rr, sd, rk): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_, float(b["open_time"][i_]), int(sd_), float(rk_)))
+R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r", "ts", "side", "risk_pct"]); R["usd"] = R.r * 10
+if DETAIL: R.to_csv(DETAIL, index=False)
 G = R.groupby(["tf", "sig", "exit", "y"]).agg(n=("r", "size"), usd=("usd", "sum")).reset_index()
 P = G.pivot_table(index=["tf", "sig", "exit"], columns="y", values="usd", fill_value=0).reset_index(); N = G.groupby(["tf", "sig", "exit"]).n.sum().reset_index(name="n"); P = P.merge(N, on=["tf", "sig", "exit"])
 yrs = [y for y in (2022, 2023, 2024, 2025, 2026) if y in P.columns]; P["total"] = P[yrs].sum(axis=1)
