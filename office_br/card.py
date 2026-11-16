@@ -74,9 +74,13 @@ def cluster_line(row: Dict[str, Any]) -> str | None:
 
 
 def warn_line(row: Dict[str, Any]) -> str | None:
-    """Попередження «слабкий сигнал» (ГІПОТЕЗА, історія 2024-2026): причини лежать у hyp_json['warn'] (список коротких текстів). Немає — рядка немає."""
-    w = [str(x) for x in (_td_hyp(row).get("warn") or []) if x]
-    return ("Слабкий сигнал: " + "; ".join(w)) if w else None
+    """Попередження: «Слабкий сигнал» (ГІПОТЕЗА, історія 2024-2026; hyp['warn']) або «Обережно» (hyp['caution'] — напр. акції в СВІНГу: історії лише ~10 міс.). Немає — рядка немає."""
+    h = _td_hyp(row)
+    w = [str(x) for x in (h.get("warn") or []) if x]
+    c = [str(x) for x in (h.get("caution") or []) if x]
+    if w:
+        return "Слабкий сигнал: " + "; ".join(w + c)
+    return ("Обережно: " + "; ".join(c)) if c else None
 
 
 def td_size(row: Dict[str, Any]) -> float:

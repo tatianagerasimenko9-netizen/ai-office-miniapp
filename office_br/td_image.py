@@ -92,7 +92,7 @@ def render_td(row, bars):
         if wr_:
             hh = .62 + .3 * len(wr_)
             box(y, hh, "#3a3000", YEL, 2.2)
-            fig.text(.07, 1 - u(y + .3), "СЛАБКИЙ СИГНАЛ", color=YEL, fontsize=16, fontweight="bold", va="center")
+            fig.text(.07, 1 - u(y + .3), ("СЛАБКИЙ СИГНАЛ" if wl.startswith("Слабкий") else "ОБЕРЕЖНО"), color=YEL, fontsize=16, fontweight="bold", va="center")
             for i_, ln in enumerate(wr_): fig.text(.07, 1 - u(y + .62 + .27 * i_), ln, color=TXT, fontsize=12.5, va="center")
             y += hh + .1
         fd, path = tempfile.mkstemp(prefix="td_live_", suffix=".png"); os.close(fd)
