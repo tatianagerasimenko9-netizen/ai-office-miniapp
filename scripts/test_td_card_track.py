@@ -43,7 +43,7 @@ def _row(direction="LONG"):
 def test_card_text_plain():
     for d in ("LONG", "SHORT"):
         text = card.build_card(_row(d))
-        assert "ЗВЕРХУ" not in text and "ТЕСТ №2" in text and "−$10" in text and "+$" in text and "Вхід" in text and "Стоп" in text and "Ціль" in text
+        assert "ЗВЕРХУ" not in text and "ІНТРАДЕЙ №2" in text and "−$10" in text and "+$" in text and "Вхід" in text and "Стоп" in text and "Ціль" in text
         assert "Відкрий на $" in text and "USDT" in text and abs(card.td_size(_row(d)) * abs(float(_row(d)["entry"]) - float(_row(d)["sl"])) / float(_row(d)["entry"]) - 10) < 1e-9
         assert "TD-" not in text and "ATR" not in text and "оцінка моделі" not in text and "ордерів" in text and len(text) < 600
 
@@ -118,7 +118,7 @@ def test_td_entry_counts_at_card_time_then_sl():
             asyncio.run(live.track(db, lambda *a, **k: bars2, send))
         lv = [e["level"] for e in store.events(db, row["sig_id"])]
         assert "SL" in lv and "AMBIGUOUS" not in lv, lv
-        assert len(sent) == 1 and "ТЕСТ №2" in sent[0] and "ЗВЕРХУ" not in sent[0] and "SL" in sent[0], sent
+        assert len(sent) == 1 and "ІНТРАДЕЙ №2" in sent[0] and "ЗВЕРХУ" not in sent[0] and "SL" in sent[0], sent
         assert store.rows(db, "WHERE sig_id = ?", (row["sig_id"],))[0]["status"] in ("SL", "SENT", "CLOSED") or True
 
 
@@ -140,7 +140,7 @@ def test_remind_logic_and_flow():
         run = lambda now: asyncio.run(remind.remind_open(db, fetch, send, now))
         assert run(t0 + 600) == 0
         px["v"] = 92.12 + 0.64 * 1.1                         # +1,1R через 40 хв: вже нагадуємо
-        assert run(t0 + 2400) == 1 and len(sent) == 1 and sent[0][0] == "ТЕСТ №2 · SOL LONG · зараз +1,1R (+$11) #ТЕСТ", sent[0][0]
+        assert run(t0 + 2400) == 1 and len(sent) == 1 and sent[0][0] == "ІНТРАДЕЙ №2 · SOL LONG · зараз +1,1R (+$11) #ТЕСТ", sent[0][0]
         assert sent[0][1]["reply_to"] == 55                  # відповідь на картку
         px["v"] = 92.12 + 0.64 * 1.6; assert run(t0 + 3000) == 0          # той самий рівень вдруге не шлемо
         px["v"] = 92.12 + 0.64 * 2.3; assert run(t0 + 7200) == 1 and "+2,3R" in sent[1][0]

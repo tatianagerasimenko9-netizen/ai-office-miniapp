@@ -40,15 +40,17 @@ def render_td(row, bars):
     else:
         ytop = hi + .25 * risk; ybot = min(ent - max(1.6 * risk, .45 * (ytop - lo)), lo - .05 * (ytop - lo))
     with matplotlib.rc_context({"text.parse_math": False}):
-        fig = plt.figure(figsize=(7.2, 14.4), facecolor=BG, dpi=130)
-        fig.text(.06, .962, f"№{int(row['seq'])}", color=DIM, fontsize=14, fontweight="bold")
-        fig.patches.append(FancyBboxPatch((.80, .952), .14, .026, boxstyle="round,pad=0.002,rounding_size=0.01", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=1))
-        fig.text(.87, .9645, "ТЕСТ", color=YEL, fontsize=11, fontweight="bold", ha="center", va="center")
-        fig.text(.06, .905, sym, color=TXT, fontsize=30, fontweight="bold")
-        fig.text(.94, .905, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
-        fig.text(.06, .878, "Binance Futures · " + _hy.get("tf_text", "графік M15"), color=DIM, fontsize=10)
-        if _hy.get("label"): fig.text(.5, .9645, _hy["label"], color=TXT, fontsize=14, fontweight="bold", ha="center", va="center")
-        ax = fig.add_axes([.04, .505, .78, .355]); ax.set_facecolor(BG)
+        fig = plt.figure(figsize=(7.2, 16.5), facecolor=BG, dpi=130)
+        from office_br.card import strat
+        nm, _em, bcol, dcol, sub = strat(row); nm = _hy.get("label", nm); sub = _hy.get("sub", sub)
+        fig.patches.append(Rectangle((0, .928), 1, .072, transform=fig.transFigure, facecolor=bcol, edgecolor="none"))
+        fig.text(.05, .9700, nm, color=dcol, fontsize=30, fontweight="bold", va="center")
+        fig.text(.95, .9700, f"№{int(row['seq'])}", color=dcol, fontsize=22, fontweight="bold", va="center", ha="right")
+        fig.text(.05, .9395, sub, color=dcol, fontsize=12.5, va="center")
+        fig.text(.06, .885, sym, color=TXT, fontsize=30, fontweight="bold")
+        fig.text(.94, .885, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
+        fig.text(.06, .858, "Binance Futures · " + _hy.get("tf_text", "графік M15"), color=DIM, fontsize=10)
+        ax = fig.add_axes([.04, .545, .78, .30]); ax.set_facecolor(BG)
         for i, (o, h, l, c) in enumerate(K):
             col = GRN if c >= o else RED
             ax.vlines(i, l, h, color=col, linewidth=1); ax.add_patch(Rectangle((i - .33, min(o, c)), .66, max(abs(c - o), 1e-12), facecolor=col, edgecolor=col))
@@ -71,38 +73,38 @@ def render_td(row, bars):
         sz = td_size(row)
         rows = [("ВІДКРИЙ НА", f"${usd_fmt(sz)}", "USDT, без плеча. З плечем сума та сама, під угоду йде менше", TXT), ("ВХІД", fmt(ent), "став лімітним ордером за цією ціною (дешевша комісія)", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
                 ("ЦІЛЬ", fmt(tp), f"+{pct(tp)}% · +${usd_tp:.0f} при ризику $10 · став лімітним ордером", GRN)]
-        y = .465
+        y = .515
         for lab, val, sub, col in rows:
-            fig.patches.append(FancyBboxPatch((.05, y - .062), .90, .072, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
-            fig.patches.append(Rectangle((.05, y - .062), .012, .072, transform=fig.transFigure, facecolor=col, edgecolor="none"))
-            fig.text(.09, y - .012, lab, color=col, fontsize=12, fontweight="bold", va="top")
-            fig.text(.92, y - .012, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
-            fig.text(.09, y - .042, sub, color=DIM, fontsize=10, va="top")
-            y -= .074
+            fig.patches.append(FancyBboxPatch((.05, y - .054), .90, .062, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
+            fig.patches.append(Rectangle((.05, y - .054), .012, .062, transform=fig.transFigure, facecolor=col, edgecolor="none"))
+            fig.text(.09, y - .009, lab, color=col, fontsize=12, fontweight="bold", va="top")
+            fig.text(.92, y - .009, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
+            fig.text(.09, y - .036, sub, color=DIM, fontsize=10, va="top")
+            y -= .064
         from office_br.card import cluster_line, warn_line
         import textwrap
         wl = warn_line(row)
         if wl:
             reason = wl.split(": ", 1)[1] if ": " in wl else wl
-            wr_ = textwrap.wrap(reason[0].upper() + reason[1:], 46)[:3]; hgt = .034 + .024 * len(wr_) + .014
+            wr_ = textwrap.wrap(reason[0].upper() + reason[1:], 46)[:3]; hgt = .030 + .021 * len(wr_) + .012
             fig.patches.append(FancyBboxPatch((.05, y - hgt), .90, hgt, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=2.2))
-            fig.text(.07, y - .012, "СЛАБКИЙ СИГНАЛ", color=YEL, fontsize=17, fontweight="bold", va="top")
-            for i_, ln in enumerate(wr_): fig.text(.07, y - .047 - .024 * i_, ln, color=TXT, fontsize=12.5, va="top")
-            y -= hgt + .014
+            fig.text(.07, y - .010, "СЛАБКИЙ СИГНАЛ", color=YEL, fontsize=17, fontweight="bold", va="top")
+            for i_, ln in enumerate(wr_): fig.text(.07, y - .041 - .021 * i_, ln, color=TXT, fontsize=12.5, va="top")
+            y -= hgt + .012
         cl = cluster_line(row)
         if cl:
             wr = textwrap.wrap(cl, 62)[:3]
-            fig.patches.append(FancyBboxPatch((.05, y - .018 - .026 * len(wr)), .90, .026 * len(wr) + .012, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
-            for i_, ln in enumerate(wr): fig.text(.07, y - .006 - .026 * i_, ln, color=YEL, fontsize=10, va="top")
-            y -= .026 * len(wr) + .03
+            fig.patches.append(FancyBboxPatch((.05, y - .016 - .023 * len(wr)), .90, .023 * len(wr) + .010, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
+            for i_, ln in enumerate(wr): fig.text(.07, y - .005 - .023 * i_, ln, color=YEL, fontsize=10, va="top")
+            y -= .023 * len(wr) + .026
         if _hy.get("why"):
-            wy = textwrap.wrap(str(_hy["why"]), 56)[:3]; hy_ = .030 + .024 * len(wy)
+            wy = textwrap.wrap(str(_hy["why"]), 56)[:3]; hy_ = .026 + .021 * len(wy)
             fig.patches.append(FancyBboxPatch((.05, y - hy_), .90, hy_, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
-            fig.text(.07, y - .010, "ЧОМУ СИГНАЛ", color=DIM, fontsize=10, fontweight="bold", va="top")
-            for i_, ln in enumerate(wy): fig.text(.07, y - .033 - .024 * i_, ln, color=TXT, fontsize=11.5, va="top")
-            y -= hy_ + .016
-        fig.text(.06, y - .006, _hy.get("hold1", "Тримати до цілі або стопа, максимум 48 годин."), color=TXT, fontsize=11)
-        fig.text(.06, y - .028, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
+            fig.text(.07, y - .009, "ЧОМУ СИГНАЛ", color=DIM, fontsize=10, fontweight="bold", va="top")
+            for i_, ln in enumerate(wy): fig.text(.07, y - .029 - .021 * i_, ln, color=TXT, fontsize=11.5, va="top")
+            y -= hy_ + .012
+        fig.text(.06, y - .005, _hy.get("hold1", "Тримати до цілі або стопа, максимум 48 годин."), color=TXT, fontsize=11)
+        fig.text(.06, y - .024, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
         fig.text(.5, .008, "Тестова стратегія · ручне рішення · ордерів Office не відкриває", color=DIM, fontsize=9, ha="center")
         fd, path = tempfile.mkstemp(prefix="td_live_", suffix=".png"); os.close(fd)
         try: fig.savefig(path, facecolor=BG)

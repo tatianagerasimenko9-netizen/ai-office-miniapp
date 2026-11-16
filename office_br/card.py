@@ -25,9 +25,17 @@ def is_td(row: Dict[str, Any]) -> bool:
     return str(row.get("sig_id", "")).startswith("TD|")
 
 
+STRATS = {"TD": ("ІНТРАДЕЙ", "🟠", "#ff8a1f", "#1a0f05", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🔵", "#2f8bff", "#04101f", "4 год · угоди до 10 діб")}
+
+
+def strat(row: Dict[str, Any]):
+    """(назва, емодзі, колір шапки, колір тексту на шапці, підпис) за префіксом sig_id: TD → ІНТРАДЕЙ, SW → СВІНГ."""
+    return STRATS.get(str(row.get("sig_id", "")).split("|", 1)[0], STRATS["TD"])
+
+
 def head(row: Dict[str, Any]) -> str:
-    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ТЕСТ №n»."""
-    return f"ТЕСТ №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
+    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ІНТРАДЕЙ №n» / «СВІНГ №n»."""
+    return f"{strat(row)[0]} №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
 
 
 def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,7 +84,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
     L = [
-        f"🧪 ТЕСТ №{int(row['seq'])}",
+        f"{strat(row)[1]} {strat(row)[0]} №{int(row['seq'])}",
         f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
         f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
         f"🟡 Вхід {_n(entry, sym)} · лімітним ордером",
@@ -89,7 +97,9 @@ def build_td_card(row: Dict[str, Any]) -> str:
     if wl: L.append("⚠️ " + wl)
     cl = cluster_line(row)
     if cl: L.append("⚠️ " + cl)
-    L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")
+    why = _td_hyp(row).get("why")
+    if why: L.append("📌 Чому: " + str(why))
+    L.append("⏱ " + str(_td_hyp(row).get("hold1") or "Тримати до цілі або стопа, максимум 48 год.") + " Стоп виставити на біржі одразу після входу.")
     L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
     L.append(TD_TAG)
     return "\n".join(L)
