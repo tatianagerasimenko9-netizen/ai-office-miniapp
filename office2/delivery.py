@@ -119,6 +119,8 @@ def build_caption(snap: Dict[str, Any], now: Optional[float] = None) -> str:
     dr = th.get("day_risk")
     if isinstance(dr, dict) and dr.get("text"):
         L.append(f"⚠️ {dr['text']}")
+    for m in (snap.get("marks") or []):
+        L.append(f"⚠️ {m}")
     L.append(f"⏳ До {rc.kyiv_stamp(snap['valid_until_ts'])} (Київ)")
     L.append("📊 Пояснення та перевірки — у Mini App ↓")
     return "\n".join(L)
@@ -337,7 +339,14 @@ async def deliver_pending(db: str, send: Callable[..., Awaitable[Optional[int]]]
                 await run_o2(_execute, db, "UPDATE office2_live_signal SET last_error = ? WHERE scenario_id = ?", (f"READY_NUMBER: {type(exc_no).__name__}: {exc_no}"[:300], sid))
                 log(f"[office2] READY number unavailable; stays pending {sid}: {type(exc_no).__name__}")
                 return 0
-            cap = build_caption(dict(snap, ready_no=ready_no), now=clk())
+            try:
+                import office_marks as _mk
+                _info = await run_o2(_mk.record, db, sid, sym, clk())
+                _marks = _mk.ai_marks(snap) + _mk.news_marks(_info, clk())
+            except Exception as exc_mk:  # noqa: BLE001
+                _marks = []
+                log(f"[office2] позначки недоступні {sid}: {type(exc_mk).__name__}")
+            cap = build_caption(dict(snap, ready_no=ready_no, marks=_marks), now=clk())
             t_a = time.time()
             _lc = th.get("lifecycle") or {}
             _reply = {"reply_to_message_id": int(_lc["parent_msg_id"])} if _lc.get("relation") in ("REENTRY", "INDEPENDENT") and _lc.get("parent_msg_id") else {}      # повторний вхід — відповіддю на повідомлення попереднього сценарію
