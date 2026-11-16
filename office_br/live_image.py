@@ -13,9 +13,11 @@ def render(row, bars):
     if not all(all(math.isfinite(p) and p>0 for p in b) for b in prices):
         raise ValueError("invalid candles")
     last=datetime.fromisoformat(str(bars[-1]["ts"]).replace("Z","+00:00")).timestamp()
-    if float(row["confirm_ts"])-last>900 or last>float(row["confirm_ts"]):
+    try: _tf=float(json.loads(row["hyp_json"]).get("tf_s",900)) if isinstance(row.get("hyp_json"),str) else 900.0
+    except Exception: _tf=900.0
+    if float(row["confirm_ts"])-last>_tf or last>float(row["confirm_ts"]):
         raise ValueError("candles not aligned with signal confirmation")
-    if str(row.get("sig_id","")).startswith("TD|"):
+    if str(row.get("sig_id","")).startswith(("TD|","SW|")):
         from office_br.td_image import render_td
         return render_td(row,bars)
     from matplotlib import pyplot as plt

@@ -92,7 +92,7 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
     n = 0
     for row in _pending(db):
         # No stale startup notifications: only signals confirmed in last 4 minutes.
-        if time.time() - (float(row["confirm_ts"]) + 900) > 240:
+        if time.time() - (float(row["confirm_ts"]) + (14400 if card.is_swing(row) else 900)) > (900 if card.is_swing(row) else 240):
             _execute(db, "UPDATE br_test_signal SET status = 'EXPIRED_UNSENT' WHERE sig_id = ? AND msg_id IS NULL", (row["sig_id"],))
             continue
         try:
@@ -107,11 +107,12 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
             if send_image is not None and fetch is not None:
                 import os
                 from office_br.live_image import render
-                candles = await asyncio.to_thread(fetch, row["symbol"], "15m", 240, closed_only=True)
+                sw = card.is_swing(row)       # СВІНГ малюється на 4-годинних свічках, ІНТРАДЕЙ — на M15
+                candles = await asyncio.to_thread(fetch, row["symbol"], "4h" if sw else "15m", 130 if sw else 240, closed_only=True)
                 png = await asyncio.to_thread(render, row, candles)
                 try:
                     msg_id = await send_image(
-                        png, card.build_card(row, v2_line), row
+                        png, card.build_caption(row, v2_line)[0], row
                     )
                 finally:
                     try: os.unlink(png)
@@ -172,8 +173,8 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     active = store.rows(db, "WHERE status = 'SENT'")
     for row in active:
         sid = row["sig_id"]
-        if time.time() - (float(row["confirm_ts"]) + 900) > 48 * 3600:
-            msg_id = await send(f"{card.head(row)} · {row['symbol']}: 48 год минуло, підсумок не визначено.",
+        if time.time() - (float(row["confirm_ts"]) + (14400 if card.is_swing(row) else 900)) > card.hold_hours(row) * 3600:
+            msg_id = await send(f"{card.head(row)} · {row['symbol']}: {card.hold_text(row).replace('до ', '')} минуло, підсумок не визначено.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
