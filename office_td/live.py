@@ -167,6 +167,12 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
         cluster = None
     hyp = {"strategy": STRATEGY, "stop_tag": stop_tag, "cluster": cluster, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
            "warn": res.get("warn") or [], "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
+    try:
+        import office_marks as _mk
+        _c = _mk.news_marks(_mk.record(db, sid, cand["symbol"], now), now)
+        if _c: hyp["caution"] = _c
+    except Exception:  # noqa: BLE001
+        pass
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, cand["symbol"], cand["direction"], cand["h1_entry"], cand["h1_ts"], cand["h1_close_ts"], res["confirm_ts"], res["entry"], res["sl"],
               json.dumps([{"p": res["tp"], "src": "TD"}]), json.dumps(hyp, default=str), now, "NEW"))
