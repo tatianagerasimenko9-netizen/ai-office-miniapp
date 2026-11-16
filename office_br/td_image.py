@@ -19,7 +19,8 @@ def render_td(row, bars):
     if not all(all(math.isfinite(p) and p > 0 for p in b) for b in prices):
         raise ValueError("invalid candles")
     last = datetime.fromisoformat(str(bars[-1]["ts"]).replace("Z", "+00:00")).timestamp()
-    if float(row["confirm_ts"]) - last > 900 or last > float(row["confirm_ts"]):
+    _hy = json.loads(row["hyp_json"]) if isinstance(row.get("hyp_json"), str) and row.get("hyp_json") else {}
+    if float(row["confirm_ts"]) - last > float(_hy.get("tf_s", 900)) or last > float(row["confirm_ts"]):
         raise ValueError("candles not aligned with signal confirmation")
     import matplotlib
     from matplotlib import pyplot as plt
@@ -45,7 +46,8 @@ def render_td(row, bars):
         fig.text(.87, .9645, "ТЕСТ", color=YEL, fontsize=11, fontweight="bold", ha="center", va="center")
         fig.text(.06, .905, sym, color=TXT, fontsize=30, fontweight="bold")
         fig.text(.94, .905, "▲ LONG" if side > 0 else "▼ SHORT", color=GRN if side > 0 else RED, fontsize=26, fontweight="bold", ha="right")
-        fig.text(.06, .878, "Binance Futures · графік M15", color=DIM, fontsize=10)
+        fig.text(.06, .878, "Binance Futures · " + _hy.get("tf_text", "графік M15"), color=DIM, fontsize=10)
+        if _hy.get("label"): fig.text(.5, .9645, _hy["label"], color=TXT, fontsize=14, fontweight="bold", ha="center", va="center")
         ax = fig.add_axes([.04, .505, .78, .355]); ax.set_facecolor(BG)
         for i, (o, h, l, c) in enumerate(K):
             col = GRN if c >= o else RED
@@ -93,7 +95,13 @@ def render_td(row, bars):
             fig.patches.append(FancyBboxPatch((.05, y - .018 - .026 * len(wr)), .90, .026 * len(wr) + .012, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
             for i_, ln in enumerate(wr): fig.text(.07, y - .006 - .026 * i_, ln, color=YEL, fontsize=10, va="top")
             y -= .026 * len(wr) + .03
-        fig.text(.06, y - .006, "Тримати до цілі або стопа, максимум 48 годин.", color=TXT, fontsize=11)
+        if _hy.get("why"):
+            wy = textwrap.wrap(str(_hy["why"]), 56)[:3]; hy_ = .030 + .024 * len(wy)
+            fig.patches.append(FancyBboxPatch((.05, y - hy_), .90, hy_, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
+            fig.text(.07, y - .010, "ЧОМУ СИГНАЛ", color=DIM, fontsize=10, fontweight="bold", va="top")
+            for i_, ln in enumerate(wy): fig.text(.07, y - .033 - .024 * i_, ln, color=TXT, fontsize=11.5, va="top")
+            y -= hy_ + .016
+        fig.text(.06, y - .006, _hy.get("hold1", "Тримати до цілі або стопа, максимум 48 годин."), color=TXT, fontsize=11)
         fig.text(.06, y - .028, "Стоп виставити на біржі одразу після входу.", color=TXT, fontsize=11)
         fig.text(.5, .008, "Тестова стратегія · ручне рішення · ордерів Office не відкриває", color=DIM, fontsize=9, ha="center")
         fd, path = tempfile.mkstemp(prefix="td_live_", suffix=".png"); os.close(fd)
