@@ -79,12 +79,12 @@ def build_td_card(row: Dict[str, Any]) -> str:
         f"🧪 ТЕСТ №{int(row['seq'])}",
         f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
         f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
-        f"🟡 Вхід {_n(entry, sym)}",
+        f"🟡 Вхід {_n(entry, sym)} · лімітним ордером",
         f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
     ]
     for t in tg[:1]:
         usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
-        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10)")
+        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10) · лімітним ордером")
     wl = warn_line(row)
     if wl: L.append("⚠️ " + wl)
     cl = cluster_line(row)

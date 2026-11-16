@@ -39,7 +39,7 @@ def render_td(row, bars):
     else:
         ytop = hi + .25 * risk; ybot = min(ent - max(1.6 * risk, .45 * (ytop - lo)), lo - .05 * (ytop - lo))
     with matplotlib.rc_context({"text.parse_math": False}):
-        fig = plt.figure(figsize=(7.2, 13.2), facecolor=BG, dpi=130)
+        fig = plt.figure(figsize=(7.2, 14.4), facecolor=BG, dpi=130)
         fig.text(.06, .962, f"№{int(row['seq'])}", color=DIM, fontsize=14, fontweight="bold")
         fig.patches.append(FancyBboxPatch((.80, .952), .14, .026, boxstyle="round,pad=0.002,rounding_size=0.01", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=1))
         fig.text(.87, .9645, "ТЕСТ", color=YEL, fontsize=11, fontweight="bold", ha="center", va="center")
@@ -67,8 +67,8 @@ def render_td(row, bars):
         fig.text(.835, ty, f"ЦІЛЬ\n{fmt(tp)}\n+{pct(tp)}% · +${usd_tp:.0f}", color=GRN, fontsize=9.5, fontweight="bold", va="center")
         from office_br.card import td_size, usd_fmt
         sz = td_size(row)
-        rows = [("ВІДКРИЙ НА", f"${usd_fmt(sz)}", "USDT, без плеча. З плечем сума та сама, під угоду йде менше", TXT), ("ВХІД", fmt(ent), "ринком або лімітом біля цієї ціни", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
-                ("ЦІЛЬ", fmt(tp), f"+{pct(tp)}% · прибуток при ризику $10: +${usd_tp:.0f}", GRN)]
+        rows = [("ВІДКРИЙ НА", f"${usd_fmt(sz)}", "USDT, без плеча. З плечем сума та сама, під угоду йде менше", TXT), ("ВХІД", fmt(ent), "став лімітним ордером за цією ціною (дешевша комісія)", YEL), ("СТОП", fmt(sl), f"−{pct(sl)}% · збиток при спрацюванні −$10", RED),
+                ("ЦІЛЬ", fmt(tp), f"+{pct(tp)}% · +${usd_tp:.0f} при ризику $10 · став лімітним ордером", GRN)]
         y = .465
         for lab, val, sub, col in rows:
             fig.patches.append(FancyBboxPatch((.05, y - .062), .90, .072, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor=PANEL, edgecolor="none"))
@@ -79,11 +79,17 @@ def render_td(row, bars):
             y -= .074
         from office_br.card import cluster_line, warn_line
         import textwrap
-        wr = []
-        for t_ in (warn_line(row), cluster_line(row)):
-            if t_: wr += textwrap.wrap(t_, 62)[:3]
-        wr = wr[:5]
-        if wr:
+        wl = warn_line(row)
+        if wl:
+            reason = wl.split(": ", 1)[1] if ": " in wl else wl
+            wr_ = textwrap.wrap(reason[0].upper() + reason[1:], 46)[:3]; hgt = .034 + .024 * len(wr_) + .014
+            fig.patches.append(FancyBboxPatch((.05, y - hgt), .90, hgt, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="#3a2f12", edgecolor=YEL, linewidth=2.2))
+            fig.text(.07, y - .012, "СЛАБКИЙ СИГНАЛ", color=YEL, fontsize=17, fontweight="bold", va="top")
+            for i_, ln in enumerate(wr_): fig.text(.07, y - .047 - .024 * i_, ln, color=TXT, fontsize=12.5, va="top")
+            y -= hgt + .014
+        cl = cluster_line(row)
+        if cl:
+            wr = textwrap.wrap(cl, 62)[:3]
             fig.patches.append(FancyBboxPatch((.05, y - .018 - .026 * len(wr)), .90, .026 * len(wr) + .012, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
             for i_, ln in enumerate(wr): fig.text(.07, y - .006 - .026 * i_, ln, color=YEL, fontsize=10, va="top")
             y -= .026 * len(wr) + .03
