@@ -24,6 +24,9 @@ def _run(db: str, period_s: float = 45.0) -> None:
             res = live.cycle(db, fetch_candles_futures)
             if res.get("candidates") or res.get("signals"):
                 print(f"[td] cycle {res}", flush=True)
+            from office_td import swing
+            if swing.enabled():
+                swing.cycle(db, fetch_candles_futures)
         except Exception as exc:  # noqa: BLE001
             print(f"[td] cycle: {type(exc).__name__}: {exc}", flush=True)
         time.sleep(period_s)

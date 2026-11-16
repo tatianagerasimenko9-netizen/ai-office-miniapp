@@ -1,0 +1,38 @@
+name: brstudy
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/brstudy.yml
+      - docs/handoff/br-profitability/strategy_search/br_study.py
+      - docs/handoff/br-profitability/br_extra.csv
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch M15
+        shell: bash
+        run: |
+          for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT NEARUSDT ONDOUSDT SEIUSDT TIAUSDT; do
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-07-01:2026-11-15 | tr '\n' ' '; echo
+          done
+      - name: Дослідження B&R
+        shell: bash
+        run: python3 docs/handoff/br-profitability/strategy_search/br_study.py candles docs/handoff/br-profitability/br_signals.csv docs/handoff/br-profitability/br_extra.csv docs/handoff/br-profitability/br_study.csv
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/br_study.csv
+          git commit -m "brstudy: ознаки й сітка стопів/цілей B&R (автоматично)" && git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac

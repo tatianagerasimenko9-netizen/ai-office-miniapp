@@ -706,14 +706,17 @@ async def send_via_bot_photo(
     message_thread_id: Optional[int] = None,
     reply_markup: Optional[Dict[str, Any]] = None,
     timeout_sec: float = 45.0,
+    parse_mode: Optional[str] = None,
 ) -> tuple[bool, str, Optional[int]]:
-    """Одне повідомлення: фото + caption (ліміт Telegram 1024)."""
+    """Одне повідомлення: фото + caption (ліміт Telegram 1024). parse_mode="HTML": ціни в <code> копіюються дотиком; якщо Telegram не розбирає розмітку — повтор без неї (теги знімаються)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
     cap = str(caption or "")[:1024]
     data = aiohttp.FormData()
     data.add_field("chat_id", str(chat_id))
     if cap:
         data.add_field("caption", cap)
+        if parse_mode:
+            data.add_field("parse_mode", str(parse_mode))
     if reply_to_message_id:
         data.add_field("reply_to_message_id", str(int(reply_to_message_id)))
     if message_thread_id:
@@ -727,6 +730,9 @@ async def send_via_bot_photo(
                 body = await resp.json()
                 if resp.status != 200 or not bool(body.get("ok")):
                     desc = str((body or {}).get("description") or body)
+                    if parse_mode and "parse entities" in desc.lower():
+                        import html as _html, re as _re
+                        return await send_via_bot_photo(session, token, chat_id, photo_path, _html.unescape(_re.sub(r"<[^>]+>", "", cap)), reply_to_message_id, message_thread_id, reply_markup, timeout_sec, None)
                     return False, f"telegram photo: {desc}", None
                 msg_id = None
                 try:
@@ -2941,6 +2947,7 @@ async def run() -> None:
         symbol: str = "",
         direction: str = "",
         skip_gate: bool = False,
+        parse_mode: Optional[str] = None,
     ) -> Optional[int]:
         if not skip_gate:
             tg = gate_outbound_telegram(
@@ -2987,6 +2994,7 @@ async def run() -> None:
                     reply_to_message_id=reply_to_message_id,
                     message_thread_id=thread_id,
                     reply_markup=photo_btn,
+                    parse_mode=parse_mode,
                 )
 
             _out = await _ledger.deliver(_dk, _photo_attempt, lambda t0: _reconcile_msg(cap, t0, photo=True))
@@ -3020,11 +3028,15 @@ async def run() -> None:
                 photo_path,
                 caption=cap,
                 reply_to=reply_to_message_id or thread_id,
+                **({"parse_mode": "html"} if parse_mode else {}),
             )
             _note_out(getattr(sent, "id", None))
             return int(getattr(sent, "id", 0) or 0) or None
         except Exception as exc:
             print(f"[relay][WARN] photo telethon failed: {exc}")
+            if parse_mode:
+                import html as _html, re as _re
+                caption = _html.unescape(_re.sub(r"<[^>]+>", "", caption))
             return await send_office(
                 caption,
                 stream=stream,
@@ -7781,6 +7793,7 @@ EV позитивне: {prob.get('ev_positive', '')}
             scenario_id=str(row["seq"]),
             intent="BR_LIVE_EXPERIMENT", event_type=EVENT_TRADE_UPDATE,
             symbol=row["symbol"], direction=row["direction"], skip_gate=True,
+            parse_mode="HTML" if str(row.get("sig_id", "")).startswith(("TD|", "SW|")) else None,
         )
 
     async def _monitor_br_observation() -> None:

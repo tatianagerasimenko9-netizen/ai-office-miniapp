@@ -22,12 +22,33 @@ TD_TAG = "#ТЕСТ"
 
 
 def is_td(row: Dict[str, Any]) -> bool:
-    return str(row.get("sig_id", "")).startswith("TD|")
+    return str(row.get("sig_id", "")).startswith(("TD|", "SW|"))
+
+
+STRATS = {"TD": ("ІНТРАДЕЙ", "🟨", "#ffd500", "#2a2200", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🟦", "#0057b7", "#ffffff", "4 год · угоди до 10 діб")}
+
+
+def strat(row: Dict[str, Any]):
+    """(назва, емодзі, колір шапки, колір тексту на шапці, підпис) за префіксом sig_id: TD → ІНТРАДЕЙ, SW → СВІНГ."""
+    return STRATS.get(str(row.get("sig_id", "")).split("|", 1)[0], STRATS["TD"])
+
+
+def is_swing(row: Dict[str, Any]) -> bool:
+    return str(row.get("sig_id", "")).startswith("SW|")
+
+
+def hold_hours(row: Dict[str, Any]) -> int:
+    """Скільки тримати: ІНТРАДЕЙ — до 48 год, СВІНГ — до 10 діб."""
+    return 240 if is_swing(row) else 48
+
+
+def hold_text(row: Dict[str, Any]) -> str:
+    return "до 10 діб" if is_swing(row) else "до 48 год"
 
 
 def head(row: Dict[str, Any]) -> str:
-    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ТЕСТ №n»."""
-    return f"ТЕСТ №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
+    """Префікс повідомлень: «B&R LIVE · B&R-n» або «ІНТРАДЕЙ №n» / «СВІНГ №n»."""
+    return f"{strat(row)[0]} №{int(row['seq'])}" if is_td(row) else f"B&R LIVE · B&R-{row['seq']}"
 
 
 def _td_hyp(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,24 +96,56 @@ def build_td_card(row: Dict[str, Any]) -> str:
     risk = abs(entry - sl)
     tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
     pc = lambda p: f"{abs(p - entry) / entry * 100:.2f}".replace(".", ",")
+    hy = _td_hyp(row)
     L = [
-        f"🧪 ТЕСТ №{int(row['seq'])}",
-        f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
-        f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
-        f"🟡 Вхід {_n(entry, sym)} · лімітним ордером",
-        f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
+        f"{strat(row)[1]} {strat(row)[0]} №{int(row['seq'])} · {sym} {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+        f"💰 Сума ${usd_fmt(td_size(row))}",
+        f"🟡 Вхід {_n(entry, sym)} (ліміт)",
+        f"🔴 Стоп {_n(sl, sym)} · −{pc(sl)}% = −$10",
     ]
     for t in tg[:1]:
         usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
-        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10) · лімітним ордером")
+        L.append(f"🟢 Ціль {_n(t['p'], sym)} · +{pc(t['p'])}% = +${usd:.0f} (ліміт)")
     wl = warn_line(row)
-    if wl: L.append("⚠️ " + wl)
-    cl = cluster_line(row)
-    if cl: L.append("⚠️ " + cl)
-    L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")
-    L.append("Тестова стратегія · ручне рішення · Office не відкриває ордерів.")
+    if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
+    n = (hy.get("cluster") or {}).get("n") or 0
+    if n:
+        syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
+        word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
+        L.append(f"➕ Ще {n} {word}" + (f" ({syms})" if syms else "") + " у той самий бік — це один рух")
+    if hy.get("why"): L.append("📌 " + str(hy["why"]))
+    L.append("⏱ тримати " + str(hy.get("hold") or hold_text(row)))
     L.append(TD_TAG)
     return "\n".join(L)
+
+
+def build_td_caption_html(row: Dict[str, Any]) -> str:
+    """Підпис під картинкою (HTML): назва, вхід/стоп/ціль стовпчиком із кружечками (ціни копіюються дотиком), «ще монети», скільки тримати, #ТЕСТ.
+    Попередження «слабкий сигнал», сума та $/% — на картинці, не дублюються."""
+    import html, re
+    hy = _td_hyp(row); sym, d = row["symbol"], row["direction"]
+    plain = lambda x: re.sub(r"[\s\u00a0\u202f]", "", _n(x, sym)).replace(",", ".")
+    tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
+    L = [f"{strat(row)[1]} <b>{html.escape(strat(row)[0])} №{int(row['seq'])}</b> · {html.escape(sym)} {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+         f"🟡 вхід  <code>{plain(row['entry'])}</code> (ліміт)",
+         f"🔴 стоп  <code>{plain(row['sl'])}</code>"]
+    if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
+    n = (hy.get("cluster") or {}).get("n") or 0
+    if n:
+        syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
+        word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
+        L.append(f"➕ Ще {n} {word}" + (f" ({html.escape(syms)})" if syms else "") + " у той самий бік — це один рух")
+    if hy.get("why"): L.append("📌 " + html.escape(str(hy["why"])))
+    L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))
+    L.append(TD_TAG)
+    return "\n".join(L)
+
+
+def build_caption(row: Dict[str, Any], v2_line: str | None = None):
+    """(текст, parse_mode) підпису під зображенням: для ІНТРАДЕЙ/СВІНГ — HTML, для B&R — як було."""
+    if is_td(row):
+        return build_td_caption_html(row), "HTML"
+    return build_card(row, v2_line), None
 
 
 def build_card(row: Dict[str, Any], v2_line: str | None = None) -> str:
