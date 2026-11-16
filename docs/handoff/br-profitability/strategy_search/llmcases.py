@@ -46,6 +46,15 @@ def limit_sim(a, j, side, ent, sl, tp, at, off, W=4, hz=192):
             return dict(k=k, out="TIME", R=side * (c[q + hz] - fp) / risk, sp=sp)
     return dict(k=0, out="NOFILL", R=0.0, sp=0.0)
 
+def d1_levels(a, N=3):
+    """Рівні з денного графіка: фрактальні максимуми/мінімуми (екстремум серед N днів з обох боків). ГІПОТЕЗА щодо N. Повертає (день_підтвердження, ціна, тип)."""
+    day = (a["open_time"] // 86400).astype(int); u, st = np.unique(day, return_index=True); en = np.r_[st[1:], len(day)]
+    hi = np.array([a["high"][x:y].max() for x, y in zip(st, en)]); lo = np.array([a["low"][x:y].min() for x, y in zip(st, en)]); out = []
+    for i in range(N, len(u) - N):
+        if hi[i] > hi[i - N:i].max() and hi[i] > hi[i + 1:i + N + 1].max(): out.append((int(u[i + N]), float(hi[i]), "H"))
+        if lo[i] < lo[i - N:i].min() and lo[i] < lo[i + 1:i + N + 1].min(): out.append((int(u[i + N]), float(lo[i]), "L"))
+    return out
+
 def rel(p, e): return round((float(p) / e - 1) * 100, 2)
 
 def main():
@@ -61,7 +70,7 @@ def main():
         for y in (2024, 2025, 2026):
             z = D[D.year == y].copy()
             if len(z): z["s"] = m.predict(z[X]); parts.append(md.dedupe(z[z.s >= thr]))
-    sel = pd.concat(parts); cases = []; cache = {}; H = {}; allrows = []; limrows = []
+    sel = pd.concat(parts); cases = []; cache = {}; H = {}; allrows = []; limrows = []; lvrows = []; D1L = {}
     for _, x in sel.iterrows():
         if x.sym not in cache:
             a = td.load15(x.sym); cache[x.sym] = (a, td.atr_arr(a["high"], a["low"], a["close"])); H[x.sym] = md.load_h1(x.sym)
@@ -84,6 +93,11 @@ def main():
             bi = int(np.searchsorted(btc.index.to_numpy(float), x.t)); br24 = float(btc.r24.iloc[min(bi, len(btc) - 1)]) * 100
             fwd = [[round(float(h_[q]), 8), round(float(l_[q]), 8), round(float(c_[q]), 8)] for q in range(j + 1, min(j + 673, len(c_)))]
             _r = td.sim(a, j, side, ent, sl, tp, 192) - 0.001 / sp
+            if x.sym not in D1L: D1L[x.sym] = d1_levels(a)
+            _dy = int(a["open_time"][j] // 86400); _lv = [(p_, ty) for (d_, p_, ty) in D1L[x.sym] if d_ <= _dy - 1 and d_ >= _dy - 150]
+            _up = [p_ for p_, ty in _lv if ty == "H" and p_ > ent * 1.0005]; _dn = [p_ for p_, ty in _lv if ty == "L" and p_ < ent * 0.9995]
+            _fwd = min(_up) if side > 0 and _up else (max(_dn) if side < 0 and _dn else None); _bk = max(_dn) if side > 0 and _dn else (min(_up) if side < 0 and _up else None)
+            _risk = abs(ent - sl); lvrows.append([float(a["open_time"][j]), x.sym, side, round(abs(_fwd - ent) / _risk, 3) if _fwd else None, round(abs(_bk - ent) / _risk, 3) if _bk else None, len(_lv)])
             _p = path(a, j, side, ent, sl, tp)
             _lm = {off: limit_sim(a, j, side, ent, sl, tp, at, off) for off in (0.0, 0.1, 0.25)}
             if all(v is not None for v in _lm.values()):
@@ -98,6 +112,7 @@ def main():
             f1.write(json.dumps(dict(id=n, **c["case"]), ensure_ascii=False) + "\n")
             f2.write(json.dumps(dict(id=n, t=c["t"], sym=c["sym"], side=c["side"], ent=c["ent"], sl=c["sl"], tp=c["tp"], post_cutoff=c["t"] >= CUT, fwd=c["fwd"])) + "\n")
     pd.DataFrame(allrows, columns=["t", "sym", "side", "stop_pct", "atr15_pct", "score", "ret6h", "ret12h", "ret36h", "btc24h", "r48h_cost10", "tp_R", "out", "nbars", "mfe", "t05", "b05", "t1", "b1", "t15", "b15", "t2", "b2", "r2h", "r4h", "r8h", "r12h", "r24h"]).to_csv(f"{OUT}/all_signals.csv", index=False)
+    pd.DataFrame(lvrows, columns=["t", "sym", "side", "next_level_R", "back_level_R", "n_levels"]).to_csv(f"{OUT}/all_levels.csv", index=False)
     cols = ["t", "sym", "side", "stop_pct"] + [f"{n}{o}" for o in ("0", "01", "025") for n in ("k", "out", "R", "sp")]
     pd.DataFrame(limrows, columns=cols).to_csv(f"{OUT}/all_limit.csv", index=False)
     print(f"усього кейсів {len(cases)} (після 01.07.2026: {len(post)}); у вибірці {len(pick)}")
