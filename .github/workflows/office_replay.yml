@@ -1,0 +1,43 @@
+name: office_replay
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/office_replay.yml
+      - docs/handoff/br-profitability/office_signals/replay.py
+      - docs/handoff/br-profitability/office_signals/live_signals.csv
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy
+      - name: Fetch 1m
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability/office_signals
+          SYMS=$(tail -n +2 $D/live_signals.csv | cut -d, -f1 | sort -u | tr '\n' ',' | sed 's/,$//')
+          echo $SYMS
+          python3 scripts/fetch_binance_klines.py candles "BTCUSDT,$SYMS" 1m:2026-10-05:2026-11-16 | tail -3
+          test -s candles/BTCUSDT/1m.csv || { echo FETCH FAILED; exit 1; }
+      - name: Replay
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability/office_signals
+          python3 $D/replay.py candles $D/live_signals.csv 0.0010 | tee $D/replay_out.txt
+          python3 $D/replay.py candles $D/live_signals.csv 0.0005 | tee $D/replay_out_fee05.txt
+      - name: Save
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/office_signals/replay_out*.txt
+          git commit -m "office_replay: прогін сигналів AI Office (автоматично)" && git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
