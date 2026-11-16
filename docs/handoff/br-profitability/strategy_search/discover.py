@@ -1,64 +1,105 @@
-"""READ-ONLY. Безіменний пошук умов (без наперед заданої стратегії).
-Крок 1: для кожного моменту (кожні 2 бари, обидва напрямки) рахуємо результат входу зі структурним стопом (екстремум 8 барів) і ціллю 3R + ознаки ДО входу.
-Крок 2: дерево вчиться ТІЛЬКИ на 2022-2023. Крок 3: кожен листок перевіряється окремо в 2024, 2025, 2026 (дерево цих років не бачило).
-✅ = train>0, плюс у КОЖНОМУ з трьох тестових років (n>=50) І нижня межа CI95 по днях на всьому тесті >0. Таймфрейм бару задається 3-м аргументом (хв: 60 або 240).
-Використання: discover.py CANDLES_DIR SYMS TF_MIN COST"""
-import sys
-import numpy as np, pandas as pd
-from sklearn.tree import DecisionTreeRegressor, export_text
-TF = int(sys.argv[3]); COST = float(sys.argv[4])
-sys.argv = [sys.argv[0], sys.argv[1], sys.argv[2], str(COST)]
-import reverse_search as rs
-_orig = rs.load
-def load(s):
-    d = _orig(s)
-    if d is None or TF == 15: return d
-    g = d.groupby(d.open_time // (TF * 60) * (TF * 60)).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"), volume=("volume", "sum")).reset_index()
-    return g
-rs.load = load
-found = []
-def main():
-    btc = rs.load("BTCUSDT"); btc_ret = {}
-    step = TF * 60
-    if btc is not None:
-        bt = btc.open_time.to_numpy(float); bc = btc.close.to_numpy(float)
-        for i in range(4, len(bc)): btc_ret[int(bt[i] // 900)] = np.sign(bc[i] - bc[i - 4])
-        # build() шукає btc_ret за int(t//900): для TF>15 ключі кратні TF/15 — заповнимо всі 15-хв слоти бару
-        full = {}
-        for k, v in btc_ret.items():
-            for j in range(TF // 15): full[k + j] = v
-        btc_ret = full
-    rows = []
-    for s in rs.SYMS:
-        d = rs.load(s)
-        if d is None: continue
-        r = rs.build(d, btc_ret)
-        for x in r: x["sym"] = s
-        rows += r; print(s, len(r), flush=True)
-    df = pd.DataFrame(rows); df["year"] = pd.to_datetime(df.t, unit="s").dt.year
-    print(f"\nTF={TF} хв; комісія {COST*100:.2f}%; рядків {len(df)}; сер. R усіх входів по роках:", {int(y): round(g.r.mean(), 3) for y, g in df.groupby("year")})
-    ev = {int(y): round(100 * (g.mfe >= 3).mean(), 1) for y, g in df.groupby("year")}
-    print("частка входів, що дійшли ≥3R до стопа (беззбиток ≈ 27%+):", ev)
-    tr = df[df.year <= 2023]; tests = {y: df[df.year == y] for y in (2024, 2025, 2026)}
-    global found
-    found = []
-    for depth, leaf in ((3, 3000), (4, 2000), (5, 1500)):
-        m = DecisionTreeRegressor(max_depth=depth, min_samples_leaf=leaf).fit(tr[rs.FEATS], tr.r)
-        lf_tr = m.apply(tr[rs.FEATS]); lf_te = {y: m.apply(g[rs.FEATS]) for y, g in tests.items()}
-        print(f"\n=== Дерево depth={depth}, мін. листок {leaf} ===\n" + export_text(m, feature_names=rs.FEATS, max_depth=depth))
-        print("| листок | train 22-23 n/R | 2024 n/R/$ | 2025 n/R/$ | 2026 n/R/$ | CI95 тест | ✅ |\n|--|--|--|--|--|--|--|")
-        for lf in sorted(set(lf_tr)):
-            a = tr[lf_tr == lf]; cells = []; ok = a.r.mean() > 0; pool = {}
-            for y, g in tests.items():
-                q = g[lf_te[y] == lf]
-                if len(q) < 50: cells.append(f"{len(q)}/–/–"); ok = False; continue
-                cells.append(f"{len(q)}/{q.r.mean():+.3f}/{10*q.r.sum():+,.0f}")
-                if q.r.mean() <= 0: ok = False
-                for tt, rr in zip(q.t, q.r): pool.setdefault(int(tt // 86400), []).append(rr)
-            lo, hi = rs.boot(pool) if pool else (0, 0)
-            ok = ok and lo > 0
-            if ok: found.append((depth, lf, len(a), a.r.mean(), cells, lo, hi))
-            print(f"| {lf} | {len(a)}/{a.r.mean():+.3f} | " + " | ".join(cells) + f" | [{lo:+.3f}; {hi:+.3f}] | {'✅' if ok else ''} |")
-main()
-print(f"\n##### ПІДСУМОК TF={TF} комісія {COST*100:.2f}%: ✅ листків = {len(found)}")
-for f in found: print("   ✅", f)
+"""READ-ONLY. Широкий пошук стратегій на історії (власниця 16.11.2026: «застосовуй ті інструменти, які знаєш ти»). Класичні підходи на H1/H4/D1, 12 монет, 2022-2026, комісія за круг (FEE), ризик $10 = 1R = стоп.
+Вхід на відкритті наступного бару після сигналу; одна позиція на монету; SL-першим. Виходи: fix (стоп s×ATR, ціль k×стоп, час H) і trail (ATR-стоп, що підтягується).
+Чесна оцінка: параметри НЕ підбираються під результат; показуємо ВСІ конфігурації; окремо — що в плюсі в КОЖНОМУ з 2023, 2024, 2025, 2026 і вибір на 2022-2024 → тест 2025-2026. Усе — ГІПОТЕЗА (OUR_IMPLEMENTATION класичних сигналів).
+Використання: discover.py CANDLES_DIR SYMS FEE"""
+import sys, numpy as np, pandas as pd
+try:
+    from numba import njit
+except Exception:
+    def njit(*a, **k):
+        return (lambda f: f) if not (a and callable(a[0])) else a[0]
+CD, SYMS, FEE = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3])
+
+def bars(sym, per):
+    d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
+    g = d.groupby(d.open_time // per * per).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last")).reset_index()
+    return {k: g[k].to_numpy(float) for k in ("open_time", "open", "high", "low", "close")}
+
+def sma(x, n): return pd.Series(x).rolling(n).mean().to_numpy()
+def std(x, n): return pd.Series(x).rolling(n).std().to_numpy()
+def rmax(x, n): return pd.Series(x).rolling(n).max().shift(1).to_numpy()
+def rmin(x, n): return pd.Series(x).rolling(n).min().shift(1).to_numpy()
+def atr(h, l, c, n=14):
+    pc = np.r_[c[0], c[:-1]]; tr = np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc))); return pd.Series(tr).rolling(n).mean().to_numpy()
+def rsi(c, n):
+    d = np.diff(c, prepend=c[0]); up = pd.Series(np.where(d > 0, d, 0)).ewm(alpha=1 / n, adjust=False).mean(); dn = pd.Series(np.where(d < 0, -d, 0)).ewm(alpha=1 / n, adjust=False).mean()
+    return (100 - 100 / (1 + up / dn.replace(0, np.nan))).to_numpy()
+def ev(state):                      # подія: стан щойно став істинним
+    s = np.nan_to_num(state.astype(float)) > 0; return s & ~np.r_[False, s[:-1]]
+
+def signals(b):
+    o, h, l, c = b["open"], b["high"], b["low"], b["close"]; A = atr(h, l, c); m200 = sma(c, 200); S = {}
+    up, dn = c > m200, c < m200
+    for N in (20, 50, 100):
+        hi, lo = rmax(h, N), rmin(l, N); L_, S_ = ev(c > hi), ev(c < lo)
+        S[f"donchian{N}"] = (L_, S_); S[f"donchian{N}+MA200"] = (L_ & up, S_ & dn)
+    for f, s in ((10, 30), (20, 50), (50, 200)):
+        a, z = sma(c, f), sma(c, s); S[f"MA{f}/{s}cross"] = (ev(a > z), ev(a < z))
+    r2 = rsi(c, 2); S["RSI2 reversion+MA200"] = (ev((r2 < 10) & up), ev((r2 > 90) & dn)); S["RSI2 reversion"] = (ev(r2 < 5), ev(r2 > 95))
+    r14 = rsi(c, 14); S["RSI14 <30/>70 reversion"] = (ev(r14 < 30), ev(r14 > 70)); S["RSI14 >70/<30 momentum"] = (ev(r14 > 70), ev(r14 < 30))
+    mb, sb = sma(c, 20), std(c, 20); ub, lb = mb + 2 * sb, mb - 2 * sb
+    S["Bollinger reversion"] = (ev(c < lb), ev(c > ub)); S["Bollinger reversion+MA200"] = (ev((c < lb) & up), ev((c > ub) & dn)); S["Bollinger breakout"] = (ev(c > ub), ev(c < lb))
+    w = (ub - lb) / mb; pr = pd.Series(w).rolling(100).rank(pct=True).shift(1).to_numpy(); sq = pr < 0.1
+    S["Squeeze breakout"] = (ev(sq & (c > ub)), ev(sq & (c < lb)))
+    z = (c - sma(c, 50)) / std(c, 50); S["Z-score reversion 2.5"] = (ev(z < -2.5), ev(z > 2.5))
+    rg = h - l; big = rg > 2 * A; pos = (c - l) / np.where(rg == 0, np.nan, rg)
+    S["Big bar follow"] = (ev(big & (pos > 0.75)), ev(big & (pos < 0.25))); S["Big bar fade"] = (ev(big & (pos < 0.25)), ev(big & (pos > 0.75)))
+    for n in (20, 60):
+        roc = c / np.r_[np.full(n, np.nan), c[:-n]] - 1; S[f"Momentum ROC{n}"] = (ev(roc > 0), ev(roc < 0))
+    return S, A
+
+@njit(cache=False)
+def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
+    n = len(c); out_i = []; out_r = []; out_rk = []; i = 1
+    while i < n - 2:
+        side = 0
+        if ls[i]: side = 1
+        elif ss[i]: side = -1
+        if side == 0 or not A[i] > 0: i += 1; continue
+        e = o[i + 1]; risk = s * A[i]
+        if risk <= 0 or risk / e < 0.0005: i += 1; continue
+        sl = e - side * risk; tp = e + side * k * risk; best = e; res = 0.0; j = i + 1; done = False
+        while j < n and j <= i + H:
+            if mode == 1:
+                if side > 0: best = max(best, c[j - 1]); sl = max(sl, best - t * A[i])
+                else: best = min(best, c[j - 1]); sl = min(sl, best + t * A[i])
+            hs = (l[j] <= sl) if side > 0 else (h[j] >= sl)
+            if hs: res = (sl - e) * side / risk; done = True; break
+            if mode == 0:
+                ht = (h[j] >= tp) if side > 0 else (l[j] <= tp)
+                if ht: res = k; done = True; break
+            j += 1
+        if not done:
+            jj = min(j, n - 1); res = (c[jj] - e) * side / risk
+        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e)
+        i = max(j, i + 1)
+    return out_i, out_r, out_rk
+
+EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0)]
+HZ = {3600: 72, 14400: 60, 86400: 40}; TFN = {3600: "H1", 14400: "H4", 86400: "D1"}
+rows = []
+for per in (3600, 14400, 86400):
+    B = {s: bars(s, per) for s in SYMS}
+    SG = {s: signals(B[s]) for s in SYMS}
+    for name in SG[SYMS[0]][0]:
+        for ename, mode, sm, k, t in EXITS:
+            for sym in SYMS:
+                b = B[sym]; S, A = SG[sym]; L_, S_ = S[name]
+                idx, rr, rk = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode == 0 else HZ[per] * 3, FEE)
+                for i_, r_ in zip(idx, rr): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_))
+R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r"]); R["usd"] = R.r * 10
+G = R.groupby(["tf", "sig", "exit", "y"]).agg(n=("r", "size"), usd=("usd", "sum")).reset_index()
+P = G.pivot_table(index=["tf", "sig", "exit"], columns="y", values="usd", fill_value=0).reset_index(); N = G.groupby(["tf", "sig", "exit"]).n.sum().reset_index(name="n"); P = P.merge(N, on=["tf", "sig", "exit"])
+yrs = [y for y in (2022, 2023, 2024, 2025, 2026) if y in P.columns]; P["total"] = P[yrs].sum(axis=1)
+print(f"Комісія {FEE*100:.2f}% за круг, ризик $10; конфігурацій: {len(P)}; угод у всіх: {int(P.n.sum()):,}")
+print(f"Серед конфігурацій у плюсі всього: {(P.total>0).sum()} ({(P.total>0).mean()*100:.0f}%); у плюсі в КОЖНОМУ з 2023-2026: {int((P[[y for y in yrs if y>=2023]]>0).all(axis=1).sum())}")
+print("\nУ плюсі в КОЖНОМУ році 2023–2026 (n≥150):")
+ok = P[(P[[y for y in yrs if y >= 2023]] > 0).all(axis=1) & (P.n >= 150)].sort_values("total", ascending=False)
+print(ok.round(0).to_string(index=False) if len(ok) else "  немає")
+sel = P[(P[[y for y in yrs if y <= 2024]].sum(axis=1) > 0)]; oos = sel[[y for y in (2025, 2026) if y in sel.columns]].sum(axis=1)
+print(f"\nЧесна перевірка: обрано {len(sel)} конфігурацій, що були в плюсі на 2022–2024; на НЕБАЧЕНИХ 2025–2026 з них у плюсі {(oos>0).sum()} ({(oos>0).mean()*100:.0f}%); сума {oos.sum():+,.0f}$; середня {oos.mean():+,.0f}$")
+print("\nТоп-15 за небаченим 2025–2026 серед обраних на 2022–2024:")
+sel = sel.assign(oos=oos.values).sort_values("oos", ascending=False).head(15); print(sel.round(0).to_string(index=False))
+print("\nНайкращі 10 за загальним результатом (УВАГА: відбір після факту):"); print(P.sort_values("total", ascending=False).head(10).round(0).to_string(index=False))
+print("\nУсередненні за сигналом (усі виходи, TF): сума $ і частка конфігурацій у плюсі:"); print(P.groupby("sig").agg(total=("total", "sum"), plus=("total", lambda x: (x > 0).mean())).round(2).sort_values("total", ascending=False).to_string())
+P.to_csv("discover_results.csv", index=False)
