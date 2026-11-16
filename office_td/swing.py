@@ -17,6 +17,10 @@ import numpy as np
 import pandas as pd
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "BNBUSDT", "LTCUSDT", "DOTUSDT", "ATOMUSDT")
+# 30 нових крипто-монет (рішення власниці 16.11.2026; тест 2022–2026: +$17 613, 27 з 30 у плюсі — docs/handoff/br-profitability/IMPROVEMENTS_LOG_UA.md, розділ K)
+EXTRA_CRYPTO = ("TRXUSDT", "NEARUSDT", "OPUSDT", "FILUSDT", "ETCUSDT", "UNIUSDT", "AAVEUSDT", "MKRUSDT", "SANDUSDT", "MANAUSDT", "AXSUSDT", "GALAUSDT", "RUNEUSDT", "LDOUSDT", "CRVUSDT", "SNXUSDT", "ICPUSDT", "XLMUSDT", "BCHUSDT", "ALGOUSDT", "VETUSDT", "GRTUSDT", "APEUSDT", "IMXUSDT", "INJUSDT", "APTUSDT", "EOSUSDT", "HBARUSDT", "THETAUSDT", "DYDXUSDT")
+if os.getenv("SW_EXTRA_CRYPTO", "1").strip().lower() in ("1", "true", "yes", "on"):
+    SYMBOLS = SYMBOLS + EXTRA_CRYPTO
 # метали, нафта, газ, акції (за рішенням власниці 16.11.2026; історія лише з січня 2026 → спостереження): ТЕСТ СВІНГ +$857 на 437 угодах, CL у мінусі, NVDA/SPCX слабше
 COMMODITIES = ("XAUUSDT", "XAGUSDT", "CLUSDT", "BZUSDT", "NATGASUSDT", "NVDAUSDT", "SPCXUSDT")
 CAUTION = {"NVDAUSDT": "акція, історії лише ~10 міс., результат на тесті невеликий", "SPCXUSDT": "акція, історії лише ~10 міс., результат на тесті невеликий",

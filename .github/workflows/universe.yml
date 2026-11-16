@@ -34,7 +34,7 @@ jobs:
           DETAIL=docs/handoff/br-profitability/universe_swing_base_trades.csv python3 docs/handoff/br-profitability/strategy_search/discover.py candles "$TRAIN" 0.001 > docs/handoff/br-profitability/universe_swing_base_out.txt
           DETAIL=docs/handoff/br-profitability/universe_swing_new_trades.csv python3 docs/handoff/br-profitability/strategy_search/discover.py candles "$NEW" 0.001 > docs/handoff/br-profitability/universe_swing_new_out.txt
           rm -f discover_results.csv
-      - name: ІНТРАДЕЙ (TD): модель навчена на 12 монетах — чи працює на нових
+      - name: "ІНТРАДЕЙ (TD) — модель навчена на 12 монетах, чи працює на нових"
         shell: bash
         run: |
           cd docs/handoff/br-profitability/strategy_search
