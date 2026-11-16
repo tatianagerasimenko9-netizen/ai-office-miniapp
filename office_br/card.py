@@ -25,7 +25,7 @@ def is_td(row: Dict[str, Any]) -> bool:
     return str(row.get("sig_id", "")).startswith("TD|")
 
 
-STRATS = {"TD": ("ІНТРАДЕЙ", "🟠", "#ff8a1f", "#1a0f05", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🔵", "#2f8bff", "#04101f", "4 год · угоди до 10 діб")}
+STRATS = {"TD": ("ІНТРАДЕЙ", "🟡", "#ffd500", "#2a2200", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🔵", "#0057b7", "#ffffff", "4 год · угоди до 10 діб")}
 
 
 def strat(row: Dict[str, Any]):
@@ -103,6 +103,24 @@ def build_td_card(row: Dict[str, Any]) -> str:
     if hy.get("why"): L.append("📌 " + str(hy["why"]))
     L.append("⏱ " + str(hy.get("hold") or "до 48 год"))
     L.append(TD_TAG)
+    return "\n".join(L)
+
+
+def build_td_caption_html(row: Dict[str, Any]) -> str:
+    """Підпис під картинкою (HTML): назва/символ/напрям, ціни, які копіюються дотиком (<code>), «ще монети», час, #ТЕСТ. Попередження «слабкий сигнал» і цифри $/% — на картинці, не дублюються."""
+    import html, re
+    hy = _td_hyp(row); sym, d = row["symbol"], row["direction"]
+    plain = lambda x: re.sub(r"[\s\u00a0\u202f]", "", _n(x, sym)).replace(",", ".")
+    tg = json.loads(row["targets_json"]) if isinstance(row.get("targets_json"), str) else row.get("targets") or []
+    L = [f"{strat(row)[1]} <b>{html.escape(strat(row)[0])} №{int(row['seq'])}</b> · {html.escape(sym)} {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
+         f"вхід <code>{plain(row['entry'])}</code> · стоп <code>{plain(row['sl'])}</code>" + (f" · ціль <code>{plain(tg[0]['p'])}</code>" if tg else "")]
+    n = (hy.get("cluster") or {}).get("n") or 0
+    if n:
+        syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
+        word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
+        L.append(f"➕ Ще {n} {word}" + (f" ({html.escape(syms)})" if syms else "") + " у той самий бік — це один рух")
+    if hy.get("why"): L.append("📌 " + html.escape(str(hy["why"])))
+    L.append("⏱ " + html.escape(str(hy.get("hold") or "до 48 год")) + " · " + TD_TAG)
     return "\n".join(L)
 
 
