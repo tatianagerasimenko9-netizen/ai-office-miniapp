@@ -52,6 +52,12 @@ def cluster_line(row: Dict[str, Any]) -> str | None:
     return f"Ще {n} {word}" + (f" ({syms})" if syms else "") + f" {verb} сигнал у той самий бік цієї години. Це один рух, ризик складається."
 
 
+def warn_line(row: Dict[str, Any]) -> str | None:
+    """Попередження «слабкий сигнал» (ГІПОТЕЗА, історія 2024-2026): причини лежать у hyp_json['warn'] (список коротких текстів). Немає — рядка немає."""
+    w = [str(x) for x in (_td_hyp(row).get("warn") or []) if x]
+    return ("Слабкий сигнал: " + "; ".join(w)) if w else None
+
+
 def td_size(row: Dict[str, Any]) -> float:
     """Сума позиції в USDT (без плеча), щоб стоп коштував рівно $10: 10 / відстань до стопа."""
     entry, sl = float(row["entry"]), float(row["sl"])
@@ -73,12 +79,14 @@ def build_td_card(row: Dict[str, Any]) -> str:
         f"🧪 ТЕСТ №{int(row['seq'])}",
         f"{sym} · {'▲ LONG' if d == 'LONG' else '▼ SHORT'}",
         f"💰 Відкрий на ${usd_fmt(td_size(row))} (USDT, без плеча)",
-        f"🟡 Вхід {_n(entry, sym)}",
+        f"🟡 Вхід {_n(entry, sym)} · лімітним ордером",
         f"🔴 Стоп {_n(sl, sym)} (−{pc(sl)}% · −$10)",
     ]
     for t in tg[:1]:
         usd = 10 * abs(float(t["p"]) - entry) / risk if risk > 0 else 0.0
-        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10)")
+        L.append(f"🟢 Ціль {_n(t['p'], sym)} (+{pc(t['p'])}% · +${usd:.0f} при ризику $10) · лімітним ордером")
+    wl = warn_line(row)
+    if wl: L.append("⚠️ " + wl)
     cl = cluster_line(row)
     if cl: L.append("⚠️ " + cl)
     L.append("⏱ Тримати до цілі або стопа, максимум 48 год. Стоп виставити на біржі одразу після входу.")

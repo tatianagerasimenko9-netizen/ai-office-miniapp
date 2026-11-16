@@ -166,11 +166,25 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
     except Exception:  # noqa: BLE001
         cluster = None
     hyp = {"strategy": STRATEGY, "stop_tag": stop_tag, "cluster": cluster, "model": "TD_V1", "score": cand["score"], "threshold": thr if thr is not None else model().threshold, "h1_entry": cand["h1_entry"], "h1_sl": cand["h1_sl"],
-           "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
+           "warn": res.get("warn") or [], "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, cand["symbol"], cand["direction"], cand["h1_entry"], cand["h1_ts"], cand["h1_close_ts"], res["confirm_ts"], res["entry"], res["sl"],
               json.dumps([{"p": res["tp"], "src": "TD"}]), json.dumps(hyp, default=str), now, "NEW"))
     return sid
+
+
+def _warn_for(cand: dict, res: dict, fetch: Callable, now: float) -> List[str]:
+    """Попередження «слабкий сигнал» (ГІПОТЕЗА, див. office_td/warn.py). Ніколи не блокує сигнал: помилка → без попередження."""
+    from office_td import warn as W
+    if not W.enabled(): return []
+    try:
+        h1 = fetch(cand["symbol"], "1h", H1_BARS, closed_only=True)
+        btc = fetch("BTCUSDT", "1h", 40, closed_only=True) if cand["symbol"] != "BTCUSDT" else h1
+        if not isinstance(h1, list) or len(h1) < 200: return []
+        return W.compute(1 if cand["direction"] == "LONG" else -1, float(res["entry"]), float(res["sl"]), h1, btc if isinstance(btc, list) else None, float(res["confirm_ts"]))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[td] попередження: {type(exc).__name__}: {exc}", flush=True)
+        return []
 
 
 def confirm_all(db: str, fetch: Callable, now: Optional[float] = None, m: Optional[Model] = None) -> int:
@@ -186,6 +200,7 @@ def confirm_all(db: str, fetch: Callable, now: Optional[float] = None, m: Option
         res = confirm_candidate(cand, bars, now)
         if res["status"] == "WAIT": continue
         if res["status"] == "CONFIRMED":
+            res["warn"] = _warn_for(cand, res, fetch, now)
             sid = record_signal(db, cand, res, now, (m.threshold if m is not None else None))
             _execute(db, "UPDATE td_candidate SET status = 'CONFIRMED', note = ?, done_ts = ? WHERE cand_id = ?", (sid, now, cand["cand_id"])); n += 1
             print(f"[td] СИГНАЛ {sid} entry={res['entry']} sl={res['sl']:.6g} tp={res['tp']:.6g}", flush=True)
