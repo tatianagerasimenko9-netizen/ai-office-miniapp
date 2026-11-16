@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/liveflags.yml
       - docs/handoff/br-profitability/strategy_search/live_flags.py
+      - docs/handoff/br-profitability/strategy_search/live_warn.py
+      - office_td/warn.py
       - docs/handoff/br-profitability/live_signals.csv
   workflow_dispatch:
 permissions:
@@ -25,14 +27,14 @@ jobs:
         shell: bash
         run: |
           for S in BTCUSDT ETHUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT BNBUSDT LTCUSDT DOTUSDT ATOMUSDT XAUUSDT XAGUSDT CLUSDT BZUSDT NATGASUSDT NVDAUSDT SPCXUSDT; do
-            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-10-28:2026-11-14 | tr '\n' ' '; echo
+            python3 scripts/fetch_binance_klines.py candles $S 15m:2026-08-20:2026-11-14 | tr '\n' ' '; echo
           done
-      - name: Правила на живих сигналах
+      - name: Живий код попередження на сигналах 1-86
         shell: bash
-        run: python3 docs/handoff/br-profitability/strategy_search/live_flags.py candles docs/handoff/br-profitability/live_signals.csv | tee docs/handoff/br-profitability/live_flags_out.txt
+        run: python3 docs/handoff/br-profitability/strategy_search/live_warn.py candles docs/handoff/br-profitability/live_signals.csv . | tee docs/handoff/br-profitability/live_flags_out.txt
       - name: Зберегти
         shell: bash
         run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
           git add docs/handoff/br-profitability/live_flags_out.txt
-          git commit -m "liveflags: попередження на живих сигналах (автоматично)" && git pull --rebase origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
+          git commit -m "liveflags: попередження на живих сигналах (автоматично)" && git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
