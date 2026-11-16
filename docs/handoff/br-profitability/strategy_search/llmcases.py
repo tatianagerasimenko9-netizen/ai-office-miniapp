@@ -6,6 +6,7 @@ import numpy as np, pandas as pd
 CD, TRAIN, NEW, OUT = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 sys.argv = ["x", CD, TRAIN, NEW, "0.001"]
 import newcoins as nc
+sys.path.insert(0, __file__.rsplit('/', 1)[0]); import d1lv
 md, td = nc.md, nc.td
 CUT = pd.Timestamp("2026-07-01", tz="UTC").timestamp()
 
@@ -93,11 +94,13 @@ def main():
             bi = int(np.searchsorted(btc.index.to_numpy(float), x.t)); br24 = float(btc.r24.iloc[min(bi, len(btc) - 1)]) * 100
             fwd = [[round(float(h_[q]), 8), round(float(l_[q]), 8), round(float(c_[q]), 8)] for q in range(j + 1, min(j + 673, len(c_)))]
             _r = td.sim(a, j, side, ent, sl, tp, 192) - 0.001 / sp
-            if x.sym not in D1L: D1L[x.sym] = d1_levels(a)
-            _dy = int(a["open_time"][j] // 86400); _lv = [(p_, ty) for (d_, p_, ty) in D1L[x.sym] if d_ <= _dy - 1 and d_ >= _dy - 150]
-            _up = [p_ for p_, ty in _lv if ty == "H" and p_ > ent * 1.0005]; _dn = [p_ for p_, ty in _lv if ty == "L" and p_ < ent * 0.9995]
-            _fwd = min(_up) if side > 0 and _up else (max(_dn) if side < 0 and _dn else None); _bk = max(_dn) if side > 0 and _dn else (min(_up) if side < 0 and _up else None)
-            _risk = abs(ent - sl); lvrows.append([float(a["open_time"][j]), x.sym, side, round(abs(_fwd - ent) / _risk, 3) if _fwd else None, round(abs(_bk - ent) / _risk, 3) if _bk else None, len(_lv)])
+            if x.sym not in D1L: _D = d1lv.build(a); D1L[x.sym] = (_D, d1lv.levels(_D))
+            _D, _Ls = D1L[x.sym]; _di = int(np.searchsorted(_D["u"], int(a["open_time"][j] // 86400))); _risk = abs(ent - sl); _atrd = _D["atr"][_di] if _di < len(_D["atr"]) else float("nan")
+            _al = [(L_["p"], L_["t"], d1lv.state(L_, _di)) for L_ in _Ls]; _al = [(p_, t_, k_) for p_, t_, k_ in _al if k_ is not None]
+            _ah = [(abs(p_ - ent), k_) for p_, t_, k_ in _al if (p_ - ent) * side > 0.0005 * ent]; _bk = [(abs(p_ - ent), k_) for p_, t_, k_ in _al if (p_ - ent) * side < -0.0005 * ent]
+            _a1 = min(_ah) if _ah else None; _b1 = min(_bk) if _bk else None; _nr = min(_al, key=lambda z: abs(z[0] - ent)) if _al else None
+            lvrows.append([float(a["open_time"][j]), x.sym, side, round(_a1[0] / _risk, 3) if _a1 else None, _a1[1] if _a1 else None, round(_b1[0] / _risk, 3) if _b1 else None, _b1[1] if _b1 else None,
+                           round(abs(_nr[0] - ent) / _atrd, 3) if _nr and _atrd == _atrd else None, (1 if (_nr[0] - ent) * side < 0 else -1) if _nr else None, _nr[2] if _nr else None, len(_al)])
             _p = path(a, j, side, ent, sl, tp)
             _lm = {off: limit_sim(a, j, side, ent, sl, tp, at, off) for off in (0.0, 0.1, 0.25)}
             if all(v is not None for v in _lm.values()):
@@ -112,7 +115,7 @@ def main():
             f1.write(json.dumps(dict(id=n, **c["case"]), ensure_ascii=False) + "\n")
             f2.write(json.dumps(dict(id=n, t=c["t"], sym=c["sym"], side=c["side"], ent=c["ent"], sl=c["sl"], tp=c["tp"], post_cutoff=c["t"] >= CUT, fwd=c["fwd"])) + "\n")
     pd.DataFrame(allrows, columns=["t", "sym", "side", "stop_pct", "atr15_pct", "score", "ret6h", "ret12h", "ret36h", "btc24h", "r48h_cost10", "tp_R", "out", "nbars", "mfe", "t05", "b05", "t1", "b1", "t15", "b15", "t2", "b2", "r2h", "r4h", "r8h", "r12h", "r24h"]).to_csv(f"{OUT}/all_signals.csv", index=False)
-    pd.DataFrame(lvrows, columns=["t", "sym", "side", "next_level_R", "back_level_R", "n_levels"]).to_csv(f"{OUT}/all_levels.csv", index=False)
+    pd.DataFrame(lvrows, columns=["t", "sym", "side", "ahead_R", "ahead_touches", "back_R", "back_touches", "near_atr", "near_behind", "near_touches", "n_alive"]).to_csv(f"{OUT}/all_levels.csv", index=False)
     cols = ["t", "sym", "side", "stop_pct"] + [f"{n}{o}" for o in ("0", "01", "025") for n in ("k", "out", "R", "sp")]
     pd.DataFrame(limrows, columns=cols).to_csv(f"{OUT}/all_limit.csv", index=False)
     print(f"усього кейсів {len(cases)} (після 01.07.2026: {len(post)}); у вибірці {len(pick)}")
