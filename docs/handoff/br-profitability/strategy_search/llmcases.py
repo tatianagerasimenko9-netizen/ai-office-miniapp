@@ -27,6 +27,25 @@ def path(a, j, side, ent, sl, tp, hz=192):
         res[f"b{lv}"] = next((i + 1 for i in range(t, len(ret)) if ret[i]), None) if t else None
     return res
 
+def limit_sim(a, j, side, ent, sl, tp, at, off, W=4, hz=192):
+    """Лімітний вхід: рівень = вхід сигналу, зсунутий у бік ПОЛІПШЕННЯ ціни на off*ATR. Виконується, якщо за W барів (1 год) ціна торкнулась рівня; далі той самий стоп і ціль (абсолютні ціни). SL-першим; на барі виконання ціль не рахується (консервативно)."""
+    h, l, o, c = a["high"], a["low"], a["open"], a["close"]; lvl = ent - side * off * at
+    for k in range(1, W + 1):
+        q = j + k
+        if q >= len(c): return None
+        if (l[q] <= lvl) if side > 0 else (h[q] >= lvl):
+            fp = min(lvl, o[q]) if side > 0 else max(lvl, o[q]); risk = abs(fp - sl)
+            if risk <= 0 or (tp - fp) * side <= 0 or (fp - sl) * side <= 0: return None
+            sp = risk / fp
+            if (l[q] <= sl) if side > 0 else (h[q] >= sl): return dict(k=k, out="SL", R=-1.0, sp=sp)
+            for m in range(1, hz + 1):
+                z = q + m
+                if z >= len(c): return None
+                if (l[z] <= sl) if side > 0 else (h[z] >= sl): return dict(k=k, out="SL", R=-1.0, sp=sp)
+                if (h[z] >= tp) if side > 0 else (l[z] <= tp): return dict(k=k, out="TP", R=side * (tp - fp) / risk, sp=sp)
+            return dict(k=k, out="TIME", R=side * (c[q + hz] - fp) / risk, sp=sp)
+    return dict(k=0, out="NOFILL", R=0.0, sp=0.0)
+
 def rel(p, e): return round((float(p) / e - 1) * 100, 2)
 
 def main():
@@ -42,7 +61,7 @@ def main():
         for y in (2024, 2025, 2026):
             z = D[D.year == y].copy()
             if len(z): z["s"] = m.predict(z[X]); parts.append(md.dedupe(z[z.s >= thr]))
-    sel = pd.concat(parts); cases = []; cache = {}; H = {}; allrows = []
+    sel = pd.concat(parts); cases = []; cache = {}; H = {}; allrows = []; limrows = []
     for _, x in sel.iterrows():
         if x.sym not in cache:
             a = td.load15(x.sym); cache[x.sym] = (a, td.atr_arr(a["high"], a["low"], a["close"])); H[x.sym] = md.load_h1(x.sym)
@@ -66,6 +85,9 @@ def main():
             fwd = [[round(float(h_[q]), 8), round(float(l_[q]), 8), round(float(c_[q]), 8)] for q in range(j + 1, min(j + 673, len(c_)))]
             _r = td.sim(a, j, side, ent, sl, tp, 192) - 0.001 / sp
             _p = path(a, j, side, ent, sl, tp)
+            _lm = {off: limit_sim(a, j, side, ent, sl, tp, at, off) for off in (0.0, 0.1, 0.25)}
+            if all(v is not None for v in _lm.values()):
+                limrows.append([float(a["open_time"][j]), x.sym, side, round(sp * 100, 3)] + sum(([v["k"], v["out"], round(v["R"], 4), round(v["sp"] * 100, 4)] for v in _lm.values()), []))
             allrows.append((float(a["open_time"][j]), x.sym, side, round(sp * 100, 3), round(at / ent * 100, 3), round(float(x.s), 3), round(-h1[-7][3], 2), round(-h1[-13][3], 2), round(-h1[0][3], 2), round(br24, 2), round(_r, 4), round(abs(tp - ent) / abs(ent - sl), 2), _p["out"], _p["nb"], _p["mfe"], _p["t0.5"], _p["b0.5"], _p["t1.0"], _p["b1.0"], _p["t1.5"], _p["b1.5"], _p["t2.0"], _p["b2.0"], _p["r8"], _p["r16"], _p["r32"], _p["r48"], _p["r96"]))
             cases.append(dict(t=float(a["open_time"][j]), sym=x.sym, side=side, ent=float(ent), sl=float(sl), tp=float(tp), score=round(float(x.s), 3), case=dict(direction="LONG" if side > 0 else "SHORT", stop_pct=round(sp * 100, 2), target_pct=round(abs(tp - ent) / ent * 100, 2), atr15_pct=round(at / ent * 100, 3), model_score=round(float(x.s), 3), market_btc_24h_pct=round(br24, 2), levels_pct_from_entry=lv, h1_last36_ohlc_pct=h1, m15_last32_ohlc_pct=m15), fwd=fwd)); break
     random.seed(11); post = [c for c in cases if c["t"] >= CUT]; pre = [c for c in cases if c["t"] < CUT]
@@ -76,5 +98,7 @@ def main():
             f1.write(json.dumps(dict(id=n, **c["case"]), ensure_ascii=False) + "\n")
             f2.write(json.dumps(dict(id=n, t=c["t"], sym=c["sym"], side=c["side"], ent=c["ent"], sl=c["sl"], tp=c["tp"], post_cutoff=c["t"] >= CUT, fwd=c["fwd"])) + "\n")
     pd.DataFrame(allrows, columns=["t", "sym", "side", "stop_pct", "atr15_pct", "score", "ret6h", "ret12h", "ret36h", "btc24h", "r48h_cost10", "tp_R", "out", "nbars", "mfe", "t05", "b05", "t1", "b1", "t15", "b15", "t2", "b2", "r2h", "r4h", "r8h", "r12h", "r24h"]).to_csv(f"{OUT}/all_signals.csv", index=False)
+    cols = ["t", "sym", "side", "stop_pct"] + [f"{n}{o}" for o in ("0", "01", "025") for n in ("k", "out", "R", "sp")]
+    pd.DataFrame(limrows, columns=cols).to_csv(f"{OUT}/all_limit.csv", index=False)
     print(f"усього кейсів {len(cases)} (після 01.07.2026: {len(post)}); у вибірці {len(pick)}")
 if __name__ == "__main__": main()
