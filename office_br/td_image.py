@@ -77,11 +77,13 @@ def render_td(row, bars):
             fig.text(.92, y - .012, val, color=TXT, fontsize=22, fontweight="bold", ha="right", va="top")
             fig.text(.09, y - .042, sub, color=DIM, fontsize=10, va="top")
             y -= .074
-        from office_br.card import cluster_line
-        cl = cluster_line(row)
-        if cl:
-            import textwrap
-            wr = textwrap.wrap(cl, 62)[:3]
+        from office_br.card import cluster_line, warn_line
+        import textwrap
+        wr = []
+        for t_ in (warn_line(row), cluster_line(row)):
+            if t_: wr += textwrap.wrap(t_, 62)[:3]
+        wr = wr[:5]
+        if wr:
             fig.patches.append(FancyBboxPatch((.05, y - .018 - .026 * len(wr)), .90, .026 * len(wr) + .012, boxstyle="round,pad=0.002,rounding_size=0.012", transform=fig.transFigure, facecolor="none", edgecolor=YEL, linewidth=1))
             for i_, ln in enumerate(wr): fig.text(.07, y - .006 - .026 * i_, ln, color=YEL, fontsize=10, va="top")
             y -= .026 * len(wr) + .03
