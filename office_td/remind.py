@@ -43,7 +43,13 @@ def text(row: Dict[str, Any], r_now: float) -> str:
     from office_br import card
     sym = str(row["symbol"]).replace("USDT", "")
     num = lambda x: f"{x:+.1f}".replace(".", ",")
-    return f"{card.head(row)} · {sym} {row['direction']} · зараз {num(r_now)}R (+${10 * r_now:.0f}) {card.TD_TAG}"
+    msg = f"{card.head(row)} · {sym} {row['direction']} · зараз {num(r_now)}R (+${10 * r_now:.0f}) {card.TD_TAG}"
+    if card.is_swing(row) and r_now >= 2.0:      # СВІНГ: беззбиток після +2R на історії 2022–2026 не шкодить і не допомагає (журнал, розділ M); лише підказка
+        try:
+            msg += f"\n🔒 можна перенести стоп у беззбиток: {card._n(float(row['entry']), row['symbol'])}"
+        except Exception:  # noqa: BLE001
+            pass
+    return msg
 
 
 async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[float] = None) -> int:

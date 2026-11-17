@@ -58,14 +58,21 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
         if side == 0 or not A[i] > 0: i += 1; continue
         e = o[i + 1]; risk = s * A[i]
         if risk <= 0 or risk / e < 0.0005: i += 1; continue
-        sl = e - side * risk; tp = e + side * k * risk; best = e; res = 0.0; j = i + 1; done = False
+        sl = e - side * risk; tp = e + side * k * risk; best = e; res = 0.0; j = i + 1; done = False; mfe = 0.0
         while j < n and j <= i + H:
+            if mode >= 2 and j - 1 >= i + 1:          # беззбиток (2) / трейлінг на 1R (3) або 0,5R (4) за ціною ПІСЛЯ того, як попередні бари дали +t·R (SL-першим, активація з наступного бару)
+                pj = j - 1; fav = ((h[pj] - e) if side > 0 else (e - l[pj])) / risk; mfe = max(mfe, fav)
+                if mfe >= t:
+                    if mode == 2: nsl = e
+                    else:
+                        best = max(best, c[pj]) if side > 0 else min(best, c[pj]); nsl = best - side * (1.0 if mode == 3 else 0.5) * risk
+                    sl = max(sl, nsl) if side > 0 else min(sl, nsl)
             if mode == 1:
                 if side > 0: best = max(best, c[j - 1]); sl = max(sl, best - t * A[i])
                 else: best = min(best, c[j - 1]); sl = min(sl, best + t * A[i])
             hs = (l[j] <= sl) if side > 0 else (h[j] >= sl)
             if hs: res = (sl - e) * side / risk; done = True; break
-            if mode == 0:
+            if mode != 1:
                 ht = (h[j] >= tp) if side > 0 else (l[j] <= tp)
                 if ht: res = k; done = True; break
             j += 1
@@ -75,7 +82,10 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
         i = max(j, i + 1)
     return out_i, out_r, out_rk, out_s
 
-EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0)]
+EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0),
+         ("BE +1R TP6", 2, 3.0, 6.0, 1.0), ("BE +1.5R TP6", 2, 3.0, 6.0, 1.5), ("BE +2R TP6", 2, 3.0, 6.0, 2.0), ("BE +3R TP6", 2, 3.0, 6.0, 3.0),
+         ("trail1R після +1.5R TP6", 3, 3.0, 6.0, 1.5), ("trail1R після +2R TP6", 3, 3.0, 6.0, 2.0), ("trail1R після +3R TP6", 3, 3.0, 6.0, 3.0),
+         ("trail0.5R після +2R TP6", 4, 3.0, 6.0, 2.0), ("trail0.5R після +3R TP6", 4, 3.0, 6.0, 3.0)]
 HZ = {3600: 72, 14400: 60, 86400: 40}; TFN = {3600: "H1", 14400: "H4", 86400: "D1"}
 rows = []
 for per in (3600, 14400, 86400):
@@ -86,7 +96,7 @@ for per in (3600, 14400, 86400):
             if ONLY and f"{TFN[per]}|{name}|{ename}" not in ONLY: continue
             for sym in SYMS:
                 b = B[sym]; S, A = SG[sym]; L_, S_ = S[name]
-                idx, rr, rk, sd = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode == 0 else HZ[per] * 3, FEE)
+                idx, rr, rk, sd = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode != 1 else HZ[per] * 3, FEE)
                 for i_, r_, sd_, rk_ in zip(idx, rr, sd, rk): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_, float(b["open_time"][i_]), int(sd_), float(rk_)))
 R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r", "ts", "side", "risk_pct"]); R["usd"] = R.r * 10
 if DETAIL: R.to_csv(DETAIL, index=False)
