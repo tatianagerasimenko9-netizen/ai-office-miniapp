@@ -123,6 +123,18 @@ def build_td_card(row: Dict[str, Any]) -> str:
     return "\n".join(L)
 
 
+def r_levels(row: Dict[str, Any]) -> list:
+    """Ціни, на яких угода має +1R/+2R/+3R (від входу, за відстанню до стопа): лише орієнтири; справжня ціль — окремий рядок. ІНТРАДЕЙ ціль 3R → показуємо +1R, +2R; СВІНГ ціль 6R → +1R, +2R, +3R (🔒 на +2R = можна беззбиток)."""
+    try:
+        e, sl = float(row["entry"]), float(row["sl"]); risk = abs(e - sl)
+        if risk <= 0: return []
+        side = 1 if row["direction"] == "LONG" else -1
+        top = 3 if is_swing(row) else 2
+        return [(k, e + side * k * risk) for k in range(1, top + 1)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def build_td_caption_html(row: Dict[str, Any]) -> str:
     """Підпис під картинкою (HTML): назва, вхід/стоп/ціль стовпчиком із кружечками (ціни копіюються дотиком), «ще монети», скільки тримати, #ТЕСТ.
     Попередження «слабкий сигнал», сума та $/% — на картинці, не дублюються."""
@@ -134,6 +146,8 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
          f"🟡 вхід  <code>{plain(row['entry'])}</code> (ліміт)",
          f"🔴 стоп  <code>{plain(row['sl'])}</code>"]
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
+    lv = r_levels(row)
+    if lv: L.append("📍 орієнтири: " + " · ".join(f"+{k}R <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
         syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
