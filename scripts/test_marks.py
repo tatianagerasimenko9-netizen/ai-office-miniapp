@@ -14,3 +14,8 @@ from office_bridge import _fetchone
 assert _fetchone(db, "SELECT status FROM signal_news WHERE sig_id='S1'")[0] == "no_key"
 os.environ["SIGNAL_MARKS"] = "0"; assert mk.ai_marks(s) == []
 print("ok marks")
+from office_td import remind
+_sw = {"sig_id": "SW|NATGASUSDT|LONG|1", "seq": 3, "symbol": "NATGASUSDT", "direction": "LONG", "entry": 3.512, "sl": 3.4, "hyp_json": "{}"}
+assert "беззбиток: 3,512" in remind.text(_sw, 2.3) and "беззбиток" not in remind.text(_sw, 1.2)
+assert "беззбиток" not in remind.text(dict(_sw, sig_id="TD|BTCUSDT|LONG|1"), 2.3)
+print("ok remind be")
