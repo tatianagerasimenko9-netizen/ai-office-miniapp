@@ -112,6 +112,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
         L.append(f"🟢 Ціль {_n(t['p'], sym)} · +{pc(t['p'])}% = +${usd:.0f} (ліміт)")
     wl = warn_line(row)
     if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
+    if hy.get("opp"): L.append("⚠️ " + str(hy["opp"]))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
         syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
@@ -148,6 +149,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+{k}R <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
+    if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
         syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])

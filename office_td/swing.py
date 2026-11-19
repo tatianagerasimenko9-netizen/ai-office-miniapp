@@ -98,6 +98,8 @@ def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, e
     if sym in CAUTION: hyp["caution"] = [CAUTION[sym]]
     try:
         import office_marks as _mk
+        _opp = _mk.opposite_open(db, sym, direction, "SW")
+        if _opp: hyp["opp"] = _opp
         hyp["caution"] = (hyp.get("caution") or []) + _mk.news_marks(_mk.record(db, sid, sym, now), now)
         if not hyp["caution"]: hyp.pop("caution")
     except Exception: pass
