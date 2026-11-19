@@ -98,61 +98,77 @@ def _usd(x: float) -> str:
     return ("+" if x >= 0 else "−") + f"${abs(x):,.0f}".replace(",", " ")
 
 
+def _ug(n: int) -> str:
+    return f"{n} " + ("угода" if n % 10 == 1 and n % 100 != 11 else ("угоди" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "угод"))
+
+
+def _fmt_r(x: float) -> str:
+    return f"{x:+.1f}".replace(".", ",").replace("-", "−")
+
+
 def render(data: Dict[str, Any], out_dir: str, now: Optional[float] = None) -> List[str]:
-    """Малює табло: одна або кілька PNG (ROWS_PER_IMAGE рядків на картинку)."""
+    """Одна картинка (варіант A, вибір власниці): вгорі підсумок СВІНГ/ІНТРАДЕЙ і «що зробити сьогодні»; СВІНГ згруповано за днем (найстаріші зверху, смужка «день N із 10»), плитки по 4 в ряд.
+    Стрілка = результат зараз: ▲ зелена (плюс від +0,15R), ▼ червона (мінус від −0,15R), ● сіра (≈0); купівля/продаж — словом."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, Rectangle
     BG, CARD, TXT, MUT, YEL, BLU, GRN, RED = "#101418", "#1b222b", "#f2f4f7", "#9aa4b2", "#ffd500", "#0057b7", "#2ecc71", "#ff5a5f"
-    now = time.time() if now is None else now; stamp = _kyiv(now).strftime("%d.%m.%Y %H:%M")
-    items: List[tuple] = []
-    for k, nm, col in (("SW", "СВІНГ", "#4d9bff"), ("TD", "ІНТРАДЕЙ", YEL)):
-        d = data[k]; items.append(("head", k, nm, col, d))
-        if not d["rows"]: items.append(("empty", k))
-        for r in d["rows"]: items.append(("row", k, r))
-    pages: List[List[tuple]] = [[]]; n = 0
-    for it in items:
-        if it[0] == "row":
-            if n >= ROWS_PER_IMAGE: pages.append([]); n = 0
-            n += 1
-        pages[-1].append(it)
-    paths = []
-    for pi, page in enumerate(pages):
-        height = 22 + sum(26 if it[0] == "head" else (9 if it[0] == "empty" else 10.2) for it in page) + 8
-        fig = plt.figure(figsize=(7.2, height * 0.0725), dpi=150, facecolor=BG); ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(height, 0); ax.axis("off")
-        def t(x, y, s, size=12, c=TXT, w="normal", ha="left"): ax.text(x, y, s, color=c, fontsize=size, fontweight=w, ha=ha, va="center")
-        ax.add_patch(Rectangle((0, 0), 100, 14, fc=BLU)); ax.add_patch(Rectangle((0, 0), 100, 7, fc=YEL))
-        t(5, 3.5, "ТАБЛО УГОД" + (f" · {pi + 1}/{len(pages)}" if len(pages) > 1 else ""), 18, "#2a2200", "bold"); t(5, 10.5, f"{stamp} за Києвом · відкриті угоди СВІНГ і ІНТРАДЕЙ", 10.5, "#ffffff")
-        y = 18
-        for it in page:
-            if it[0] == "head":
-                _, k, nm, col, d = it
-                ax.add_patch(Rectangle((4, y), 92, 0.7, fc=col, ec="none")); t(5, y + 4.5, nm, 14, col, "bold")
-                t(95, y + 4.5, f"відкрито {len(d['rows'])}", 11, TXT, "bold", "right")
-                nu = d["now_usd"]; st = d["streak"]; wk = d["week"]
-                for j, (lab, val, c) in enumerate([("зараз", _usd(nu), GRN if nu >= 0 else RED), ("стопів поспіль", str(st), RED if st >= 3 else TXT), (f"за 7 діб ({d['closed7']} закр.)", _usd(wk), GRN if wk >= 0 else RED)]):
-                    x = 5 + j * 30.5; t(x, y + 11.5, lab, 8.6, MUT); t(x, y + 16.5, val, 13, c, "bold")
-                y += 26
-            elif it[0] == "empty":
-                t(8, y + 3, "відкритих угод немає", 10.5, MUT); y += 9
-            else:
-                _, k, r = it; rr = r["r"]
-                col = MUT if rr is None else (GRN if rr >= 0.3 else (RED if rr <= -0.3 else MUT))
-                ax.add_patch(FancyBboxPatch((4, y), 92, 9.2, boxstyle="round,pad=0,rounding_size=1.0", fc=CARD, ec="none")); ax.add_patch(Rectangle((4, y), 1.4, 9.2, fc=col, ec="none"))
-                t(8, y + 3.3, f"{r['sym']} {'▲' if r['dir'] == 'LONG' else '▼'}", 11.5, TXT, "bold"); t(8, y + 7.0, r["note"] or f"№{r['seq']}", 8.2, "#ffb703" if r["note"] else MUT)
-                if k == "SW":
-                    day = int(r["age_h"] // 24) + 1; total = 10; lab = f"день {min(day, total)} із {total}"; on = min(day, total)
-                else:
-                    total = 8; on = min(total, int(r["age_h"] // 6) + 1); lab = f"{int(r['age_h'])} год із 48"
-                t(52, y + 3.2, lab, 9, TXT, ha="center")
-                w = 28 / total
-                for q in range(total): ax.add_patch(Rectangle((38 + q * w, y + 5.2), w * 0.82, 1.5, fc=(YEL if q < on else "#33404d"), ec="none"))
-                if rr is None: t(94, y + 4.6, "—", 11, MUT, ha="right")
-                else: t(94, y + 3.2, f"{rr:+.1f}R".replace("+-", "−"), 11.5, col, "bold", "right"); t(94, y + 7.0, _usd(10 * rr), 8.6, col, ha="right")
-                y += 10.2
-        t(50, height - 3, "Спостереження, не гарантія прибутку · R за останнім закриттям M1", 8.2, MUT, ha="center")
-        p = os.path.join(out_dir, f"board_{int(now)}_{pi + 1}.png"); fig.savefig(p, facecolor=BG); plt.close(fig); paths.append(p)
-    return paths
+    now = time.time() if now is None else now; stamp = _kyiv(now).strftime("%d.%m %H:%M")
+    TW, TH, GAP = 22.0, 12.4, 1.0
+    st = lambda r: (MUT, "●") if r is None else ((GRN, "▲") if r >= 0.15 else ((RED, "▼") if r <= -0.15 else (MUT, "●")))
+    dword = lambda d: "купівля" if d == "LONG" else "продаж"
+    acts: List[str] = []
+    for k in ("SW", "TD"):
+        for r in data[k]["rows"]:
+            if r["note"].startswith("стоп"): acts.append(f"{r['sym']} {dword(r['dir'])}:  {r['note']}")
+    for k in ("SW", "TD"):
+        for r in data[k]["rows"]:
+            if r["note"].startswith("скоро"): acts.append(f"{r['sym']} {dword(r['dir'])}:  закрити за часом {'завтра' if k == 'SW' else 'скоро'}")
+    acts = acts[:6]
+    groups: List[tuple] = []
+    sw = sorted(data["SW"]["rows"], key=lambda r: (-int(r["age_h"] // 24), -(r["r"] if r["r"] is not None else -99)))
+    for d in sorted({min(int(r["age_h"] // 24) + 1, 10) for r in sw}, reverse=True):
+        groups.append(("SW", d, [r for r in sw if min(int(r["age_h"] // 24) + 1, 10) == d]))
+    if data["TD"]["rows"]:
+        groups.append(("TD", 0, sorted(data["TD"]["rows"], key=lambda r: -r["age_h"])))
+    height = 14 + 21 + (8 + 5.2 * max(1, len(acts)) + 3) + sum(9 + ((len(g[2]) + 3) // 4) * (TH + GAP) + 3 for g in groups) + 6
+    fig = plt.figure(figsize=(7.2, height * 0.0725), dpi=150, facecolor=BG); ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(height, 0); ax.axis("off")
+    def t(x, y, s, size=12, c=TXT, w="normal", ha="left"): ax.text(x, y, s, color=c, fontsize=size, fontweight=w, ha=ha, va="center")
+    ax.add_patch(Rectangle((0, 0), 100, 14, fc=BLU)); ax.add_patch(Rectangle((0, 0), 100, 7, fc=YEL))
+    t(5, 3.5, "ТАБЛО УГОД", 19, "#2a2200", "bold"); t(95, 3.5, stamp, 12, "#2a2200", "bold", "right"); t(5, 10.5, "відкриті угоди · ціни за останньою хвилиною · комісії не враховано", 9.5, "#ffffff")
+    y = 17
+    for j, (k, nm, col) in enumerate((("SW", "СВІНГ", "#4d9bff"), ("TD", "ІНТРАДЕЙ", YEL))):
+        d = data[k]; x = 4 + j * 47; ax.add_patch(FancyBboxPatch((x, y), 45, 18, boxstyle="round,pad=0,rounding_size=1.2", fc=CARD, ec="none")); ax.add_patch(Rectangle((x, y), 45, 0.8, fc=col, ec="none"))
+        up = sum(1 for r in d["rows"] if r["r"] is not None and r["r"] >= 0.15); dn = sum(1 for r in d["rows"] if r["r"] is not None and r["r"] <= -0.15); fl = len(d["rows"]) - up - dn
+        t(x + 3, y + 4.5, nm, 12.5, col, "bold"); t(x + 42, y + 4.5, f"відкрито {len(d['rows'])}", 10.5, TXT, "bold", "right")
+        nu = d["now_usd"]; t(x + 3, y + 10.5, _usd(nu), 17, GRN if nu >= 0 else RED, "bold")
+        t(x + 22, y + 10.5, f"▲{up}", 10.5, GRN, "bold"); t(x + 29, y + 10.5, f"▼{dn}", 10.5, RED, "bold"); t(x + 36, y + 10.5, f"●{fl}", 10.5, MUT, "bold")
+        wk = d["week"]; t(x + 3, y + 15.2, f"7 діб: {_usd(wk)} · стопів поспіль {d['streak']}", 8, GRN if wk >= 0 else RED)
+    y += 21
+    bh = 8 + 5.2 * max(1, len(acts)); ax.add_patch(FancyBboxPatch((4, y), 92, bh, boxstyle="round,pad=0,rounding_size=1.2", fc="#2a2200", ec=YEL, lw=1.2))
+    t(7, y + 4, "ЩО ЗРОБИТИ СЬОГОДНІ", 11, YEL, "bold")
+    if acts:
+        for q, a in enumerate(acts): t(7, y + 9.5 + q * 5.2, "•  " + a, 10.3, TXT)
+    else: t(7, y + 9.5, "нічого терміново", 10.3, MUT)
+    y += bh + 3
+    for k, day, rows in groups:
+        if k == "SW":
+            ax.add_patch(FancyBboxPatch((4, y), 92, 7, boxstyle="round,pad=0,rounding_size=1.0", fc=BLU if day >= 8 else "#26303b", ec="none"))
+            t(7, y + 3.5, f"СВІНГ · ДЕНЬ {day} із 10", 12.5, YEL, "bold"); t(93, y + 3.5, f"{_ug(len(rows))} · ще {10 - day} діб", 9.5, TXT, ha="right")
+            for q in range(10): ax.add_patch(Rectangle((44 + q * 1.9, y + 2.6), 1.6, 1.8, fc=YEL if q < day else "#4a5866", ec="none"))
+        else:
+            ax.add_patch(FancyBboxPatch((4, y), 92, 7, boxstyle="round,pad=0,rounding_size=1.0", fc="#26303b", ec="none")); t(7, y + 3.5, "ІНТРАДЕЙ · до 48 год", 12.5, YEL, "bold"); t(93, y + 3.5, _ug(len(rows)), 9.5, TXT, ha="right")
+        y += 9
+        for q, r in enumerate(rows):
+            cx = 4 + (q % 4) * (TW + GAP + 0.2); cy = y + (q // 4) * (TH + GAP); rr = r["r"]; col, ar = st(rr)
+            ax.add_patch(FancyBboxPatch((cx, cy), TW, TH, boxstyle="round,pad=0,rounding_size=1.2", fc=CARD, ec="none")); ax.add_patch(Rectangle((cx, cy), 1.2, TH, fc=col, ec="none"))
+            t(cx + 2.6, cy + 3.4, r["sym"], 11.2, TXT, "bold"); t(cx + TW - 1.5, cy + 3.4, dword(r["dir"]) if k == "SW" else f"{int(r['age_h'])} год · {dword(r['dir'])}", 7.4, MUT, ha="right")
+            t(cx + 2.6, cy + 8.6, ar, 15, col, "bold"); t(cx + 7.2, cy + 8.6, "—" if rr is None else _fmt_r(rr) + "R", 13, col, "bold")
+            if rr is not None: t(cx + TW - 1.5, cy + 9.2, _usd(10 * rr), 8.6, col, ha="right")
+        y += ((len(rows) + 3) // 4) * (TH + GAP) + 3
+    t(50, height - 3, "Спостереження, не гарантія прибутку", 8, MUT, ha="center")
+    p = os.path.join(out_dir, f"board_{int(now)}_1.png"); fig.savefig(p, facecolor=BG); plt.close(fig)
+    return [p]
 
 
 async def daily(db: str, fetch: Callable, send_image: Callable, now: Optional[float] = None) -> int:
