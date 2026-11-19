@@ -2966,7 +2966,7 @@ async def run() -> None:
                 return None
         thread_id = _thread_for_stream(stream)
         cap = _strip_agent_tag(caption)[:1024]
-        token = tg_bot_token if intent in ("BR_LIVE_EXPERIMENT", "BR_LIVE_TEST") else (agent_bot_tokens.get("lev") or tg_bot_token)
+        token = tg_bot_token if intent in ("BR_LIVE_EXPERIMENT", "BR_LIVE_TEST", "BOARD_LIVE") else (agent_bot_tokens.get("lev") or tg_bot_token)
         from office_telegram_policy import mini_app_button
 
         photo_btn = mini_app_button(
@@ -7788,6 +7788,8 @@ EV позитивне: {prob.get('ev_positive', '')}
                                        symbol=row["symbol"], direction=row["direction"], skip_gate=True)
 
     async def _send_br_image(path: str, caption: str, row: dict) -> Optional[int]:
+        if str(row.get("sig_id", "")).startswith("BOARD|"):      # Табло угод: без кнопок B&R (немає seq), той самий бот і потік
+            return await send_office_photo(path, caption, stream="general", intent="BOARD_LIVE", event_type=EVENT_TRADE_UPDATE, symbol="", skip_gate=True)
         return await send_office_photo(
             path, caption, stream="general",
             scenario_id=str(row["seq"]),
