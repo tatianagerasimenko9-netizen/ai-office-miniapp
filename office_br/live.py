@@ -174,10 +174,24 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     for row in active:
         sid = row["sig_id"]
         if time.time() - (float(row["confirm_ts"]) + (14400 if card.is_swing(row) else 900)) > card.hold_hours(row) * 3600:
-            msg_id = await send(f"{card.head(row)} · {row['symbol']}: {card.hold_text(row).replace('до ', '')} минуло, підсумок не визначено.",
+            px_t = None; tail = ""
+            if card.is_td(row):      # ІНТРАДЕЙ/СВІНГ: час вийшов — показуємо результат за ринком на цей момент і просимо закрити (у СВІНГу ≈45% угод закриваються саме так і здебільшого в плюсі)
+                try:
+                    cs = await asyncio.to_thread(fetch, row["symbol"], "1m", 5, closed_only=True)
+                    px_t = float(cs[-1]["close"]) if isinstance(cs, list) and cs else None
+                    if px_t is not None:
+                        sg_t = 1 if row["direction"] == "LONG" else -1; rk = abs(float(row["entry"]) - float(row["sl"]))
+                        r_t = sg_t * (px_t - float(row["entry"])) / rk if rk > 0 else 0.0
+                        num = f"{r_t:+.1f}".replace(".", ",").replace("-", "−"); tail = f" Зараз {num}R ({'+' if r_t >= 0 else '−'}${abs(10 * r_t):.0f}) — закрий угоду за ринком."
+                except Exception:  # noqa: BLE001
+                    px_t = None
+            msg_id = await send(f"{card.head(row)} · {row['symbol']}: {card.hold_text(row).replace('до ', '')} минуло, підсумок не визначено.{tail}",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
+                if px_t is not None:
+                    try: store.record_event(db, sid, "TIMEOUT", time.time(), px_t)
+                    except Exception: pass
             continue
         # Paper ENTRY tracking starts only after the READY card was actually sent.
         # Clamp any persisted cursor too, so a restart cannot replay pre-delivery candles.
@@ -347,6 +361,12 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     await remind.remind_open(db, fetch, send)
                 except Exception as exc:
                     print(f"[td-remind] {type(exc).__name__}: {exc}", flush=True)
+                if send_image is not None:           # Табло відкритих угод раз на добу о 09:00 за Києвом (BOARD=0 вимикає)
+                    try:
+                        from office_td import board
+                        await board.daily(db, fetch, send_image)
+                    except Exception as exc:
+                        print(f"[board] {type(exc).__name__}: {exc}", flush=True)
                 from office_market_data import hard_backoff_left
                 hard_ban = hard_backoff_left()
                 # During an exchange IP ban, don't fan out historical REST
