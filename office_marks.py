@@ -91,3 +91,18 @@ def news_marks(info: Dict[str, Any], now: Optional[float] = None) -> List[str]:
         if len(out) >= 2:
             break
     return out
+
+
+def opposite_open(db: str, symbol: str, direction: str, own: str) -> Optional[str]:
+    """Якщо інша стратегія (ІНТРАДЕЙ ↔ СВІНГ) вже тримає відкриту угоду по цій монеті у ПРОТИЛЕЖНИЙ бік — короткий текст попередження. Лише показ."""
+    if not enabled():
+        return None
+    try:
+        from office_bridge import _fetchone
+        other, name = ("SW", "СВІНГ") if own == "TD" else ("TD", "ІНТРАДЕЙ")
+        row = _fetchone(db, "SELECT direction FROM br_test_signal WHERE sig_id LIKE ? AND symbol = ? AND direction != ? AND status IN ('NEW', 'SENT') ORDER BY created_ts DESC LIMIT 1", (other + "|%", symbol, direction))
+        if row:
+            return f"{name} уже тримає {row[0]} по {symbol.replace('USDT', '')} — протилежно"
+    except Exception:  # noqa: BLE001
+        pass
+    return None

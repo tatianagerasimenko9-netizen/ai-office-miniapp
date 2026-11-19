@@ -25,3 +25,14 @@ _row = {"sig_id": "SW|NATGASUSDT|LONG|1", "seq": 5, "symbol": "NATGASUSDT", "dir
 _cap = _c.build_caption(_row)[0]; assert "+1R <code>3.624</code>" in _cap and "+3R <code>3.848</code>" in _cap and "🔒 беззбиток" in _cap, _cap
 _cap2 = _c.build_caption(dict(_row, sig_id="TD|BTCUSDT|LONG|1"))[0]; assert "+2R" in _cap2 and "+3R" not in _cap2 and "беззбиток" not in _cap2, _cap2
 print("ok r_levels")
+os.environ["SIGNAL_MARKS"] = "1"
+_db = os.path.join(tempfile.mkdtemp(), "o.db")
+from office_br import store as _st
+_st.init(_db)
+from office_bridge import _execute as _ex
+_ex(_db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("SW|BTCUSDT|SHORT|1", 1, "BTCUSDT", "SHORT", 1, 1, 1, 1, 63000.0, 66000.0, "[]", "{}", time.time(), "SENT"))
+assert mk.opposite_open(_db, "BTCUSDT", "LONG", "TD") == "СВІНГ уже тримає SHORT по BTC — протилежно"
+assert mk.opposite_open(_db, "BTCUSDT", "SHORT", "TD") is None and mk.opposite_open(_db, "ETHUSDT", "LONG", "TD") is None and mk.opposite_open(_db, "BTCUSDT", "LONG", "SW") is None
+_r2 = dict(_row, sig_id="TD|BTCUSDT|LONG|1", hyp_json=_j.dumps({"why": "x", "hold": "до 48 год", "opp": "СВІНГ уже тримає SHORT по BTC — протилежно"}))
+assert "⚠️ СВІНГ уже тримає SHORT по BTC" in _c.build_caption(_r2)[0]
+print("ok opposite")

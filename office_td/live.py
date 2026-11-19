@@ -170,6 +170,8 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
            "warn": res.get("warn") or [], "k_bars": res["k"], "feats": {k: feats.get(k) for k in ("W_ahead", "W_behind", "H4_ahead", "H4_behind", "D_ahead", "D_behind", "pos72", "pos168", "fib_ret", "W_swept", "H4_swept", "D_swept", "touch_tot")}}
     try:
         import office_marks as _mk
+        _opp = _mk.opposite_open(db, cand["symbol"], cand["direction"], "TD")
+        if _opp: hyp["opp"] = _opp
         _c = _mk.news_marks(_mk.record(db, sid, cand["symbol"], now), now)
         if _c: hyp["caution"] = _c
     except Exception:  # noqa: BLE001
