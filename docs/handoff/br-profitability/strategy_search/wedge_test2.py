@@ -50,7 +50,7 @@ def find_wedge(win, a, vols):
 rows_out = []
 for tf in ("H4", "D1"):
     for sym in SYMS:
-        b = bars(sym, PER[tf]); o, h, l, c, t, vol = b["open"], b["high"], b["low"], b["close"], b["open_time"], b["volume"]; A = atr14(h, l, c); n = len(c)
+        b = bars(sym, PER[tf]); o, h, l, c, t, vol = b["open"], b["high"], b["low"], b["close"], b["open_time"], b["volume"]; A = atr14(h, l, c); M200 = pd.Series(c).rolling(200).mean().to_numpy(); n = len(c)
         dicts = [{"open": o[k], "high": h[k], "low": l[k], "close": c[k], "ts": float(t[k])} for k in range(n)]
         busy = {"base": 0, "touch": 0, "touch_vol": 0}
         for i in range(LOOK, n - 2):
@@ -58,6 +58,8 @@ for tf in ("H4", "D1"):
             win = dicts[i - LOOK + 1:i + 1]; w = find_wedge(win, float(A[i]), vol[i - LOOK + 1:i + 1])
             if not w: continue
             kind, side, li, ok_touch, vol_decl, brk_vol = w
+            if not M200[i] > 0: continue
+            ctx = 'з трендом' if ((side > 0 and c[i] > M200[i]) or (side < 0 and c[i] < M200[i])) else 'проти тренду'      # тренд = сторона MA200 (ГІПОТЕЗА; у уроці — трендова лінія)
             up_line, lo_line = li[0][1][1], li[1][1][1]
             e = o[i + 1]; sl = lo_line if side > 0 else up_line; risk = (e - sl) * side
             if risk <= 0 or risk / e < 0.0005 or risk / e > 0.25: continue
@@ -67,18 +69,18 @@ for tf in ("H4", "D1"):
             for var, cond in (("base", True), ("touch", ok_touch), ("touch_vol", ok_touch and vol_decl and brk_vol)):
                 if cond and i >= busy[var]:
                     busy[var] = i + 1 + held + 1
-                    rows_out.append((tf, sym, kind + "|" + var, side, float(t[i + 1]), e, sl, tp, R, why, held, risk / e, int(pd.Timestamp(t[i + 1], unit="s").year)))
+                    rows_out.append((tf, sym, kind + "|" + var + "|" + ctx, side, float(t[i + 1]), e, sl, tp, R, why, held, risk / e, int(pd.Timestamp(t[i + 1], unit="s").year)))
 W = pd.DataFrame(rows_out, columns=["tf", "sym", "kind", "side", "ts", "entry", "sl", "tp", "r", "why", "held", "risk_pct", "y"]); W["usd"] = 10 * W.r
 W.to_csv(OUT + "_trades.csv", index=False)
 print(f"КЛИН v2 (суворіше): комісія {FEE*100:.2f}% за круг, ризик $10, монет {len(SYMS)}")
-W["var"] = W.kind.str.split("|").str[1]; W["kind"] = W.kind.str.split("|").str[0]
+W["ctx"] = W.kind.str.split("|").str[2]; W["var"] = W.kind.str.split("|").str[1]; W["kind"] = W.kind.str.split("|").str[0]
 for var, nm in (("base", "як було (2+2 торкання, без об'ємів)"), ("touch", "≥5 торкань"), ("touch_vol", "≥5 торкань + об'єми (падають у клині, ростуть на пробої)")):
     for tf in ("H4", "D1"):
         x = W[(W.tf == tf) & (W["var"] == var)]
         if x.empty: print(f"\n== {nm} · {tf}: угод немає"); continue
         print(f"\n== {nm} · {tf}: угод {len(x)}, сума ${x.usd.sum():+.0f}, на угоду ${x.usd.mean():+.2f}, виграшних {100*(x.usd>0).mean():.0f}%, ціль {(x.why=='TP').sum()}, стоп {(x.why=='SL').sum()}, час {(x.why=='TIME').sum()}")
         print("   по роках:", {int(a): round(b) for a, b in x.groupby('y').usd.sum().items()}, "| монет у плюсі:", int((x.groupby('sym').usd.sum() > 0).sum()), "з", x.sym.nunique())
-        for kd, g in x.groupby("kind"): print(f"     {'купівля (спадний клин)' if kd == 'falling_wedge' else 'продаж (висхідний клин)'}: {len(g)} угод, ${g.usd.sum():+.0f}, на угоду ${g.usd.mean():+.2f}")
+        for (kd, cx), g in x.groupby(["kind", "ctx"]): print(f"     {'купівля (спадний клин)' if kd == 'falling_wedge' else 'продаж (висхідний клин)'} · {cx}: {len(g)} угод, ${g.usd.sum():+.0f}, на угоду ${g.usd.mean():+.2f}, виграшних {100*(g.usd>0).mean():.0f}%")
 S = pd.read_csv(SWCSV); S["usd"] = 10 * S.r
 print(f"\n== ПОЄДНАННЯ зі СВІНГом (його угод {len(S)}, сума ${S.usd.sum():+.0f})")
 for var in ("touch", "touch_vol"):
