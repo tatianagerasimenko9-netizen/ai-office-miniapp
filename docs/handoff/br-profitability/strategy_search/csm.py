@@ -67,14 +67,27 @@ def csm(L, H, long_only=False):
                 last = w
         if last is not None: W.loc[t] = last
     return W
-def tsm(L, H):
+QV30 = Q.rolling(30).mean()
+def tsm(L, H, topn=None, equal=False):
     mom = C / C.shift(L) - 1; W = pd.DataFrame(0.0, index=C.index, columns=C.columns); last = None
     for k, t in enumerate(C.index):
         if k % H == 0:
-            sc = np.sign(mom.loc[t]).replace(0, np.nan).dropna(); iv = (1 / vol60.loc[t, sc.index]).replace([np.inf], np.nan).dropna(); sc = sc[iv.index]
+            sc = np.sign(mom.loc[t]).replace(0, np.nan).dropna()
+            if topn: sc = sc[sc.index.isin(QV30.loc[t].dropna().nlargest(topn).index)]      # лише найліквідніші топ-N за обсягом торгів
+            iv = (1 / vol60.loc[t, sc.index]).replace([np.inf], np.nan).dropna(); sc = sc[iv.index]
+            if equal: iv = iv * 0 + 1
             if len(sc) >= 5: w = pd.Series(0.0, index=C.columns); w[sc.index] = sc * iv / iv.sum(); last = w
         if last is not None: W.loc[t] = last
     return W
+if os.environ.get("ROBUST") == "1":
+    print("\n=== СТІЙКІСТЬ найкращого за 2020–21 вибору (L=30, H=7) та сусідів: ліквідність, ваги, витрати ===")
+    for (L, H) in ((30, 7), (14, 7), (30, 14), (14, 14)):
+        for topn in (None, 30, 20, 10):
+            for equal in (False, True):
+                for fee in (0.0006, 0.0015):
+                    FEE1 = fee
+                    line(f"TSM L={L} H={H} топ{topn or 'всі'} {'рівні' if equal else 'за мінливістю'} витрати {fee*100:.2f}%", evalw(tsm(L, H, topn, equal)))
+    sys.exit(0)
 bench = pd.DataFrame(1.0 / C.shape[1], index=C.index, columns=C.columns).where(C.notna(), 0.0); bench = bench.div(bench.sum(axis=1).replace(0, np.nan), axis=0)
 print("\n=== Контрольний кошик: просто тримати всі монети порівну ==="); line("тримати все (LONG, рівні ваги)", evalw(bench))
 for L in (7, 14, 30, 60, 90):

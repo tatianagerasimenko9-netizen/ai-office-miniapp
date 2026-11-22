@@ -31,10 +31,15 @@ jobs:
         run: |
           D=docs/handoff/br-profitability
           python3 $D/strategy_search/csm.py run dly "$ALL" $D/csm | tee $D/csm_out.txt
+      - name: Стійкість (ліквідність, ваги, витрати)
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          ROBUST=1 python3 $D/strategy_search/csm.py run dly "$ALL" $D/csm | tee $D/csm_robust_out.txt
       - name: Зберегти
         shell: bash
         run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-          git add docs/handoff/br-profitability/csm_out.txt
+          git add docs/handoff/br-profitability/csm_out.txt docs/handoff/br-profitability/csm_robust_out.txt
           git commit -m "csm: імпульс за тижні та місяці (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
