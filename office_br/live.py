@@ -213,7 +213,8 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             print(f"[br-live] PRE_READY_ENTRY {sid}; outcome suppressed", flush=True)
             continue
         last = max(_cursor(db, sid, float(ready_sent_ts)), float(ready_sent_ts))
-        candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 120, closed_only=True)
+        need_1m = max(120, min(1000, int((time.time() - last) / 60) + 10))     # після простою воркера (OOM/деплой) докачуємо хвилинні свічки від курсора, а не лише останні 2 год
+        candles = await asyncio.to_thread(fetch, row["symbol"], "1m", need_1m, closed_only=True)
         if not isinstance(candles, list) or not candles:
             continue
         # Never silently skip an interval if worker restarted or Futures was unavailable.
@@ -319,6 +320,20 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
     return n
 
 
+def repair_outage_data_gap(db: str, now: float | None = None) -> int:
+    """Одноразово (22.11.2026): після простою воркера (OOM, ~12 год) усі відкриті ІНТРАДЕЙ/СВІНГ були помилково позначені DATA_GAP (докачка свічок була лише 2 год). Повертаємо їх у SENT, щоб супровід (стоп/ціль/час, табло, нагадування) продовжився з докачкою від курсора."""
+    from office_bridge import _execute, _fetchone, _fetchall
+    now = time.time() if now is None else now
+    _execute(db, "CREATE TABLE IF NOT EXISTS br_repair (key TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL, n INTEGER)")
+    if _fetchone(db, "SELECT 1 FROM br_repair WHERE key = 'dg_outage_20261122'"):
+        return 0
+    rows = _fetchall(db, "SELECT sig_id FROM br_test_signal WHERE status = 'DATA_GAP' AND msg_id IS NOT NULL AND sent_ts >= ? AND (sig_id LIKE 'TD|%' OR sig_id LIKE 'SW|%')", (now - 11 * 86400,))
+    for (sid,) in rows:
+        _execute(db, "UPDATE br_test_signal SET status = 'SENT' WHERE sig_id = ? AND status = 'DATA_GAP'", (sid,))
+    _execute(db, "INSERT INTO br_repair(key, ts, n) VALUES ('dg_outage_20261122', ?, ?) ON CONFLICT DO NOTHING", (now, len(rows)))
+    return len(rows)
+
+
 async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable | None = None) -> None:
     """One low-frequency, isolated loop; failures never interrupt Office2."""
     from office_bridge import _execute
@@ -330,6 +345,12 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
     consecutive_partial = 0
     print(f"[br-live] monitor initialized enabled={enabled()} symbols={len(symbols())}", flush=True)
     if enabled():
+        try:
+            n_dg = await asyncio.to_thread(repair_outage_data_gap, db)
+            if n_dg:
+                print(f"[br-live] повернуто з DATA_GAP у SENT після простою: {n_dg}", flush=True)
+        except Exception as exc:
+            print(f"[br-live] repair DATA_GAP: {type(exc).__name__}: {exc}", flush=True)
         try:
             repaired = await asyncio.to_thread(reconcile_pre_ready_ambiguous_audit, db)
             if repaired:
