@@ -49,12 +49,15 @@ def signals(b):
     return S, A
 
 @njit(cache=False)
-def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
-    n = len(c); out_i = []; out_r = []; out_rk = []; out_s = []; out_h = []; out_w = []; out_snap = []; i = 1
+def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee, up, dn):
+    n = len(c); out_i = []; out_r = []; out_rk = []; out_s = []; out_h = []; out_w = []; out_snap = []; out_ch = []; i = 1; pend = 0; chain = 0
     while i < n - 2:
         side = 0
         if ls[i]: side = 1
         elif ss[i]: side = -1
+        if side == 0 and pend != 0 and chain < 3 and ((pend > 0 and up[i]) or (pend < 0 and dn[i])): side = pend      # перезахід після беззбитку (режим 5): той самий напрямок, якщо тренд-фільтр MA200 лишається
+        else: chain = 0 if side != 0 else chain
+        pend = 0
         if side == 0 or not A[i] > 0: i += 1; continue
         e = o[i + 1]; risk = s * A[i]
         if risk <= 0 or risk / e < 0.0005: i += 1; continue
@@ -63,7 +66,7 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
             if mode >= 2 and j - 1 >= i + 1:          # беззбиток (2) / трейлінг на 1R (3) або 0,5R (4) за ціною ПІСЛЯ того, як попередні бари дали +t·R (SL-першим, активація з наступного бару)
                 pj = j - 1; fav = ((h[pj] - e) if side > 0 else (e - l[pj])) / risk; mfe = max(mfe, fav)
                 if mfe >= t:
-                    if mode == 2: nsl = e
+                    if mode == 2 or mode == 5: nsl = e
                     else:
                         best = max(best, c[pj]) if side > 0 else min(best, c[pj]); nsl = best - side * (1.0 if mode == 3 else 0.5) * risk
                     sl = max(sl, nsl) if side > 0 else min(sl, nsl)
@@ -79,28 +82,29 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee):
             j += 1
         if not done:
             jj = min(j, n - 1); res = (c[jj] - e) * side / risk
-        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e); out_s.append(side); out_h.append(j - (i + 1)); out_w.append(why); out_snap.append(snap)
+        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e); out_s.append(side); out_h.append(j - (i + 1)); out_w.append(why); out_snap.append(snap); out_ch.append(chain)
+        if mode == 5 and why == 'SL_BE': pend = side; chain += 1
         i = max(j, i + 1)
-    return out_i, out_r, out_rk, out_s, out_h, out_w, out_snap
+    return out_i, out_r, out_rk, out_s, out_h, out_w, out_snap, out_ch
 
 EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0),
          ("fix s3 TP0.3", 0, 3.0, 0.3, 0.0), ("fix s3 TP0.5", 0, 3.0, 0.5, 0.0), ("fix s3 TP1", 0, 3.0, 1.0, 0.0), ("fix s3 TP2", 0, 3.0, 2.0, 0.0),
-         ("BE +1R TP6", 2, 3.0, 6.0, 1.0), ("BE +1.5R TP6", 2, 3.0, 6.0, 1.5), ("BE +2R TP6", 2, 3.0, 6.0, 2.0), ("BE +3R TP6", 2, 3.0, 6.0, 3.0),
+         ("BE +1R TP6", 2, 3.0, 6.0, 1.0), ("BE +2R перезахід TP6", 5, 3.0, 6.0, 2.0), ("BE +3R перезахід TP6", 5, 3.0, 6.0, 3.0), ("BE +1.5R TP6", 2, 3.0, 6.0, 1.5), ("BE +2R TP6", 2, 3.0, 6.0, 2.0), ("BE +3R TP6", 2, 3.0, 6.0, 3.0),
          ("trail1R після +1.5R TP6", 3, 3.0, 6.0, 1.5), ("trail1R після +2R TP6", 3, 3.0, 6.0, 2.0), ("trail1R після +3R TP6", 3, 3.0, 6.0, 3.0),
          ("trail0.5R після +2R TP6", 4, 3.0, 6.0, 2.0), ("trail0.5R після +3R TP6", 4, 3.0, 6.0, 3.0)]
 HZ = {3600: 72, 14400: int(os.environ.get('H4_BARS', 60)), 86400: 40}; TFN = {3600: "H1", 14400: "H4", 86400: "D1"}
 rows = []
 for per in (3600, 14400, 86400):
     B = {s: bars(s, per) for s in SYMS}
-    SG = {s: signals(B[s]) for s in SYMS}
+    SG = {s: signals(B[s]) for s in SYMS}; UPd = {s: B[s]["close"] > sma(B[s]["close"], 200) for s in SYMS}; DNd = {s: B[s]["close"] < sma(B[s]["close"], 200) for s in SYMS}
     for name in SG[SYMS[0]][0]:
         for ename, mode, sm, k, t in EXITS:
             if ONLY and f"{TFN[per]}|{name}|{ename}" not in ONLY: continue
             for sym in SYMS:
                 b = B[sym]; S, A = SG[sym]; L_, S_ = S[name]
-                idx, rr, rk, sd, hh, ww, ss = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode != 1 else HZ[per] * 3, FEE)
-                for i_, r_, sd_, rk_, h_, w_, sn_ in zip(idx, rr, sd, rk, hh, ww, ss): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_, float(b["open_time"][i_]), int(sd_), float(rk_), int(h_), w_, sn_.get(2, np.nan), sn_.get(3, np.nan), sn_.get(4, np.nan), sn_.get(5, np.nan), sn_.get(6, np.nan)))
-R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r", "ts", "side", "risk_pct", "hold_bars", "why", "r_d2", "r_d3", "r_d4", "r_d5", "r_d6"]); R["usd"] = R.r * 10
+                idx, rr, rk, sd, hh, ww, ss, chn = run(b["open"], b["high"], b["low"], b["close"], A, L_, S_, mode, sm, k, t, HZ[per] if mode != 1 else HZ[per] * 3, FEE, UPd[sym], DNd[sym])
+                for i_, r_, sd_, rk_, h_, w_, sn_, ch_ in zip(idx, rr, sd, rk, hh, ww, ss, chn): rows.append((TFN[per], name, ename, sym, int(pd.Timestamp(b["open_time"][i_], unit="s").year), r_, float(b["open_time"][i_]), int(sd_), float(rk_), int(h_), w_, sn_.get(2, np.nan), sn_.get(3, np.nan), sn_.get(4, np.nan), sn_.get(5, np.nan), sn_.get(6, np.nan), int(ch_)))
+R = pd.DataFrame(rows, columns=["tf", "sig", "exit", "sym", "y", "r", "ts", "side", "risk_pct", "hold_bars", "why", "r_d2", "r_d3", "r_d4", "r_d5", "r_d6", "chain"]); R["usd"] = R.r * 10
 if DETAIL: R.to_csv(DETAIL, index=False)
 G = R.groupby(["tf", "sig", "exit", "y"]).agg(n=("r", "size"), usd=("usd", "sum")).reset_index()
 P = G.pivot_table(index=["tf", "sig", "exit"], columns="y", values="usd", fill_value=0).reset_index(); N = G.groupby(["tf", "sig", "exit"]).n.sum().reset_index(name="n"); P = P.merge(N, on=["tf", "sig", "exit"])
