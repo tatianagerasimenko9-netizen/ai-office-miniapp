@@ -46,3 +46,21 @@ m = [x for x in msgs if "DOT" in x]; assert m and "Зараз +2,5R (+$25) — �
 from office_bridge import _fetchone
 assert _fetchone(db, "SELECT price FROM br_test_event WHERE sig_id = ? AND level = 'TIMEOUT'", (sid,))[0] == 1.25
 print("ok timeout")
+# Простій воркера ~12 год: докачка 1-хв свічок від курсора, DATA_GAP не ставиться; одноразове відновлення з DATA_GAP
+_execute(db, live.DDL)
+t1 = time.time(); sid2 = "SW|ADAUSDT|SHORT|7"
+_execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         (sid2, 77, "ADAUSDT", "SHORT", 1.0, 1, 1, t1 - 3 * 86400, 1.0, 1.2, json.dumps([{"p": 0.5}]), "{}", t1 - 3 * 86400, "SENT", 8, t1 - 13 * 3600))
+asked = []
+def fetch3(sym, tf, n, closed_only=True):
+    asked.append(n); base = (int(t1) // 60) * 60
+    return [{"ts": __import__("datetime").datetime.fromtimestamp(base - (n - i) * 60, __import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"), "open": 1.0, "high": 1.01, "low": 0.99, "close": 1.0} for i in range(n)]
+msgs2 = []
+async def send2(text, **kw): msgs2.append(text); return 321
+asyncio.run(live.track(db, fetch3, send2))
+assert max(asked) >= 700, asked
+assert not any("ADA" in x and "прогалина" in x for x in msgs2), msgs2
+_execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (sid2,))
+assert live.repair_outage_data_gap(db) >= 1 and live.repair_outage_data_gap(db) == 0
+assert _fetchone(db, "SELECT status FROM br_test_signal WHERE sig_id = ?", (sid2,))[0] == "SENT"
+print("ok outage")
