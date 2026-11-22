@@ -3,10 +3,11 @@
 Угоди: (A) «відбій»: після k-го торкання лінії входимо проти торкання (верхня → SHORT, нижня → LONG) на відкритті наступної свічки після підтвердження свінга; стоп за лінію +0,5 ATR; ціль = протилежна лінія; утримання 30 свічок.
 (B) «хибний пробій»: після k-го торкання, якщо за ≤5 свічок ціна проколює лінію й закриття повертається усередину — входимо проти проколу (до протилежної лінії); стоп за екстремум проколу.
 Комісія за круг; ризик $10; SL-першим. Результат по k = номер торкання цієї лінії (2,3,4,5+). Використання: channel_test.py CANDLES_DIR SYMS FEE OUT_PREFIX"""
-import sys
+import os, sys
 import numpy as np, pandas as pd
 CD, SYMS, FEE, OUT = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3]), sys.argv[4]
-PER = {"H4": 14400, "D1": 86400}; HOLD = 30; K = 2
+PER = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}; HOLD = 30; K = 2
+TFS = os.environ.get("TFS", "H4,D1").split(",")
 
 def bars(sym, per):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
@@ -22,7 +23,7 @@ def walk(h, l, c, i0, side, e, sl, tp):
     j = min(len(c) - 1, i0 + HOLD - 1); return side * (c[j] - e) / risk, "TIME"
 
 rows = []
-for tf in ("H4", "D1"):
+for tf in TFS:
     for sym in SYMS:
         b = bars(sym, PER[tf]); o, h, l, c = b["open"], b["high"], b["low"], b["close"]; t = b["open_time"]; A = atr14(h, l, c); n = len(c)
         SH, SL_ = [], []
@@ -62,7 +63,7 @@ for tf in ("H4", "D1"):
 W = pd.DataFrame(rows, columns=["tf", "sym", "type", "k", "side", "ts", "r", "why"]); W["usd"] = 10 * W.r; W["y"] = pd.to_datetime(W.ts, unit="s").dt.year
 W.to_csv(OUT + "_trades.csv", index=False)
 print(f"КАНАЛ: гіпотеза 4-го торкання; комісія {FEE*100:.2f}% за круг, ризик $10, монет {len(SYMS)}")
-for tf in ("H4", "D1"):
+for tf in TFS:
     for tp_ in ("відбій", "хибний пробій"):
         print(f"\n== {tf} · {tp_}")
         x = W[(W.tf == tf) & (W.type == tp_)]

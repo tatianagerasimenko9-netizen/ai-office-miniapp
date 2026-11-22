@@ -6,7 +6,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 import numpy as np, pandas as pd
 import office_bulkowski as B
 CD, SYMS, FEE, OUT = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3]), sys.argv[4]
-PER = {"H4": 14400, "D1": 86400}; HOLD = {"H4": 60, "D1": 30}; LOOK = 80
+PER = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}; HOLD = {"M15": 96, "H1": 48, "H4": 60, "D1": 30}; LOOK = 80
+TFS = os.environ.get("TFS", "H4,D1").split(","); SINCE = float(pd.Timestamp(os.environ.get("SINCE", "2022-01-01")).timestamp())
 
 def bars(sym, per):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
@@ -22,12 +23,12 @@ def walk(h, l, c, i0, side, e, sl, tp, H):
     j = min(len(c) - 1, i0 + H - 1); return side * (c[j] - e) / risk, "TIME", j - i0
 
 rows = []; fails = []
-for tf in ("H4", "D1"):
+for tf in TFS:
     for sym in SYMS:
         b = bars(sym, PER[tf]); o, h, l, c, t = b["open"], b["high"], b["low"], b["close"], b["open_time"]; A = atr14(h, l, c); M200 = pd.Series(c).rolling(200).mean().to_numpy(); n = len(c)
         dicts = [{"open": o[k], "high": h[k], "low": l[k], "close": c[k], "ts": float(t[k])} for k in range(n)]; busy = {}
         for i in range(LOOK, n - 2):
-            if not (A[i] > 0 and M200[i] > 0): continue
+            if t[i] < SINCE or not (A[i] > 0 and M200[i] > 0): continue
             win = dicts[i - LOOK + 1:i + 1]; a = float(A[i]); now = len(win) - 1
             try: res = B.head_shoulders(win, a) + B.triangles_rectangle(win, a) + B.flags(win, a)
             except Exception: continue
@@ -66,7 +67,7 @@ for tf in ("H4", "D1"):
 W = pd.DataFrame(rows, columns=["tf", "sym", "kind", "side", "ctx", "ts", "r", "why", "held", "risk_pct", "y", "th", "tl", "fail", "rev_r"]); W["usd"] = 10 * W.r
 W.to_csv(OUT + "_trades.csv", index=False)
 print(f"ЛАБОРАТОРІЯ ФІГУР: комісія {FEE*100:.2f}% за круг, ризик $10, монет {len(SYMS)}, 2022–2026")
-for tf in ("H4", "D1"):
+for tf in TFS:
     print(f"\n######## {tf}")
     x = W[W.tf == tf]
     g = x.groupby(["kind", "side"]).agg(n=("usd", "size"), total=("usd", "sum"), mean=("usd", "mean"), win=("usd", lambda v: 100 * (v > 0).mean())).round(1)
@@ -77,7 +78,7 @@ print("\n######## КЛИН: нюанси (H4+D1)")
 w = W[W.kind.isin(["rising_wedge", "falling_wedge"])].copy()
 if len(w):
     w["touch"] = np.where((w.th + w.tl >= 5) & (w[["th", "tl"]].min(axis=1) >= 2) & (w[["th", "tl"]].max(axis=1) >= 3), "≥5 торкань", "<5 торкань")
-    for tf in ("H4", "D1"):
+    for tf in TFS:
         for kd in ("falling_wedge", "rising_wedge"):
             x = w[(w.tf == tf) & (w.kind == kd)]
             if x.empty: continue
