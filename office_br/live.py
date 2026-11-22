@@ -166,6 +166,9 @@ def reconcile_pre_ready_ambiguous_audit(db: str) -> int:
     return repaired
 
 
+_GAP_TRIES: dict = {}
+
+
 async def track(db: str, fetch: Callable, send: Callable) -> int:
     """Conservative M1 paper tracking. Ambiguous same-bar TP/SL is NOT counted as a win."""
     from office_bridge import _execute
@@ -219,7 +222,15 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             continue
         # Never silently skip an interval if worker restarted or Futures was unavailable.
         first_ts = _epoch(candles[0])
+        if first_ts > last + 60 and card.is_td(row):
+            _GAP_TRIES[sid] = _GAP_TRIES.get(sid, 0) + 1            # ІНТРАДЕЙ/СВІНГ: тимчасова нестача хвилинних свічок (ліміт API, кеш) — повторюємо наступним циклом; DATA_GAP лише після 8 невдалих циклів поспіль
+            if _GAP_TRIES[sid] < 8:
+                if _GAP_TRIES[sid] == 1: print(f"[br-live] gap {sid}: докачка не покрила курсор, повтор", flush=True)
+                continue
+        elif sid in _GAP_TRIES:
+            _GAP_TRIES.pop(sid, None)
         if first_ts > last + 60:
+            _GAP_TRIES.pop(sid, None)
             print(f"[br-live] DATA_GAP {sid} last={last} first={first_ts}; no outcome assumed", flush=True)
             msg_id = await send(f"{card.head(row)} · {row['symbol']}: прогалина у хвилинних даних; результат НЕВІДОМИЙ.",
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
@@ -325,12 +336,12 @@ def repair_outage_data_gap(db: str, now: float | None = None) -> int:
     from office_bridge import _execute, _fetchone, _fetchall
     now = time.time() if now is None else now
     _execute(db, "CREATE TABLE IF NOT EXISTS br_repair (key TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL, n INTEGER)")
-    if _fetchone(db, "SELECT 1 FROM br_repair WHERE key = 'dg_outage_20261122'"):
+    if _fetchone(db, "SELECT 1 FROM br_repair WHERE key = 'dg_outage_20261122b'"):
         return 0
     rows = _fetchall(db, "SELECT sig_id FROM br_test_signal WHERE status = 'DATA_GAP' AND msg_id IS NOT NULL AND sent_ts >= ? AND (sig_id LIKE 'TD|%' OR sig_id LIKE 'SW|%')", (now - 11 * 86400,))
     for (sid,) in rows:
         _execute(db, "UPDATE br_test_signal SET status = 'SENT' WHERE sig_id = ? AND status = 'DATA_GAP'", (sid,))
-    _execute(db, "INSERT INTO br_repair(key, ts, n) VALUES ('dg_outage_20261122', ?, ?) ON CONFLICT DO NOTHING", (now, len(rows)))
+    _execute(db, "INSERT INTO br_repair(key, ts, n) VALUES ('dg_outage_20261122b', ?, ?) ON CONFLICT DO NOTHING", (now, len(rows)))
     return len(rows)
 
 
