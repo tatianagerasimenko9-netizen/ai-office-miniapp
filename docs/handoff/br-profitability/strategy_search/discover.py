@@ -61,12 +61,15 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee, up, dn):
         if side == 0 or not A[i] > 0: i += 1; continue
         e = o[i + 1]; risk = s * A[i]
         if risk <= 0 or risk / e < 0.0005: i += 1; continue
-        sl = e - side * risk; tp = e + side * k * risk; best = e; res = 0.0; j = i + 1; done = False; mfe = 0.0; why = 'TIME'; snap = {}
+        sl = e - side * risk; tp = e + side * k * risk; best = e; res = 0.0; j = i + 1; done = False; mfe = 0.0; why = 'TIME'; snap = {}; bk = 0.0; fl = 0; ff = 0.5 if mode == 6 else 0.3333333333333333
         while j < n and j <= i + H:
             if mode >= 2 and j - 1 >= i + 1:          # беззбиток (2) / трейлінг на 1R (3) або 0,5R (4) за ціною ПІСЛЯ того, як попередні бари дали +t·R (SL-першим, активація з наступного бару)
                 pj = j - 1; fav = ((h[pj] - e) if side > 0 else (e - l[pj])) / risk; mfe = max(mfe, fav)
                 if mfe >= t:
                     if mode == 2 or mode == 5: nsl = e
+                    elif mode == 6 or mode == 7:
+                        nsl = e
+                        if not fl: fl = 1; bk = ff * t        # частковий вихід: фіксуємо ff від позиції на +t·R, решта зі стопом у беззбитку
                     else:
                         best = max(best, c[pj]) if side > 0 else min(best, c[pj]); nsl = best - side * (1.0 if mode == 3 else 0.5) * risk
                     sl = max(sl, nsl) if side > 0 else min(sl, nsl)
@@ -82,14 +85,14 @@ def run(o, h, l, c, A, ls, ss, mode, s, k, t, H, fee, up, dn):
             j += 1
         if not done:
             jj = min(j, n - 1); res = (c[jj] - e) * side / risk
-        out_i.append(i + 1); out_r.append(res - fee / (risk / e)); out_rk.append(risk / e); out_s.append(side); out_h.append(j - (i + 1)); out_w.append(why); out_snap.append(snap); out_ch.append(chain)
+        out_i.append(i + 1); out_r.append((bk + (1 - ff) * res if fl else res) - fee / (risk / e) - (ff * 0.5 * fee / (risk / e) if fl else 0.0)); out_rk.append(risk / e); out_s.append(side); out_h.append(j - (i + 1)); out_w.append(why); out_snap.append(snap); out_ch.append(chain)
         if mode == 5 and why == 'SL_BE': pend = side; chain += 1
         i = max(j, i + 1)
     return out_i, out_r, out_rk, out_s, out_h, out_w, out_snap, out_ch
 
 EXITS = [("fix s1.5 TP2", 0, 1.5, 2.0, 0.0), ("fix s3 TP3", 0, 3.0, 3.0, 0.0), ("fix s3 TP6", 0, 3.0, 6.0, 0.0), ("trail 3 ATR", 1, 3.0, 0.0, 3.0),
          ("fix s3 TP0.3", 0, 3.0, 0.3, 0.0), ("fix s3 TP0.5", 0, 3.0, 0.5, 0.0), ("fix s3 TP1", 0, 3.0, 1.0, 0.0), ("fix s3 TP2", 0, 3.0, 2.0, 0.0),
-         ("BE +1R TP6", 2, 3.0, 6.0, 1.0), ("BE +2R перезахід TP6", 5, 3.0, 6.0, 2.0), ("BE +3R перезахід TP6", 5, 3.0, 6.0, 3.0), ("BE +1.5R TP6", 2, 3.0, 6.0, 1.5), ("BE +2R TP6", 2, 3.0, 6.0, 2.0), ("BE +3R TP6", 2, 3.0, 6.0, 3.0),
+         ("BE +1R TP6", 2, 3.0, 6.0, 1.0), ("половина +2R і беззбиток TP6", 6, 3.0, 6.0, 2.0), ("третина +2R і беззбиток TP6", 7, 3.0, 6.0, 2.0), ("BE +2R перезахід TP6", 5, 3.0, 6.0, 2.0), ("BE +3R перезахід TP6", 5, 3.0, 6.0, 3.0), ("BE +1.5R TP6", 2, 3.0, 6.0, 1.5), ("BE +2R TP6", 2, 3.0, 6.0, 2.0), ("BE +3R TP6", 2, 3.0, 6.0, 3.0),
          ("trail1R після +1.5R TP6", 3, 3.0, 6.0, 1.5), ("trail1R після +2R TP6", 3, 3.0, 6.0, 2.0), ("trail1R після +3R TP6", 3, 3.0, 6.0, 3.0),
          ("trail0.5R після +2R TP6", 4, 3.0, 6.0, 2.0), ("trail0.5R після +3R TP6", 4, 3.0, 6.0, 3.0)]
 HZ = {3600: 72, 14400: int(os.environ.get('H4_BARS', 60)), 86400: 40}; TFN = {3600: "H1", 14400: "H4", 86400: "D1"}
