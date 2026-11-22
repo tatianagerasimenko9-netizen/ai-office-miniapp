@@ -64,3 +64,19 @@ _execute(db, "UPDATE br_test_signal SET status = 'DATA_GAP' WHERE sig_id = ?", (
 assert live.repair_outage_data_gap(db) >= 1 and live.repair_outage_data_gap(db) == 0
 assert _fetchone(db, "SELECT status FROM br_test_signal WHERE sig_id = ?", (sid2,))[0] == "SENT"
 print("ok outage")
+
+# Тимчасова нестача свічок для TD/SW: без повідомлення «прогалина», DATA_GAP лише після 8 циклів
+sid3 = "SW|DOGEUSDT|SHORT|8"
+_execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status, msg_id, sent_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         (sid3, 78, "DOGEUSDT", "SHORT", 1.0, 1, 1, t1 - 3 * 86400, 1.0, 1.2, json.dumps([{"p": 0.5}]), "{}", t1 - 3 * 86400, "SENT", 9, t1 - 13 * 3600))
+def fetch_short(sym, tf, n, closed_only=True):
+    base = (int(t1) // 60) * 60
+    return [{"ts": __import__("datetime").datetime.fromtimestamp(base - (5 - i) * 60, __import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"), "open": 1.0, "high": 1.01, "low": 0.99, "close": 1.0} for i in range(5)]
+msgs3 = []
+async def send3(text, **kw): msgs3.append(text); return 555
+for _ in range(7): asyncio.run(live.track(db, fetch_short, send3))
+assert not [x for x in msgs3 if "DOGE" in x], msgs3
+assert _fetchone(db, "SELECT status FROM br_test_signal WHERE sig_id = ?", (sid3,))[0] == "SENT"
+asyncio.run(live.track(db, fetch_short, send3))
+assert [x for x in msgs3 if "DOGE" in x and "прогалина" in x] and _fetchone(db, "SELECT status FROM br_test_signal WHERE sig_id = ?", (sid3,))[0] == "DATA_GAP"
+print("ok gap-retry")
