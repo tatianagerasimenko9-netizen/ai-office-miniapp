@@ -230,3 +230,11 @@ def reminder_text(row: Dict[str, Any], level: str) -> str:
         "SL": "🔴 SL досягнуто",
     }
     return base + " · " + actions.get(level, level) + tag_
+
+
+def cancel_text(row: Dict[str, Any], why: str) -> str:
+    """B&R: вхід не відбувся, а ціна вже дійшла до стопа ('SL') або до першої цілі ('TP') — сигнал скасовано. Лише повідомлення."""
+    base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
+    if why == "SL":
+        return base + f" · ⚪ Скасовано: ціна дійшла до стопа {_n(float(row['sl']), row['symbol'])}, а до входу не повернулась.\nЯкщо заявка на вхід ще стоїть — зніми її."
+    return base + " · ⚪ Скасовано: ціна пішла до цілі без входу.\nЯкщо заявка на вхід ще стоїть — зніми її."
