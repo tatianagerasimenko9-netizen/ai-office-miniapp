@@ -14,8 +14,8 @@ DDL_DAY = """CREATE TABLE IF NOT EXISTS td_day_note (
     sig_id TEXT NOT NULL, kind TEXT NOT NULL, ts DOUBLE PRECISION NOT NULL, r DOUBLE PRECISION, sent INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (sig_id, kind))"""
 DAY_WINDOWS = (("d1", 24.0, 30.0), ("d3", 72.0, 78.0))     # СВІНГ: перевірка наприкінці 1-ї та 3-ї доби після входу (вікно 6 год, один раз)
 GIVEBACK_TEXT = "💡 Гарний плюс. Такі угоди часто трохи відкочуються — це нормально. Тримай до дня закриття."
-D1_TEXT = "⚠️ Перша доба в мінусі. Такі угоди найчастіше закінчуються стопом (8 з 10). Стоп уже стоїть — робити нічого не треба."
-D3_TEXT = "🌟 Третя доба і вже гарний плюс. Половина таких угод доходить до +$30 і більше, стоп буває рідко (6 зі 100)."
+D1_TEXT = "⚠️ Перша доба в мінусі. Такі угоди найчастіше закінчуються стопом (8 з 10)."
+D3_TEXT = "🌟 Третя доба і вже гарний плюс."
 
 
 def day_note(kind: str, r_now: float) -> Optional[str]:
@@ -59,20 +59,49 @@ def text(row: Dict[str, Any], r_now: float) -> str:
     sym = str(row["symbol"]).replace("USDT", "")
     num = lambda x: f"{x:+.1f}".replace(".", ",")
     msg = f"{card.head(row)} · {sym} {row['direction']} · зараз {num(r_now)}R (+${10 * r_now:.0f}) {card.TD_TAG}"
+    if card.is_swing(row):                       # СВІНГ: спочатку долари, R у дужках (прохання власниці 23.11)
+        msg = f"{card.head(row)} · {sym} {row['direction']} · зараз +${10 * r_now:.0f} (це {num(r_now).lstrip('+')}R) {card.TD_TAG}"
     if card.is_swing(row) and r_now >= 2.0:      # СВІНГ: беззбиток після +2R на історії 2022–2026 не шкодить і не допомагає (журнал, розділ M); лише підказка
         try:
             msg += f"\n🔒 можна перенести стоп у беззбиток: {card._n(float(row['entry']), row['symbol'])}"
         except Exception:  # noqa: BLE001
             pass
         msg += "\n" + GIVEBACK_TEXT
+    if card.is_swing(row):
+        nxt = _next_level(row, r_now)
+        if nxt: msg += f"\n📍 +${10 * nxt[0]} буде на ціні {nxt[1]}"
     return msg
+
+
+def _price_at(row: Dict[str, Any], k: float) -> str:
+    """Ціна, на якій угода має +k·R (k<0 — мінус), у форматі картки."""
+    from office_br import card
+    e, sl = float(row["entry"]), float(row["sl"]); side = 1 if row["direction"] == "LONG" else -1
+    return card._n(e + side * k * abs(e - sl), row["symbol"])
+
+
+def _next_level(row: Dict[str, Any], r_now: float):
+    """Наступний цілий рівень вище поточного (до +5R; ціль 6R — окремий рядок на картці): (k, ціна) або None."""
+    try:
+        k = int(r_now) + 1
+        return (k, _price_at(row, k)) if 1 <= k <= 5 else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def day_text(row: Dict[str, Any], r_now: float, note: str) -> str:
     from office_br import card
     sym = str(row["symbol"]).replace("USDT", "")
     usd = f"{'+' if r_now >= 0 else '−'}${abs(10 * r_now):.0f}"
-    return f"{card.head(row)} · {sym} {row['direction']} · зараз {usd} {card.TD_TAG}\n{note}"
+    out = f"{card.head(row)} · {sym} {row['direction']} · зараз {usd} {card.TD_TAG}\n{note}"
+    try:
+        if note == D1_TEXT:
+            out += f"\n🔴 Стоп стоїть на {card._n(float(row['sl']), row['symbol'])} (−$10). Робити нічого не треба."
+        elif note == D3_TEXT:
+            out += (f" Половина таких угод доходить до ціни {_price_at(row, 3)} (+$30) і далі." if r_now < 3 else " Половина таких угод закінчується на +$30 і більше.") + "\nСтоп буває рідко (6 зі 100)."
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[float] = None) -> int:

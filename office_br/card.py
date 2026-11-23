@@ -165,7 +165,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
          f"🔴 стоп  <code>{plain(row['sl'])}</code>"]
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
     lv = r_levels(row)
-    if lv: L.append("📍 орієнтири: " + " · ".join(f"+{k}R <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
+    if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
     if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))

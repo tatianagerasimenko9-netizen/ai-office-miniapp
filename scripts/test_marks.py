@@ -22,8 +22,8 @@ print("ok remind be")
 from office_br import card as _c
 import json as _j
 _row = {"sig_id": "SW|NATGASUSDT|LONG|1", "seq": 5, "symbol": "NATGASUSDT", "direction": "LONG", "entry": 3.512, "sl": 3.4, "targets_json": _j.dumps([{"p": 4.18}]), "hyp_json": _j.dumps({"why": "x", "hold": "до 10 діб"})}
-_cap = _c.build_caption(_row)[0]; assert "+1R <code>3.624</code>" in _cap and "+3R <code>3.848</code>" in _cap and "🔒 беззбиток" in _cap, _cap
-_cap2 = _c.build_caption(dict(_row, sig_id="TD|BTCUSDT|LONG|1"))[0]; assert "+2R" in _cap2 and "+3R" not in _cap2 and "беззбиток" not in _cap2, _cap2
+_cap = _c.build_caption(_row)[0]; assert "+$10 → <code>3.624</code>" in _cap and "+$30 → <code>3.848</code>" in _cap and "🔒 беззбиток" in _cap, _cap
+_cap2 = _c.build_caption(dict(_row, sig_id="TD|BTCUSDT|LONG|1"))[0]; assert "+$20 →" in _cap2 and "+$30 →" not in _cap2 and "беззбиток" not in _cap2, _cap2
 print("ok r_levels")
 os.environ["SIGNAL_MARKS"] = "1"
 _db = os.path.join(tempfile.mkdtemp(), "o.db")
@@ -73,3 +73,11 @@ assert sum(remind.D1_TEXT in t for t in _out) == 1 and any("AAA" in t and remind
 assert any("BBB" in t and remind.D3_TEXT in t for t in _out) and not any("CCC" in t or "DDD" in t or "EEE" in t for t in _out if remind.D1_TEXT in t or remind.D3_TEXT in t), _out
 _k = len(_out); _aio.run(remind.remind_open(_db3, _fetch, _send, _n0 + 600)); assert len(_out) == _k, _out                # повторно не надсилається
 print("ok calm + day notes")
+# --- тексти з цінами (погоджено власницею 23.11)
+_b = {"sig_id": "SW|BTCUSDT|LONG|1", "seq": 12, "symbol": "BTCUSDT", "direction": "LONG", "entry": 58000.0, "sl": 57280.0, "hyp_json": "{}"}
+_t2 = remind.text(_b, 2.0); assert "зараз +$20 (це 2,0R)" in _t2 and "📍 +$30 буде на ціні 60" in _t2 and remind.GIVEBACK_TEXT in _t2, _t2
+_d1 = remind.day_text(_b, -0.7, remind.D1_TEXT); assert "зараз −$7" in _d1 and "🔴 Стоп стоїть на 57" in _d1 and "(−$10)" in _d1, _d1
+_d3 = remind.day_text(_b, 2.4, remind.D3_TEXT); assert "доходить до ціни 60" in _d3 and "(+$30) і далі" in _d3 and "6 зі 100" in _d3, _d3
+assert "закінчується на +$30 і більше" in remind.day_text(_b, 3.4, remind.D3_TEXT)
+assert "(це" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2) and "буде на ціні" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2)
+print("ok price texts")
