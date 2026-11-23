@@ -25,11 +25,15 @@ out, fetch, send = run({"BTCUSDT": [(62100, 62150, 62000, 62050), (62050, 62060,
                         "ADAUSDT": [(0.149, 0.1495, 0.1485, 0.149)]})
 asyncio.run(live.track(db, fetch, send))
 st = dict(_fetchall(db, "SELECT symbol, status FROM br_test_signal", ()))
-assert st == {"BTCUSDT": "CANCEL", "ETHUSDT": "CANCEL", "SOLUSDT": "SL", "ADAUSDT": "SENT"}, st
+assert st == {"BTCUSDT": "SENT", "ETHUSDT": "CANCEL", "SOLUSDT": "SL", "ADAUSDT": "SENT"}, st
 b = next(t for t in out if "BTC" in t); e = next(t for t in out if "ETH" in t)
-assert "⚪ Скасовано: ціна дійшла до стопа" in b and "до входу не повернулась" in b and "зніми її" in b, b
+assert "⚠️ Ціна зачепила стоп до входу. Сигнал ще діє" in b and "вхід 62 216" in b and "стоп 61 651" in b, b
 assert "⚪ Скасовано: ціна пішла до цілі без входу" in e, e
 assert any("SOL" in t and "Ціну входу торкнуто" in t for t in out) and any("SOL" in t and "SL досягнуто" in t for t in out) and not any("ADA" in t for t in out), out
-ev = {r[0] for r in _fetchall(db, "SELECT level FROM br_test_event WHERE sig_id = ?", ("BR|BTCUSDT|LONG|1|1",))}; assert ev == {"CANCEL"}, ev
-k = len(out); asyncio.run(live.track(db, fetch, send)); assert len([t for t in out if "Скасовано" in t]) == 2 and len(out) == k, out   # повторно не надсилається
+ev = {r[0] for r in _fetchall(db, "SELECT level FROM br_test_event WHERE sig_id = ?", ("BR|BTCUSDT|LONG|1|1",))}; assert ev == {"PRESTOP"}, ev
+k = len(out); asyncio.run(live.track(db, fetch, send)); assert len([t for t in out if "Скасовано" in t]) == 1 and len(out) == k, out   # повторно не надсилається
+# після попередження ціна повертається до входу і йде до цілі → звичайний супровід
+out2, fetch2, send2 = run({"BTCUSDT": [(62100, 62150, 62000, 62050), (62050, 62060, 61600, 61620), (61700, 62300, 61700, 62250), (62250, 62800, 62240, 62790)], "ADAUSDT": [(0.149, 0.1495, 0.1485, 0.149)]})
+asyncio.run(live.track(db, fetch2, send2)); st2 = dict(_fetchall(db, "SELECT symbol, status FROM br_test_signal", ()))
+assert any("BTC" in t and "Ціну входу торкнуто" in t for t in out2) and any("BTC" in t and "TP1 досягнуто" in t for t in out2) and not any("зачепила стоп" in t for t in out2), out2
 print(b); print(e); print("ok br cancel")

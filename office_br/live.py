@@ -257,18 +257,21 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
             entry = float(row["entry"])
             if not entry_seen:
                 if not (low <= entry <= high):
-                    # Вхід не торкнуто. Якщо ціна вже дійшла до стопа або першої цілі — сигнал скасовано (рішення власниці 23.11.2026): пишемо один раз і припиняємо супровід.
-                    why_c = None
-                    if (low <= float(row["sl"])) if sg > 0 else (high >= float(row["sl"])): why_c = "SL"
-                    elif tg and ((high >= float(tg[0]["p"])) if sg > 0 else (low <= float(tg[0]["p"]))): why_c = "TP"
-                    if why_c:
-                        c_msg = await send(card.cancel_text(row, why_c), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+                    # Вхід не торкнуто (рішення власниці 23.11.2026): ціна зачепила стоп → одне попередження, сигнал лишається чинним; ціна пішла до першої цілі → «скасовано» і кінець супроводу.
+                    if "PRESTOP" not in prev and ((low <= float(row["sl"])) if sg > 0 else (high >= float(row["sl"]))):
+                        w_msg = await send(card.prestop_text(row), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
+                        if not w_msg:
+                            break
+                        store.record_event(db, sid, "PRESTOP", ts, None, int(w_msg)); prev.add("PRESTOP"); n += 1
+                        print(f"[br-live] PRESTOP {sid} tg_id={w_msg}", flush=True)
+                    elif tg and ((high >= float(tg[0]["p"])) if sg > 0 else (low <= float(tg[0]["p"]))):
+                        c_msg = await send(card.cancel_text(row), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
                         if not c_msg:
                             break
                         store.record_event(db, sid, "CANCEL", ts, None, int(c_msg))
                         _execute(db, "UPDATE br_test_signal SET status = 'CANCEL' WHERE sig_id = ?", (sid,))
                         _save_cursor(db, sid, ts); n += 1
-                        print(f"[br-live] CANCEL {sid} ({why_c} без входу) tg_id={c_msg}", flush=True)
+                        print(f"[br-live] CANCEL {sid} (ціль без входу) tg_id={c_msg}", flush=True)
                         break
                     _save_cursor(db, sid, ts)
                     last = ts
