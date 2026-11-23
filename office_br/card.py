@@ -232,14 +232,20 @@ def reminder_text(row: Dict[str, Any], level: str) -> str:
     return base + " · " + actions.get(level, level) + tag_
 
 
+def _br_tag(row: Dict[str, Any]) -> str:
+    """Короткий заголовок супроводу: «BTC LONG · B&R-2390» (монета і напрям першими)."""
+    h = head(row); num = h.split(" · ")[-1] if " · " in h else h
+    return f"{row['symbol'].replace('USDT', '')} {row['direction']} · {num}"
+
+
 def cancel_text(row: Dict[str, Any], why: str = "TP") -> str:
     """B&R: вхід не відбувся, а ціна вже пішла до першої цілі — сигнал скасовано. Лише повідомлення."""
-    base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
-    return base + " · ⚪ Скасовано: ціна пішла до цілі без входу.\nЯкщо заявка на вхід ще стоїть — зніми її."
+    return f"⚪ {_br_tag(row)} · скасовано: ціна пішла до цілі без входу"
 
 
 def prestop_text(row: Dict[str, Any]) -> str:
-    """B&R: ціна зачепила рівень стопа ДО входу — сигнал лишається чинним (історія 15.10–23.11.2026: 152 такі угоди відпрацювали як звичайні; журнал, розділ AH). Лише повідомлення."""
-    base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
-    return (base + " · ⚠️ Ціна зачепила стоп до входу. Сигнал ще діє: такі угоди відпрацьовують як звичайні."
-            + f"\nВхід і стоп ті самі: вхід {_n(float(row['entry']), row['symbol'])}, стоп {_n(float(row['sl']), row['symbol'])}.")
+    """B&R: ціна зачепила рівень стопа ДО входу — сигнал лишається чинним. Цифри — історія 15.10–23.11.2026, 152 угоди (журнал, розділ AH): ціль 3 — 24%, ціль 1–2 і стоп — 15%, стоп — 51%. Лише повідомлення."""
+    return (f"⚠️ {_br_tag(row)} · стоп зачепило до входу, сигнал діє"
+            + f"\n🟡 вхід {_n(float(row['entry']), row['symbol'])}"
+            + f"\n🔴 стоп {_n(float(row['sl']), row['symbol'])} — той самий"
+            + "\n📊 4 з 10 доходять до цілі 1+, половина — стоп")
