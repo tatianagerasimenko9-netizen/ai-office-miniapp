@@ -50,3 +50,26 @@ _r3 = dict(_row, hyp_json=_j.dumps({"why": "x", "hold": "до 10 діб", "rep":
 assert "⚠️ повторний сигнал після стопа цієї ж монети за останню добу, історично слабший" in _c.build_caption(_r3)[0]
 os.environ["SIGNAL_MARKS"] = "0"; assert mk.recent_stop(_db, "ALGOUSDT", "SHORT", _t0) is None; os.environ["SIGNAL_MARKS"] = "1"
 print("ok repeat after stop")
+# --- «спокійна монета» на картці СВІНГу + людські нагадування (1-ша доба в мінусі, 3-тя доба в плюсі)
+_calm = dict(_row, hyp_json=_j.dumps({"why": "x", "hold": "до 10 діб", "atr": 3.512 * 0.02}))
+assert _c.CALM_TEXT in _c.build_caption(_calm)[0]
+assert _c.CALM_TEXT not in _c.build_caption(dict(_row, hyp_json=_j.dumps({"why": "x", "hold": "до 10 діб", "atr": 3.512 * 0.03})))[0]
+assert _c.CALM_TEXT not in _c.build_caption(dict(_calm, sig_id="TD|BTCUSDT|LONG|1"))[0] and _c.CALM_TEXT not in _c.build_caption(_row)[0]
+assert remind.GIVEBACK_TEXT in remind.text(_sw, 2.3) and remind.GIVEBACK_TEXT not in remind.text(_sw, 1.2) and remind.GIVEBACK_TEXT not in remind.text(dict(_sw, sig_id="TD|BTCUSDT|LONG|1"), 2.3)
+assert remind.day_note("d1", -0.6) == remind.D1_TEXT and remind.day_note("d1", -0.2) is None and remind.day_note("d3", 2.1) == remind.D3_TEXT and remind.day_note("d3", 1.5) is None
+assert "зараз −$7" in remind.day_text(_sw, -0.7, remind.D1_TEXT)
+import asyncio as _aio
+_db3 = os.path.join(tempfile.mkdtemp(), "r.db"); _st.init(_db3); _n0 = time.time()
+def _mk(sid, sym, entry_age_h):
+    _ex(_db3, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status, msg_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (sid, 1, sym, "LONG", 1, 1, 1, 1, 100.0, 90.0, _j.dumps([{"p": 160.0}]), "{}", _n0 - entry_age_h * 3600, "SENT", 77))
+    _ex(_db3, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts) VALUES (?,?,?,?,?)", (sid, "ENTRY", _n0 - entry_age_h * 3600, 100.0, _n0))
+_mk("SW|AAAUSDT|LONG|1", "AAAUSDT", 25); _mk("SW|BBBUSDT|LONG|1", "BBBUSDT", 73); _mk("SW|CCCUSDT|LONG|1", "CCCUSDT", 25); _mk("TD|DDDUSDT|LONG|1", "DDDUSDT", 25); _mk("SW|EEEUSDT|LONG|1", "EEEUSDT", 10)
+_px = {"AAAUSDT": 93.0, "BBBUSDT": 124.0, "CCCUSDT": 101.0, "DDDUSDT": 93.0, "EEEUSDT": 93.0}; _out = []
+def _fetch(sym, tf, n, closed_only=True): return [{"close": _px[sym]}]
+async def _send(txt, **kw): _out.append(txt); return 1
+os.environ["TD_REMIND"] = "1"
+_aio.run(remind.remind_open(_db3, _fetch, _send, _n0))
+assert sum(remind.D1_TEXT in t for t in _out) == 1 and any("AAA" in t and remind.D1_TEXT in t for t in _out), _out          # 1-ша доба −0,7R: лише СВІНГ у вікні 24–30 год
+assert any("BBB" in t and remind.D3_TEXT in t for t in _out) and not any("CCC" in t or "DDD" in t or "EEE" in t for t in _out if remind.D1_TEXT in t or remind.D3_TEXT in t), _out
+_k = len(_out); _aio.run(remind.remind_open(_db3, _fetch, _send, _n0 + 600)); assert len(_out) == _k, _out                # повторно не надсилається
+print("ok calm + day notes")

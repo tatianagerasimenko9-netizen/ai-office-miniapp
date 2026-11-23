@@ -122,6 +122,11 @@ def scan(db: str, fetch: Callable, now: Optional[float] = None, symbols: tuple =
             bar_open = float(b["t"][-1])
             if bar_open + PER > now or now - (bar_open + PER) > MAX_AGE_S: continue      # лише свіжозакритий H4-бар
             seen += 1
+            try:                                                                            # тихий журнал «вхід у хвилю 3» (без повідомлень і без впливу на сигнали)
+                from office_td import shadow_wave as _sh
+                _sh.step(db, sym, b, now)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sw-shadow] {sym}: {type(exc).__name__}: {exc}", flush=True)
             sg, atr, close = signals(b)
             if not sg or not atr > 0 or (STOP_ATR * atr) / close < MIN_SP: continue
             sides = {s for s, _ in sg}

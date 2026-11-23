@@ -83,6 +83,21 @@ def warn_line(row: Dict[str, Any]) -> str | None:
     return ("Обережно: " + "; ".join(c)) if c else None
 
 
+CALM_ATR_PCT = 0.023
+CALM_TEXT = "🟢 спокійна монета — такі сигнали на історії кращі"
+
+
+def calm_line(row: Dict[str, Any]) -> str | None:
+    """СВІНГ: «спокійна монета», якщо ATR(H4) < 2,3% ціни входу. Історія 2022–2026 (журнал, розділ AA): такі угоди дали +$2,2…2,4 на угоду проти +$0,5…0,7 у найрухливіших, в обох періодах. Лише показ."""
+    if not is_swing(row):
+        return None
+    try:
+        atr = float(_td_hyp(row).get("atr") or 0); entry = float(row["entry"])
+        return CALM_TEXT if atr > 0 and entry > 0 and atr / entry < CALM_ATR_PCT else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def td_size(row: Dict[str, Any]) -> float:
     """Сума позиції в USDT (без плеча), щоб стоп коштував рівно $10: 10 / відстань до стопа."""
     entry, sl = float(row["entry"]), float(row["sl"])
@@ -112,6 +127,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
         L.append(f"🟢 Ціль {_n(t['p'], sym)} · +{pc(t['p'])}% = +${usd:.0f} (ліміт)")
     wl = warn_line(row)
     if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
+    if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + str(hy["opp"]))
     if hy.get("rep"): L.append("⚠️ " + str(hy["rep"]))
     n = (hy.get("cluster") or {}).get("n") or 0
@@ -150,6 +166,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+{k}R <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
+    if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
     if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))
     n = (hy.get("cluster") or {}).get("n") or 0
