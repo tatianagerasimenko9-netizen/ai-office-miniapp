@@ -10,6 +10,21 @@ from typing import Any, Callable, Dict, List, Optional
 
 DDL = """CREATE TABLE IF NOT EXISTS td_reminder (
     sig_id TEXT PRIMARY KEY, n INTEGER NOT NULL, last_ts DOUBLE PRECISION NOT NULL)"""
+DDL_DAY = """CREATE TABLE IF NOT EXISTS td_day_note (
+    sig_id TEXT NOT NULL, kind TEXT NOT NULL, ts DOUBLE PRECISION NOT NULL, r DOUBLE PRECISION, sent INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (sig_id, kind))"""
+DAY_WINDOWS = (("d1", 24.0, 30.0), ("d3", 72.0, 78.0))     # СВІНГ: перевірка наприкінці 1-ї та 3-ї доби після входу (вікно 6 год, один раз)
+GIVEBACK_TEXT = "💡 Гарний плюс. Такі угоди часто трохи відкочуються — це нормально. Тримай до дня закриття."
+D1_TEXT = "⚠️ Перша доба в мінусі. Такі угоди найчастіше закінчуються стопом (8 з 10). Стоп уже стоїть — робити нічого не треба."
+D3_TEXT = "🌟 Третя доба і вже гарний плюс. Половина таких угод доходить до +$30 і більше, стоп буває рідко (6 зі 100)."
+
+
+def day_note(kind: str, r_now: float) -> Optional[str]:
+    """СВІНГ, історія 2022–2026 (журнал, розділ AA): 1-ша доба ≤ −0,5R → стоп у 82%; 3-тя доба ≥ +2R → +3R і більше у 52%, стоп у 6%. Лише інформація."""
+    if kind == "d1" and r_now <= -0.5: return D1_TEXT
+    if kind == "d3" and r_now >= 2.0: return D3_TEXT
+    return None
+
+
 TERMINAL = {"SL", "TP1", "TP2", "TP3", "AMBIGUOUS", "CANCEL"}
 
 
@@ -49,7 +64,15 @@ def text(row: Dict[str, Any], r_now: float) -> str:
             msg += f"\n🔒 можна перенести стоп у беззбиток: {card._n(float(row['entry']), row['symbol'])}"
         except Exception:  # noqa: BLE001
             pass
+        msg += "\n" + GIVEBACK_TEXT
     return msg
+
+
+def day_text(row: Dict[str, Any], r_now: float, note: str) -> str:
+    from office_br import card
+    sym = str(row["symbol"]).replace("USDT", "")
+    usd = f"{'+' if r_now >= 0 else '−'}${abs(10 * r_now):.0f}"
+    return f"{card.head(row)} · {sym} {row['direction']} · зараз {usd} {card.TD_TAG}\n{note}"
 
 
 async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[float] = None) -> int:
@@ -59,14 +82,22 @@ async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[fl
     from office_bridge import _execute, _fetchone
     from office_br import card, store
     now = time.time() if now is None else now; sent = 0
-    _execute(db, DDL, ())
+    _execute(db, DDL, ()); _execute(db, DDL_DAY, ())
     for row in store.rows(db, "WHERE status = 'SENT'"):
         if not card.is_td(row) or row.get("msg_id") is None: continue
         sid = row["sig_id"]; evs = store.events(db, sid); lv = {e["level"] for e in evs}
         if "ENTRY" not in lv or lv & TERMINAL: continue
         st = _fetchone(db, "SELECT n, last_ts FROM td_reminder WHERE sig_id = ?", (sid,))
         n_sent = int(st[0]) if st else 0
-        if n_sent >= len(levels()): continue                  # усі рівні вже надіслано: ціни не запитуємо
+        kind = None
+        if card.is_swing(row):                                # СВІНГ: нотатка наприкінці 1-ї / 3-ї доби після входу (один раз кожна)
+            try:
+                age_h = (now - float(next(e["touched_ts"] for e in evs if e["level"] == "ENTRY"))) / 3600.0
+                for k_, a_, b_ in DAY_WINDOWS:
+                    if a_ <= age_h < b_ and not _fetchone(db, "SELECT 1 FROM td_day_note WHERE sig_id = ? AND kind = ?", (sid, k_)): kind = k_
+            except Exception:  # noqa: BLE001
+                kind = None
+        if n_sent >= len(levels()) and kind is None: continue  # усі рівні вже надіслано і нотатка доби не потрібна: ціни не запитуємо
         candles = await asyncio.to_thread(fetch, row["symbol"], "1m", 5, closed_only=True)
         if not isinstance(candles, list) or not candles: continue
         try:
@@ -77,6 +108,12 @@ async def remind_open(db: str, fetch: Callable, send: Callable, now: Optional[fl
         if risk <= 0: continue
         tp = float(json.loads(row["targets_json"])[0]["p"]); r_now = side * (px - entry) / risk; r_tp = abs(tp - entry) / risk
         if r_now >= r_tp or r_now <= -1: continue          # ціль/стоп уже за ціною: це справа супроводу, не нагадування
+        if kind is not None:
+            note = day_note(kind, r_now); ok = 0
+            if note:
+                ok = 1 if await send(day_text(row, r_now, note), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"]) else 0
+                if ok: sent += 1; print(f"[td-remind] {sid} {kind} {r_now:+.2f}R", flush=True)
+            if ok or not note: _execute(db, "INSERT INTO td_day_note(sig_id, kind, ts, r, sent) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", (sid, kind, now, r_now, ok))
         n_new = due(r_now, n_sent)
         if n_new <= n_sent: continue
         msg = await send(text(row, r_now), reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
