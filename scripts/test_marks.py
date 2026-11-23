@@ -36,3 +36,17 @@ assert mk.opposite_open(_db, "BTCUSDT", "SHORT", "TD") is None and mk.opposite_o
 _r2 = dict(_row, sig_id="TD|BTCUSDT|LONG|1", hyp_json=_j.dumps({"why": "x", "hold": "до 48 год", "opp": "СВІНГ уже тримає SHORT по BTC — протилежно"}))
 assert "⚠️ СВІНГ уже тримає SHORT по BTC" in _c.build_caption(_r2)[0]
 print("ok opposite")
+# --- повторний сигнал СВІНГу після стопа тієї ж монети в той самий бік за останню добу
+_t0 = time.time()
+_ex(_db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("SW|ALGOUSDT|SHORT|1", 2, "ALGOUSDT", "SHORT", 1, 1, 1, 1, 0.07278, 0.07799, "[]", "{}", _t0 - 3 * 86400, "SL"))
+_ex(_db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts) VALUES (?,?,?,?,?)", ("SW|ALGOUSDT|SHORT|1", "SL", _t0 - 2 * 3600, 0.07799, _t0 - 2 * 3600))
+assert mk.recent_stop(_db, "ALGOUSDT", "SHORT", _t0) == mk.REPEAT_TEXT
+assert mk.recent_stop(_db, "ALGOUSDT", "LONG", _t0) is None and mk.recent_stop(_db, "BTCUSDT", "SHORT", _t0) is None          # інший бік / інша монета
+assert mk.recent_stop(_db, "ALGOUSDT", "SHORT", _t0 + 30 * 3600) is None                                                    # стоп був понад добу тому
+_ex(_db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("TD|ADAUSDT|LONG|1", 3, "ADAUSDT", "LONG", 1, 1, 1, 1, 1.0, 0.9, "[]", "{}", _t0 - 3 * 86400, "SL"))
+_ex(_db, "INSERT INTO br_test_event(sig_id, level, touched_ts, price, ts) VALUES (?,?,?,?,?)", ("TD|ADAUSDT|LONG|1", "SL", _t0 - 3600, 0.9, _t0 - 3600))
+assert mk.recent_stop(_db, "ADAUSDT", "LONG", _t0) is None                                                                  # ІНТРАДЕЙ не враховується (історія лише для СВІНГу)
+_r3 = dict(_row, hyp_json=_j.dumps({"why": "x", "hold": "до 10 діб", "rep": mk.REPEAT_TEXT}))
+assert "⚠️ повторний сигнал після стопа цієї ж монети за останню добу, історично слабший" in _c.build_caption(_r3)[0]
+os.environ["SIGNAL_MARKS"] = "0"; assert mk.recent_stop(_db, "ALGOUSDT", "SHORT", _t0) is None; os.environ["SIGNAL_MARKS"] = "1"
+print("ok repeat after stop")

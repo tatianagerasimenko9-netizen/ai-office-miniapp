@@ -1,0 +1,46 @@
+name: reentry
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/reentry.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 175
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas numba
+      - name: Fetch M15
+        shell: bash
+        run: |
+          TRAIN=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT
+          NEW=TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          echo "ALL=$TRAIN,$NEW" >> $GITHUB_ENV
+          for S in ${TRAIN//,/ } ${NEW//,/ }; do python3 scripts/fetch_binance_klines.py candles $S 15m:2022-01-01:2026-11-21 | tr '\n' ' '; echo; done
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: СВІНГ - перезахід після беззбитку
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          export ONLY=""
+          for X in "fix s3 TP6" "BE +2R TP6" "BE +2R перезахід TP6" "BE +3R перезахід TP6"; do
+            for SG in "donchian20+MA200" "RSI2 reversion+MA200" "Bollinger reversion+MA200"; do ONLY="$ONLY;H4|$SG|$X"; done
+          done
+          export ONLY="${ONLY#;}"
+          DETAIL=$D/reentry_sw.csv python3 $D/strategy_search/discover.py candles "$ALL" 0.001 > $D/reentry_sw_out.txt
+          rm -f discover_results.csv
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/reentry_*
+          git commit -m "reentry: дрібні тейки для СВІНГ (автоматично)" && git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac
