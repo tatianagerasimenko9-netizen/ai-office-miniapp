@@ -144,6 +144,11 @@ def cycle(db: str, fetch: Callable, now: Optional[float] = None) -> Dict[str, in
     """Викликається з фонового потоку раз на ~45 с; скан — раз на 4 год, через 20+ секунд після закриття бару."""
     global _LAST_H4
     now = time.time() if now is None else now; out = {"sw_signals": 0}
+    try:                                                   # тихий журнал «тижнева карта монет» (раз на тиждень, без повідомлень)
+        from office_td import shadow_tsm as _tsm
+        _tsm.cycle(db, fetch, now)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[tsm-shadow] {type(exc).__name__}: {exc}", flush=True)
     k = int(now // PER)
     if k > _LAST_H4 and now - k * PER >= 20:
         got = scan(db, fetch, now)
