@@ -1,0 +1,49 @@
+name: prices
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/prices.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - name: Поточні ціни (публічні тикери)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, time
+          def get(u):
+              try:
+                  return json.loads(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "office-research"}), timeout=20).read())
+              except Exception as e:
+                  return {"_err": str(e)[:80]}
+          out = {"ts": time.time(), "src": {}}
+          j = get("https://fapi.binance.com/fapi/v1/ticker/price")
+          if isinstance(j, list): out["src"]["binance"] = {x["symbol"]: float(x["price"]) for x in j if x["symbol"].endswith("USDT")}
+          else: out["binance_err"] = j
+          j = get("https://www.okx.com/api/v5/market/tickers?instType=SWAP")
+          if isinstance(j, dict) and j.get("data"): out["src"]["okx"] = {x["instId"].replace("-USDT-SWAP", "USDT"): float(x["last"]) for x in j["data"] if x["instId"].endswith("-USDT-SWAP")}
+          else: out["okx_err"] = j if "_err" in j else "no data"
+          j = get("https://api.bybit.com/v5/market/tickers?category=linear")
+          if isinstance(j, dict) and (j.get("result") or {}).get("list"): out["src"]["bybit"] = {x["symbol"]: float(x["lastPrice"]) for x in j["result"]["list"] if x["symbol"].endswith("USDT")}
+          else: out["bybit_err"] = j if "_err" in j else "no data"
+          j = get("https://api.gateio.ws/api/v4/futures/usdt/tickers")
+          if isinstance(j, list): out["src"]["gate"] = {x["contract"].replace("_", ""): float(x["last"]) for x in j}
+          json.dump(out, open("docs/handoff/br-profitability/prices_now.json", "w"))
+          print({k: len(v) for k, v in out["src"].items()}, {k: v for k, v in out.items() if k.endswith("_err")})
+          PY
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/prices_now.json
+          git commit -m "prices: поточні ціни (автоматично)"
+          for i in 1 2 3; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep 5; done
