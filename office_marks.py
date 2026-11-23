@@ -106,3 +106,23 @@ def opposite_open(db: str, symbol: str, direction: str, own: str) -> Optional[st
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+REPEAT_TEXT = "повторний сигнал після стопа цієї ж монети за останню добу, історично слабший"
+
+
+def recent_stop(db: str, symbol: str, direction: str, now: Optional[float] = None, hours: float = 24.0) -> Optional[str]:
+    """СВІНГ: якщо угоду по ЦІЙ ЖЕ монеті в ТОЙ САМИЙ бік вибило по стопу за останні `hours` годин — текст позначки. Лише показ, сигнал не блокується.
+    Історія (durations_sw_60, 42 монети, 5 років, одна позиція на монету): повтор ≤1 доби після стопа ≈ $+0.08 на угоду (Bollinger −$0.72), проти $+1.33 у середньому."""
+    if not enabled():
+        return None
+    try:
+        import time as _t
+        from office_bridge import _fetchone
+        t = float(now if now is not None else _t.time())
+        row = _fetchone(db, "SELECT 1 FROM br_test_event e JOIN br_test_signal s ON s.sig_id = e.sig_id WHERE e.level = 'SL' AND s.sig_id LIKE 'SW|%' AND s.symbol = ? AND s.direction = ? AND e.touched_ts >= ? AND e.touched_ts <= ? LIMIT 1", (symbol, direction, t - hours * 3600.0, t))
+        if row:
+            return REPEAT_TEXT
+    except Exception:  # noqa: BLE001
+        pass
+    return None
