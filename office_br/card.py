@@ -230,3 +230,16 @@ def reminder_text(row: Dict[str, Any], level: str) -> str:
         "SL": "🔴 SL досягнуто",
     }
     return base + " · " + actions.get(level, level) + tag_
+
+
+def cancel_text(row: Dict[str, Any], why: str = "TP") -> str:
+    """B&R: вхід не відбувся, а ціна вже пішла до першої цілі — сигнал скасовано. Лише повідомлення."""
+    base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
+    return base + " · ⚪ Скасовано: ціна пішла до цілі без входу.\nЯкщо заявка на вхід ще стоїть — зніми її."
+
+
+def prestop_text(row: Dict[str, Any]) -> str:
+    """B&R: ціна зачепила рівень стопа ДО входу — сигнал лишається чинним (історія 15.10–23.11.2026: 152 такі угоди відпрацювали як звичайні; журнал, розділ AH). Лише повідомлення."""
+    base = f"{head(row)} · {row['symbol'].replace('USDT', '')} {row['direction']}"
+    return (base + " · ⚠️ Ціна зачепила стоп до входу. Сигнал ще діє: такі угоди відпрацьовують як звичайні."
+            + f"\nВхід і стоп ті самі: вхід {_n(float(row['entry']), row['symbol'])}, стоп {_n(float(row['sl']), row['symbol'])}.")
