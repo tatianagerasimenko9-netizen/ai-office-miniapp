@@ -254,6 +254,16 @@ def cancel_text(row: Dict[str, Any], why: str = "TP") -> str:
     return f"⚪ {_br_tag(row)} · скасовано: ціна пішла до цілі без входу"
 
 
+def timeout_text(row: Dict[str, Any], entered: bool, tail: str = "") -> str:
+    """Час утримання вийшов. B&R: коротко, без «підсумок не визначено» (вигляд погоджено власницею 25.11.2026). ІНТРАДЕЙ/СВІНГ: результат за ринком у доларах (tail)."""
+    hrs = hold_text(row).replace("до ", "")
+    if is_td(row):
+        return f"{head(row)} · {row['symbol']}: {hrs} минуло.{tail or ' Закрий угоду за ринком.'}"
+    if not entered:
+        return f"⚪ {_br_tag(row)} · закрито: за {hrs} входу не було"
+    return f"⚪ {_br_tag(row)} · {hrs} минуло: ні цілі, ні стопа. Закрий за ринком"
+
+
 def prestop_text(row: Dict[str, Any]) -> str:
     """B&R: ціна зачепила рівень стопа ДО входу — сигнал лишається чинним. Цифри — історія 15.10–23.11.2026, 152 угоди (журнал, розділ AH): ціль 3 — 24%, ціль 1–2 і стоп — 15%, стоп — 51%. Лише повідомлення."""
     return (f"⚠️ {_br_tag(row)} · стоп зачепило до входу, сигнал діє"

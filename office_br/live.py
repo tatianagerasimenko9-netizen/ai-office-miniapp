@@ -206,7 +206,8 @@ async def track(db: str, fetch: Callable, send: Callable) -> int:
                         num = f"{r_t:+.1f}".replace(".", ",").replace("-", "−"); tail = f" Зараз {num}R ({'+' if r_t >= 0 else '−'}${abs(10 * r_t):.0f}) — закрий угоду за ринком."
                 except Exception:  # noqa: BLE001
                     px_t = None
-            msg_id = await send(f"{card.head(row)} · {row['symbol']}: {card.hold_text(row).replace('до ', '')} минуло, підсумок не визначено.{tail}",
+            entered = any(e.get("level") == "ENTRY" for e in store.events(db, sid))
+            msg_id = await send(card.timeout_text(row, entered, tail),
                                 reply_to=int(row["msg_id"]), symbol=row["symbol"], direction=row["direction"])
             if msg_id:
                 _execute(db, "UPDATE br_test_signal SET status = 'TIMEOUT' WHERE sig_id = ?", (sid,))
