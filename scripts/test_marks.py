@@ -81,16 +81,3 @@ _d3 = remind.day_text(_b, 2.4, remind.D3_TEXT); assert "доходить до ц
 assert "закінчується на +$30 і більше" in remind.day_text(_b, 3.4, remind.D3_TEXT)
 assert "(це" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2) and "буде на ціні" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2)
 print("ok price texts")
-# --- «для споту»: лише СВІНГ LONG по крипто, коли монета виросла за 30 днів
-_sp = dict(_row, sig_id="SW|ADAUSDT|LONG|1", symbol="ADAUSDT", hyp_json=_j.dumps({"why": "x", "hold": "до 10 діб", "spot": {"ret30": 0.124}}))
-assert "🛒 для споту: умови для купівлі є — за 30 днів +12% і сигнал на купівлю" in _c.build_caption(_sp)[0]
-assert "для споту" not in _c.build_caption(dict(_sp, direction="SHORT"))[0] and "для споту" not in _c.build_caption(_row)[0] and "для споту" not in _c.build_caption(dict(_sp, sig_id="TD|ADAUSDT|LONG|1"))[0]
-from office_td import swing as _sw2
-_dbs = os.path.join(tempfile.mkdtemp(), "sp.db"); _st.init(_dbs); _tn = time.time()
-_h = lambda sid: _j.loads(_fetchone(_dbs, "SELECT hyp_json FROM br_test_signal WHERE sig_id = ?", (sid,))[0])
-assert _h(_sw2.record(_dbs, "ADAUSDT", 1, ["breakout"], _tn - 14400, 0.5, 0.01, _tn, 0.12)).get("spot") == {"ret30": 0.12}
-assert "spot" not in _h(_sw2.record(_dbs, "SOLUSDT", 1, ["breakout"], _tn - 14400, 70.0, 1.0, _tn, -0.05))          # за 30 днів упала
-assert "spot" not in _h(_sw2.record(_dbs, "XRPUSDT", -1, ["breakout"], _tn - 14400, 1.0, 0.02, _tn, 0.20))         # сигнал на продаж
-assert "spot" not in _h(_sw2.record(_dbs, "XAUUSDT", 1, ["breakout"], _tn - 14400, 3700.0, 30.0, _tn, 0.20))       # не крипто
-assert "spot" not in _h(_sw2.record(_dbs, "DOTUSDT", 1, ["breakout"], _tn - 14400, 0.7, 0.02, _tn))                # даних за 30 днів немає
-print("ok spot mark")

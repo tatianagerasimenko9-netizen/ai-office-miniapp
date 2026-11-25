@@ -85,7 +85,7 @@ def _open_symbol(db: str, sym: str) -> bool:
     return bool(_fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id LIKE 'SW|%' AND symbol = ? AND status IN ('NEW', 'SENT') LIMIT 1", (sym,)))
 
 
-def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, entry: float, atr: float, now: float, ret30: Optional[float] = None) -> Optional[str]:
+def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, entry: float, atr: float, now: float) -> Optional[str]:
     from office_bridge import _execute, _fetchone
     direction = "LONG" if side > 0 else "SHORT"; sid = f"SW|{sym}|{direction}|{int(bar_open)}"
     if _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)): return None
@@ -96,8 +96,6 @@ def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, e
     why = f"Тренд {'вгору' if side > 0 else 'вниз'}: ціна {trend} 200-середньої (4 год). Сигнал: {names}."
     hyp = {"strategy": "SW_TEST", "rules": why_keys, "why": why, "hold": "до 10 діб", "tf_s": PER, "stop_atr": STOP_ATR, "tp_r": TP_R, "atr": atr, "model": "SWING_H4_TREND"}
     if sym in CAUTION: hyp["caution"] = [CAUTION[sym]]
-    # «Для споту»: сигнал на купівлю + монета виросла за 30 днів (умова тижневої карти, журнал X–Y); лише крипто. Тільки позначка на картці (рішення власниці 25.11.2026).
-    if side > 0 and ret30 is not None and ret30 > 0 and sym not in COMMODITIES: hyp["spot"] = {"ret30": round(float(ret30), 4)}
     try:
         import office_marks as _mk
         _opp = _mk.opposite_open(db, sym, direction, "SW")
@@ -129,12 +127,16 @@ def scan(db: str, fetch: Callable, now: Optional[float] = None, symbols: tuple =
                 _sh.step(db, sym, b, now)
             except Exception as exc:  # noqa: BLE001
                 print(f"[sw-shadow] {sym}: {type(exc).__name__}: {exc}", flush=True)
+            try:                                                                            # тихий журнал «B&R на 4 годинах за трендом» (без повідомлень і без впливу на сигнали)
+                from office_td import shadow_br4 as _b4
+                _b4.step(db, sym, b, now)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[br4-shadow] {sym}: {type(exc).__name__}: {exc}", flush=True)
             sg, atr, close = signals(b)
             if not sg or not atr > 0 or (STOP_ATR * atr) / close < MIN_SP: continue
             sides = {s for s, _ in sg}
             if len(sides) != 1 or _open_symbol(db, sym): continue                          # одна позиція на монету; суперечливі сигнали пропускаємо
-            r30 = float(b["c"][-1] / b["c"][-181] - 1) if len(b["c"]) > 181 and b["c"][-181] > 0 else None      # зміна за 30 днів (180 H4-барів)
-            side = sides.pop(); sid = record(db, sym, side, [k for _, k in sg], bar_open, close, atr, now, r30)
+            side = sides.pop(); sid = record(db, sym, side, [k for _, k in sg], bar_open, close, atr, now)
             if sid: n += 1; print(f"[sw] СИГНАЛ {sid} entry={close:.6g} atr={atr:.6g} правила={[k for _, k in sg]}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[sw] scan {sym}: {type(exc).__name__}: {exc}", flush=True)
