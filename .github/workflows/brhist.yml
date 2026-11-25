@@ -30,12 +30,13 @@ jobs:
         shell: bash
         run: |
           D=$PWD/docs/handoff/br-profitability
-          python3 $D/strategy_search/br_hist.py candles "$TRAIN" $D/data/br_hist_trades.csv | tee $D/brhist_out.txt
+          TF=3600 HOR=96 python3 $D/strategy_search/br_hist.py candles "$TRAIN" $D/data/br_hist_h1.csv | tee $D/brhist_h1_out.txt
+          TF=14400 HOR=60 python3 $D/strategy_search/br_hist.py candles "$TRAIN" $D/data/br_hist_h4.csv | tee $D/brhist_h4_out.txt
       - name: Save
         shell: bash
         run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-          gzip -f docs/handoff/br-profitability/data/br_hist_trades.csv
-          git add docs/handoff/br-profitability/brhist_out.txt docs/handoff/br-profitability/data/br_hist_trades.csv.gz
-          git commit -m "brhist: B&R на історії, як є і навпаки (автоматично)"
+          gzip -f docs/handoff/br-profitability/data/br_hist_h1.csv docs/handoff/br-profitability/data/br_hist_h4.csv
+          git add docs/handoff/br-profitability/brhist_h1_out.txt docs/handoff/br-profitability/brhist_h4_out.txt docs/handoff/br-profitability/data/br_hist_h1.csv.gz docs/handoff/br-profitability/data/br_hist_h4.csv.gz
+          git commit -m "brhist: B&R на H1 і H4 (автоматично)"
           for i in 1 2 3; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep 5; done

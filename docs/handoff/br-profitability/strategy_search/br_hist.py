@@ -6,15 +6,17 @@
   «навпаки»: протилежний напрям із тієї ж ціни, стоп = m × та сама відстань по інший бік, ціль = k × ризик.
   m ∈ {1,2,3}, k ∈ {1,2,3}. Тайм-аут → за ціною закриття. Комісія за круг: 0,10% (ринкові) і 0,04% (лімітні) — обидві показано. Ризик $10 на угоду.
 Розрізи (усі показано, нічого не відбирається): роки; розмір стопа; за трендом/проти (сторона MA200 на H4); спокійна монета (ATR(H4,14)/ціна < 2,3%); година UTC.
+Варіант «старший таймфрейм» (25.11.2026, ГІПОТЕЗА, записано ДО запуску): ті самі правила детектора без жодної зміни чисел, але на барах H1 або H4 (env TF=3600 / 14400) — стопи стають ширші, комісія менша частка ризику. Утримання: env HOR барів (H1: 96 = 4 доби; H4: 60 = 10 діб, як у СВІНГ).
 Використання: br_hist.py CANDLES_DIR SYMS OUT_CSV"""
 import os, sys
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
 from office_br import detect
 CD, SYMS, OUT = sys.argv[1], sys.argv[2].split(","), sys.argv[3]
-cfg = dict(detect.HYP); K = cfg["pivot_k"]; LB = cfg["lookback"]; MS = (1, 2, 3); KS = (1, 2, 3); HOR = 192; WAIT = 24
+cfg = dict(detect.HYP); K = cfg["pivot_k"]; LB = cfg["lookback"]; MS = (1, 2, 3); KS = (1, 2, 3); PER = int(os.environ.get("TF", "900")); HOR = int(os.environ.get("HOR", "192")); WAIT = 24
 def run(sym):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
+    if PER != 900: d = d.groupby(d.open_time // PER * PER).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last")).reset_index()
     t, o, h, l, c = (d[k].to_numpy(float) for k in ("open_time", "open", "high", "low", "close")); n = len(c)
     g = d.groupby(d.open_time // 14400 * 14400).agg(high=("high", "max"), low=("low", "min"), close=("close", "last"))
     pc = g.close.shift(1); tr = np.maximum(g.high - g.low, np.maximum((g.high - pc).abs(), (g.low - pc).abs()))
@@ -60,7 +62,7 @@ for s in SYMS:
     if os.path.exists(f"{CD}/{s}/15m.csv"): r = run(s); allr += r; print(s, len(r), flush=True)
 W = pd.DataFrame(allr); W["y"] = pd.to_datetime(W.ts, unit="s").dt.year; W["hour"] = pd.to_datetime(W.ts, unit="s").dt.hour; W.to_csv(OUT, index=False)
 days = (W.ts.max() - W.ts.min()) / 86400
-print(f"\nB&R НА ІСТОРІЇ: {len(W)} входів, монет {W.sym.nunique()}, {pd.Timestamp(W.ts.min(), unit='s'):%Y-%m-%d} — {pd.Timestamp(W.ts.max(), unit='s'):%Y-%m-%d}; медіанний стоп {W.stop_pct.median():.2f}%; ризик $10; у дужках — на одну угоду")
+print(f"\nB&R НА ІСТОРІЇ (бар {PER//60} хв, утримання {HOR} барів): {len(W)} входів, монет {W.sym.nunique()}, {pd.Timestamp(W.ts.min(), unit='s'):%Y-%m-%d} — {pd.Timestamp(W.ts.max(), unit='s'):%Y-%m-%d}; медіанний стоп {W.stop_pct.median():.2f}%; ризик $10; у дужках — на одну угоду")
 def cell(g, col, fee, m): x = 10 * (g[col] - fee / (m * g.stop_pct)); return f"${x.sum():+9.0f} ({x.mean():+.2f})"
 def table(g, title):
     print(f"\n== {title}: n={len(g)}")
