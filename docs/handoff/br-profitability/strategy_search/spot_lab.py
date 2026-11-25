@@ -69,11 +69,25 @@ X = {}
 for s in SYMS:
     p = f"{D}/{s}.csv"
     if os.path.exists(p): X[s] = pd.read_csv(p).set_index("day")
+# Розрізаємо історію монети на окремі «життя», якщо тикер перевикористано або була деномінація (інакше це виглядає як фальшиві ×1000 / −99,9%):
+#  • після перерви в торгах ≥2 днів ціна змінилась більш ніж у 5 разів;  • або за один день більш ніж у 50 разів (жодна справжня монета так не росте; крах LUNA 12.05.2022 теж потрапляє сюди — її втрати до цього дня (−94%) враховано).
+X2 = {}; NSPLIT = 0
+for s, x in X.items():
+    x = x[x.c > 0]; d = x.index.to_numpy(); c = x.c.to_numpy(); cuts = [0]
+    for i in range(1, len(c)):
+        r = c[i] / c[i - 1]; gap = d[i] - d[i - 1]
+        if (gap >= 2 and (r > 5 or r < 0.2)) or r > 50 or r < 0.02: cuts.append(i)
+    cuts.append(len(c)); NSPLIT += len(cuts) - 2
+    for k in range(len(cuts) - 1):
+        part = x.iloc[cuts[k]:cuts[k + 1]]
+        if len(part) >= 60: X2[s if k == 0 and len(cuts) == 2 else f"{s[:-4]}~{k + 1}USDT"] = part
+X = X2
 O = pd.DataFrame({s: x.o for s, x in X.items()}).sort_index(); H = pd.DataFrame({s: x.h for s, x in X.items()}).reindex(O.index); L = pd.DataFrame({s: x.l for s, x in X.items()}).reindex(O.index)
 C = pd.DataFrame({s: x.c for s, x in X.items()}).reindex(O.index); Q = pd.DataFrame({s: x.qv for s, x in X.items()}).reindex(O.index)
 CF = C.ffill()                                                 # ціна для оцінки: якщо монету зняли з торгів — останнє закриття (ОПТИМІСТИЧНО: насправді часто близько нуля)
 LASTD = {s: int(C[s].last_valid_index()) for s in C}
 DT = pd.to_datetime(O.index * 86400, unit="s"); YR = pd.Series(DT.year, index=O.index)
+print(f"(розрізів історії через деномінацію/повторний лістинг: {NSPLIT}; рядів після розрізання: {len(X)})")
 MAJ = [s for s in ("BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "LINKUSDT", "LTCUSDT", "TRXUSDT", "BCHUSDT", "ETCUSDT", "XLMUSDT", "ATOMUSDT") if s in C]
 def day(s): return int(pd.Timestamp(s).timestamp() // 86400)
 WIN = [("2020→2026", day("2020-03-01")), ("2022→2026", day("2022-01-01"))]
