@@ -10,7 +10,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 170
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,18 +19,17 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install numpy pandas
-      - name: Денні свічки OHLC
+      - name: Увесь спот Binance (денні свічки, включно зі знятими з торгів)
         shell: bash
         run: |
-          ALLC=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT,ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,RENUSDT,BATUSDT,ZRXUSDT
-          echo "ALL=$ALLC" >> $GITHUB_ENV
-          python3 docs/handoff/br-profitability/strategy_search/spot_lab.py fetch dly "$ALLC"
+          python3 docs/handoff/br-profitability/strategy_search/spot_lab.py fetchspot dly BTCUSDT,ETHUSDT
           ls dly | wc -l
       - name: Спот-лабораторія
         shell: bash
         run: |
           D=docs/handoff/br-profitability
-          python3 $D/strategy_search/spot_lab.py run dly "$ALL" | tee $D/spotlab_out.txt
+          python3 $D/strategy_search/spot_lab.py run dly ALL | tee $D/spotlab_out.txt
+          test $(ls dly | wc -l) -gt 150 || { echo 'замало монет — перелік не завантажився'; exit 1; }
       - name: Зберегти
         shell: bash
         run: |
