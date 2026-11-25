@@ -83,6 +83,16 @@ def warn_line(row: Dict[str, Any]) -> str | None:
     return ("Обережно: " + "; ".join(c)) if c else None
 
 
+def spot_line(row: Dict[str, Any]) -> str | None:
+    """СВІНГ LONG: «для споту — умови для купівлі є», якщо монета виросла за 30 днів (hyp['spot']). Лише показ."""
+    sp = _td_hyp(row).get("spot") if is_swing(row) and row.get("direction") == "LONG" else None
+    if not isinstance(sp, dict): return None
+    try:
+        return f"🛒 для споту: умови для купівлі є — за 30 днів +{100 * float(sp.get('ret30') or 0):.0f}% і сигнал на купівлю"
+    except Exception:  # noqa: BLE001
+        return None
+
+
 CALM_ATR_PCT = 0.023
 CALM_TEXT = "🟢 спокійна монета — такі сигнали на історії кращі"
 
@@ -127,6 +137,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
         L.append(f"🟢 Ціль {_n(t['p'], sym)} · +{pc(t['p'])}% = +${usd:.0f} (ліміт)")
     wl = warn_line(row)
     if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
+    if spot_line(row): L.append(spot_line(row))
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + str(hy["opp"]))
     if hy.get("rep"): L.append("⚠️ " + str(hy["rep"]))
@@ -166,6 +177,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
+    if spot_line(row): L.append(spot_line(row))
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
     if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))
