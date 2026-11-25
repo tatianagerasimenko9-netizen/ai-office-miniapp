@@ -51,7 +51,7 @@ for sym in SYMS:
         net = res - FEE / (risk / e)
         k = lambda q: side * (c[i] / c[i - q] - 1); rg = b["mx50"][i] - b["mn50"][i]; jb = int(np.searchsorted(bt["open_time"], t[i + 1])) - 1
         rows.append(dict(sym=sym, sig=key, side=side, ts=float(t[i + 1]), y=int(pd.Timestamp(t[i + 1], unit="s").year), why=why, r=net, mfe=mfe, mfe_day=mfe_bar / 6.0, risk_pct=risk / e, hold=j - (i + 1),
-                         d1=snaps.get(1, np.nan), d2=snaps.get(2, np.nan), d3=snaps.get(3, np.nan), d5=snaps.get(5, np.nan),
+                         d1=snaps.get(1, np.nan), d2=snaps.get(2, np.nan), d3=snaps.get(3, np.nan), d5=snaps.get(5, np.nan), d4=snaps.get(4, np.nan), d6=snaps.get(6, np.nan), d7=snaps.get(7, np.nan), d8=snaps.get(8, np.nan), d9=snaps.get(9, np.nan), d10=snaps.get(10, np.nan),
                          ret6=k(6), ret18=k(18), ret42=k(42), ret180=k(180) if i >= 180 else np.nan, atr_pct=A[i] / c[i], dist200=side * (c[i] - m200[i]) / A[i],
                          rsi=b["rsi14"][i] if side > 0 else 100 - b["rsi14"][i], volx=b["volume"][i] / b["vol20"][i] if b["vol20"][i] > 0 else np.nan,
                          rpos=((c[i] - b["mn50"][i]) / rg if side > 0 else (b["mx50"][i] - c[i]) / rg) if rg > 0 else np.nan,

@@ -79,6 +79,8 @@ def tsm(L, H, topn=None, equal=False):
             if len(sc) >= 5: w = pd.Series(0.0, index=C.columns); w[sc.index] = sc * iv / iv.sum(); last = w
         if last is not None: W.loc[t] = last
     return W
+if os.environ.get("DUMP"):
+    FEE1 = 0.0015; net = evalw(tsm(30, 7, 20, False)); pd.DataFrame({"day": C.index, "ret": net.to_numpy()}).to_csv(os.environ["DUMP"], index=False); print("TSM daily →", os.environ["DUMP"], len(net)); sys.exit(0)
 if os.environ.get("ROBUST") == "1":
     print("\n=== СТІЙКІСТЬ найкращого за 2020–21 вибору (L=30, H=7) та сусідів: ліквідність, ваги, витрати ===")
     for (L, H) in ((30, 7), (14, 7), (30, 14), (14, 14)):
