@@ -98,17 +98,20 @@ def dca(syms, d0, weeks=52):
         eq.append(cash + float((units * row).sum()))
     return pd.Series(eq, index=c.index), n
 R30 = C / C.shift(30) - 1; MA200 = C.rolling(200).mean(); QV30 = Q.rolling(30).mean()
-def trend(d0, cond, stop=None, trail=None, N=10, pool=10):
+def trend(d0, cond, stop=None, trail=None, N=10, pool=10, log=None):
     """pool — скільки найліквідніших монет розглядаємо; з них беремо до N (C4: N із найбільшим зростанням за 30 днів)."""
     idx = [d for d in C.index if d0 <= d <= END]; cash = CAP; pos = {}; eq = []; acts = 0
     for k, d in enumerate(idx):
         for s in list(pos):
             u, e, pk = pos[s]; lvl = None
-            if d > LASTD[s]: cash += u * CF.at[d, s] * (1 - FEE); del pos[s]; acts += 1; continue      # монету зняли з торгів: вихід за останнім закриттям
+            if d > LASTD[s]:
+                if log is not None: log.append((s, d, e, CF.at[d, s], 'знято з торгів'))
+                cash += u * CF.at[d, s] * (1 - FEE); del pos[s]; acts += 1; continue      # монету зняли з торгів: вихід за останнім закриттям
             if stop: lvl = e * (1 - stop)
             if trail: lvl = max(lvl or 0, pk * (1 - trail))
             if lvl and pd.notna(L.at[d, s]) and L.at[d, s] <= lvl:
                 px = min(O.at[d, s], lvl); cash += u * px * (1 - FEE); del pos[s]; acts += 1
+                if log is not None: log.append((s, d, e, px, 'стоп'))
             elif pd.notna(C.at[d, s]): pos[s] = (u, e, max(pk, C.at[d, s]))
         if k % 7 == 0:
             q = QV30.loc[d].dropna(); q = q[[s for s in q.index if pd.notna(C.at[d, s])]]; top = list(q.nlargest(pool).index); ok = []
@@ -118,7 +121,9 @@ def trend(d0, cond, stop=None, trail=None, N=10, pool=10):
             if cond == "C4": ok = sorted(ok, key=lambda s: -R30.at[d, s])
             ok = ok[:N]
             for s in list(pos):
-                if s not in ok: cash += pos[s][0] * CF.at[d, s] * (1 - FEE); del pos[s]; acts += 1
+                if s not in ok:
+                    if log is not None: log.append((s, d, pos[s][1], CF.at[d, s], 'перегляд'))
+                    cash += pos[s][0] * CF.at[d, s] * (1 - FEE); del pos[s]; acts += 1
             e_now = cash + sum(u * CF.at[d, s] for s, (u, _, _) in pos.items())
             for s in ok:
                 if s not in pos and cash >= e_now / N * 0.99:
@@ -139,6 +144,29 @@ def grid(sym, d0, cap, s, N, tp):
                     px = min(O.at[d, sym], lvl); amt = cap / N; cash -= amt; b[k] = (amt * (1 - FEE) / px, px, ref, d); acts += 1
         eq.append(cash + sum(u * C.at[d, sym] for u, _, _, _ in b.values()))
     return pd.Series(eq, index=idx), acts
+if os.environ.get("DIAG") == "1":
+    f = lambda d: pd.Timestamp(d * 86400, unit="s").strftime("%Y-%m-%d")
+    print("ДІАГНОСТИКА даних і «тих, що летять»")
+    ch = C / C.shift(1) - 1; bad = [(s, d, v) for s in C for d, v in ch[s].dropna().items() if v > 4 or v < -0.8]
+    print(f" денних стрибків закриття > +400% або < −80%: {len(bad)} (монет {len({b[0] for b in bad})})")
+    for s_, d, v in sorted(bad, key=lambda x: x[2])[:25] + sorted(bad, key=lambda x: -x[2])[:15]: print(f"   {s_:14s} {f(d)} {100*v:+.0f}%  (ціна {C.at[d-1, s_] if (d-1) in C.index else float('nan'):.6g} → {C.at[d, s_]:.6g})")
+    gaps = [(s_, int(C[s_].first_valid_index()), LASTD[s_], int(C[s_].loc[C[s_].first_valid_index():LASTD[s_]].isna().sum())) for s_ in C]
+    print(" монет із пропусками в середині історії (ознака повторного лістингу під тим самим тикером):", [(a, n) for a, _, _, n in gaps if n > 30][:40])
+    for pool in (50, 150):
+        lg = []; d0 = int(min(d for d in C.index if d >= day("2022-01-01"))); e_, a_ = trend(d0, "C4", pool=pool, log=lg)
+        T_ = pd.DataFrame(lg, columns=["sym", "d", "e", "px", "why"]); T_["ret"] = T_.px / T_.e - 1
+        print(f"\n C4 із {pool} ліквідних, 2022→: позицій {len(T_)}, середній результат позиції {100*T_.ret.mean():+.1f}%, медіана {100*T_.ret.median():+.1f}%, у плюсі {100*(T_.ret>0).mean():.0f}%, гірше −50%: {int((T_.ret<-0.5).sum())}, краще +100%: {int((T_.ret>1).sum())}")
+        print("  по роках (середній результат позиції, n): " + ", ".join(f"{y}: {100*g.ret.mean():+.1f}% ({len(g)})" for y, g in T_.groupby(T_.d.map(lambda d: pd.Timestamp(d*86400, unit='s').year))))
+        print("  без позицій гірших за −60% (можливі артефакти/крахи): середній", f"{100*T_[T_.ret>-0.6].ret.mean():+.1f}%")
+        for _, r in T_.sort_values("ret").head(20).iterrows(): print(f"   {r.sym:14s} вихід {f(r.d)} вхід {r.e:.6g} → {r.px:.6g} {100*r.ret:+.0f}% ({r.why})")
+        print("  найчастіші монети:", T_.sym.value_counts().head(15).to_dict())
+    print("\n Найбільші річні «ікси» (перевірка на артефакти):")
+    for y in range(2020, 2027):
+        a = day(f"{y}-01-01"); b = min(day(f"{y}-12-31"), END)
+        if a not in C.index or b - a < 200: continue
+        r = pd.Series({s_: CF.at[b, s_] / C.at[a, s_] for s_ in C if pd.notna(C.at[a, s_])}).sort_values()
+        print(f"  {y}: топ " + ", ".join(f"{k.replace('USDT','')} ×{v:.0f}" for k, v in r.tail(6).items()) + " | низ " + ", ".join(f"{k.replace('USDT','')} ×{v:.4f}" for k, v in r.head(4).items()))
+    sys.exit(0)
 print(f"СПОТ-ЛАБОРАТОРІЯ: монет {C.shape[1]}, {DT[0]:%Y-%m-%d} — {DT[-1]:%Y-%m-%d}; капітал ${CAP:.0f}; комісія {FEE*100:.2f}%; великі монети для кошика: {len(MAJ)}")
 for wname, d0 in WIN:
     d0 = int(min(d for d in C.index if d >= d0)); print(f"\n################ ВІКНО {wname}")
