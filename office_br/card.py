@@ -180,14 +180,24 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     return "\n".join(L)
 
 
-def build_caption(row: Dict[str, Any], v2_line: str | None = None):
+def trend_line(direction: str, up4: bool | None, up1: bool | None) -> str | None:
+    """B&R: напрям тренду на 4 год і 1 год (ціна вище/нижче середньої за 200 свічок). Лише підказка, не фільтр: на історії 2022–2026 напрям тренду майже не міняє
+    результат B&R на M15 (журнал, розділ AP). Вигляд погоджено власницею 25.11.2026. None — якщо даних немає."""
+    if up4 is None or up1 is None: return None
+    f = lambda u: "🟢 вгору" if u else "🔴 вниз"
+    long_ = direction == "LONG"
+    tail = "тренди різні" if up4 != up1 else ("сигнал ЗА трендом" if up4 == long_ else "сигнал ПРОТИ тренду")
+    return f"🧭 Тренд: 4 год {f(up4)} · 1 год {f(up1)} — {tail}"
+
+
+def build_caption(row: Dict[str, Any], v2_line: str | None = None, trend: str | None = None):
     """(текст, parse_mode) підпису під зображенням: для ІНТРАДЕЙ/СВІНГ — HTML, для B&R — як було."""
     if is_td(row):
         return build_td_caption_html(row), "HTML"
-    return build_card(row, v2_line), None
+    return build_card(row, v2_line, trend), None
 
 
-def build_card(row: Dict[str, Any], v2_line: str | None = None) -> str:
+def build_card(row: Dict[str, Any], v2_line: str | None = None, trend: str | None = None) -> str:
     if is_td(row):
         return build_td_card(row)
     sym, d = row["symbol"], row["direction"]
@@ -199,6 +209,7 @@ def build_card(row: Dict[str, Any], v2_line: str | None = None) -> str:
     rr = lambda p: f"{abs(p - entry) / risk:.2f}".replace(".", ",") if risk > 0 else "—"
     L = [
         f"B&R LIVE · {tag(row.get('seq'))} · {sym} · {d}",
+        *([trend] if trend else []),
         f"Пробій: {_n(row['level'], sym)} — закриття {'вище' if long_ else 'нижче'} підтверджено",
         f"🟡 ВХІД {_n(entry, sym)}",
         f"🔴 SL {_n(sl, sym)} (−{pc(sl)}%)",

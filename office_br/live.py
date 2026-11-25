@@ -82,6 +82,21 @@ def scan_symbol(db: str, symbol: str, fetch: Callable, now: float | None = None,
     return new
 
 
+def trend_text(fetch: Callable, symbol: str, direction: str) -> str | None:
+    """Рядок «Тренд: 4 год … · 1 год …» для картки B&R: сторона середньої за 200 закритих свічок на H4 і H1. Збій даних → None (картка йде без рядка)."""
+    try:
+        from office_td.swing import h4_from_h1
+        rows = fetch(symbol, "1h", 900, closed_only=True)
+        if not isinstance(rows, list) or len(rows) < 200: return None
+        c1 = [float(x["close"]) for x in rows]; up1 = c1[-1] > sum(c1[-200:]) / 200
+        b = h4_from_h1(rows); up4 = None
+        if b is not None and len(b["c"]) >= 200: up4 = bool(b["c"][-1] > float(b["c"][-200:].mean()))
+        return card.trend_line(direction, up4, up1)
+    except Exception as exc:  # noqa: BLE001 — підказка не має блокувати доставку
+        print(f"[br-live] trend line skipped {symbol}: {type(exc).__name__}", flush=True)
+        return None
+
+
 def _pending(db: str) -> list[dict]:
     return store.rows(db, "WHERE status = 'NEW' AND msg_id IS NULL")
 
@@ -104,6 +119,9 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
                     v2_line = v2.line(row, store.rows(db, "WHERE created_ts >= ? AND created_ts < ?", (bucket, bucket + 900)))
                 except Exception as exc_v2:  # мітка інформаційна: збій не має блокувати доставку
                     print(f"[br-live] v2 label skipped: {type(exc_v2).__name__}", flush=True)
+            trend = None
+            if fetch is not None and not card.is_td(row):   # підказка про тренд — лише для B&R
+                trend = await asyncio.to_thread(trend_text, fetch, row["symbol"], row["direction"])
             if send_image is not None and fetch is not None:
                 import os
                 from office_br.live_image import render
@@ -112,13 +130,13 @@ async def deliver(db: str, send: Callable, send_image: Callable | None = None, f
                 png = await asyncio.to_thread(render, row, candles)
                 try:
                     msg_id = await send_image(
-                        png, card.build_caption(row, v2_line)[0], row
+                        png, card.build_caption(row, v2_line, trend)[0], row
                     )
                 finally:
                     try: os.unlink(png)
                     except OSError: pass
             else:
-                msg_id = await send(card.build_card(row, v2_line), symbol=row["symbol"], direction=row["direction"])
+                msg_id = await send(card.build_card(row, v2_line, trend), symbol=row["symbol"], direction=row["direction"])
             if not msg_id:
                 print(f"[br-live] delivery pending {row['sig_id']}", flush=True)
                 continue
