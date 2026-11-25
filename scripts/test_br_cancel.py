@@ -37,3 +37,10 @@ out2, fetch2, send2 = run({"BTCUSDT": [(62100, 62150, 62000, 62050), (62050, 620
 asyncio.run(live.track(db, fetch2, send2)); st2 = dict(_fetchall(db, "SELECT symbol, status FROM br_test_signal", ()))
 assert any("BTC" in t and "Ціну входу торкнуто" in t for t in out2) and any("BTC" in t and "TP1 досягнуто" in t for t in out2) and not any("стоп зачепило" in t for t in out2), out2
 print(b); print(e); print("ok br cancel")
+# --- час вийшов: короткий текст без «підсумок не визначено»
+_r = {"sig_id": "BR|BTCUSDT|LONG|9", "seq": 2390, "symbol": "BTCUSDT", "direction": "LONG", "level": 62000.0, "entry": 62216.2, "sl": 61651.4, "targets_json": "[]", "hyp_json": "{}"}
+assert card.timeout_text(_r, False) == "⚪ BTC LONG · B&R-2390 · закрито: за 48 год входу не було", card.timeout_text(_r, False)
+assert card.timeout_text(_r, True) == "⚪ BTC LONG · B&R-2390 · 48 год минуло: ні цілі, ні стопа. Закрий за ринком"
+_s = dict(_r, sig_id="SW|ETHUSDT|SHORT|1", symbol="ETHUSDT", direction="SHORT", hyp_json='{"strategy": "SW_TEST", "hold": "до 10 діб"}')
+_t = card.timeout_text(_s, True, " Зараз +1,2R (+$12) — закрий угоду за ринком."); assert "10 діб минуло. Зараз +1,2R (+$12) — закрий угоду за ринком." in _t and "не визначено" not in _t, _t
+print("ok timeout text")
