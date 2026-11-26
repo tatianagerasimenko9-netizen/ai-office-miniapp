@@ -53,3 +53,4 @@ jobs:
           git add docs/handoff/br-profitability/divlab_out.txt docs/handoff/br-profitability/data/divlab_cells.csv.gz
           git commit -m "divlab: широка перевірка дивергенцій (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# rerun 2

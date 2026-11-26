@@ -3,6 +3,7 @@
   A = 42 монети, 2022–2026 (цю групу на H4 вже бачили);  B = ті самі 42 монети, 2020–2021 (не бачили);  C = інші монети Binance, 2020–2026 (не бачили);
   M = метали Binance (XAU, XAG);  S = акції США, денні 2005–2026 (Yahoo);  G = метали/індекси, денні (Yahoo);  S1 = акції, годинні, останні ~2 роки (Yahoo).
 Сигнал: RSI(14); пивот = екстремум серед k барів з обох боків, k ∈ {3,5,8} (видно через k барів); попередній пивот того ж типу не далі 60 барів.
+  КОНТРОЛЬ (додано 26.11 до другого запуску): той самий вхід на пивоті БЕЗ дивергенції (NL — мінімум → LONG, NH — максимум → SHORT). Дивергенція має сенс, лише якщо вона краща за контроль у тій самій комірці.
   RB звичайна бичача (ціна нижче, RSI вище → LONG), RS звичайна ведмежа (SHORT), HB прихована бичача (ціна вище, RSI нижче → LONG), HS прихована ведмежа (SHORT).
 Вхід: закриття бару підтвердження. Стопи: 1,5 / 2 / 3 × ATR14 від входу, або «за пивот» (за екстремум пивота ∓0,1 ATR). Цілі: 2R / 3R / 6R. Утримання ≤60 барів. Стоп-першим. Ризик $10.
 Комісія за круг: крипто 0,10%; акції/метали Yahoo 0,05% (ГІПОТЕЗА). Таймфрейми крипто: M15, H1, H4, D1.
@@ -48,7 +49,7 @@ if mode == "yf":
                 d = d.dropna(subset=["Close"])
                 if len(d) < 300: continue
                 ix = pd.DatetimeIndex(d.index); ix = ix.tz_convert("UTC").tz_localize(None) if ix.tz is not None else ix
-                pd.DataFrame({"open_time": (ix.astype("int64") // 10**9), "open": d.Open.to_numpy(), "high": d.High.to_numpy(), "low": d.Low.to_numpy(), "close": d.Close.to_numpy()}).to_csv(f"{D}/{t.replace('=', '_')}_{nm}.csv", index=False)
+                pd.DataFrame({"open_time": ((ix - pd.Timestamp("1970-01-01")) // pd.Timedelta("1s")).to_numpy(), "open": d.Open.to_numpy(), "high": d.High.to_numpy(), "low": d.Low.to_numpy(), "close": d.Close.to_numpy()}).to_csv(f"{D}/{t.replace('=', '_')}_{nm}.csv", index=False)
                 print(t, nm, len(d), flush=True)
             except Exception as e: print(t, nm, "ERR", str(e)[:80], flush=True)
     sys.exit(0)
@@ -79,11 +80,11 @@ def study(group, tf, sym, t, h, l, c, fee, keep_ev=False):
             if len(piv) < 2: continue
             prev = piv[:-1]; cur = piv[1:]; ok = (cur - prev <= LOOK) & (cur - prev > k) & (R[cur] > 0) & (R[prev] > 0)
             for q, p in zip(cur[ok], prev[ok]):
-                if typ == "L": kind = "RB" if (l[q] < l[p] and R[q] > R[p]) else ("HB" if (l[q] > l[p] and R[q] < R[p]) else None); side = 1
-                else: kind = "RS" if (h[q] > h[p] and R[q] < R[p]) else ("HS" if (h[q] < h[p] and R[q] > R[p]) else None); side = -1
+                if typ == "L": kind = "RB" if (l[q] < l[p] and R[q] > R[p]) else ("HB" if (l[q] > l[p] and R[q] < R[p]) else "NL"); side = 1
+                else: kind = "RS" if (h[q] > h[p] and R[q] < R[p]) else ("HS" if (h[q] < h[p] and R[q] > R[p]) else "NH"); side = -1
                 i = q + k
                 if not kind or not A[i] > 0 or not M[i] > 0: continue
-                if keep_ev and k == 5: EV4.append((sym, t[i] + 14400, kind, side))
+                if keep_ev and k == 5 and kind[0] != "N": EV4.append((sym, t[i] + 14400, kind, side))
                 if i + HOLD >= n: continue
                 e = c[i]; H_ = h[i + 1:i + 1 + HOLD]; L_ = l[i + 1:i + 1 + HOLD]; last = c[i + HOLD]
                 zone = int(R[q] < 40) if side > 0 else int(R[q] > 60); trend = int(side * (e - M[i]) > 0); g = group if group != "X" else ("A" if yr[i] >= 2022 else "B")
@@ -117,7 +118,7 @@ if os.path.isdir(YFD):
 flush(); W = pd.concat(CH, ignore_index=True); del CH
 for c_ in ("g", "tf", "kind", "stop"): W[c_] = W[c_].astype(str).astype("category")
 W["usd"] = (10 * W.r).astype("float32")
-NAME = {"RB": "звичайна бичача", "RS": "звичайна ведмежа", "HB": "прихована бичача", "HS": "прихована ведмежа"}
+NAME = {"RB": "звичайна бичача", "RS": "звичайна ведмежа", "HB": "прихована бичача", "HS": "прихована ведмежа", "NL": "КОНТРОЛЬ мінімум без дивергенції", "NH": "КОНТРОЛЬ максимум без дивергенції"}
 GN = {"A": "A: 42 монети 2022–26", "B": "B: ті самі 2020–21", "C": "C: інші монети", "M": "M: метали Binance", "S": "S: акції, день", "G": "G: метали/індекси, день", "S1": "S1: акції, година", "G1": "G1: метали/індекси, година"}
 def cell(x):
     if len(x) < 100: return f"n={len(x)}"
@@ -137,12 +138,17 @@ for kind in ("HB", "HS"):
         if len(x) < 300: continue
         p = x.pivot_table(index="stop", columns="tg", values="usd", aggfunc="mean", observed=True).round(2); print(f"  {NAME[kind]} · {GN[g]} · {tf} (n≈{len(x)//12}):  " + " | ".join(f"{st}: " + "/".join(f"{p.loc[st, tg]:+.2f}" for tg in TGS) for st in STOPS if st in p.index))
 print("\n== 3) ЩО ПЛЮСОВЕ В УСІХ ТРЬОХ НЕЗАЛЕЖНИХ ГРУПАХ КРИПТО (A, B, C; n≥200 у кожній). Показано найкращі 30 за НАЙГІРШОЮ з трьох груп")
-cr = W[W.g.isin(["A", "B", "C"])]; res = []
+CTRL = {"RB": "NL", "HB": "NL", "RS": "NH", "HS": "NH"}
+cr = W[W.g.isin(["A", "B", "C"])]; res = []; CT = {}
 for trn in (None, 1, 0):
     for zn in (None, 1, 0):
         x = cr if trn is None else cr[cr.trend == trn]; x = x if zn is None else x[x.zone == zn]
         a = x.groupby(["tf", "k", "kind", "stop", "tg", "g"], observed=True).usd.agg(["mean", "size"]).unstack("g")
         for idx, row in a.iterrows():
+            if idx[2] in ("NL", "NH"):
+                try: CT[(idx, trn, zn)] = [row[("mean", g)] for g in "ABC"]
+                except KeyError: pass
+                continue
             try: ms = [row[("mean", g)] for g in "ABC"]; ns = [row[("size", g)] for g in "ABC"]
             except KeyError: continue
             if any(pd.isna(ms)) or min(ns) < 200: continue
@@ -151,17 +157,24 @@ tot = len(res); pos = sum(1 for r in res if r[0] > 0); res.sort(key=lambda r: -r
 print(f"  перевірено комбінацій: {tot}; плюсові в усіх трьох групах: {pos} ({100*pos/max(tot,1):.0f}%). Якби дивергенції нічого не давали, випадково плюсових у трьох групах було б ≈12%.")
 TR = {None: "усі", 1: "за трендом", 0: "проти тренду"}; ZN = {None: "будь-який RSI", 1: "RSI у крайній зоні", 0: "RSI не в крайній зоні"}
 for mn, idx, trn, zn, ms, ns in res[:30]:
-    tf, k, kind, st, tg = idx; print(f"   {tf:3s} k={k} {NAME[kind]:18s} {TR[trn]:13s} {ZN[zn]:22s} стоп {st:4s} ціль {tg}R: A ${ms[0]:+.2f} (n={int(ns[0])}), B ${ms[1]:+.2f} (n={int(ns[1])}), C ${ms[2]:+.2f} (n={int(ns[2])})")
+    tf, k, kind, st, tg = idx; ct = CT.get(((tf, k, CTRL[kind], st, tg), trn, None)); cs = (" || без дивергенції: " + "/".join(f"{v:+.2f}" for v in ct)) if ct else ""
+    print(f"   {tf:3s} k={k} {NAME[kind]:18s} {TR[trn]:13s} {ZN[zn]:22s} стоп {st:4s} ціль {tg}R: A ${ms[0]:+.2f} (n={int(ns[0])}), B ${ms[1]:+.2f} (n={int(ns[1])}), C ${ms[2]:+.2f} (n={int(ns[2])}){cs}")
+better = 0; cmpn = 0
+for mn, idx, trn, zn, ms, ns in res:
+    ct = CT.get(((idx[0], idx[1], CTRL[idx[2]], idx[3], idx[4]), trn, None))
+    if ct and not any(pd.isna(ct)): cmpn += 1; better += int(all(m > c_ for m, c_ in zip(ms, ct)))
+print(f"  дивергенція КРАЩА за той самий вхід без дивергенції в усіх трьох групах: {better} із {cmpn} комбінацій ({100*better/max(cmpn,1):.0f}%; випадково було б ≈12%)")
 print("  найгірші 10 (для чесності):")
 for mn, idx, trn, zn, ms, ns in sorted(res, key=lambda r: max(r[4]))[:10]:
     tf, k, kind, st, tg = idx; print(f"   {tf:3s} k={k} {NAME[kind]:18s} {TR[trn]:13s} {ZN[zn]:22s} стоп {st:4s} ціль {tg}R: A ${ms[0]:+.2f}, B ${ms[1]:+.2f}, C ${ms[2]:+.2f}")
 print("\n== 4) АКЦІЇ І МЕТАЛИ: найкращі 12 комірок у групі S (акції, день), і та сама комірка в G (метали/індекси) та S1 (акції, година)")
-sx = W[W.g == "S"].groupby(["k", "kind", "trend", "stop", "tg"], observed=True).usd.agg(["mean", "size"]); sx = sx[sx["size"] >= 300].sort_values("mean", ascending=False)
+sx = W[(W.g == "S") & ~W.kind.isin(["NL", "NH"])].groupby(["k", "kind", "trend", "stop", "tg"], observed=True).usd.agg(["mean", "size"]); sx = sx[sx["size"] >= 300].sort_values("mean", ascending=False)
 print(f"  комбінацій у S: {len(sx)}, плюсових {int((sx['mean']>0).sum())}")
 for (k, kind, trn, st, tg), row in sx.head(12).iterrows():
     def other(g, tf):
         y = W[(W.g == g) & (W.tf == tf) & (W.k == k) & (W.kind == kind) & (W.trend == trn) & (W.stop == st) & (W.tg == tg)]; return f"${y.usd.mean():+.2f} (n={len(y)})" if len(y) >= 50 else f"n={len(y)}"
-    print(f"   k={k} {NAME[kind]:18s} {TR[trn]:13s} стоп {st:4s} ціль {tg}R: S ${row['mean']:+.2f} (n={int(row['size'])}) | G {other('G', 'D1')} | S1 {other('S1', 'H1')} | крипто D1 A {other('A', 'D1')}")
+    cy = W[(W.g == "S") & (W.k == k) & (W.kind == CTRL[kind]) & (W.trend == trn) & (W.stop == st) & (W.tg == tg)]
+    print(f"   k={k} {NAME[kind]:18s} {TR[trn]:13s} стоп {st:4s} ціль {tg}R: S ${row['mean']:+.2f} (n={int(row['size'])}; без дивергенції ${cy.usd.mean():+.2f}) | G {other('G', 'D1')} | S1 {other('S1', 'H1')} | крипто D1 A {other('A', 'D1')}")
 if os.path.exists(SWF):
     E = pd.DataFrame(EV4, columns=["sym", "t", "kind", "side"]); sw = pd.read_csv(SWF); sw["usd"] = 10 * sw.r; sw["g"] = np.where(~sw.sym.isin(SY42), "C", np.where(sw.y >= 2022, "A", "B")); WIN = 12 * 14400
     def flag(kinds, same):
