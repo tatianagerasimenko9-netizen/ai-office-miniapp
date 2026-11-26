@@ -93,6 +93,29 @@ def news_marks(info: Dict[str, Any], now: Optional[float] = None) -> List[str]:
     return out
 
 
+PAIR_HOURS = 4.0
+
+
+def opposite_recent_td(db: str, symbol: str, direction: str, now: Optional[float] = None) -> Optional[str]:
+    """ІНТРАДЕЙ: якщо за останні 4 год по цій монеті вже був сигнал ІНТРАДЕЙ у ПРОТИЛЕЖНИЙ бік і він ще діє — текст попередження. Лише показ, сигнал не блокується.
+    Історія 2024–2026 (журнал, розділ BC): 32 пари, перший +$10,29 на угоду, другий −$1,76. Вигляд погоджено власницею 26.11.2026."""
+    if not enabled():
+        return None
+    try:
+        import time as _t
+        from office_bridge import _fetchone
+        now = _t.time() if now is None else now
+        row = _fetchone(db, "SELECT seq, created_ts FROM br_test_signal WHERE sig_id LIKE 'TD|%' AND symbol = ? AND direction != ? AND status IN ('NEW', 'SENT') AND created_ts >= ? ORDER BY created_ts DESC LIMIT 1",
+                        (symbol, direction, now - PAIR_HOURS * 3600))
+        if row:
+            mins = max(1, int(round((now - float(row[1])) / 60))); ago = f"{mins} хв" if mins < 90 else f"{int(round(mins / 60))} год"
+            num = f" №{int(row[0])}" if row[0] else ""
+            return f"{ago} тому був протилежний сигнал ІНТРАДЕЙ{num} по {symbol.replace('USDT', '')}. На історії в таких парах частіше правий перший"
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def opposite_open(db: str, symbol: str, direction: str, own: str) -> Optional[str]:
     """Якщо інша стратегія (ІНТРАДЕЙ ↔ СВІНГ) вже тримає відкриту угоду по цій монеті у ПРОТИЛЕЖНИЙ бік — короткий текст попередження. Лише показ."""
     if not enabled():

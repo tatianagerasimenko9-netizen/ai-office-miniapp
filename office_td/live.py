@@ -172,6 +172,8 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
         import office_marks as _mk
         _opp = _mk.opposite_open(db, cand["symbol"], cand["direction"], "TD")
         if _opp: hyp["opp"] = _opp
+        _pair = _mk.opposite_recent_td(db, cand["symbol"], cand["direction"], now)
+        if _pair: hyp["pair"] = _pair
         _c = _mk.news_marks(_mk.record(db, sid, cand["symbol"], now), now)
         if _c: hyp["caution"] = _c
     except Exception:  # noqa: BLE001

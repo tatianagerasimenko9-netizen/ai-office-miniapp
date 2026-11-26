@@ -129,6 +129,7 @@ def build_td_card(row: Dict[str, Any]) -> str:
     if wl: L.append("⚠️ " + wl.split(" (", 1)[0])
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + str(hy["opp"]))
+    if hy.get("pair"): L.append("⚠️ " + str(hy["pair"]))
     if hy.get("rep"): L.append("⚠️ " + str(hy["rep"]))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
@@ -168,6 +169,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
+    if hy.get("pair"): L.append("⚠️ " + html.escape(str(hy["pair"])))
     if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
