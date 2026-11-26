@@ -81,3 +81,15 @@ _d3 = remind.day_text(_b, 2.4, remind.D3_TEXT); assert "доходить до ц
 assert "закінчується на +$30 і більше" in remind.day_text(_b, 3.4, remind.D3_TEXT)
 assert "(це" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2) and "буде на ціні" not in remind.text(dict(_b, sig_id="TD|BTCUSDT|LONG|1"), 1.2)
 print("ok price texts")
+# --- ІНТРАДЕЙ: протилежний сигнал по тій самій монеті за останні 4 год
+_dbp = os.path.join(tempfile.mkdtemp(), "p.db"); _st.init(_dbp); _tp = time.time()
+_ins = "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+_ex(_dbp, _ins, ("TD|ETHUSDT|SHORT|1", 139, "ETHUSDT", "SHORT", 1, 1, 1, 1, 1684.38, 1707.66, "[]", "{}", _tp - 14 * 60, "SENT"))
+assert mk.opposite_recent_td(_dbp, "ETHUSDT", "LONG", _tp) == "14 хв тому був протилежний сигнал ІНТРАДЕЙ №139 по ETH. На історії в таких парах частіше правий перший"
+assert mk.opposite_recent_td(_dbp, "ETHUSDT", "SHORT", _tp) is None and mk.opposite_recent_td(_dbp, "BTCUSDT", "LONG", _tp) is None       # той самий бік / інша монета
+assert mk.opposite_recent_td(_dbp, "ETHUSDT", "LONG", _tp + 3 * 3600).startswith("3 год тому") and mk.opposite_recent_td(_dbp, "ETHUSDT", "LONG", _tp + 5 * 3600) is None   # понад 4 год — без позначки
+_ex(_dbp, "UPDATE br_test_signal SET status = 'SL' WHERE seq = 139", ()); assert mk.opposite_recent_td(_dbp, "ETHUSDT", "LONG", _tp) is None              # перший уже закрився
+_ex(_dbp, _ins, ("SW|ETHUSDT|SHORT|2", 48, "ETHUSDT", "SHORT", 1, 1, 1, 1, 1772.0, 1894.0, "[]", "{}", _tp - 600, "SENT")); assert mk.opposite_recent_td(_dbp, "ETHUSDT", "LONG", _tp) is None   # СВІНГ — це інша позначка
+_r3 = dict(_row, sig_id="TD|ETHUSDT|LONG|1", symbol="ETHUSDT", hyp_json=_j.dumps({"why": "x", "hold": "до 48 год", "pair": "14 хв тому був протилежний сигнал ІНТРАДЕЙ №139 по ETH. На історії в таких парах частіше правий перший"}))
+assert "⚠️ 14 хв тому був протилежний сигнал ІНТРАДЕЙ №139 по ETH. На історії в таких парах частіше правий перший" in _c.build_caption(_r3)[0] and "протилежний сигнал" not in _c.build_caption(_row)[0]
+print("ok intraday opposite pair")
