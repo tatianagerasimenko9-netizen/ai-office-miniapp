@@ -132,6 +132,11 @@ def scan(db: str, fetch: Callable, now: Optional[float] = None, symbols: tuple =
                 _b4.step(db, sym, b, now)
             except Exception as exc:  # noqa: BLE001
                 print(f"[br4-shadow] {sym}: {type(exc).__name__}: {exc}", flush=True)
+            try:                                                                            # тихий журнал «усі дивергенції RSI на 4 годинах» (без повідомлень і без впливу на сигнали)
+                from office_td import shadow_div as _dv
+                _dv.step(db, sym, b, now)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[div-shadow] {sym}: {type(exc).__name__}: {exc}", flush=True)
             sg, atr, close = signals(b)
             if not sg or not atr > 0 or (STOP_ATR * atr) / close < MIN_SP: continue
             sides = {s for s, _ in sg}

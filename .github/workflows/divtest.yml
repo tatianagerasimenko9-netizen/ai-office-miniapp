@@ -1,0 +1,40 @@
+name: divtest
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/divtest.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 175
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch H1
+        shell: bash
+        run: |
+          ALLC=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          echo "ALL=$ALLC" >> $GITHUB_ENV
+          for S in ${ALLC//,/ }; do python3 scripts/fetch_binance_klines.py candles $S 1h:2022-01-01:2026-11-22 | tr '\n' ' '; echo; done
+          test -s candles/BTCUSDT/1h.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Divergence test
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          python3 $D/strategy_search/div_test.py candles "$ALL" $D/swmfe_trades.csv $D/data/div | tee $D/div_out.txt; gzip -f $D/data/div_trades.csv
+      - name: Зберегти
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/div_out.txt docs/handoff/br-profitability/data/div_trades.csv.gz
+          git commit -m "divtest: дивергенції RSI на історії (автоматично)"
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done

@@ -1,0 +1,48 @@
+name: btcnow
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/btcnow.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - name: Fetch recent candles (OKX public)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, time, csv
+          def get(u):
+              for a in range(4):
+                  try: return json.loads(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "office-research"}), timeout=20).read())
+                  except Exception as e: time.sleep(1 + a)
+              return {}
+          for sym in ("BTC", "ETH"):
+              for bar, pages in (("15m", 12), ("1H", 15), ("4H", 8)):
+                  rows = {}; after = ""
+                  for _ in range(pages):
+                      j = get(f"https://www.okx.com/api/v5/market/history-candles?instId={sym}-USDT-SWAP&bar={bar}&limit=100" + (f"&after={after}" if after else ""))
+                      d = j.get("data") or []
+                      if not d: break
+                      for x in d: rows[int(x[0]) // 1000] = x[1:5] + [x[8] if len(x) > 8 else "1"]
+                      after = d[-1][0]; time.sleep(0.25)
+                  with open(f"docs/handoff/br-profitability/data/now_{sym}_{bar}.csv", "w", newline="") as f:
+                      w = csv.writer(f); w.writerow(["open_time", "open", "high", "low", "close", "confirm"])
+                      for t in sorted(rows): w.writerow([t] + rows[t])
+                  print(sym, bar, len(rows))
+          PY
+      - name: Save
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/data/now_*.csv
+          git commit -m "btcnow: свіжі свічки (автоматично)" || exit 0
+          for i in 1 2 3; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep 5; done
