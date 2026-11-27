@@ -13,182 +13,206 @@
 <link rel="icon" type="image/png" href="/lev/icon-192.png">
 <title>AI Office · Лев</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#080F1B;--panel:#111C2C;--deep:#0B1524;--gold:#D8B66A;--text:#F7F5F0;--muted:#A7AAB2;--line:rgba(216,182,106,.18);--up:#5FD39A;--down:#F4A08F;--blue:#345B8A}
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Montserrat',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
-body{min-height:100vh;display:flex;flex-direction:column;max-width:560px;margin:0 auto}
-button{font-family:inherit;color:inherit}
-header{display:flex;align-items:center;justify-content:space-between;padding:calc(18px + env(safe-area-inset-top)) 16px 12px;border-bottom:1px solid var(--line)}
-.brand{font-family:'Cormorant Garamond',Georgia,serif;font-size:27px;font-weight:600;color:var(--gold);line-height:1}
-.live{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--up)}.dot.stale{background:var(--down)}
-main{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px;padding-bottom:84px}
-.card{background:var(--panel);border-radius:14px;padding:14px 16px}
-.card.gold{border:1px solid rgba(216,182,106,.28)}
+:root{--bg:#080F1B;--panel:#111C2C;--deep:#0B1524;--gold:#D8B66A;--text:#F7F5F0;--muted:#A7AAB2;--line:rgba(216,182,106,.16);--up:#5FD39A;--down:#F4A08F;--warn:#F2C75C;--upbg:rgba(95,211,154,.13);--downbg:rgba(244,160,143,.14)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Montserrat',system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;max-width:560px;margin:0 auto}
+button{font-family:inherit;color:inherit;cursor:pointer}
+header{display:flex;align-items:center;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top)) 16px 10px}
+.brand{font-family:'Cormorant Garamond',Georgia,serif;font-size:25px;font-weight:600;color:var(--gold);line-height:1}
+.live{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--up);flex-shrink:0}.dot.stale,.dot.red{background:var(--down)}.dot.yellow{background:var(--warn)}.dot.grey{background:#55617a}
+main{padding:6px 16px 96px;display:flex;flex-direction:column;gap:14px}
+.hide{display:none!important}
+.card{background:var(--panel);border-radius:16px;padding:16px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.col{display:flex;flex-direction:column;gap:2px}
-.ava{width:48px;height:48px;border-radius:50%;border:1px solid var(--gold);background:var(--deep);display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',Georgia,serif;font-size:26px;font-weight:600;color:var(--gold);flex-shrink:0;object-fit:cover}
-.serif{font-family:'Cormorant Garamond',Georgia,serif;font-weight:600}
-h2{margin:0;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold)}
-.muted{color:var(--muted)}.small{font-size:11px}.tiny{font-size:10px}
+.muted{color:var(--muted)}.small{font-size:12px}.tiny{font-size:11px}
 .up{color:var(--up)}.down{color:var(--down)}
-.btn{min-height:46px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13px;font-weight:700;border:none;background:var(--gold);color:#17140E;padding:0 14px;cursor:pointer;text-decoration:none}
-.btn.ghost{background:transparent;color:var(--gold);border:1px solid rgba(216,182,106,.5);font-weight:600}
-.btn.plain{background:transparent;color:var(--text);border:1px solid rgba(216,182,106,.3);font-weight:600}
-.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.stat{background:var(--panel);border-radius:12px;padding:12px}
-.stat b{display:block;font-size:19px;font-weight:700;line-height:1.2}
-.box{background:var(--deep);border-radius:10px;padding:10px}
-.att{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:50px;padding:8px 0;border-top:1px solid rgba(216,182,106,.14);background:none;border-left:0;border-right:0;border-bottom:0;width:100%;text-align:left;font-size:13px;line-height:1.45;cursor:pointer}
-.att:first-of-type{border-top:0}
-.bar{position:relative;height:6px;border-radius:3px;background:#1B2A40;margin:4px 0}
-.bar i{position:absolute;left:0;top:0;height:6px;border-radius:3px;background:var(--blue)}
-.bar u{position:absolute;top:-4px;width:2px;height:14px;background:var(--text)}
-.trade{border-top:1px solid rgba(216,182,106,.14);padding-top:12px;margin-top:12px;display:flex;flex-direction:column;gap:10px;cursor:pointer}
-.pill{padding:4px 9px;border-radius:99px;border:1px solid var(--line);font-size:10px;font-weight:700;white-space:nowrap}
-.pill.up{border-color:var(--up)}.pill.down{border-color:var(--down)}
-nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);background:var(--deep);max-width:560px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom)}
-nav button{min-height:56px;background:none;border:0;border-top:2px solid transparent;font-size:11px;font-weight:500;color:var(--muted);cursor:pointer}
-nav button.on{color:var(--gold);font-weight:700;border-top-color:var(--gold)}
-.sheet{position:fixed;inset:0;background:var(--bg);z-index:10;overflow:auto;display:none;max-width:560px;margin:0 auto}
-.sheet.on{display:block}
-.sheet .in{padding:16px;display:flex;flex-direction:column;gap:14px;padding-bottom:40px}
-.kv{display:flex;justify-content:space-between;gap:14px;font-size:12px;padding:5px 0}
-.kv span:first-child{color:var(--muted);flex-shrink:0}.kv span:last-child{text-align:right}
+h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+.ava{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--gold);object-fit:cover;flex-shrink:0;background:var(--deep)}
+/* головне число */
+.hero{background:linear-gradient(160deg,#16263E 0%,#0F1A2B 100%);border:1px solid var(--line);border-radius:18px;padding:18px 16px 14px}
+.hero .big{font-size:46px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.hero .lab{font-size:12px;color:var(--muted);margin-top:4px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.mini{background:rgba(8,15,27,.55);border-radius:12px;padding:10px 12px}
+.mini b{display:block;font-size:19px;font-weight:700;line-height:1.2}
+.say{display:flex;gap:10px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;font-weight:500;line-height:1.4}
+/* увага */
+.att{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--panel);border:0;border-radius:14px;padding:12px 14px;min-height:56px}
+.att.red{background:var(--downbg);box-shadow:inset 3px 0 0 var(--down)}.att.yellow{box-shadow:inset 3px 0 0 var(--warn)}
+.att b{display:block;font-size:14px;font-weight:700}.att span.d{display:block;font-size:12px;color:var(--muted)}
+.chev{color:var(--gold);font-size:18px;margin-left:auto}
+/* фільтри */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;border:1px solid var(--line);background:transparent;border-radius:99px;padding:8px 13px;font-size:12px;font-weight:600;color:var(--muted);min-height:36px}
+.chip.on{background:var(--gold);border-color:var(--gold);color:#17140E}
+/* група */
+.grp{background:var(--panel);border-radius:16px;overflow:hidden}
+.grp>button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;padding:14px 16px;text-align:left;min-height:64px}
+.grp .t{font-size:15px;font-weight:700}.grp .s{font-size:12px;color:var(--muted)}
+.grp .sum{margin-left:auto;font-size:20px;font-weight:800}
+.split{display:flex;height:5px;border-radius:3px;overflow:hidden;background:#1B2A40;margin-top:7px;width:120px}
+.split i{background:var(--up)}.split u{background:var(--down)}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 12px 14px}
+.tile{border:0;border-radius:12px;padding:10px 8px;text-align:center;background:var(--deep);min-height:58px;position:relative}
+.tile.up{background:var(--upbg)}.tile.down{background:var(--downbg)}
+.tile .n{font-size:13px;font-weight:700;color:var(--text)}.tile .v{font-size:15px;font-weight:800}
+.tile .f{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
+.empty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
+/* сигнали */
+.day{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 2px 0}
+.sig{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--panel);border:0;border-radius:14px;padding:12px 14px;min-height:58px}
+.sig b{font-size:15px;font-weight:700}.sig .m{font-size:11px;color:var(--muted)}
+.tag{margin-left:auto;font-size:11px;font-weight:700;padding:5px 9px;border-radius:99px;background:var(--deep);color:var(--muted);white-space:nowrap}
+.tag.open{color:var(--up);background:var(--upbg)}.tag.sl{color:var(--down);background:var(--downbg)}.tag.tp{color:#0C1A12;background:var(--up)}
+/* лист */
+.shade{position:fixed;inset:0;background:rgba(3,7,14,.72);z-index:20;display:none;align-items:flex-end;justify-content:center}
+.shade.on{display:flex}
+.sheet{background:#0F1929;border-radius:22px 22px 0 0;width:100%;max-width:560px;max-height:88vh;overflow:auto;padding:10px 16px calc(22px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.grab{width:42px;height:4px;border-radius:2px;background:#3a475e;margin:2px auto 12px}
+.sheet h3{margin:0;font-size:22px;font-weight:800;line-height:1.15}
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
+.three div{background:var(--deep);border-radius:12px;padding:10px}.three b{display:block;font-size:17px;font-weight:800;line-height:1.25}
+.bar{position:relative;height:6px;border-radius:3px;background:#1B2A40;margin:6px 0 4px}
+.bar i{position:absolute;left:0;top:0;height:6px;border-radius:3px;background:#345B8A}.bar u{position:absolute;top:-4px;width:2px;height:14px;background:var(--text)}
+.kv{display:flex;justify-content:space-between;gap:14px;font-size:13px;padding:7px 0;border-top:1px solid rgba(216,182,106,.1)}
+.kv span:first-child{color:var(--muted);flex-shrink:0}.kv span:last-child{text-align:right;font-weight:600}
+.btn{min-height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:14px;font-weight:700;border:0;background:var(--gold);color:#17140E;padding:0 14px;width:100%}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid rgba(216,182,106,.35);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.note{background:var(--deep);border-radius:12px;padding:12px;font-size:13px;line-height:1.5;margin-top:10px}
+.note.warn{box-shadow:inset 3px 0 0 var(--warn)}
+details{margin-top:10px}summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--gold);letter-spacing:.04em;padding:6px 0;list-style:none}summary::-webkit-details-marker{display:none}summary:after{content:' ▾'}details[open] summary:after{content:' ▴'}
 p{margin:0}
-.hide{display:none}
+nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);background:rgba(11,21,36,.97);max-width:560px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom);z-index:10}
+nav button{min-height:58px;background:none;border:0;border-top:2px solid transparent;font-size:11px;font-weight:600;color:var(--muted)}
+nav button.on{color:var(--gold);border-top-color:var(--gold)}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">AI Office</div>
-  <div class="live"><span id="dot" class="dot stale"></span><span id="upd">завантаження…</span></div>
-</header>
+<header><div class="brand">AI Office</div><div class="live"><span id="dot" class="dot stale"></span><span id="upd">завантаження…</span></div></header>
 
 <main id="tab-today"></main>
 <main id="tab-signals" class="hide"></main>
 <main id="tab-invest" class="hide">
-  <div class="card gold"><div class="row" style="justify-content:flex-start"><img class="ava" src="/lev/lev.jpg" alt="Лев"><div class="serif" style="font-size:21px;line-height:1.15">Портфель ще не підключено</div></div>
-  <p style="margin-top:12px;font-size:14px;line-height:1.6">Щоб я бачив ваші покупки на споті й рахував відра, потрібен ключ біржі «лише читання» або ручне введення покупок. Скажіть у чаті, який спосіб обираєте.</p></div>
+  <div class="card"><div class="row" style="justify-content:flex-start"><img class="ava" src="/lev/lev.jpg" alt="Лев"><div><b style="font-size:16px">Портфель ще не підключено</b><div class="small muted">потрібен ключ «лише читання» або ручне введення</div></div></div></div>
   <h2>На чому стоятимуть поради</h2>
-  <div class="card">
-    <div class="kv"><span>Біткоїн частинами щотижня</span><span>$4 000 → $12 350</span></div>
+  <div class="card" style="padding:8px 16px">
+    <div class="kv" style="border-top:0"><span>Біткоїн частинами щотижня</span><span class="up">$4 000 → $12 350</span></div>
     <div class="kv"><span>Стоп на споті</span><span>не допомагає</span></div>
     <div class="kv"><span>Гонитва за тим, що вистрілило</span><span class="down">−99%</span></div>
-    <p class="tiny muted" style="border-top:1px solid rgba(216,182,106,.14);padding-top:8px;margin-top:6px">Наша перевірка: 664 монети, 2020–2026, старт у січні 2022.</p>
   </div>
+  <div class="tiny muted">Наша перевірка: 664 монети, 2020–2026.</div>
 </main>
 <main id="tab-zvirka" class="hide"></main>
 
-<div id="sheet" class="sheet"><div class="in" id="sheet-in"></div></div>
+<div id="shade" class="shade"><div class="sheet" id="sheet"></div></div>
 
 <nav>
-  <button data-tab="today" class="on">Сьогодні</button>
-  <button data-tab="signals">Сигнали</button>
-  <button data-tab="invest">Інвестиції</button>
-  <button data-tab="zvirka">Звірка</button>
+  <button data-tab="today" class="on">Сьогодні</button><button data-tab="signals">Сигнали</button><button data-tab="invest">Інвестиції</button><button data-tab="zvirka">Звірка</button>
 </nav>
 
 <script>
 (function(){
   try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();} }catch(e){}
-  var S=null,Z=null,frozen=false;
+  var S=null,Z=null,frozen=false,F='all',SF='all',OPEN={};
   var $=function(id){return document.getElementById(id)};
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-  function usd(x){if(x==null)return '—';var a=Math.abs(Math.round(x));return (x>=0?'+':'−')+'$'+String(a).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}
-  function cls(x){return x==null?'muted':(x>=0?'up':'down')}
+  function num(a){return String(Math.round(Math.abs(a))).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}
+  function usd(x){if(x==null)return '—';var r=Math.round(x);return (r>0?'+':(r<0?'−':''))+'$'+num(r)}
+  function cls(x){if(x==null)return 'muted';var r=Math.round(x);return r>0?'up':(r<0?'down':'')}
   function dec(){try{return JSON.parse(localStorage.getItem('lev_dec')||'{}')}catch(e){return{}}}
   function setDec(id,v){var d=dec();d[id]=v;try{localStorage.setItem('lev_dec',JSON.stringify(d))}catch(e){}}
-  function ava(sz){return '<img class="ava" src="/lev/lev.jpg" alt="Лев" style="width:'+sz+'px;height:'+sz+'px">'}
+  function all(){var a=[];S.groups.forEach(function(g){g.trades.forEach(function(t){a.push(t)})});return a}
+  function find(id){var r=null;all().forEach(function(t){if(t.sig_id===id)r=t});return r}
+  var FILT={all:function(){return true},plus:function(t){return t.now!=null&&Math.round(t.now)>0},minus:function(t){return t.now!=null&&Math.round(t.now)<0},soon:function(t){return t.soon},near:function(t){return t.near},
+            short:function(t){return t.dir==='SHORT'},long:function(t){return t.dir==='LONG'},both:function(t){return t.both}};
+  var FNAME={all:'Усі',plus:'У плюсі',minus:'У мінусі',soon:'Виходять сьогодні',near:'Біля стопа',short:'Шорти',long:'Лонги',both:'В обидва боки'};
 
-  function tradeHtml(t,full){
-    var h='<div class="row"><div class="col"><div style="font-size:14px;font-weight:700">'+esc(t.sym)+' · '+esc(t.dir_ua)+'</div><div class="small muted">'+esc(t.age)+'</div></div><div class="row" style="gap:10px"><div style="font-size:20px;font-weight:700;line-height:1.1" class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</div><span class="muted" aria-hidden="true">'+(full?'▴':'▾')+'</span></div></div>';
-    if(!full)return h;
-    if(t.pos!=null){h+='<div class="bar"><i style="width:'+(t.pos*100)+'%"></i><u style="left:'+(t.pos*100)+'%"></u></div><div class="row tiny muted"><span>стоп</span><span>зараз '+esc(t.price)+'</span><span>ціль</span></div>'}
-    h+='<div class="grid3 small"><div><div class="muted">зараз</div><b class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</b></div><div><div class="muted">до стопа ще</div><b>'+(t.to_stop==null?'—':'$'+Math.round(t.to_stop))+'</b></div><div><div class="muted">якщо стоп</div><b class="down">'+usd(t.if_stop)+'</b></div></div>';
-    h+='<div><div class="kv"><span>Відкрито</span><span>'+esc(t.opened)+' · '+esc(t.strat)+(t.seq?' №'+t.seq:'')+'</span></div><div class="kv"><span>Вхід</span><span>'+esc(t.entry)+'</span></div><div class="kv"><span>Стоп</span><span>'+esc(t.sl)+' · '+usd(t.if_stop)+'</span></div><div class="kv"><span>Ціль</span><span>'+esc(t.tp)+(t.tp_usd?' · '+esc(t.tp_usd):'')+'</span></div><div class="kv"><span>Ціна зараз</span><span>'+(t.price?esc(t.price):'не бачу')+'</span></div><div class="kv"><span>Вихід за часом</span><span>'+esc(t.exit_at)+'</span></div>';
-    var w=[t.pair,t.opp,t.rep?'повторний сигнал після стопа':null].filter(Boolean);if(w.length)h+='<div class="kv"><span>Застереження</span><span class="down">'+esc(w.join('; '))+'</span></div>';
-    h+='</div><div class="btn ghost" data-calm="'+esc(t.sig_id)+'" role="button" tabindex="0" style="margin-top:4px">Мені тривожно</div>';
-    return h;
-  }
+  function tile(t){var c=cls(t.now);return '<button class="tile '+c+'" data-trade="'+esc(t.sig_id)+'">'+(t.near?'<span class="f" style="background:var(--down)"></span>':(t.soon?'<span class="f" style="background:var(--warn)"></span>':''))+'<div class="n">'+esc(t.sym)+'</div><div class="v '+c+'">'+(t.now==null?'—':usd(t.now))+'</div></button>'}
 
   function renderToday(){
-    var s=S,h='';
-    h+='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(52)+'<div class="col"><div class="serif" style="font-size:22px;line-height:1.1">Лев</div><div class="small muted">ваш аналітик · стежить зараз</div></div></div>';
-    h+='<p style="margin-top:12px;font-size:14px;line-height:1.55">'+esc(s.lev)+'</p></div>';
-    if(s.attention.length){h+='<div class="card"><h2 style="margin-bottom:6px">Що потребує уваги</h2>';
-      s.attention.forEach(function(a){h+='<button class="att" data-sig="'+esc(a.sig_id||'')+'"><span>'+esc(a.text)+'</span>'+(a.sig_id?'<span style="color:var(--gold);font-size:16px" aria-hidden="true">→</span>':'')+'</button>'});h+='</div>'}
-    h+='<div class="grid3"><div class="stat"><div class="tiny muted">Зараз</div><b class="'+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'—')+'</b><div class="tiny muted">ще не зафіксовано</div></div>';
-    h+='<div class="stat"><div class="tiny muted">До стопів</div><b>'+(s.sums.n?'$'+Math.round(s.sums.to_stop).toLocaleString('uk'):'—')+'</b><div class="tiny muted">можна втратити від зараз</div></div>';
-    h+='<div class="stat"><div class="tiny muted">Якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b><div class="tiny muted">підсумок угод</div></div></div>';
-    
-    h+='<details class="tiny muted" style="margin-top:-8px"><summary style="cursor:pointer">Ціни на '+esc(s.price_at||'—')+(s.stale?' · дані застаріли':'')+' · як я рахую</summary><p style="margin-top:6px">Ризик $'+s.risk+' на угоду. '+esc(s.note)+(s.sums.unknown?' Без ціни зараз: '+s.sums.unknown+'.':'')+'</p></details>';
-    h+='<h2>Відкриті угоди · '+s.sums.n+'</h2>';
-    if(!s.groups.length){h+='<div class="card muted">Відкритих угод немає.</div>'}
-    s.groups.forEach(function(g,gi){
-      h+='<div class="card"><div class="row"><div class="col"><div style="font-size:15px;font-weight:700">'+esc(g.title)+'</div>'+(g.sub?'<div class="small muted">'+esc(g.sub)+'</div>':'')+'</div><div style="font-size:21px;font-weight:700" class="'+cls(g.now)+'">'+(g.now==null?'—':usd(g.now))+'</div></div>';
-      var open=window.__open&&window.__open[gi], list=open?g.trades:g.trades.slice(0,3);
-      list.forEach(function(t){h+='<div class="trade" data-row="'+esc(t.sig_id)+'">'+tradeHtml(t,window.__row===t.sig_id)+'</div>'});
-      if(g.trades.length>3){h+='<button class="btn plain" style="width:100%;margin-top:12px" data-more="'+gi+'">'+(open?'Згорнути':'Ще '+(g.trades.length-3))+'</button>'}
-      h+='</div>'});
+    var s=S,T=all(),h='';
+    h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div><img class="ava" src="/lev/lev.jpg" alt="Лев"></div>';
+    h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
+    h+='<div class="say"><span><b style="color:var(--gold)">Лев:</b> '+esc(s.lev)+'</span></div></div>';
+    if(s.attention.length){h+='<h2>Потребує уваги</h2>';
+      s.attention.forEach(function(a){h+='<button class="att '+esc(a.level)+'" data-filter="'+esc(a.filter)+'"><span class="dot '+esc(a.level)+'"></span><span><b>'+esc(a.title)+'</b><span class="d">'+esc(a.detail)+'</span></span><span class="chev" aria-hidden="true">›</span></button>'})}
+    h+='<h2 id="trades">Відкриті угоди</h2>';
+    if(!T.length){h+='<div class="card empty">Відкритих угод немає.</div>';$('tab-today').innerHTML=h;return}
+    var order=['all','plus','minus','soon','near'];if(order.indexOf(F)<0)order.push(F);
+    h+='<div class="chips">';order.forEach(function(k){var n=T.filter(FILT[k]).length;if(k!=='all'&&!n&&k!==F)return;h+='<button class="chip'+(F===k?' on':'')+'" data-f="'+k+'">'+FNAME[k]+' · '+n+'</button>'});h+='</div>';
+    if(F!=='all'){var L=T.filter(FILT[F]).sort(function(a,b){return (a.now==null)-(b.now==null)||(a.now-b.now)});
+      h+='<div class="grp">'+(L.length?'<div class="tiles" style="padding-top:14px">'+L.map(tile).join('')+'</div>':'<div class="empty">Таких угод зараз немає.</div>')+'</div>'}
+    else{s.groups.forEach(function(g,gi){var k=g.trades.filter(function(t){return t.now!=null}),p=k.filter(function(t){return Math.round(t.now)>0}).length,m=k.filter(function(t){return Math.round(t.now)<0}).length,o=OPEN[gi];
+      h+='<div class="grp"><button data-g="'+gi+'"><span><div class="t">'+esc(g.title)+'</div><div class="s">'+p+' у плюсі · '+m+' у мінусі</div><div class="split"><i style="width:'+(g.n?100*p/g.n:0)+'%"></i><u style="width:'+(g.n?100*m/g.n:0)+'%"></u></div></span><span class="sum '+cls(g.now)+'">'+(g.now==null?'—':usd(g.now))+'</span><span class="chev" style="margin-left:0" aria-hidden="true">'+(o?'▴':'▾')+'</span></button>';
+      if(o)h+='<div class="tiles">'+g.trades.map(tile).join('')+'</div>';h+='</div>'})}
+    h+='<details><summary>Як я рахую</summary><p class="small muted">Ціни на '+esc(s.price_at||'—')+(s.stale?' (застаріли)':'')+'. Ризик $'+s.risk+' на угоду. '+esc(s.note)+(s.sums.unknown?' Без ціни зараз: '+s.sums.unknown+'.':'')+' Червона крапка на плитці — угода біля стопа, жовта — виходить сьогодні.</p></details>';
     $('tab-today').innerHTML=h;
   }
 
-  function sigCard(x){
-    var d=dec()[x.sig_id];
-    return '<button class="card" data-open="'+esc(x.sig_id)+'" style="border:0;width:100%;text-align:left;cursor:pointer"><div class="row"><div class="col"><div class="tiny" style="font-weight:700;letter-spacing:.08em;color:'+(x.strat==='СВІНГ'?'#8FB4E8':'#E8D08F')+'">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.ago)+'</div><div style="font-size:18px;font-weight:700">'+esc(x.sym)+' · '+esc(x.dir_ua)+'</div></div><div class="col" style="align-items:flex-end;gap:6px"><span class="pill '+(x.open?'up':'')+'">'+esc(x.status)+'</span>'+(d?'<span class="tiny muted">'+(d==='took'?'ви взяли':'ви пропустили')+'</span>':'')+'</div></div><p class="small" style="margin-top:8px">'+esc(x.lev.title)+'</p></button>';
+  function openTrade(id){
+    var t=find(id);if(!t)return;frozen=true;
+    var h='<div class="grab"></div><div class="row"><div><div class="tiny muted">'+esc(t.strat)+(t.seq?' №'+t.seq:'')+' · '+esc(t.age)+'</div><h3>'+esc(t.sym)+' · '+esc(t.dir_ua)+'</h3></div><div style="font-size:30px;font-weight:800" class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</div></div>';
+    if(t.near)h+='<div class="note warn" style="box-shadow:inset 3px 0 0 var(--down)">Біля стопа: до нього '+String(t.dist_pct).replace('.',',')+'%.</div>';
+    if(t.soon)h+='<div class="note warn">Сьогодні виходить за часом: '+esc(t.exit_at)+'. Закрийте за ринком.</div>';
+    h+='<div class="three"><div><div class="tiny muted">зараз</div><b class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</b></div><div><div class="tiny muted">до стопа ще</div><b>'+(t.to_stop==null?'—':'$'+num(t.to_stop))+'</b></div><div><div class="tiny muted">якщо стоп</div><b class="down">'+usd(t.if_stop)+'</b></div></div>';
+    if(t.pos!=null)h+='<div class="bar"><i style="width:'+(t.pos*100)+'%"></i><u style="left:'+(t.pos*100)+'%"></u></div><div class="row tiny muted" style="margin-bottom:8px"><span>стоп</span><span>ціль</span></div>';
+    h+='<div class="kv"><span>Ціна зараз</span><span>'+(t.price?esc(t.price):'не бачу')+'</span></div><div class="kv"><span>Вхід</span><span>'+esc(t.entry)+'</span></div><div class="kv"><span>Стоп</span><span class="down">'+esc(t.sl)+'</span></div><div class="kv"><span>Ціль</span><span class="up">'+esc(t.tp)+(t.tp_usd?' · '+esc(t.tp_usd):'')+'</span></div><div class="kv"><span>Відкрито</span><span>'+esc(t.opened)+'</span></div><div class="kv"><span>Вихід за часом</span><span>'+esc(t.exit_at)+'</span></div>';
+    var w=[t.pair,t.opp,t.rep?'повторний сигнал після стопа':null].filter(Boolean);if(w.length)h+='<div class="note warn">'+esc(w.join('. '))+'</div>';
+    h+='<div class="two"><button class="btn" data-calm="'+esc(t.sig_id)+'">Мені тривожно</button><button class="btn ghost" data-close="1">Закрити</button></div>';
+    show(h);
   }
+  function openCalm(id){
+    var t=find(id);if(!t)return;
+    var h='<div class="grab"></div><div class="row" style="justify-content:flex-start"><img class="ava" src="/lev/lev.jpg" alt="Лев"><div><h3>'+esc(t.sym)+' · '+esc(t.dir_ua)+'</h3><div class="tiny muted">знімок на '+esc(S.price_at||'—')+' · цифри не миготять</div></div></div>';
+    if(t.now==null)h+='<div class="note">Ціну цієї монети я зараз не бачу, тому суми не покажу. Стоп за сигналом: '+esc(t.sl)+'.</div>';
+    else h+='<div class="note" style="font-size:15px">До стопа <b>'+String(t.dist_pct).replace('.',',')+'%</b>. Стоп на '+esc(t.sl)+', ціна '+esc(t.price)+'.</div><div class="three"><div><div class="tiny muted">зараз</div><b class="'+cls(t.now)+'">'+usd(t.now)+'</b></div><div><div class="tiny muted">до стопа ще</div><b>$'+num(t.to_stop)+'</b></div><div><div class="tiny muted">якщо стоп</div><b class="down">'+usd(t.if_stop)+'</b></div></div>';
+    h+='<div class="note" style="font-size:15px"><b>Ваш план:</b> угода закривається, коли настане одне з трьох — стоп '+esc(t.sl)+', ціль '+esc(t.tp)+' або час ('+esc(t.exit_at)+').'+(t.now!=null?' <b>Зараз жодна умова не настала.</b>':'')+'</div>';
+    h+='<details><summary>На чому це базується</summary><div class="kv"><span>Ціна</span><span>'+esc(t.price||'немає')+' · '+esc(S.price_at||'—')+'</span></div><div class="kv"><span>Вхід і стоп</span><span>'+esc(t.entry)+' · '+esc(t.sl)+'</span></div><div class="kv"><span>Схожі рухи на історії</span><span>ще не пораховано</span></div><p class="tiny muted" style="margin-top:6px">'+esc(S.note)+'</p></details>';
+    h+='<div class="two"><button class="btn ghost" data-trade="'+esc(t.sig_id)+'">Назад до угоди</button><button class="btn" data-close="1">Згорнути</button></div>';
+    show(h);
+  }
+
+  function lvl(x){return x.lev.cautions.length?'yellow':(x.lev.calm?'':'grey')}
   function renderSignals(){
-    var h='<h2>Сигнали за 48 годин · '+S.signals.length+'</h2>';
-    if(!S.signals.length)h+='<div class="card muted">За останні дві доби сигналів не було.</div>';
-    S.signals.forEach(function(x){h+=sigCard(x)});
+    var A=S.signals,h='',SFN={all:'Усі',open:'Відкриті',warn:'Із застереженням',clean:'Чисті'};
+    var SFF={all:function(){return true},open:function(x){return x.open},warn:function(x){return x.lev.cautions.length>0},clean:function(x){return x.lev.calm&&!x.lev.cautions.length}};
+    h+='<div class="chips">';Object.keys(SFN).forEach(function(k){h+='<button class="chip'+(SF===k?' on':'')+'" data-sf="'+k+'">'+SFN[k]+' · '+A.filter(SFF[k]).length+'</button>'});h+='</div>';
+    var L=A.filter(SFF[SF]),day='';if(!L.length)h+='<div class="card empty">Таких сигналів за 48 годин немає.</div>';
+    L.forEach(function(x){var d=x.at.slice(0,5);if(d!==day){day=d;h+='<div class="day">'+esc(d)+'</div>'}
+      var st=x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')),me=dec()[x.sig_id];
+      h+='<button class="sig" data-sigid="'+esc(x.sig_id)+'"><span class="dot '+lvl(x)+'"></span><span><b>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</b><div class="m">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at.slice(6))+(me?' · '+(me==='took'?'взяла':'пропустила'):'')+'</div></span><span class="tag '+st+'">'+esc(x.status)+'</span></button>'});
+    h+='<details><summary>Що означають кольори</summary><p class="small muted">Зелена крапка — чистий сигнал на спокійній монеті. Жовта — є застереження. Сіра — звичайний сигнал без особливих плюсів чи мінусів.</p></details>';
     $('tab-signals').innerHTML=h;
   }
   function openSignal(id){
-    var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;
-    var h='<button class="btn plain" data-close="1" style="align-self:flex-start">← Назад</button>';
-    h+='<div class="card"><div class="row"><div class="col"><div class="tiny" style="font-weight:700;letter-spacing:.08em;color:#8FB4E8">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><div style="font-size:22px;font-weight:700">'+esc(x.sym)+' · '+esc(x.dir_ua)+'</div></div><span class="pill '+(x.open?'up':'')+'">'+esc(x.status)+'</span></div>';
-    h+='<div class="grid3" style="margin-top:12px"><div class="box"><div class="tiny muted">Вхід</div><b style="font-size:15px">'+esc(x.entry)+'</b></div><div class="box"><div class="tiny muted">Стоп · −$'+S.risk+'</div><b style="font-size:15px" class="down">'+esc(x.sl)+'</b></div><div class="box"><div class="tiny muted">Ціль · '+esc(x.tp_usd)+'</div><b style="font-size:15px" class="up">'+esc(x.tp)+'</b></div></div></div>';
-    h+='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(44)+'<div class="serif" style="font-size:21px;line-height:1.15">'+esc(x.lev.title)+'</div></div><p style="margin-top:12px;font-size:14px;line-height:1.6">'+esc(x.lev.text)+'</p><p style="margin-top:10px;font-size:14px;line-height:1.6">'+esc(x.lev.after)+'</p>';
-    h+='<div style="border-top:1px solid rgba(216,182,106,.14);margin-top:12px;padding-top:10px"><h2 style="margin-bottom:4px">На що я дивився</h2>';
-    x.lev.facts.forEach(function(f){h+='<div class="kv"><span>'+esc(f[0])+'</span><span>'+esc(f[1])+'</span></div>'});h+='</div></div>';
+    var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;frozen=true;
+    var h='<div class="grab"></div><div class="row"><div><div class="tiny muted">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><h3>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</h3></div><span class="tag '+(x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')))+'">'+esc(x.status)+'</span></div>';
+    h+='<div class="three"><div><div class="tiny muted">вхід</div><b>'+esc(x.entry)+'</b></div><div><div class="tiny muted">стоп · −$'+S.risk+'</div><b class="down">'+esc(x.sl)+'</b></div><div><div class="tiny muted">ціль · '+esc(x.tp_usd)+'</div><b class="up">'+esc(x.tp)+'</b></div></div>';
+    h+='<div class="row" style="justify-content:flex-start;margin-top:4px"><img class="ava" src="/lev/lev.jpg" alt="Лев"><b style="font-size:16px;line-height:1.3">'+esc(x.lev.title)+'</b></div>';
+    if(x.lev.cautions.length)x.lev.cautions.forEach(function(c){h+='<div class="note warn">'+esc(c)+'</div>'});
+    h+='<div class="note">'+esc(x.lev.after)+'</div>';
+    h+='<details><summary>На що я дивився</summary>';x.lev.facts.forEach(function(f){h+='<div class="kv"><span>'+esc(f[0])+'</span><span>'+esc(f[1])+'</span></div>'});h+='</details>';
     var d=dec()[x.sig_id];
-    h+='<div class="small muted">Рішення за вами. Лев нічого не відкриває сам. Позначка зберігається лише на цьому телефоні.</div><div class="grid2"><button class="btn'+(d==='took'?'':' plain')+'" data-dec="took" data-id="'+esc(x.sig_id)+'">Взяла</button><button class="btn'+(d==='skip'?'':' plain')+'" data-dec="skip" data-id="'+esc(x.sig_id)+'">Пропустила</button></div>';
-    showSheet(h);
+    h+='<div class="two"><button class="btn'+(d==='took'?'':' ghost')+'" data-dec="took" data-id="'+esc(x.sig_id)+'">Взяла</button><button class="btn'+(d==='skip'?'':' ghost')+'" data-dec="skip" data-id="'+esc(x.sig_id)+'">Пропустила</button></div><div class="tiny muted" style="margin-top:8px;text-align:center">Рішення за вами. Позначка зберігається лише на цьому телефоні.</div>';
+    show(h);
   }
-  function openCalm(id){
-    var t=null;S.groups.forEach(function(g){g.trades.forEach(function(q){if(q.sig_id===id)t=q})});if(!t)return;
-    frozen=true;
-    var h='<div class="row" style="justify-content:flex-start">'+ava(48)+'<div class="col"><div class="serif" style="font-size:24px;line-height:1.1">'+esc(t.sym)+' · '+esc(t.dir_ua)+'</div><div class="small muted">знімок на '+esc(S.price_at||'—')+' · цифри не миготять</div></div></div>';
-    h+='<div class="card gold" style="display:flex;flex-direction:column;gap:14px">';
-    if(t.now==null){h+='<p style="font-size:15px;line-height:1.6">Ціну цієї монети я зараз не бачу, тому суми не покажу. Стоп за сигналом: '+esc(t.sl)+'.</p>'}
-    else{h+='<p style="font-size:15px;line-height:1.6">До вашого стопа '+String(t.dist_pct).replace('.',',')+'%. Стоп стоїть на '+esc(t.sl)+', ціна зараз '+esc(t.price)+'.</p>';
-      h+='<div class="grid3"><div class="box"><div class="tiny muted">Зараз</div><b style="font-size:18px" class="'+cls(t.now)+'">'+usd(t.now)+'</b></div><div class="box"><div class="tiny muted">До стопа ще</div><b style="font-size:18px">$'+Math.round(t.to_stop)+'</b></div><div class="box"><div class="tiny muted">Якщо стоп</div><b style="font-size:18px" class="down">'+usd(t.if_stop)+'</b></div></div>'}
-    h+='<p style="font-size:15px;line-height:1.6">У вашому плані ця угода закривається в одному з трьох випадків: стоп '+esc(t.sl)+', ціль '+esc(t.tp)+' або час ('+esc(t.exit_at)+'). '+(t.now!=null?'Жодна з цих умов зараз не настала.':'')+'</p>';
-    if(t.opp||t.pair||t.rep){h+='<p class="small" style="color:var(--down)">Застереження з картки: '+esc([t.pair,t.opp,t.rep?'повторний сигнал після стопа':null].filter(Boolean).join('; '))+'.</p>'}
-    h+='<p class="small muted">'+esc(S.note)+'</p></div>';
-    h+='<div class="grid2"><button class="btn" data-plan="'+esc(t.sig_id)+'">Показати мій план</button><button class="btn plain" data-close="1">Згорнути</button></div>';
-    h+='<div class="card"><h2 style="margin-bottom:4px">На чому це базується</h2><div class="kv"><span>Ціна</span><span>'+esc(t.price||'немає')+' · '+esc(S.price_at||'—')+'</span></div><div class="kv"><span>Вхід і стоп</span><span>'+esc(t.entry)+' · '+esc(t.sl)+', із сигналу</span></div><div class="kv"><span>Схожі рухи на історії</span><span>ще не пораховано</span></div><p class="tiny muted" style="border-top:1px solid rgba(216,182,106,.14);padding-top:8px;margin-top:6px">Частоту «ціна повернулась» покажу тут, коли вона буде порахована з описом, що вважали схожим рухом.</p></div>';
-    showSheet(h);
-  }
-  function showSheet(h){$('sheet-in').innerHTML=h;$('sheet').classList.add('on');$('sheet').scrollTop=0}
-  function closeSheet(){$('sheet').classList.remove('on');frozen=false}
+  function show(h){$('sheet').innerHTML=h;$('shade').classList.add('on');$('sheet').scrollTop=0}
+  function hide(){$('shade').classList.remove('on');frozen=false;render()}
 
   function renderZvirka(){
-    if(!Z){$('tab-zvirka').innerHTML='<div class="card muted">Завантаження…</div>';return}
-    var h='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(44)+'<div class="serif" style="font-size:21px;line-height:1.15">Що обіцяв і що вийшло</div></div><p style="margin-top:12px;font-size:14px;line-height:1.6">Тут живий рахунок сигналів Офісу. Ризик $'+Z.risk+' на угоду, без комісії. Відкриті угоди пораховані за поточною ціною.</p></div>';
-    var prom={'СВІНГ':'на історії: близько +$1,30 на угоду, половина угод — стоп','ІНТРАДЕЙ':'на історії: близько +$1,00 на угоду'};
-    Z.rows.forEach(function(r){var n=r.sl+r.tp+r.time;
-      h+='<div class="card"><div class="row"><div class="col"><div style="font-size:15px;font-weight:700">'+esc(r.name)+'</div><div class="small muted">з '+esc(r.since||'—')+'</div></div><div style="font-size:21px;font-weight:700" class="'+cls(r.closed_usd)+'">'+usd(r.closed_usd)+'</div></div>';
-      h+='<p class="small muted" style="margin:6px 0 8px">'+esc(prom[r.name]||'')+'</p>';
-      h+='<div class="kv"><span>Закрито угод</span><span>'+n+(n?' · на угоду '+usd(r.closed_usd/n):'')+'</span></div><div class="kv"><span>Стоп / ціль / за часом</span><span>'+r.sl+' / '+r.tp+' / '+r.time+'</span></div>';
-      if(r.time_unknown)h+='<div class="kv"><span>За часом без ціни виходу</span><span>'+r.time_unknown+' (не враховані)</span></div>';
-      h+='<div class="kv"><span>Відкрито зараз</span><span>'+r.open+' · <b class="'+cls(r.open_usd)+'">'+usd(r.open_usd)+'</b>'+(r.open_unknown?' · без ціни '+r.open_unknown:'')+'</span></div></div>'});
-    h+='<div class="tiny muted">Оновлено '+esc(Z.updated)+'. Повна звірка з вердиктами — раз на тиждень.</div>';
+    if(!Z){$('tab-zvirka').innerHTML='<div class="card empty">Завантаження…</div>';return}
+    var prom={'СВІНГ':'+$1,30','ІНТРАДЕЙ':'+$1,00'},h='<h2>Обіцяв і вийшло</h2>';
+    Z.rows.forEach(function(r){var n=r.sl+r.tp+r.time,per=n?r.closed_usd/n:null;
+      h+='<div class="card"><div class="row"><div><b style="font-size:16px">'+esc(r.name)+'</b><div class="tiny muted">з '+esc((r.since||'—').slice(0,5))+' · закрито '+n+'</div></div><div style="font-size:26px;font-weight:800" class="'+cls(r.closed_usd)+'">'+usd(r.closed_usd)+'</div></div>';
+      h+='<div class="three"><div><div class="tiny muted">обіцяв на угоду</div><b>'+prom[r.name]+'</b></div><div><div class="tiny muted">вийшло на угоду</div><b class="'+cls(per)+'">'+(per==null?'—':usd(per))+'</b></div><div><div class="tiny muted">відкрито '+r.open+'</div><b class="'+cls(r.open_usd)+'">'+usd(r.open_usd)+'</b></div></div>';
+      h+='<details><summary>Подробиці</summary><div class="kv"><span>Стоп / ціль / за часом</span><span>'+r.sl+' / '+r.tp+' / '+r.time+'</span></div>'+(r.time_unknown?'<div class="kv"><span>За часом без ціни виходу</span><span>'+r.time_unknown+' (не враховані)</span></div>':'')+(r.open_unknown?'<div class="kv"><span>Відкриті без ціни</span><span>'+r.open_unknown+'</span></div>':'')+'</details></div>'});
+    h+='<div class="tiny muted">Ризик $'+Z.risk+' на угоду, без комісії. Оновлено '+esc(Z.updated)+'.</div>';
     $('tab-zvirka').innerHTML=h;
   }
 
@@ -197,16 +221,18 @@ p{margin:0}
   function loadZ(){fetch('/api/lev/zvirka',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){Z=j;renderZvirka()}}).catch(function(){})}
 
   document.addEventListener('click',function(e){
-    var el=e.target.closest('[data-tab],[data-calm],[data-sig],[data-row],[data-more],[data-open],[data-close],[data-dec],[data-plan]');if(!el)return;
-    if(el.dataset.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==el.dataset.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(el.dataset.tab==='zvirka')loadZ();window.scrollTo(0,0)}
-    else if(el.dataset.more!=null){window.__open=window.__open||{};window.__open[el.dataset.more]=!window.__open[el.dataset.more];renderToday()}
-    else if(el.dataset.calm){openCalm(el.dataset.calm)}
-    else if(el.dataset.row){window.__row=(window.__row===el.dataset.row?null:el.dataset.row);renderToday()}
-    else if(el.dataset.sig){window.__row=el.dataset.sig;window.__open={0:true,1:true,2:true,3:true};renderToday();var r=document.querySelector('[data-row="'+el.dataset.sig+'"]');if(r)r.scrollIntoView({block:'center'})}
-    else if(el.dataset.open){openSignal(el.dataset.open)}
-    else if(el.dataset.plan){closeSheet();openSignal(el.dataset.plan)}
-    else if(el.dataset.dec){setDec(el.dataset.id,el.dataset.dec);renderSignals();openSignal(el.dataset.id)}
-    else if(el.dataset.close){closeSheet();render()}
+    if(e.target.id==='shade'){hide();return}
+    var el=e.target.closest('[data-tab],[data-f],[data-sf],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
+    if(d.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==d.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(d.tab==='zvirka')loadZ();window.scrollTo(0,0)}
+    else if(d.f){F=d.f;renderToday()}
+    else if(d.sf){SF=d.sf;renderSignals()}
+    else if(d.filter){F=d.filter;renderToday();var a=$('trades');if(a)a.scrollIntoView({behavior:'smooth',block:'start'})}
+    else if(d.g!=null){OPEN[d.g]=!OPEN[d.g];renderToday()}
+    else if(d.calm){openCalm(d.calm)}
+    else if(d.trade){openTrade(d.trade)}
+    else if(d.sigid){openSignal(d.sigid)}
+    else if(d.dec){setDec(d.id,d.dec);openSignal(d.id)}
+    else if(d.close){hide()}
   });
   if('serviceWorker' in navigator){navigator.serviceWorker.register('/lev/sw.js',{scope:'/lev/'}).catch(function(){})}
   load();setInterval(load,15000);
