@@ -6,8 +6,8 @@
 Записуємо лише коли разом виконано: B «весь ринок» (≥50% монет зробили свій злив за останні 6 год), L «денний рівень» (проколото денний свінг-мінімум останніх 90 діб, вхід уже вище),
 T «біткоїн підтвердив» (BTC дав своє ПОВЕРНЕННЯ за останні 6 год). kind = BNC_U, якщо вчорашнє денне закриття BTC вище середньої за 200 діб (єдина комбінація, плюсова в трьох періодах), інакше BNC_N (для порівняння).
 ДОДАНО 27.11.2026 (журнал BH, BK, BJ; рішення власниці «хочу такий сигнал, і щоб записувався в тихий журнал; заходити чи ні — вирішую сама»): при ПОВЕРНЕННІ, коли BTC підтвердив,
-  рахуємо K (тести того ж дна за 7 діб, ±1 ATR) і падіння від 7-денного максимуму: K≥2 і >20% → сигнал «ВІДСКОК» (BN|…, картка з позначкою «на перевірці»; вимкнути BNC_LIVE=0) + запис BNC_S3;
-  K=1 і >20% → тихо BNC_S2; K≥1 і 10–20% → тихо BNC_W. Ордерів немає.
+  рахуємо K (тести того ж дна за 7 діб, ±1 ATR) і падіння від 7-денного максимуму: падіння >20% і K≥1 → сигнал «ВІДСКОК» (BN|…, картка з позначкою «на перевірці»; вимкнути BNC_LIVE=0) + запис BNC_S3 (K≥2, сильний) або BNC_S2 (K=1, добрий);
+  K≥1 і 10–20% (слабкий) → лише тихо BNC_W. Ордерів немає.
 Відмінність від перевірки: ширина рахується по 42 крипто-монетах Офісу (у перевірці — 72). Вимкнути: BNC_SHADOW=0."""
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _deep(db: str, sym: str, b, f: int, e: float, sl: float, now: float) -> List
         sid = f"{kind}|{sym}|LONG|{int(bar)}"
         _execute(db, "INSERT INTO sw_shadow(sid, kind, symbol, direction, bar_ts, entry, sl, tp, created_ts) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", (sid, kind, sym, "LONG", bar, e, sl, tp, now))
         print(f"[bnc-shadow] {sid} entry={e:.6g} sl={sl:.6g} tp={tp:.6g} тестів дна={k} падіння={drop:.1f}% (тихий журнал)", flush=True); out.append(sid)
-    if kind == "BNC_S3" and live_enabled():
+    if kind in ("BNC_S3", "BNC_S2") and live_enabled():          # сильні (2+ тести дна) і добрі (1 тест) — власниці; слабкі (падіння 10–20%) — лише тихо (її рішення 27.11.2026)
         sid = signal(db, sym, b, f, e, sl, tp, k, drop, now)
         if sid: out.append(sid)
     return out
@@ -103,10 +103,10 @@ def signal(db: str, sym: str, b, f: int, e: float, sl: float, tp: float, k: int,
     store.init(db); te = float(b["t"][-1]) + PER; sid = f"BN|{sym}|LONG|{int(te)}"
     if _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id = ?", (sid,)) or _fetchone(db, "SELECT 1 FROM br_test_signal WHERE sig_id LIKE 'BN|%' AND symbol = ? AND status IN ('NEW', 'SENT') LIMIT 1", (sym,)): return None
     nxt = _fetchone(db, "SELECT COALESCE(MAX(seq), 0) + 1 FROM br_test_signal WHERE sig_id LIKE 'BN|%'"); seq = int(nxt[0]) if nxt else 1
-    word = "двічі" if k == 2 else f"{k} рази" if k in (3, 4) else f"{k} разів"
+    word = "раз" if k == 1 else "двічі" if k == 2 else f"{k} рази" if k in (3, 4) else f"{k} разів"
     hyp = {"strategy": "BOUNCE", "tf_s": 900, "hold": "до 2 діб", "tests": k, "drop_pct": round(drop, 1),
            "why": f"дно тестували {word}, і воно встояло · падіння {drop:.0f}% за тиждень · біткоїн розвернувся".replace(".", ","),
-           "note": "Нове правило, на перевірці. На історії 5 з 10 у плюс."}
+           "note": "Нове правило, на перевірці. На історії " + ("5 з 10 у плюс." if k >= 2 else "4–5 з 10 у плюс.")}
     sw = _fetchone(db, "SELECT seq FROM br_test_signal WHERE sig_id LIKE 'SW|%' AND symbol = ? AND direction = 'SHORT' AND status = 'SENT' ORDER BY created_ts DESC LIMIT 1", (sym,))
     if sw: hyp["opp"] = f"Шорт СВІНГ №{int(sw[0])} по {sym.replace('USDT', '')} не закривати — у нього свій стоп"
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
