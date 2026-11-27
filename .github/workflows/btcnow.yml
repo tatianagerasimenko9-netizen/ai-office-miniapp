@@ -46,3 +46,4 @@ jobs:
           git add docs/handoff/br-profitability/data/now_*.csv
           git commit -m "btcnow: свіжі свічки (автоматично)" || exit 0
           for i in 1 2 3; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep 5; done
+# rerun 2026-11-27T11:38:37Z
