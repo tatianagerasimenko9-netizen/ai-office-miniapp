@@ -33,11 +33,12 @@ jobs:
         run: |
           D=docs/handoff/br-profitability
           python3 $D/strategy_search/bounce_lab.py candles $D/data/bounce_trades.csv | tee $D/bounce_out.txt; gzip -f $D/data/bounce_trades.csv
+          TF=900 python3 $D/strategy_search/bounce_lab.py candles $D/data/bounce15_trades.csv | tee $D/bounce15_out.txt; gzip -f $D/data/bounce15_trades.csv
       - name: Save
         shell: bash
         run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-          git add docs/handoff/br-profitability/bounce_out.txt docs/handoff/br-profitability/data/bounce_trades.csv.gz
+          git add docs/handoff/br-profitability/bounce_out.txt docs/handoff/br-profitability/bounce15_out.txt docs/handoff/br-profitability/data/bounce_trades.csv.gz docs/handoff/br-profitability/data/bounce15_trades.csv.gz
           git commit -m "bounce: відскок після зливу (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
 
