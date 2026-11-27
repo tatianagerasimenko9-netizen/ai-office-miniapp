@@ -79,15 +79,15 @@ if old is not None: E = E.merge(old, on=["sym", "te"], how="left")
 for k in "BLTDU":
     if k not in E: E[k] = -1
     E[k] = E[k].fillna(-1).astype(int)
-y = pd.to_datetime(E.te, unit="s").dt.year; E["P_"] = np.where(y <= 2021, "P1", np.where(y <= 2023, "P2", "P3")); E["grp"] = np.where(E.sym.isin(S42), "S", "C"); E["usd"] = 10 * (E.r3 - 0.10 / E.sp); E["usd2"] = 10 * (E.r2 - 0.10 / E.sp); E.to_csv(OUT, index=False)
+y = pd.to_datetime(E.te, unit="s").dt.year; E["P_"] = np.where(y <= 2021, "P1", np.where(y <= 2023, "P2", "P3")); OTH = set(os.environ.get("OTH", "").split(",")) - {""}; E["grp"] = np.where(E.sym.isin(S42), "S", np.where(E.sym.isin(OTH) | (not OTH), "C", "W"))   # W — «широка» група: монети поза 72 (перевірка 27.11.2026: «взяти всі монети ф'ючерсів»); E["usd"] = 10 * (E.r3 - 0.10 / E.sp); E["usd2"] = 10 * (E.r2 - 0.10 / E.sp); E.to_csv(OUT, index=False)
 print(f"\nвходів LONG: {len(E):,}; пошук (42 монети): {(E.grp=='S').sum():,}; контроль (30 інших): {(E.grp=='C').sum():,}. База: ${E.usd.mean():+.2f} на угоду (ціль 3R), виграшних {100*(E.r3>0).mean():.0f}%")
-CELLS = [(g, p) for g in "SC" for p in ("P1", "P2", "P3")]
+GR = [g for g in "SCW" if (E.grp == g).any()]; CELLS = [(g, p) for g in GR for p in ("P1", "P2", "P3")]
 def cells(m, col="usd"):
     out = []
     for g, p in CELLS:
         x = E[m & (E.grp == g) & (E.P_ == p)]; out.append((len(x), x[col].mean() if len(x) else np.nan, (x.r3 > 0).mean() if len(x) else np.nan))
     return out
-def fmt(cs): return " | ".join(f"{v:+5.2f} ({n})" if n else "   —  " for n, v, _ in cs[:3]) + "  ||  " + " | ".join(f"{v:+5.2f} ({n})" if n else "   —  " for n, v, _ in cs[3:])
+def fmt(cs): return "  ||  ".join(" | ".join(f"{v:+5.2f} ({n})" if n else "   —  " for n, v, _ in cs[i:i + 3]) for i in range(0, len(cs), 3))
 def passed(cs, nmin=100): return all(n >= nmin and v > 0 for n, v, _ in cs)
 print("\n######## 1. КОЖНА ОЗНАКА ОКРЕМО — $ на угоду (ціль 3R, комісія 0,10%), у дужках кількість.   ПОШУК: P1 | P2 | P3   ||   КОНТРОЛЬ: P1 | P2 | P3")
 tested = found = 0; SINGLE = []
@@ -117,3 +117,12 @@ for mn, k1, i1, k2, i2, _ in sorted(PASS, key=lambda x: -x[0])[:12]:
         if passed(cs, 60): f3 += 1; P3_.append((min(v for _, v, _ in cs), f"{NAMES[k1][0]}: {NAMES[k1][1][i1]} + {NAMES[k2][0]}: {NAMES[k2][1][i2]} + {NAMES[k3][0]}: {NAMES[k3][1][i3]}", cs))
 for mn, lab, cs in sorted(P3_, key=lambda x: -x[0])[:20]: print(f"  {lab}\n      {fmt(cs)}   найслабша клітинка {mn:+.2f}")
 print(f" трійок перевірено {t3}, пройшли: {f3} (поріг n ≥ 60)")
+print("\n######## 4. ВАРІАНТИ, ЗАПИСАНІ ЗАЗДАЛЕГІДЬ (27.11.2026, до перегляду результатів): групи " + " || ".join({"S": "пошук 42", "C": "контроль 30", "W": "широка група"}[g] for g in GR))
+PRE = [("СУВОРА: дно ≥2 тестів + падіння >20% + BTC", (E.K == 2) & (E.F == 2) & (E["T"] == 1)), ("М'ЯКА: дно ≥1 тесту + падіння ≥10% + BTC", (E.K >= 1) & (E.F >= 1) & (E["T"] == 1)),
+       ("М'ЯКА + старий рівень (3 міс+)", (E.K >= 1) & (E.F >= 1) & (E["T"] == 1) & (E.Y >= 1)), ("старий рівень (3 міс+) + BTC", (E.Y >= 1) & (E["T"] == 1)), ("старий рівень (3 міс+) + дно ≥1 тесту", (E.Y >= 1) & (E.K >= 1)),
+       ("річний рівень + BTC", (E.Y == 3) & (E["T"] == 1)), ("старий рівень (3 міс+) + падіння ≥10% + BTC", (E.Y >= 1) & (E.F >= 1) & (E["T"] == 1)), ("падіння ≥10% + BTC", (E.F >= 1) & (E["T"] == 1))]
+MJ = E.sym.isin(["BTCUSDT", "ETHUSDT"])
+for lab, m in PRE:
+    cs = cells(m); x = E[m]; d = x.groupby((x.te // 86400).astype(int)).usd.sum()
+    print(f"  {lab}\n      {fmt(cs)}" + ("   <<< ПЛЮС У ВСІХ КЛІТИНКАХ" if passed(cs, 60) else ""))
+    if len(x): print(f"      разом {len(x)} угод за {len(d)} днів, на угоду {x.usd.mean():+.2f}$ (ціль 2R: {x.usd2.mean():+.2f}$), виграшних {100*(x.r3>0).mean():.0f}%, стоп {x.sp.median():.1f}%; без 5 найкращих днів {x[~(x.te // 86400).astype(int).isin(d.nlargest(5).index)].usd.mean():+.2f}$; BTC+ETH: {E[m & MJ].usd.mean() if (m & MJ).any() else float('nan'):+.2f}$ (n={int((m & MJ).sum())}); решта: {E[m & ~MJ].usd.mean():+.2f}$; по роках: " + ", ".join(f"{int(k)}: {v.usd.sum():+.0f} ({len(v)})" for k, v in x.groupby(pd.to_datetime(x.te, unit='s').dt.year)))
