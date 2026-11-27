@@ -169,9 +169,9 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
     if calm_line(row): L.append(calm_line(row))
-    if hy.get("opp"): L.append("⚠️ " + opp_html(hy))
-    if hy.get("pair"): L.append("⚠️ " + html.escape(str(hy["pair"])))
-    if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))
+    if hy.get("opp"): L.append("⚠️ " + linkify(hy["opp"], hy))
+    if hy.get("pair"): L.append("⚠️ " + linkify(hy["pair"], hy))
+    if hy.get("rep"): L.append("⚠️ " + linkify(hy["rep"], hy))
     n = (hy.get("cluster") or {}).get("n") or 0
     if n:
         syms = ", ".join((hy.get("cluster") or {}).get("syms") or [])
@@ -184,12 +184,15 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     return "\n".join(L)
 
 
-def opp_html(hy: Dict[str, Any]) -> str:
-    """Рядок про протилежну угоду. Якщо відомо повідомлення того сигналу (opp_msg) і чат Офісу — назва сигналу стає посиланням на нього (прохання власниці 27.11.2026)."""
+def linkify(text: Any, hy: Dict[str, Any]) -> str:
+    """Текст позначки для HTML-підпису; згадки інших сигналів («СВІНГ №27») стають посиланнями на їхні картки в чаті Офісу, якщо відомі hy["links"] і OFFICE_CHAT_ID (прохання власниці 27.11.2026)."""
     import html, os
-    txt = html.escape(str(hy.get("opp") or "")); name = html.escape(str(hy.get("opp_name") or "")); chat = os.getenv("OFFICE_CHAT_ID", "").strip()
-    if name and hy.get("opp_msg") and chat.startswith("-100") and chat[4:].isdigit() and name in txt:
-        return txt.replace(name, f'<a href="https://t.me/c/{chat[4:]}/{int(hy["opp_msg"])}">{name}</a>', 1)
+    txt = html.escape(str(text or "")); chat = os.getenv("OFFICE_CHAT_ID", "").strip(); lk = hy.get("links") or {}
+    if not (isinstance(lk, dict) and chat.startswith("-100") and chat[4:].isdigit()): return txt
+    for name in sorted(lk, key=len, reverse=True):
+        nm = html.escape(str(name))
+        try: txt = txt.replace(nm, f'<a href="https://t.me/c/{chat[4:]}/{int(lk[name])}">{nm}</a>', 1)
+        except (TypeError, ValueError): pass
     return txt
 
 

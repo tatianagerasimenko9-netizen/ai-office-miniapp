@@ -116,6 +116,23 @@ def opposite_recent_td(db: str, symbol: str, direction: str, now: Optional[float
     return None
 
 
+_LINK_PFX = {"ІНТРАДЕЙ": "TD", "СВІНГ": "SW", "ВІДСКОК": "BN"}
+
+
+def links(db: str, *texts: Optional[str]) -> Dict[str, int]:
+    """Для згадок «ІНТРАДЕЙ №N / СВІНГ №N / ВІДСКОК №N» у текстах позначок — номер повідомлення того сигналу в Telegram, щоб картка зробила згадку посиланням (прохання власниці 27.11.2026). Лише показ."""
+    import re
+    out: Dict[str, int] = {}
+    try:
+        from office_bridge import _fetchone
+        for name, num in set(re.findall(r"(ІНТРАДЕЙ|СВІНГ|ВІДСКОК) №(\d+)", " ".join(t for t in texts if t))):
+            row = _fetchone(db, "SELECT msg_id FROM br_test_signal WHERE sig_id LIKE ? AND seq = ? AND msg_id IS NOT NULL ORDER BY created_ts DESC LIMIT 1", (_LINK_PFX[name] + "|%", int(num)))
+            if row and row[0]: out[f"{name} №{num}"] = int(row[0])
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def opposite_open(db: str, symbol: str, direction: str, own: str) -> Optional[str]:
     """Якщо інша стратегія (ІНТРАДЕЙ ↔ СВІНГ) вже тримає відкриту угоду по цій монеті у ПРОТИЛЕЖНИЙ бік — короткий текст попередження. Лише показ."""
     if not enabled():
@@ -123,9 +140,10 @@ def opposite_open(db: str, symbol: str, direction: str, own: str) -> Optional[st
     try:
         from office_bridge import _fetchone
         other, name = ("SW", "СВІНГ") if own == "TD" else ("TD", "ІНТРАДЕЙ")
-        row = _fetchone(db, "SELECT direction FROM br_test_signal WHERE sig_id LIKE ? AND symbol = ? AND direction != ? AND status IN ('NEW', 'SENT') ORDER BY created_ts DESC LIMIT 1", (other + "|%", symbol, direction))
+        row = _fetchone(db, "SELECT direction, seq FROM br_test_signal WHERE sig_id LIKE ? AND symbol = ? AND direction != ? AND status IN ('NEW', 'SENT') ORDER BY created_ts DESC LIMIT 1", (other + "|%", symbol, direction))
         if row:
-            return f"{name} уже тримає {row[0]} по {symbol.replace('USDT', '')} — протилежно"
+            num = f" №{int(row[1])}" if row[1] else ""
+            return f"{name}{num} уже тримає {row[0]} по {symbol.replace('USDT', '')} — протилежно"
     except Exception:  # noqa: BLE001
         pass
     return None
