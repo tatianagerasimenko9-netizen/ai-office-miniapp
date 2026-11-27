@@ -1,5 +1,5 @@
 // AI Office · Лев: мінімальний service worker. Дані завжди з мережі (ціни й угоди не кешуються); оболонка сторінки — з мережі, а без звʼязку з кешу.
-const SHELL = 'lev-shell-v2';
+const SHELL = 'lev-shell-v3';
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(SHELL).then(c => c.addAll(['/lev/', '/lev/icon-192.png', '/lev/lev.jpg']).catch(() => {}))); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== SHELL).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
