@@ -139,7 +139,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     var s=S,T=all(),h='';
     h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div></div>';
     h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
-    h+='<div class="say"><span><b style="color:var(--gold)">Лев:</b> '+esc(s.lev)+'</span></div></div>';
+    h+='<div class="say"><span>'+esc(s.lev)+'</span></div></div>';
     if(s.attention.length){h+='<h2>Потребує уваги</h2>';
       s.attention.forEach(function(a){h+='<button class="att '+esc(a.level)+'" data-filter="'+esc(a.filter)+'"><span class="dot '+esc(a.level)+'"></span><span><b>'+esc(a.title)+'</b><span class="d">'+esc(a.detail)+'</span></span><span class="chev" aria-hidden="true">›</span></button>'})}
     h+='<h2 id="trades">Відкриті угоди</h2>';
