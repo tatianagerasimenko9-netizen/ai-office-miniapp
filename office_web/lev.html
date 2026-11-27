@@ -64,6 +64,14 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .tile .f{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
 .empty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
 /* сигнали */
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
+.seg button{border:0;background:transparent;color:var(--muted);border-radius:10px;min-height:46px;font-size:13px;font-weight:700;letter-spacing:.06em}.seg button.on{background:var(--gold);color:#17140E}.seg small{margin-left:7px;font-size:11px;opacity:.75}
+.pick{display:block;position:relative}.pick:after{content:'▾';position:absolute;right:16px;top:50%;transform:translateY(-50%);color:var(--gold);pointer-events:none}
+.pick select{width:100%;appearance:none;-webkit-appearance:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;min-height:46px;padding:0 40px 0 14px;font-family:inherit;font-size:14px;font-weight:600}
+.stiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stile{border:1px solid transparent;border-radius:14px;padding:12px 6px 10px;background:var(--panel);display:flex;flex-direction:column;align-items:center;gap:2px;min-height:104px}
+.stile.up{background:var(--upbg)}.stile.down{background:var(--downbg)}.stile.live{background:var(--panel);border-color:var(--line)}
+.stile .n{font-size:15px;font-weight:800;color:var(--text)}.stile .d{font-size:10px;color:var(--muted)}.stile .v{font-size:17px;font-weight:800;margin-top:4px}.stile .t{font-size:10px;color:var(--muted)}
 .day{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 2px 0}
 .sig{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--panel);border:0;border-radius:14px;padding:12px 14px;min-height:58px}
 .sig b{font-size:15px;font-weight:700}.sig .m{font-size:11px;color:var(--muted)}
@@ -119,7 +127,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
 <script>
 (function(){
   try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();} }catch(e){}
-  var S=null,Z=null,frozen=false,F='all',SF='all',OPEN={};
+  var S=null,Z=null,frozen=false,F='all',SF='all',SK='TD',OPEN={};
   var $=function(id){return document.getElementById(id)};
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
   function num(a){return String(Math.round(Math.abs(a))).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}
@@ -145,7 +153,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     h+='<h2 id="trades">Відкриті угоди</h2>';
     if(!T.length){h+='<div class="card empty">Відкритих угод немає.</div>';$('tab-today').innerHTML=h;return}
     var order=['all','plus','minus','soon','near'];if(order.indexOf(F)<0)order.push(F);
-    h+='<div class="chips">';order.forEach(function(k){var n=T.filter(FILT[k]).length;if(k!=='all'&&!n&&k!==F)return;h+='<button class="chip'+(F===k?' on':'')+'" data-f="'+k+'">'+FNAME[k]+' · '+n+'</button>'});h+='</div>';
+    h+=sel('data-fs="1"',order.filter(function(k){return k==='all'||k===F||T.filter(FILT[k]).length}).map(function(k){return [k,FNAME[k]+' · '+T.filter(FILT[k]).length]}),F);
     if(F!=='all'){var L=T.filter(FILT[F]).sort(function(a,b){return (a.now==null)-(b.now==null)||(a.now-b.now)});
       h+='<div class="grp">'+(L.length?'<div class="tiles" style="padding-top:14px">'+L.map(tile).join('')+'</div>':'<div class="empty">Таких угод зараз немає.</div>')+'</div>'}
     else{s.groups.forEach(function(g,gi){var k=g.trades.filter(function(t){return t.now!=null}),p=k.filter(function(t){return Math.round(t.now)>0}).length,m=k.filter(function(t){return Math.round(t.now)<0}).length,o=OPEN[gi];
@@ -178,16 +186,19 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     show(h);
   }
 
-  function lvl(x){return x.lev.cautions.length?'yellow':(x.lev.calm?'':'grey')}
+  function sel(attr,opts,cur){var h='<label class="pick"><select '+attr+'>';opts.forEach(function(o){h+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+esc(o[1])+'</option>'});return h+'</select></label>'}
+  function sres(x){if(x.kind==='open'){var t=find(x.sig_id);return t?t.now:null}return x.res}
   function renderSignals(){
-    var A=S.signals,h='',SFN={all:'Усі',open:'Відкриті',warn:'Із застереженням',clean:'Чисті'};
-    var SFF={all:function(){return true},open:function(x){return x.open},warn:function(x){return x.lev.cautions.length>0},clean:function(x){return x.lev.calm&&!x.lev.cautions.length}};
-    h+='<div class="chips">';Object.keys(SFN).forEach(function(k){h+='<button class="chip'+(SF===k?' on':'')+'" data-sf="'+k+'">'+SFN[k]+' · '+A.filter(SFF[k]).length+'</button>'});h+='</div>';
-    var L=A.filter(SFF[SF]),day='';if(!L.length)h+='<div class="card empty">Таких сигналів за 48 годин немає.</div>';
-    L.forEach(function(x){var d=x.at.slice(0,5);if(d!==day){day=d;h+='<div class="day">'+esc(d)+'</div>'}
-      var st=x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')),me=dec()[x.sig_id];
-      h+='<button class="sig" data-sigid="'+esc(x.sig_id)+'"><span class="dot '+lvl(x)+'"></span><span><b>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</b><div class="m">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at.slice(6))+(me?' · '+(me==='took'?'взяла':'пропустила'):'')+'</div></span><span class="tag '+st+'">'+esc(x.status)+'</span></button>'});
-    h+='<details><summary>Що означають кольори</summary><p class="small muted">Зелена крапка — чистий сигнал на спокійній монеті. Жовта — є застереження. Сіра — звичайний сигнал без особливих плюсів чи мінусів.</p></details>';
+    var A=S.signals,h='',K={TD:A.filter(function(x){return x.strat!=='СВІНГ'}),SW:A.filter(function(x){return x.strat==='СВІНГ'})};
+    h+='<div class="seg"><button class="'+(SK==='TD'?'on':'')+'" data-sk="TD">ІНТРАДЕЙ<small>'+K.TD.length+'</small></button><button class="'+(SK==='SW'?'on':'')+'" data-sk="SW">СВІНГ<small>'+K.SW.length+'</small></button></div>';
+    var SFF={all:function(){return true},open:function(x){return x.kind==='open'},plus:function(x){return x.kind!=='open'&&x.res>0},minus:function(x){return x.kind!=='open'&&x.res<0}};
+    var B=K[SK];h+=sel('data-sfs="1"',[['all','Усі сигнали · '+B.length],['open','Зараз відкриті · '+B.filter(SFF.open).length],['plus','Закриті в плюс · '+B.filter(SFF.plus).length],['minus','Закриті в мінус · '+B.filter(SFF.minus).length]],SF);
+    var L=B.filter(SFF[SF]),day='',sum=0,open=false;if(!L.length)h+='<div class="card empty">За 48 годин таких сигналів немає.</div>';
+    L.forEach(function(x){var d=x.at.slice(0,5);if(d!==day){if(open)h+='</div>';day=d;h+='<div class="day">'+esc(d)+'</div><div class="stiles">';open=true}
+      var v=sres(x),c=cls(v),ic=x.kind==='tp'?'✓ ':'',me=dec()[x.sig_id];if(v!=null)sum+=v;
+      h+='<button class="stile '+(x.kind==='open'?'live ':'')+c+'" data-sigid="'+esc(x.sig_id)+'"><span class="n">'+esc(x.sym)+'</span><span class="d">'+(x.dir==='LONG'?'▲ лонг':'▼ шорт')+'</span><span class="v '+c+'">'+(v==null?'—':ic+usd(v))+'</span><span class="t">'+(x.kind==='open'?'йде зараз':(x.kind==='tp'?'тейк':(x.kind==='sl'?'стоп':esc(x.status))))+(me==='took'?' · взяла':'')+'</span></button>'});
+    if(open)h+='</div>';
+    if(L.length)h+='<div class="card row"><span class="muted">Разом за 48 годин</span><b class="'+cls(sum)+'" style="font-size:18px">'+usd(sum)+'</b></div>';
     $('tab-signals').innerHTML=h;
   }
   function openSignal(id){
@@ -220,12 +231,13 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   function load(){fetch('/api/lev/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){S=j;if(!frozen)render()}}).catch(function(){$('upd').textContent='немає звʼязку';$('dot').className='dot stale'})}
   function loadZ(){fetch('/api/lev/zvirka',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){Z=j;renderZvirka()}}).catch(function(){})}
 
+  document.addEventListener('change',function(e){var t=e.target;if(t.dataset.sfs){SF=t.value;renderSignals()}else if(t.dataset.fs){F=t.value;renderToday()}});
   document.addEventListener('click',function(e){
     if(e.target.id==='shade'){hide();return}
-    var el=e.target.closest('[data-tab],[data-f],[data-sf],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
+    var el=e.target.closest('[data-tab],[data-sk],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
     if(d.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==d.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(d.tab==='zvirka')loadZ();window.scrollTo(0,0)}
     else if(d.f){F=d.f;renderToday()}
-    else if(d.sf){SF=d.sf;renderSignals()}
+    else if(d.sk){SK=d.sk;SF='all';renderSignals()}
     else if(d.filter){F=d.filter;renderToday();var a=$('trades');if(a)a.scrollIntoView({behavior:'smooth',block:'start'})}
     else if(d.g!=null){OPEN[d.g]=!OPEN[d.g];renderToday()}
     else if(d.calm){openCalm(d.calm)}
