@@ -1431,6 +1431,26 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path in ("/lev", "/lev/"):                       # екран радника «Лев» (лише читання)
+            from pathlib import Path as _P
+            import office_lev as _lev
+            page = _P(__file__).resolve().parent / "office_web" / "lev.html"
+            if not _lev.enabled() or not page.is_file():
+                return self._send_json(503, {"ok": False, "error": "lev_ui_unavailable"})
+            body = page.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path in ("/api/lev/state", "/api/lev/zvirka"):
+            import office_lev as _lev
+            if not _lev.enabled():
+                return self._send_json(503, {"ok": False, "error": "lev_disabled"})
+            db = _db_target_for_identity()
+            return self._send_json(200, _lev.state(db) if u.path.endswith("/state") else _lev.zvirka(db))
         if u.path == "/api/br/signals":
             from office_br import store
             db = _db_target_for_identity()
