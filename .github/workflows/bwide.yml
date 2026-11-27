@@ -57,3 +57,4 @@ jobs:
           git add docs/handoff/br-profitability/bwide_out.txt docs/handoff/br-profitability/data/bounce_feat_wide.csv.gz || true
           git commit -m "bwide: відскок на широкій групі монет (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# rerun fix

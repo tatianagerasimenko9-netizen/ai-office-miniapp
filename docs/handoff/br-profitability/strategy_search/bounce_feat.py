@@ -79,7 +79,7 @@ if old is not None: E = E.merge(old, on=["sym", "te"], how="left")
 for k in "BLTDU":
     if k not in E: E[k] = -1
     E[k] = E[k].fillna(-1).astype(int)
-y = pd.to_datetime(E.te, unit="s").dt.year; E["P_"] = np.where(y <= 2021, "P1", np.where(y <= 2023, "P2", "P3")); OTH = set(os.environ.get("OTH", "").split(",")) - {""}; E["grp"] = np.where(E.sym.isin(S42), "S", np.where(E.sym.isin(OTH) | (not OTH), "C", "W"))   # W — «широка» група: монети поза 72 (перевірка 27.11.2026: «взяти всі монети ф'ючерсів»); E["usd"] = 10 * (E.r3 - 0.10 / E.sp); E["usd2"] = 10 * (E.r2 - 0.10 / E.sp); E.to_csv(OUT, index=False)
+y = pd.to_datetime(E.te, unit="s").dt.year; E["P_"] = np.where(y <= 2021, "P1", np.where(y <= 2023, "P2", "P3")); OTH = set(os.environ.get("OTH", "").split(",")) - {""}; E["grp"] = np.where(E.sym.isin(S42), "S", np.where(E.sym.isin(OTH) | (not OTH), "C", "W")); E["usd"] = 10 * (E.r3 - 0.10 / E.sp); E["usd2"] = 10 * (E.r2 - 0.10 / E.sp); E.to_csv(OUT, index=False)
 print(f"\nвходів LONG: {len(E):,}; пошук (42 монети): {(E.grp=='S').sum():,}; контроль (30 інших): {(E.grp=='C').sum():,}. База: ${E.usd.mean():+.2f} на угоду (ціль 3R), виграшних {100*(E.r3>0).mean():.0f}%")
 GR = [g for g in "SCW" if (E.grp == g).any()]; CELLS = [(g, p) for g in GR for p in ("P1", "P2", "P3")]
 def cells(m, col="usd"):
