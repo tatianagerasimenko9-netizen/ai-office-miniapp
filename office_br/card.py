@@ -169,7 +169,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
     if calm_line(row): L.append(calm_line(row))
-    if hy.get("opp"): L.append("⚠️ " + html.escape(str(hy["opp"])))
+    if hy.get("opp"): L.append("⚠️ " + opp_html(hy))
     if hy.get("pair"): L.append("⚠️ " + html.escape(str(hy["pair"])))
     if hy.get("rep"): L.append("⚠️ " + html.escape(str(hy["rep"])))
     n = (hy.get("cluster") or {}).get("n") or 0
@@ -179,9 +179,18 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
         L.append(f"➕ Ще {n} {word}" + (f" ({html.escape(syms)})" if syms else "") + " у той самий бік — це один рух")
     if hy.get("why"): L.append("📌 " + html.escape(str(hy["why"])))
     if hy.get("note"): L.append("⚠️ " + html.escape(str(hy["note"])))
-    L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))
+    if not str(row.get("sig_id", "")).startswith("BN|"): L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))   # ВІДСКОК: строк уже є на картинці (прохання власниці 27.11.2026)
     L.append(TD_TAG)
     return "\n".join(L)
+
+
+def opp_html(hy: Dict[str, Any]) -> str:
+    """Рядок про протилежну угоду. Якщо відомо повідомлення того сигналу (opp_msg) і чат Офісу — назва сигналу стає посиланням на нього (прохання власниці 27.11.2026)."""
+    import html, os
+    txt = html.escape(str(hy.get("opp") or "")); name = html.escape(str(hy.get("opp_name") or "")); chat = os.getenv("OFFICE_CHAT_ID", "").strip()
+    if name and hy.get("opp_msg") and chat.startswith("-100") and chat[4:].isdigit() and name in txt:
+        return txt.replace(name, f'<a href="https://t.me/c/{chat[4:]}/{int(hy["opp_msg"])}">{name}</a>', 1)
+    return txt
 
 
 def trend_line(direction: str, up4: bool | None, up1: bool | None) -> str | None:

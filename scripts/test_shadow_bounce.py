@@ -62,8 +62,10 @@ made = sb.scan(db, fetch2, now2, ("BTCUSDT", "ETHUSDT"))
 assert sum(m.startswith("BN|") for m in made) == 2 and sum(m.startswith("BNC_S3|") for m in made) == 2, made
 row = [r for r in store.rows(db, "WHERE sig_id LIKE 'BN|%'") if r["symbol"] == "BTCUSDT"][0]; hy = json.loads(row["hyp_json"])
 assert row["status"] == "NEW" and card.is_td(row) and card.strat(row)[0] == "ВІДСКОК" and not card.is_swing(row) and abs(float(row["confirm_ts"]) - (t2[-1] + 2700)) < 1
-assert "не закривати" in hy["opp"] and "№27" in hy["opp"] and "на перевірці" in hy["note"]
-cap = card.build_caption(row)[0]; assert "ВІДСКОК №1" in cap and "на перевірці" in cap and "не закривати" in cap and "дно тестували" in cap, cap
+assert "не закривати" in hy["opp"] and "№27" in hy["opp"] and "з 10" in hy["note"]
+_execute(db, "UPDATE br_test_signal SET msg_id = 555 WHERE sig_id = 'SW|BTCUSDT|SHORT|1'", ()); hy["opp_msg"] = 555; row["hyp_json"] = json.dumps(hy, ensure_ascii=False); os.environ["OFFICE_CHAT_ID"] = "-1001234567890"
+cap = card.build_caption(row)[0]; assert "ВІДСКОК №1" in cap and "на перевірці" not in cap and "тримати" not in cap and '<a href="https://t.me/c/1234567890/555">Шорт СВІНГ №27</a>' in cap and "дно тестували" in cap, cap
+os.environ.pop("OFFICE_CHAT_ID"); assert "<a href" not in card.build_caption(row)[0] and "Шорт СВІНГ №27" in card.build_caption(row)[0]
 assert sb.scan(db, fetch2, now2, ("BTCUSDT", "ETHUSDT")) == []                                                   # повторів немає
 os.environ["BNC_LIVE"] = "0"; db3 = os.path.join(tempfile.mkdtemp(), "s3.db"); m3 = sb.scan(db3, fetch2, now2, ("BTCUSDT", "ETHUSDT")); os.environ["BNC_LIVE"] = "1"
 assert m3 and all(m.startswith("BNC_S3|") for m in m3), m3                                                         # вимкнений сигнал → лише тихий журнал
