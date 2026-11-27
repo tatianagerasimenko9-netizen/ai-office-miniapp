@@ -25,13 +25,13 @@ if mode == "fetch":
                     z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "office-research"}), timeout=90).read()))
                     for ln in z.read(z.namelist()[0]).decode().splitlines():
                         p = ln.split(",")
-                        if p[0].isdigit(): rows.append((int(p[0]) // 1000 if int(p[0]) > 10**11 else int(p[0]), p[1], p[2], p[3], p[4]))
+                        if p[0].isdigit(): rows.append((int(p[0]) // 1000 if int(p[0]) > 10**11 else int(p[0]), p[1], p[2], p[3], p[4]) + ((p[5],) if os.environ.get("VOL") else ()))
                     break
                 except urllib.error.HTTPError as e:
                     if e.code == 404: break
                 except Exception: pass
         if rows:
-            os.makedirs(f"{D}/{s}", exist_ok=True); pd.DataFrame(sorted(set(rows)), columns=["open_time", "open", "high", "low", "close"]).to_csv(f"{D}/{s}/15m.csv", index=False)
+            os.makedirs(f"{D}/{s}", exist_ok=True); pd.DataFrame(sorted(set(rows)), columns=["open_time", "open", "high", "low", "close"] + (["volume"] if os.environ.get("VOL") else [])).to_csv(f"{D}/{s}/15m.csv", index=False)
         return s, len(rows)
     with ThreadPoolExecutor(6) as ex:
         for s, n in ex.map(one, SY): print(s, n, flush=True)
