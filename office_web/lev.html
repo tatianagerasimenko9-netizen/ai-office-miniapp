@@ -11,7 +11,7 @@
 <link rel="manifest" href="/lev/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/lev/icon-180.png">
 <link rel="icon" type="image/png" href="/lev/icon-192.png">
-<title>AI Office · Лев</title>
+<title>AI Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -22,7 +22,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Montserra
 body{min-height:100vh;max-width:560px;margin:0 auto}
 button{font-family:inherit;color:inherit;cursor:pointer}
 header{display:flex;align-items:center;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top)) 16px 10px}
-.brand{font-family:'Cormorant Garamond',Georgia,serif;font-size:25px;font-weight:600;color:var(--gold);line-height:1}
+.brand{font-family:'Cormorant Garamond',Georgia,serif;font-size:30px;font-weight:600;color:var(--gold);line-height:.9;display:flex;flex-direction:column;align-items:center}.brand small{font-family:'Montserrat',sans-serif;font-size:8px;font-weight:600;letter-spacing:.32em;margin:3px 0 0 .32em}
 .live{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--up);flex-shrink:0}.dot.stale,.dot.red{background:var(--down)}.dot.yellow{background:var(--warn)}.dot.grey{background:#55617a}
 main{padding:6px 16px 96px;display:flex;flex-direction:column;gap:14px}
@@ -94,12 +94,12 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
 </style>
 </head>
 <body>
-<header><div class="brand">AI Office</div><div class="live"><span id="dot" class="dot stale"></span><span id="upd">завантаження…</span></div></header>
+<header><div class="brand">AI<small>OFFICE</small></div><div class="live"><span id="dot" class="dot stale"></span><span id="upd">завантаження…</span></div></header>
 
 <main id="tab-today"></main>
 <main id="tab-signals" class="hide"></main>
 <main id="tab-invest" class="hide">
-  <div class="card"><div class="row" style="justify-content:flex-start"><img class="ava" src="/lev/lev.jpg" alt="Лев"><div><b style="font-size:16px">Портфель ще не підключено</b><div class="small muted">потрібен ключ «лише читання» або ручне введення</div></div></div></div>
+  <div class="card"><div class="row" style="justify-content:flex-start"><div><b style="font-size:16px">Портфель ще не підключено</b><div class="small muted">потрібен ключ «лише читання» або ручне введення</div></div></div></div>
   <h2>На чому стоятимуть поради</h2>
   <div class="card" style="padding:8px 16px">
     <div class="kv" style="border-top:0"><span>Біткоїн частинами щотижня</span><span class="up">$4 000 → $12 350</span></div>
@@ -137,9 +137,9 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
 
   function renderToday(){
     var s=S,T=all(),h='';
-    h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div><img class="ava" src="/lev/lev.jpg" alt="Лев"></div>';
+    h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div></div>';
     h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
-    h+='<div class="say"><span><b style="color:var(--gold)">Лев:</b> '+esc(s.lev)+'</span></div></div>';
+    h+='<div class="say"><span>'+esc(s.lev)+'</span></div></div>';
     if(s.attention.length){h+='<h2>Потребує уваги</h2>';
       s.attention.forEach(function(a){h+='<button class="att '+esc(a.level)+'" data-filter="'+esc(a.filter)+'"><span class="dot '+esc(a.level)+'"></span><span><b>'+esc(a.title)+'</b><span class="d">'+esc(a.detail)+'</span></span><span class="chev" aria-hidden="true">›</span></button>'})}
     h+='<h2 id="trades">Відкриті угоди</h2>';
@@ -169,7 +169,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   }
   function openCalm(id){
     var t=find(id);if(!t)return;
-    var h='<div class="grab"></div><div class="row" style="justify-content:flex-start"><img class="ava" src="/lev/lev.jpg" alt="Лев"><div><h3>'+esc(t.sym)+' · '+esc(t.dir_ua)+'</h3><div class="tiny muted">знімок на '+esc(S.price_at||'—')+' · цифри не миготять</div></div></div>';
+    var h='<div class="grab"></div><div class="row" style="justify-content:flex-start"><div><h3>'+esc(t.sym)+' · '+esc(t.dir_ua)+'</h3><div class="tiny muted">знімок на '+esc(S.price_at||'—')+' · цифри не миготять</div></div></div>';
     if(t.now==null)h+='<div class="note">Ціну цієї монети я зараз не бачу, тому суми не покажу. Стоп за сигналом: '+esc(t.sl)+'.</div>';
     else h+='<div class="note" style="font-size:15px">До стопа <b>'+String(t.dist_pct).replace('.',',')+'%</b>. Стоп на '+esc(t.sl)+', ціна '+esc(t.price)+'.</div><div class="three"><div><div class="tiny muted">зараз</div><b class="'+cls(t.now)+'">'+usd(t.now)+'</b></div><div><div class="tiny muted">до стопа ще</div><b>$'+num(t.to_stop)+'</b></div><div><div class="tiny muted">якщо стоп</div><b class="down">'+usd(t.if_stop)+'</b></div></div>';
     h+='<div class="note" style="font-size:15px"><b>Ваш план:</b> угода закривається, коли настане одне з трьох — стоп '+esc(t.sl)+', ціль '+esc(t.tp)+' або час ('+esc(t.exit_at)+').'+(t.now!=null?' <b>Зараз жодна умова не настала.</b>':'')+'</div>';
@@ -194,7 +194,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;frozen=true;
     var h='<div class="grab"></div><div class="row"><div><div class="tiny muted">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><h3>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</h3></div><span class="tag '+(x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')))+'">'+esc(x.status)+'</span></div>';
     h+='<div class="three"><div><div class="tiny muted">вхід</div><b>'+esc(x.entry)+'</b></div><div><div class="tiny muted">стоп · −$'+S.risk+'</div><b class="down">'+esc(x.sl)+'</b></div><div><div class="tiny muted">ціль · '+esc(x.tp_usd)+'</div><b class="up">'+esc(x.tp)+'</b></div></div>';
-    h+='<div class="row" style="justify-content:flex-start;margin-top:4px"><img class="ava" src="/lev/lev.jpg" alt="Лев"><b style="font-size:16px;line-height:1.3">'+esc(x.lev.title)+'</b></div>';
+    h+='<div class="row" style="justify-content:flex-start;margin-top:4px"><b style="font-size:16px;line-height:1.3">'+esc(x.lev.title)+'</b></div>';
     if(x.lev.cautions.length)x.lev.cautions.forEach(function(c){h+='<div class="note warn">'+esc(c)+'</div>'});
     h+='<div class="note">'+esc(x.lev.after)+'</div>';
     h+='<details><summary>На що я дивився</summary>';x.lev.facts.forEach(function(f){h+='<div class="kv"><span>'+esc(f[0])+'</span><span>'+esc(f[1])+'</span></div>'});h+='</details>';
