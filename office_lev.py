@@ -106,7 +106,7 @@ def _trade(d: Dict[str, Any], price: Optional[float], now: float, R: float) -> D
     side = 1 if d["direction"] == "LONG" else -1; e, sl = float(d["entry"]), float(d["sl"]); risk = abs(e - sl); t_in = float(d["ev"]["ENTRY"][0]); hold = _hold_s(d["sig_id"])
     sw = d["sig_id"].startswith("SW|"); hy = _hyp(d); sym = d["symbol"].replace("USDT", "")
     t: Dict[str, Any] = {"sig_id": d["sig_id"], "seq": d["seq"], "sym": sym, "strat": _strat(d["sig_id"]), "dir": d["direction"], "dir_ua": "лонг" if side > 0 else "шорт", "entry": _px(e), "sl": _px(sl),
-                         "tp": _px(d["tp"]) if d["tp"] else "—", "if_stop": -R, "exit_ts": t_in + hold, "exit_at": _dm(t_in + hold), "rep": bool(hy.get("rep")), "opp": hy.get("opp"), "pair": hy.get("pair")}
+                         "tp": _px(d["tp"]) if d["tp"] else "—", "if_stop": -R, "exit_ts": t_in + hold, "exit_at": _dm(t_in + hold), "opened": _dm(t_in), "tp_usd": (_usd(R * abs(d["tp"] - e) / risk) if d["tp"] and risk > 0 else ""), "rep": bool(hy.get("rep")), "opp": hy.get("opp"), "pair": hy.get("pair")}
     t["age"] = (f"{int((now - t_in) // 86400) + 1}-й день із 10" if sw else f"{max(1, int((now - t_in) // 3600) + 1)}-та год із 48")
     if price is None or risk <= 0:
         t.update({"price": None, "now": None, "to_stop": None, "pos": None, "dist_pct": None}); return t

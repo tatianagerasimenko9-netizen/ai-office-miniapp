@@ -1445,6 +1445,23 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path.startswith("/lev/") and len(u.path) > 5:      # статичні файли застосунку «Лев»: іконки, маніфест, service worker, фото
+            from pathlib import Path as _P
+            _LEV_FILES = {"manifest.webmanifest": "application/manifest+json; charset=utf-8", "sw.js": "application/javascript; charset=utf-8", "icon-180.png": "image/png", "icon-192.png": "image/png",
+                          "icon-512.png": "image/png", "lev.jpg": "image/jpeg"}
+            name = u.path[5:]
+            f = _P(__file__).resolve().parent / "office_web" / "lev_static" / name
+            if name not in _LEV_FILES or not f.is_file():
+                return self._send_json(404, {"ok": False, "error": "not_found"})
+            body = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", _LEV_FILES[name])
+            self.send_header("Cache-Control", "no-cache" if name in ("sw.js", "manifest.webmanifest") else "public, max-age=86400")
+            if name == "sw.js": self.send_header("Service-Worker-Allowed", "/lev/")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if u.path in ("/api/lev/state", "/api/lev/zvirka"):
             import office_lev as _lev
             if not _lev.enabled():
