@@ -104,6 +104,8 @@ def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, e
         if _rep: hyp["rep"] = _rep
         hyp["caution"] = (hyp.get("caution") or []) + _mk.news_marks(_mk.record(db, sid, sym, now), now)
         if not hyp["caution"]: hyp.pop("caution")
+        _lk = _mk.links(db, hyp.get("opp"), hyp.get("rep"))
+        if _lk: hyp["links"] = _lk
     except Exception: pass
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, sym, direction, entry, bar_open, bar_open + PER, bar_open, entry, sl, json.dumps([{"p": tp, "src": "SW"}]), json.dumps(hyp, default=str), now, "NEW"))

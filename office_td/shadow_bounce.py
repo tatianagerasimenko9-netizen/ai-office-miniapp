@@ -109,8 +109,8 @@ def signal(db: str, sym: str, b, f: int, e: float, sl: float, tp: float, k: int,
            "note": "На історії " + ("5 з 10 у плюс" if k >= 2 else "4–5 з 10 у плюс")}
     sw = _fetchone(db, "SELECT seq, msg_id FROM br_test_signal WHERE sig_id LIKE 'SW|%' AND symbol = ? AND direction = 'SHORT' AND status = 'SENT' ORDER BY created_ts DESC LIMIT 1", (sym,))
     if sw:
-        hyp["opp_name"] = f"Шорт СВІНГ №{int(sw[0])}"; hyp["opp"] = f"{hyp['opp_name']} по {sym.replace('USDT', '')} не закривати — у нього свій стоп"
-        if sw[1]: hyp["opp_msg"] = int(sw[1])
+        hyp["opp"] = f"Шорт СВІНГ №{int(sw[0])} по {sym.replace('USDT', '')} не закривати — у нього свій стоп"
+        if sw[1]: hyp["links"] = {f"СВІНГ №{int(sw[0])}": int(sw[1])}
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, sym, "LONG", float(b["l"][f]), float(b["t"][f]), te, te - 900, e, sl, json.dumps([{"p": tp, "src": "BN"}]), json.dumps(hyp, ensure_ascii=False), now, "NEW"))
     print(f"[bnc] СИГНАЛ {sid} №{seq} entry={e:.6g} sl={sl:.6g} tp={tp:.6g} тестів={k} падіння={drop:.1f}%", flush=True)

@@ -176,6 +176,8 @@ def record_signal(db: str, cand: dict, res: dict, now: float, thr: Optional[floa
         if _pair: hyp["pair"] = _pair
         _c = _mk.news_marks(_mk.record(db, sid, cand["symbol"], now), now)
         if _c: hyp["caution"] = _c
+        _lk = _mk.links(db, hyp.get("opp"), hyp.get("pair"))
+        if _lk: hyp["links"] = _lk
     except Exception:  # noqa: BLE001
         pass
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",

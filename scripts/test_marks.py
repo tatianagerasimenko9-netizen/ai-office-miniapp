@@ -31,7 +31,7 @@ from office_br import store as _st
 _st.init(_db)
 from office_bridge import _execute as _ex
 _ex(_db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("SW|BTCUSDT|SHORT|1", 1, "BTCUSDT", "SHORT", 1, 1, 1, 1, 63000.0, 66000.0, "[]", "{}", time.time(), "SENT"))
-assert mk.opposite_open(_db, "BTCUSDT", "LONG", "TD") == "СВІНГ уже тримає SHORT по BTC — протилежно"
+assert mk.opposite_open(_db, "BTCUSDT", "LONG", "TD") == "СВІНГ №1 уже тримає SHORT по BTC — протилежно"
 assert mk.opposite_open(_db, "BTCUSDT", "SHORT", "TD") is None and mk.opposite_open(_db, "ETHUSDT", "LONG", "TD") is None and mk.opposite_open(_db, "BTCUSDT", "LONG", "SW") is None
 _r2 = dict(_row, sig_id="TD|BTCUSDT|LONG|1", hyp_json=_j.dumps({"why": "x", "hold": "до 48 год", "opp": "СВІНГ уже тримає SHORT по BTC — протилежно"}))
 assert "⚠️ СВІНГ уже тримає SHORT по BTC" in _c.build_caption(_r2)[0]
