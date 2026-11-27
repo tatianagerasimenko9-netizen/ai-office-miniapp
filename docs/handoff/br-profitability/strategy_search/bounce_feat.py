@@ -13,6 +13,8 @@
  I RSI(14) у дні     : <20 | 20–30 | >30
  F падіння від 7-денного максимуму: <10% | 10–20% | >20%
  H стоп              : <1,5% | 1,5–3% | >3%
+ Y старий великий рівень (додано 27.11.2026 ДО повторного запуску, ідея власниці «прокол рівня старших таймфреймів»; приклад: BTC 20–25.11.2026 проколов річний мінімум 57 750 і повернувся):
+   дно зливу нижче найнижчої ціни за вікно «від 14 діб тому до N діб тому», а вхід уже вище цього рівня: немає | 3-місячний (N=90) | піврічний (N=180) | річний (N=365); береться найстарший, що виконано.
  а також прапорці з bounce_lab: B весь ринок, L денний рівень, T BTC підтвердив, D дивергенція, U великий тренд BTC угору.
 ПЕРЕВІРКА ВІД САМООБМАНУ: шукаємо на 42 монетах Офісу (група «пошук»), підтверджуємо на 30 ІНШИХ монетах (група «контроль»), і скрізь окремо в трьох періодах (P1 2020–21, P2 2022–23, P3 2024–26).
  Умова (одна ознака або пара) ЗНАЙДЕНА, лише якщо плюс у всіх трьох періодах пошуку І в усіх трьох періодах контролю (n ≥ 100 у кожній клітинці). Друкується, скільки умов перевірено — щоб бачити частку випадкових збігів.
@@ -28,6 +30,7 @@ def cut(x, edges): return int(np.searchsorted(edges, x, side="right"))
 def events(sym, t, o, h, l, c, v, need_future=True):
     n = len(c); pc = np.r_[c[0], c[:-1]]; A = pd.Series(np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc)))).rolling(14).mean().to_numpy(); R = rsi(c)
     lo72 = pd.Series(l).rolling(LB).min().to_numpy(); hi24 = pd.Series(h).rolling(24).max().to_numpy(); hi7 = pd.Series(h).rolling(W7).max().to_numpy(); v24 = pd.Series(v).rolling(24).mean().shift(1).to_numpy()
+    LV = [pd.Series(l).rolling(N * 24 - 336).min().shift(336).to_numpy() for N in (90, 180, 365)]
     fl = np.flatnonzero((l == lo72) & (hi24 - l >= 3 * A)); fl = fl[fl >= W7 + 20]; out = []; last_entry = -1; hist = []          # hist: (бар входу, r1) попередніх повернень
     for f in fl:
         if f <= last_entry: continue
@@ -47,12 +50,12 @@ def events(sym, t, o, h, l, c, v, need_future=True):
         out.append(dict(sym=sym, tf=t[f], te=t[ent] + 3600, entry=e, sl=sl, sp=100 * risk / e, r1=res[0], r2=res[1], r3=res[2], mfe=(H_.max() - e) / risk if len(H_) else 0.0,
                         A=min(len(prev), 3), P=0 if not prev else (1 if prev[-1][1] <= -1 else 2), R=(2 if not len(pf) else (0 if near else 1)), K=min(near, 2),
                         G=cut((hi24[f] - l[f]) / A[f], [4, 6]), W=cut((min(o[f], c[f]) - l[f]) / rng if rng > 0 else 0, [0.25, 0.5]), V=(cut(v[f] / v24[f], [2, 4]) if v24[f] > 0 else -1),
-                        S=cut(ent - f, [2, 4]), X=cut((e - h[f]) / A[ent], [0.25, 1]), I=cut(R[f], [20, 30]), F=cut(100 * (hi7[f] - l[f]) / hi7[f], [10, 20]), H=cut(100 * risk / e, [1.5, 3])))
+                        S=cut(ent - f, [2, 4]), X=cut((e - h[f]) / A[ent], [0.25, 1]), I=cut(R[f], [20, 30]), F=cut(100 * (hi7[f] - l[f]) / hi7[f], [10, 20]), H=cut(100 * risk / e, [1.5, 3]), Y=max([0] + [i + 1 for i, lv in enumerate(LV) if lv[f] > 0 and l[f] < lv[f] < e])))
         hist.append((ent, res[0])); last_entry = ent
     return out
 NAMES = {"A": ("номер спроби", ["перша", "друга", "третя", "4-та+"]), "P": ("попередня спроба", ["не було", "стоп", "не стоп"]), "R": ("дно", ["те саме дно (±1 ATR)", "нове дно", "перший злив"]), "K": ("тестів того ж дна", ["0", "1", "2+"]),
          "G": ("глибина", ["3–4 ATR", "4–6 ATR", "6+ ATR"]), "W": ("хвіст", ["<25%", "25–50%", ">50%"]), "V": ("обсяг", ["<2×", "2–4×", "4×+"]), "S": ("швидкість", ["1 бар", "2–3", "4–6"]), "X": ("сила повернення", ["<0,25 ATR", "0,25–1", ">1 ATR"]),
-         "I": ("RSI у дні", ["<20", "20–30", ">30"]), "F": ("від 7-ден. макс.", ["<10%", "10–20%", ">20%"]), "H": ("стоп", ["<1,5%", "1,5–3%", ">3%"]), "B": ("весь ринок", ["ні", "так"]), "L": ("денний рівень", ["ні", "так"]), "T": ("BTC підтвердив", ["ні", "так"]), "D": ("дивергенція", ["ні", "так"]), "U": ("великий тренд угору", ["ні", "так"])}
+         "I": ("RSI у дні", ["<20", "20–30", ">30"]), "F": ("від 7-ден. макс.", ["<10%", "10–20%", ">20%"]), "H": ("стоп", ["<1,5%", "1,5–3%", ">3%"]), "Y": ("старий рівень", ["немає", "3-місячний", "піврічний", "річний"]), "B": ("весь ринок", ["ні", "так"]), "L": ("денний рівень", ["ні", "так"]), "T": ("BTC підтвердив", ["ні", "так"]), "D": ("дивергенція", ["ні", "так"]), "U": ("великий тренд угору", ["ні", "так"])}
 def load(path):
     d = pd.read_csv(path).drop_duplicates("open_time").sort_values("open_time")
     if "volume" not in d: d["volume"] = 0.0
@@ -63,7 +66,7 @@ if len(sys.argv) > 4:                                           # режим «�
         d = pd.read_csv(pth).sort_values("open_time"); z = np.zeros(len(d)); ev = events(os.path.basename(pth), *(d[k].to_numpy(float) for k in ("open_time", "open", "high", "low", "close")), z, need_future=False)
         print(f"\n== {pth}: останні повернення")
         for x in ev[-8:]:
-            print(f"  злив {pd.to_datetime(x['tf'], unit='s')} → вхід {pd.to_datetime(x['te'], unit='s')} {x['entry']:.1f} стоп {x['sl']:.1f} ({x['sp']:.2f}%) | макс +{x['mfe']:.1f}R, r3={x['r3']:+.1f} | " + "; ".join(f"{NAMES[k][0]}: {NAMES[k][1][x[k]]}" for k in "APRKGWSXIFH"))
+            print(f"  злив {pd.to_datetime(x['tf'], unit='s')} → вхід {pd.to_datetime(x['te'], unit='s')} {x['entry']:.1f} стоп {x['sl']:.1f} ({x['sp']:.2f}%) | макс +{x['mfe']:.1f}R, r3={x['r3']:+.1f} | " + "; ".join(f"{NAMES[k][0]}: {NAMES[k][1][x[k]]}" for k in "APRKGWSXIFHY"))
 ALL = []
 for s in sorted(x for x in os.listdir(D) if os.path.exists(f"{D}/{x}/15m.csv")):
     if s in ("XAUUSDT", "XAGUSDT"): continue

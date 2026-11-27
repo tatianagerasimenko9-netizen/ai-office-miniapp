@@ -40,3 +40,4 @@ jobs:
           git add docs/handoff/br-profitability/bfeat_out.txt docs/handoff/br-profitability/data/bounce_feat.csv.gz
           git commit -m "bfeat: ознаки відскоку (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# rerun Y 2026-11-27
