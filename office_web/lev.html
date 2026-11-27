@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080F1B">
+<title>AI Office · Лев</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#080F1B;--panel:#111C2C;--deep:#0B1524;--gold:#D8B66A;--text:#F7F5F0;--muted:#A7AAB2;--line:rgba(216,182,106,.18);--up:#5FD39A;--down:#F4A08F;--blue:#345B8A}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Montserrat',system-ui,sans-serif;font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;display:flex;flex-direction:column;max-width:560px;margin:0 auto}
+button{font-family:inherit;color:inherit}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 16px 12px;border-bottom:1px solid var(--line)}
+.brand{font-family:'Cormorant Garamond',Georgia,serif;font-size:27px;font-weight:600;color:var(--gold);line-height:1}
+.live{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--up)}.dot.stale{background:var(--down)}
+main{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px;padding-bottom:84px}
+.card{background:var(--panel);border-radius:14px;padding:14px 16px}
+.card.gold{border:1px solid rgba(216,182,106,.28)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.col{display:flex;flex-direction:column;gap:2px}
+.ava{width:48px;height:48px;border-radius:50%;border:1px solid var(--gold);background:var(--deep);display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',Georgia,serif;font-size:26px;font-weight:600;color:var(--gold);flex-shrink:0;object-fit:cover}
+.serif{font-family:'Cormorant Garamond',Georgia,serif;font-weight:600}
+h2{margin:0;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold)}
+.muted{color:var(--muted)}.small{font-size:11px}.tiny{font-size:10px}
+.up{color:var(--up)}.down{color:var(--down)}
+.btn{min-height:46px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13px;font-weight:700;border:none;background:var(--gold);color:#17140E;padding:0 14px;cursor:pointer;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--gold);border:1px solid rgba(216,182,106,.5);font-weight:600}
+.btn.plain{background:transparent;color:var(--text);border:1px solid rgba(216,182,106,.3);font-weight:600}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stat{background:var(--panel);border-radius:12px;padding:12px}
+.stat b{display:block;font-size:19px;font-weight:700;line-height:1.2}
+.box{background:var(--deep);border-radius:10px;padding:10px}
+.att{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:50px;padding:8px 0;border-top:1px solid rgba(216,182,106,.14);background:none;border-left:0;border-right:0;border-bottom:0;width:100%;text-align:left;font-size:13px;line-height:1.45;cursor:pointer}
+.att:first-of-type{border-top:0}
+.bar{position:relative;height:6px;border-radius:3px;background:#1B2A40;margin:4px 0}
+.bar i{position:absolute;left:0;top:0;height:6px;border-radius:3px;background:var(--blue)}
+.bar u{position:absolute;top:-4px;width:2px;height:14px;background:var(--text)}
+.trade{border-top:1px solid rgba(216,182,106,.14);padding-top:12px;margin-top:12px;display:flex;flex-direction:column;gap:8px;cursor:pointer;background:none;border-left:0;border-right:0;border-bottom:0;width:100%;text-align:left}
+.pill{padding:4px 9px;border-radius:99px;border:1px solid var(--line);font-size:10px;font-weight:700;white-space:nowrap}
+.pill.up{border-color:var(--up)}.pill.down{border-color:var(--down)}
+nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);background:var(--deep);max-width:560px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom)}
+nav button{min-height:56px;background:none;border:0;border-top:2px solid transparent;font-size:11px;font-weight:500;color:var(--muted);cursor:pointer}
+nav button.on{color:var(--gold);font-weight:700;border-top-color:var(--gold)}
+.sheet{position:fixed;inset:0;background:var(--bg);z-index:10;overflow:auto;display:none;max-width:560px;margin:0 auto}
+.sheet.on{display:block}
+.sheet .in{padding:16px;display:flex;flex-direction:column;gap:14px;padding-bottom:40px}
+.kv{display:flex;justify-content:space-between;gap:14px;font-size:12px;padding:5px 0}
+.kv span:first-child{color:var(--muted);flex-shrink:0}.kv span:last-child{text-align:right}
+p{margin:0}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AI Office</div>
+  <div class="live"><span id="dot" class="dot stale"></span><span id="upd">завантаження…</span></div>
+</header>
+
+<main id="tab-today"></main>
+<main id="tab-signals" class="hide"></main>
+<main id="tab-invest" class="hide">
+  <div class="card gold"><div class="row" style="justify-content:flex-start"><div class="ava">Л</div><div class="serif" style="font-size:21px;line-height:1.15">Портфель ще не підключено</div></div>
+  <p style="margin-top:12px;font-size:14px;line-height:1.6">Щоб я бачив ваші покупки на споті й рахував відра, потрібен ключ біржі «лише читання» або ручне введення покупок. Скажіть у чаті, який спосіб обираєте.</p></div>
+  <h2>На чому стоятимуть поради</h2>
+  <div class="card">
+    <div class="kv"><span>Біткоїн частинами щотижня</span><span>$4 000 → $12 350</span></div>
+    <div class="kv"><span>Стоп на споті</span><span>не допомагає</span></div>
+    <div class="kv"><span>Гонитва за тим, що вистрілило</span><span class="down">−99%</span></div>
+    <p class="tiny muted" style="border-top:1px solid rgba(216,182,106,.14);padding-top:8px;margin-top:6px">Наша перевірка: 664 монети, 2020–2026, старт у січні 2022.</p>
+  </div>
+</main>
+<main id="tab-zvirka" class="hide"></main>
+
+<div id="sheet" class="sheet"><div class="in" id="sheet-in"></div></div>
+
+<nav>
+  <button data-tab="today" class="on">Сьогодні</button>
+  <button data-tab="signals">Сигнали</button>
+  <button data-tab="invest">Інвестиції</button>
+  <button data-tab="zvirka">Звірка</button>
+</nav>
+
+<script>
+(function(){
+  try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();} }catch(e){}
+  var S=null,Z=null,frozen=false;
+  var $=function(id){return document.getElementById(id)};
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function usd(x){if(x==null)return '—';var a=Math.abs(Math.round(x));return (x>=0?'+':'−')+'$'+String(a).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}
+  function cls(x){return x==null?'muted':(x>=0?'up':'down')}
+  function dec(){try{return JSON.parse(localStorage.getItem('lev_dec')||'{}')}catch(e){return{}}}
+  function setDec(id,v){var d=dec();d[id]=v;try{localStorage.setItem('lev_dec',JSON.stringify(d))}catch(e){}}
+  function ava(sz){return '<div class="ava" style="width:'+sz+'px;height:'+sz+'px;font-size:'+Math.round(sz*.54)+'px">Л</div>'}
+
+  function tradeHtml(t,full){
+    var bar='';
+    if(t.pos!=null){bar='<div class="bar"><i style="width:'+(t.pos*100)+'%"></i><u style="left:'+(t.pos*100)+'%"></u></div><div class="row tiny muted"><span>стоп '+esc(t.sl)+'</span><span>вхід '+esc(t.entry)+'</span><span>ціль '+esc(t.tp)+'</span></div>'}
+    var tags=(t.rep?' · повторний після стопа':'');
+    var h='<div class="row"><div class="col"><div style="font-size:14px;font-weight:700">'+esc(t.sym)+' · '+esc(t.dir_ua)+'</div><div class="small muted">'+esc(t.age)+(t.price?' · ціна '+esc(t.price):' · ціни зараз не бачу')+esc(tags)+'</div></div><div style="font-size:22px;font-weight:700;line-height:1.1" class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</div></div>';
+    if(full){h+=bar+'<div class="grid3 small"><div><div class="muted">зараз</div><b class="'+cls(t.now)+'">'+(t.now==null?'—':usd(t.now))+'</b></div><div><div class="muted">до стопа ще</div><b>'+(t.to_stop==null?'—':'$'+Math.round(t.to_stop))+'</b></div><div><div class="muted">якщо стоп</div><b class="down">'+usd(t.if_stop)+'</b></div></div>'}
+    return h;
+  }
+
+  function renderToday(){
+    var s=S,h='';
+    h+='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(52)+'<div class="col"><div class="serif" style="font-size:22px;line-height:1.1">Лев</div><div class="small muted">ваш фінансовий радник · стежить зараз</div></div></div>';
+    h+='<p style="margin-top:12px;font-size:14px;line-height:1.55">'+esc(s.lev)+'</p></div>';
+    if(s.attention.length){h+='<div class="card"><h2 style="margin-bottom:6px">Що потребує уваги</h2>';
+      s.attention.forEach(function(a){h+='<button class="att" data-sig="'+esc(a.sig_id||'')+'"><span>'+esc(a.text)+'</span>'+(a.sig_id?'<span style="color:var(--gold);font-size:16px" aria-hidden="true">→</span>':'')+'</button>'});h+='</div>'}
+    h+='<div class="grid3"><div class="stat"><div class="tiny muted">Зараз</div><b class="'+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'—')+'</b><div class="tiny muted">ще не зафіксовано</div></div>';
+    h+='<div class="stat"><div class="tiny muted">До стопів</div><b>'+(s.sums.n?'$'+Math.round(s.sums.to_stop).toLocaleString('uk'):'—')+'</b><div class="tiny muted">можна втратити від зараз</div></div>';
+    h+='<div class="stat"><div class="tiny muted">Якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b><div class="tiny muted">підсумок угод</div></div></div>';
+    h+='<div class="tiny muted" style="margin-top:-8px">Ціни на '+esc(s.price_at||'—')+(s.stale?' · дані застаріли':'')+' · ризик $'+s.risk+' на угоду · '+esc(s.note)+(s.sums.unknown?' · без ціни: '+s.sums.unknown:'')+'</div>';
+    h+='<h2>Відкриті угоди · '+s.sums.n+'</h2>';
+    if(!s.groups.length){h+='<div class="card muted">Відкритих угод немає.</div>'}
+    s.groups.forEach(function(g,gi){
+      h+='<div class="card"><div class="row"><div class="col"><div style="font-size:15px;font-weight:700">'+esc(g.title)+'</div>'+(g.sub?'<div class="small muted">'+esc(g.sub)+'</div>':'')+'</div><div style="font-size:21px;font-weight:700" class="'+cls(g.now)+'">'+(g.now==null?'—':usd(g.now))+'</div></div>';
+      var open=window.__open&&window.__open[gi], list=open?g.trades:g.trades.slice(0,3);
+      list.forEach(function(t,i){h+='<button class="trade" data-sig="'+esc(t.sig_id)+'">'+tradeHtml(t,i===0)+'</button>'});
+      if(g.trades.length>3){h+='<button class="btn plain" style="width:100%;margin-top:12px" data-more="'+gi+'">'+(open?'Згорнути':'Ще '+(g.trades.length-3))+'</button>'}
+      h+='</div>'});
+    $('tab-today').innerHTML=h;
+  }
+
+  function sigCard(x){
+    var d=dec()[x.sig_id];
+    return '<button class="card" data-open="'+esc(x.sig_id)+'" style="border:0;width:100%;text-align:left;cursor:pointer"><div class="row"><div class="col"><div class="tiny" style="font-weight:700;letter-spacing:.08em;color:'+(x.strat==='СВІНГ'?'#8FB4E8':'#E8D08F')+'">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.ago)+'</div><div style="font-size:18px;font-weight:700">'+esc(x.sym)+' · '+esc(x.dir_ua)+'</div></div><div class="col" style="align-items:flex-end;gap:6px"><span class="pill '+(x.open?'up':'')+'">'+esc(x.status)+'</span>'+(d?'<span class="tiny muted">'+(d==='took'?'ви взяли':'ви пропустили')+'</span>':'')+'</div></div><p class="small" style="margin-top:8px">'+esc(x.lev.title)+'</p></button>';
+  }
+  function renderSignals(){
+    var h='<h2>Сигнали за 48 годин · '+S.signals.length+'</h2>';
+    if(!S.signals.length)h+='<div class="card muted">За останні дві доби сигналів не було.</div>';
+    S.signals.forEach(function(x){h+=sigCard(x)});
+    $('tab-signals').innerHTML=h;
+  }
+  function openSignal(id){
+    var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;
+    var h='<button class="btn plain" data-close="1" style="align-self:flex-start">← Назад</button>';
+    h+='<div class="card"><div class="row"><div class="col"><div class="tiny" style="font-weight:700;letter-spacing:.08em;color:#8FB4E8">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><div style="font-size:22px;font-weight:700">'+esc(x.sym)+' · '+esc(x.dir_ua)+'</div></div><span class="pill '+(x.open?'up':'')+'">'+esc(x.status)+'</span></div>';
+    h+='<div class="grid3" style="margin-top:12px"><div class="box"><div class="tiny muted">Вхід</div><b style="font-size:15px">'+esc(x.entry)+'</b></div><div class="box"><div class="tiny muted">Стоп · −$'+S.risk+'</div><b style="font-size:15px" class="down">'+esc(x.sl)+'</b></div><div class="box"><div class="tiny muted">Ціль · '+esc(x.tp_usd)+'</div><b style="font-size:15px" class="up">'+esc(x.tp)+'</b></div></div></div>';
+    h+='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(44)+'<div class="serif" style="font-size:21px;line-height:1.15">'+esc(x.lev.title)+'</div></div><p style="margin-top:12px;font-size:14px;line-height:1.6">'+esc(x.lev.text)+'</p><p style="margin-top:10px;font-size:14px;line-height:1.6">'+esc(x.lev.after)+'</p>';
+    h+='<div style="border-top:1px solid rgba(216,182,106,.14);margin-top:12px;padding-top:10px"><h2 style="margin-bottom:4px">На що я дивився</h2>';
+    x.lev.facts.forEach(function(f){h+='<div class="kv"><span>'+esc(f[0])+'</span><span>'+esc(f[1])+'</span></div>'});h+='</div></div>';
+    var d=dec()[x.sig_id];
+    h+='<div class="small muted">Рішення за вами. Лев нічого не відкриває сам. Позначка зберігається лише на цьому телефоні.</div><div class="grid2"><button class="btn'+(d==='took'?'':' plain')+'" data-dec="took" data-id="'+esc(x.sig_id)+'">Взяла</button><button class="btn'+(d==='skip'?'':' plain')+'" data-dec="skip" data-id="'+esc(x.sig_id)+'">Пропустила</button></div>';
+    showSheet(h);
+  }
+  function openCalm(id){
+    var t=null;S.groups.forEach(function(g){g.trades.forEach(function(q){if(q.sig_id===id)t=q})});if(!t)return;
+    frozen=true;
+    var h='<div class="row" style="justify-content:flex-start">'+ava(48)+'<div class="col"><div class="serif" style="font-size:24px;line-height:1.1">'+esc(t.sym)+' · '+esc(t.dir_ua)+'</div><div class="small muted">знімок на '+esc(S.price_at||'—')+' · цифри не миготять</div></div></div>';
+    h+='<div class="card gold" style="display:flex;flex-direction:column;gap:14px">';
+    if(t.now==null){h+='<p style="font-size:15px;line-height:1.6">Ціну цієї монети я зараз не бачу, тому суми не покажу. Стоп за сигналом: '+esc(t.sl)+'.</p>'}
+    else{h+='<p style="font-size:15px;line-height:1.6">До вашого стопа '+String(t.dist_pct).replace('.',',')+'%. Стоп стоїть на '+esc(t.sl)+', ціна зараз '+esc(t.price)+'.</p>';
+      h+='<div class="grid3"><div class="box"><div class="tiny muted">Зараз</div><b style="font-size:18px" class="'+cls(t.now)+'">'+usd(t.now)+'</b></div><div class="box"><div class="tiny muted">До стопа ще</div><b style="font-size:18px">$'+Math.round(t.to_stop)+'</b></div><div class="box"><div class="tiny muted">Якщо стоп</div><b style="font-size:18px" class="down">'+usd(t.if_stop)+'</b></div></div>'}
+    h+='<p style="font-size:15px;line-height:1.6">У вашому плані ця угода закривається в одному з трьох випадків: стоп '+esc(t.sl)+', ціль '+esc(t.tp)+' або час ('+esc(t.exit_at)+'). '+(t.now!=null?'Жодна з цих умов зараз не настала.':'')+'</p>';
+    if(t.opp||t.pair||t.rep){h+='<p class="small" style="color:var(--down)">Застереження з картки: '+esc([t.pair,t.opp,t.rep?'повторний сигнал після стопа':null].filter(Boolean).join('; '))+'.</p>'}
+    h+='<p class="small muted">'+esc(S.note)+'</p></div>';
+    h+='<div class="grid2"><button class="btn" data-plan="'+esc(t.sig_id)+'">Показати мій план</button><button class="btn plain" data-close="1">Згорнути</button></div>';
+    h+='<div class="card"><h2 style="margin-bottom:4px">На чому це базується</h2><div class="kv"><span>Ціна</span><span>'+esc(t.price||'немає')+' · '+esc(S.price_at||'—')+'</span></div><div class="kv"><span>Вхід і стоп</span><span>'+esc(t.entry)+' · '+esc(t.sl)+', із сигналу</span></div><div class="kv"><span>Схожі рухи на історії</span><span>ще не пораховано</span></div><p class="tiny muted" style="border-top:1px solid rgba(216,182,106,.14);padding-top:8px;margin-top:6px">Частоту «ціна повернулась» покажу тут, коли вона буде порахована з описом, що вважали схожим рухом.</p></div>';
+    showSheet(h);
+  }
+  function showSheet(h){$('sheet-in').innerHTML=h;$('sheet').classList.add('on');$('sheet').scrollTop=0}
+  function closeSheet(){$('sheet').classList.remove('on');frozen=false}
+
+  function renderZvirka(){
+    if(!Z){$('tab-zvirka').innerHTML='<div class="card muted">Завантаження…</div>';return}
+    var h='<div class="card gold"><div class="row" style="justify-content:flex-start">'+ava(44)+'<div class="serif" style="font-size:21px;line-height:1.15">Що обіцяв і що вийшло</div></div><p style="margin-top:12px;font-size:14px;line-height:1.6">Тут живий рахунок сигналів Офісу. Ризик $'+Z.risk+' на угоду, без комісії. Відкриті угоди пораховані за поточною ціною.</p></div>';
+    var prom={'СВІНГ':'на історії: близько +$1,30 на угоду, половина угод — стоп','ІНТРАДЕЙ':'на історії: близько +$1,00 на угоду'};
+    Z.rows.forEach(function(r){var n=r.sl+r.tp+r.time;
+      h+='<div class="card"><div class="row"><div class="col"><div style="font-size:15px;font-weight:700">'+esc(r.name)+'</div><div class="small muted">з '+esc(r.since||'—')+'</div></div><div style="font-size:21px;font-weight:700" class="'+cls(r.closed_usd)+'">'+usd(r.closed_usd)+'</div></div>';
+      h+='<p class="small muted" style="margin:6px 0 8px">'+esc(prom[r.name]||'')+'</p>';
+      h+='<div class="kv"><span>Закрито угод</span><span>'+n+(n?' · на угоду '+usd(r.closed_usd/n):'')+'</span></div><div class="kv"><span>Стоп / ціль / за часом</span><span>'+r.sl+' / '+r.tp+' / '+r.time+'</span></div>';
+      if(r.time_unknown)h+='<div class="kv"><span>За часом без ціни виходу</span><span>'+r.time_unknown+' (не враховані)</span></div>';
+      h+='<div class="kv"><span>Відкрито зараз</span><span>'+r.open+' · <b class="'+cls(r.open_usd)+'">'+usd(r.open_usd)+'</b>'+(r.open_unknown?' · без ціни '+r.open_unknown:'')+'</span></div></div>'});
+    h+='<div class="tiny muted">Оновлено '+esc(Z.updated)+'. Повна звірка з вердиктами — раз на тиждень.</div>';
+    $('tab-zvirka').innerHTML=h;
+  }
+
+  function render(){if(!S)return;$('upd').textContent=(S.stale?'дані застаріли · ':'наживо · ')+S.updated;$('dot').className='dot'+(S.stale?' stale':'');renderToday();renderSignals()}
+  function load(){fetch('/api/lev/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){S=j;if(!frozen)render()}}).catch(function(){$('upd').textContent='немає звʼязку';$('dot').className='dot stale'})}
+  function loadZ(){fetch('/api/lev/zvirka',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){Z=j;renderZvirka()}}).catch(function(){})}
+
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-tab],[data-sig],[data-more],[data-open],[data-close],[data-dec],[data-plan]');if(!el)return;
+    if(el.dataset.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==el.dataset.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(el.dataset.tab==='zvirka')loadZ();window.scrollTo(0,0)}
+    else if(el.dataset.more!=null){window.__open=window.__open||{};window.__open[el.dataset.more]=!window.__open[el.dataset.more];renderToday()}
+    else if(el.dataset.sig){openCalm(el.dataset.sig)}
+    else if(el.dataset.open){openSignal(el.dataset.open)}
+    else if(el.dataset.plan){closeSheet();openSignal(el.dataset.plan)}
+    else if(el.dataset.dec){setDec(el.dataset.id,el.dataset.dec);renderSignals();openSignal(el.dataset.id)}
+    else if(el.dataset.close){closeSheet();render()}
+  });
+  load();setInterval(load,15000);
+})();
+</script>
+</body>
+</html>
