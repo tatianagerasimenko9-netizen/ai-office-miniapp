@@ -83,6 +83,17 @@ def _hold_s(sig_id: str) -> float:
     return 10 * 86400.0 if sig_id.startswith("SW|") else 48 * 3600.0
 
 
+def _res(d: Dict[str, Any], R: float) -> Optional[float]:
+    """Підсумок закритого сигналу в $ (стоп = −ризик, ціль = за ціною цілі, за часом = за ціною події). Для відкритих — None (рахує екран за живою ціною)."""
+    try:
+        e, sl = float(d["entry"]), float(d["sl"]); risk = abs(e - sl); side = 1 if d["direction"] == "LONG" else -1
+        if d["status"] == "SL": return -R
+        if d["status"] in ("TP1", "TP3") and d.get("tp"): return round(R * abs(d["tp"] - e) / risk, 1)
+        if d["status"] == "TIMEOUT" and "ENTRY" in d["ev"] and d["ev"].get("TIMEOUT") and d["ev"]["TIMEOUT"][1]: return round(R * side * (float(d["ev"]["TIMEOUT"][1]) - e) / risk, 1)
+    except Exception: pass
+    return None
+
+
 def _rows(db: str, since: float) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
     cols = "sig_id, seq, symbol, direction, entry, sl, targets_json, hyp_json, created_ts, status"
@@ -182,7 +193,7 @@ def state(db: str, prices: Optional[Dict[str, float]] = None, price_ts: Optional
         same = open_same[d["direction"]] - (1 if d["status"] == "SENT" and "ENTRY" in d["ev"] else 0); mins = int((now - d["created_ts"]) / 60)
         signals.append({"sig_id": d["sig_id"], "strat": _strat(d["sig_id"]), "seq": d["seq"], "sym": d["symbol"].replace("USDT", ""), "dir": d["direction"], "dir_ua": "лонг" if d["direction"] == "LONG" else "шорт",
                         "entry": _px(float(d["entry"])), "sl": _px(float(d["sl"])), "tp": _px(d["tp"]) if d["tp"] else "—", "tp_usd": (_usd(R * abs(d["tp"] - float(d["entry"])) / abs(float(d["entry"]) - float(d["sl"]))) if d["tp"] else ""),
-                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
+                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "res": _res(d, R), "kind": {"SL": "sl", "TP1": "tp", "TP3": "tp", "TIMEOUT": "time", "SENT": "open", "NEW": "open"}.get(d["status"], "none"), "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
     return {"ok": True, "ts": now, "updated": _hm(now), "price_ts": price_ts, "price_at": _hm(price_ts) if price_ts else None, "stale": bool(not price_ts or now - price_ts > 120), "risk": R,
             "lev": lev, "note": "Рахую за сигналами Офісу, біржу не бачу. При різкому русі стоп може виконатись гірше за розрахунок.", "attention": att, "sums": sums, "groups": groups, "signals": signals, "order_authorized": False}
 
