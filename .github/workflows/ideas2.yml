@@ -1,0 +1,46 @@
+name: ideas2
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/ideas2.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch
+        shell: bash
+        run: |
+          S42=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          OTH=ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,BATUSDT,ZRXUSDT,WAVESUSDT,KSMUSDT,STORJUSDT,BANDUSDT,RLCUSDT,KNCUSDT,ZENUSDT,EGLDUSDT,ALPHAUSDT,CELOUSDT,ARUSDT,FLOWUSDT,MINAUSDT
+          echo "S42=$S42" >> $GITHUB_ENV; echo "OTH=$OTH" >> $GITHUB_ENV
+          L=docs/handoff/br-profitability/strategy_search/div_lab.py
+          python3 $L fetch candles "$S42,$OTH"
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Leg2 and Elliott
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          python3 $D/strategy_search/bounce_leg2.py candles "$S42" /tmp/leg2_h1.csv | grep -v "USDT$" | tee $D/leg2_out.txt
+          TF=900 python3 $D/strategy_search/bounce_leg2.py candles "$S42" /tmp/leg2_m15.csv | grep -v "USDT$" | tee -a $D/leg2_out.txt
+          TFS=H1 python3 $D/strategy_search/elliott_test.py candles "$S42" 0.001 /tmp/ell_h1 | tee $D/elliott_h1_out.txt
+          TFS=M15 python3 $D/strategy_search/elliott_test.py candles "$S42" 0.001 /tmp/ell_m15 | tee $D/elliott_m15_out.txt
+      - name: Save
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/leg2_out.txt docs/handoff/br-profitability/elliott_h1_out.txt docs/handoff/br-profitability/elliott_m15_out.txt || true
+          git commit -m "ideas2: друга нога, хвилі на H1/M15 (автоматично)"
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done

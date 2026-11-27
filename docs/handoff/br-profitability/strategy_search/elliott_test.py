@@ -10,7 +10,8 @@
 import os, sys
 import numpy as np, pandas as pd
 CD, SYMS, FEE, OUT = sys.argv[1], sys.argv[2].split(","), float(sys.argv[3]), sys.argv[4]
-PER = {"H4": 14400, "D1": 86400}; HOLD = {"H4": 60, "D1": 30}; KS = (2, 3, 4)
+_P = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}; _H = {"M15": 96, "H1": 48, "H4": 60, "D1": 30}; _T = os.environ.get("TFS", "H4,D1").split(",")   # TFS=M15,H1 — «хвилі на менших таймфреймах» (27.11.2026, прохання власниці; ті самі правила)
+PER = {k: _P[k] for k in _T}; HOLD = {k: _H[k] for k in _T}; KS = (2, 3, 4)
 def bars(sym, per):
     d = pd.read_csv(f"{CD}/{sym}/15m.csv").drop_duplicates("open_time").sort_values("open_time")
     g = d.groupby(d.open_time // per * per).agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last")).reset_index()

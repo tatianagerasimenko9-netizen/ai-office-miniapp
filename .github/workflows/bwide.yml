@@ -1,0 +1,60 @@
+name: bwide
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/bwide.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch
+        shell: bash
+        run: |
+          S42=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          OTH=ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,BATUSDT,ZRXUSDT,WAVESUSDT,KSMUSDT,STORJUSDT,BANDUSDT,RLCUSDT,KNCUSDT,ZENUSDT,EGLDUSDT,ALPHAUSDT,CELOUSDT,ARUSDT,FLOWUSDT,MINAUSDT
+          echo "S42=$S42" >> $GITHUB_ENV; echo "OTH=$OTH" >> $GITHUB_ENV; export K1="$S42" K2="$OTH"
+          L=docs/handoff/br-profitability/strategy_search/div_lab.py
+          WIDE=$(python3 - <<'PY'
+          import urllib.request, re, hashlib, os
+          known = set((os.environ.get("K1", "") + "," + os.environ.get("K2", "")).split(",")); out = set(); marker = ""
+          for _ in range(20):
+              x = urllib.request.urlopen("https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?delimiter=/&prefix=data/futures/um/monthly/klines/" + (f"&marker={marker}" if marker else ""), timeout=60).read().decode()
+              got = re.findall(r"<Prefix>data/futures/um/monthly/klines/([A-Z0-9]+)/</Prefix>", x); out |= set(got)
+              m = re.search(r"<NextMarker>(.*?)</NextMarker>", x)
+              if not m: break
+              marker = m.group(1)
+          c = sorted((s for s in out if s.endswith("USDT") and s not in known and "_" not in s), key=lambda s: hashlib.md5(s.encode()).hexdigest())[:150]
+          print(",".join(c))
+          PY
+          )
+          echo "WIDE count: $(echo $WIDE | tr ',' '\n' | wc -l)"
+          VOL=1 python3 $L fetch candles "$S42,$OTH,$WIDE"
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Wide features
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability; mkdir -p /tmp/w
+          python3 $D/strategy_search/bounce_lab.py candles /tmp/w/bounce_trades.csv > /tmp/w/lab.txt; tail -3 /tmp/w/lab.txt; gzip -f /tmp/w/bounce_trades.csv
+          OTH="$OTH" python3 $D/strategy_search/bounce_feat.py candles "$S42" /tmp/w/feat.csv | grep -v "USDT [0-9]*$" | tee $D/bwide_out.txt
+          gzip -c /tmp/w/feat.csv > $D/data/bounce_feat_wide.csv.gz
+      - name: Save
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/bwide_out.txt docs/handoff/br-profitability/data/bounce_feat_wide.csv.gz || true
+          git commit -m "bwide: відскок на широкій групі монет (автоматично)"
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# rerun fix

@@ -22,10 +22,11 @@ TD_TAG = "#ТЕСТ"
 
 
 def is_td(row: Dict[str, Any]) -> bool:
-    return str(row.get("sig_id", "")).startswith(("TD|", "SW|"))
+    return str(row.get("sig_id", "")).startswith(("TD|", "SW|", "BN|"))
 
 
-STRATS = {"TD": ("ІНТРАДЕЙ", "🟨", "#ffd500", "#2a2200", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🟦", "#0057b7", "#ffffff", "4 год · угоди до 10 діб")}
+STRATS = {"TD": ("ІНТРАДЕЙ", "🟨", "#ffd500", "#2a2200", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🟦", "#0057b7", "#ffffff", "4 год · угоди до 10 діб"),
+          "BN": ("ВІДСКОК", "🟩", "#1f9d55", "#ffffff", "1 год · угоди до 2 діб")}   # третій вид сигналу (рішення власниці 27.11.2026): лонг після глибокого зливу, на перевірці
 
 
 def strat(row: Dict[str, Any]):
@@ -177,6 +178,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
         word = "монета" if n % 10 == 1 and n % 100 != 11 else ("монети" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "монет")
         L.append(f"➕ Ще {n} {word}" + (f" ({html.escape(syms)})" if syms else "") + " у той самий бік — це один рух")
     if hy.get("why"): L.append("📌 " + html.escape(str(hy["why"])))
+    if hy.get("note"): L.append("⚠️ " + html.escape(str(hy["note"])))
     L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))
     L.append(TD_TAG)
     return "\n".join(L)

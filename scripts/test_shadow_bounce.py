@@ -39,3 +39,32 @@ for up, kind in ((True, "BNC_U"), (False, "BNC_N")):
 db = os.path.join(tempfile.mkdtemp(), "b.db"); assert sb.scan(db, fetch_factory(True), now, syms[:5]) == []     # замало монет для ширини
 os.environ["BNC_SHADOW"] = "0"; assert sb.scan(db, fetch_factory(True), now, syms) == []; os.environ["BNC_SHADOW"] = "1"
 print("ok shadow bounce:", seen, "входів звірено з еталоном")
+
+# --- сигнал «ВІДСКОК»: три зливи в те саме дно (±1 ATR), падіння >20% від 7-денного максимуму, BTC підтвердив → BN|… + BNC_S3
+import json
+from office_br import card, store
+def series():
+    px = [100.0] * 250
+    def leg(a, b, n): return list(np.linspace(a, b, n + 1)[1:])
+    px += leg(100, 78.3, 20) + leg(78.3, 82, 14) + leg(82, 78.2, 14) + leg(78.2, 82, 14) + leg(82, 78.0, 14) + [78.6, 79.4]
+    c_ = np.array(px); o_ = np.r_[c_[0], c_[:-1]]; h_ = np.maximum(o_, c_) + 0.15; l_ = np.minimum(o_, c_) - 0.15; t_ = 1_700_000_000 // 3600 * 3600 + np.arange(len(c_)) * 3600.0
+    return t_, h_, l_, c_
+t2, h2, l2, c2 = series(); B2 = {"t": t2, "h": h2, "l": l2, "c": c2}; n2 = len(c2); en = sb.entry_at(B2, n2 - 1); assert en, "немає повернення на останньому барі"
+k, drop = sb.depth(B2, en[0]); assert k >= 2 and drop > 20, (k, drop)
+now2 = t2[-1] + 3600 + 50
+def fetch2(sym, tf, limit, closed_only=True):
+    if tf == "1h": return [{"ts": iso(t2[i]), "high": h2[i], "low": l2[i], "close": c2[i]} for i in range(max(0, n2 - limit), n2)]
+    return [{"ts": iso(t2[0] - (260 - i) * 86400), "high": 120, "low": 90, "close": 100} for i in range(260)]
+db = os.path.join(tempfile.mkdtemp(), "s.db"); store.init(db)
+from office_bridge import _execute
+_execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ("SW|BTCUSDT|SHORT|1", 27, "BTCUSDT", "SHORT", 1, 1, 1, 1, 95.0, 101.0, "[]", "{}", now2 - 86400, "SENT"))
+made = sb.scan(db, fetch2, now2, ("BTCUSDT", "ETHUSDT"))
+assert sum(m.startswith("BN|") for m in made) == 2 and sum(m.startswith("BNC_S3|") for m in made) == 2, made
+row = [r for r in store.rows(db, "WHERE sig_id LIKE 'BN|%'") if r["symbol"] == "BTCUSDT"][0]; hy = json.loads(row["hyp_json"])
+assert row["status"] == "NEW" and card.is_td(row) and card.strat(row)[0] == "ВІДСКОК" and not card.is_swing(row) and abs(float(row["confirm_ts"]) - (t2[-1] + 2700)) < 1
+assert "не закривати" in hy["opp"] and "№27" in hy["opp"] and "на перевірці" in hy["note"]
+cap = card.build_caption(row)[0]; assert "ВІДСКОК №1" in cap and "на перевірці" in cap and "не закривати" in cap and "дно тестували" in cap, cap
+assert sb.scan(db, fetch2, now2, ("BTCUSDT", "ETHUSDT")) == []                                                   # повторів немає
+os.environ["BNC_LIVE"] = "0"; db3 = os.path.join(tempfile.mkdtemp(), "s3.db"); m3 = sb.scan(db3, fetch2, now2, ("BTCUSDT", "ETHUSDT")); os.environ["BNC_LIVE"] = "1"
+assert m3 and all(m.startswith("BNC_S3|") for m in m3), m3                                                         # вимкнений сигнал → лише тихий журнал
+print("ok bounce signal: тестів дна", k, f"падіння {drop:.1f}%"); print("--- картка ---"); print(cap)

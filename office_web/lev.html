@@ -64,8 +64,8 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .tile .f{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
 .empty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
 /* сигнали */
-.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
-.seg button{border:0;background:transparent;color:var(--muted);border-radius:10px;min-height:46px;font-size:13px;font-weight:700;letter-spacing:.06em}.seg button.on{background:var(--gold);color:#17140E}.seg small{margin-left:7px;font-size:11px;opacity:.75}
+.seg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
+.seg button{border:0;background:transparent;color:var(--muted);border-radius:10px;min-height:46px;font-size:12px;font-weight:700;letter-spacing:.03em}.seg button.on{background:var(--gold);color:#17140E}.seg small{margin-left:7px;font-size:11px;opacity:.75}
 .pick{display:block;position:relative}.pick:after{content:'▾';position:absolute;right:16px;top:50%;transform:translateY(-50%);color:var(--gold);pointer-events:none}
 .pick select{width:100%;appearance:none;-webkit-appearance:none;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;min-height:46px;padding:0 40px 0 14px;font-family:inherit;font-size:14px;font-weight:600}
 .stiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -189,8 +189,8 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   function sel(attr,opts,cur){var h='<label class="pick"><select '+attr+'>';opts.forEach(function(o){h+='<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+esc(o[1])+'</option>'});return h+'</select></label>'}
   function sres(x){if(x.kind==='open'){var t=find(x.sig_id);return t?t.now:null}return x.res}
   function renderSignals(){
-    var A=S.signals,h='',K={TD:A.filter(function(x){return x.strat!=='СВІНГ'}),SW:A.filter(function(x){return x.strat==='СВІНГ'})};
-    h+='<div class="seg"><button class="'+(SK==='TD'?'on':'')+'" data-sk="TD">ІНТРАДЕЙ<small>'+K.TD.length+'</small></button><button class="'+(SK==='SW'?'on':'')+'" data-sk="SW">СВІНГ<small>'+K.SW.length+'</small></button></div>';
+    var A=S.signals,h='',K={TD:A.filter(function(x){return x.strat==='ІНТРАДЕЙ'}),SW:A.filter(function(x){return x.strat==='СВІНГ'}),BN:A.filter(function(x){return x.strat==='ВІДСКОК'})};
+    h+='<div class="seg"><button class="'+(SK==='TD'?'on':'')+'" data-sk="TD">ІНТРАДЕЙ<small>'+K.TD.length+'</small></button><button class="'+(SK==='SW'?'on':'')+'" data-sk="SW">СВІНГ<small>'+K.SW.length+'</small></button><button class="'+(SK==='BN'?'on':'')+'" data-sk="BN">ВІДСКОК<small>'+K.BN.length+'</small></button></div>';
     var SFF={all:function(){return true},open:function(x){return x.kind==='open'},plus:function(x){return x.kind!=='open'&&x.res>0},minus:function(x){return x.kind!=='open'&&x.res<0}};
     var B=K[SK];h+=sel('data-sfs="1"',[['all','Усі сигнали · '+B.length],['open','Зараз відкриті · '+B.filter(SFF.open).length],['plus','Закриті в плюс · '+B.filter(SFF.plus).length],['minus','Закриті в мінус · '+B.filter(SFF.minus).length]],SF);
     var L=B.filter(SFF[SF]),day='',sum=0,open=false;if(!L.length)h+='<div class="card empty">За 48 годин таких сигналів немає.</div>';
