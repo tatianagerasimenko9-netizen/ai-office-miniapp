@@ -159,6 +159,11 @@ def cycle(db: str, fetch: Callable, now: Optional[float] = None) -> Dict[str, in
         _tsm.cycle(db, fetch, now)
     except Exception as exc:  # noqa: BLE001
         print(f"[tsm-shadow] {type(exc).__name__}: {exc}", flush=True)
+    try:                                                   # тихий журнал «відскок після зливу» (раз на годину, без повідомлень)
+        from office_td import shadow_bounce as _bn
+        _bn.cycle(db, fetch, now)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bnc-shadow] {type(exc).__name__}: {exc}", flush=True)
     k = int(now // PER)
     if k > _LAST_H4 and now - k * PER >= 20:
         got = scan(db, fetch, now)
