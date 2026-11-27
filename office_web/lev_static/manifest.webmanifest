@@ -1,0 +1,2 @@
+{"name": "AI Office · Лев", "short_name": "AI Office", "description": "Особистий радник: сигнали, відкриті угоди, звірка", "lang": "uk", "start_url": "/lev/", "scope": "/lev/", "display": "standalone", "orientation": "portrait", "background_color": "#080F1B", "theme_color": "#080F1B",
+ "icons": [{"src": "/lev/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"}, {"src": "/lev/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}
