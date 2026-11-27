@@ -154,24 +154,27 @@ def state(db: str, prices: Optional[Dict[str, float]] = None, price_ts: Optional
             gk = [t for t in g if t["now"] is not None]
             groups.append({"title": f"{strat} · {nm} · {len(g)}", "sub": ("одна ставка на " + ("падіння" if dr == "SHORT" else "ріст")) if len(g) >= 5 else "", "now": round(sum(t["now"] for t in gk), 0) if gk else None, "n": len(g),
                            "trades": sorted(g, key=lambda t: (t["now"] is None, -(t["now"] or 0)))})
+    for t in trades:
+        t["soon"] = bool(t["exit_ts"] - now <= 86400); t["near"] = bool(t["now"] is not None and t["now"] <= -R / 2)       # «біля стопа» = уже втрачено понад половину ризику
     att: List[Dict[str, Any]] = []
-    for dr, nm, mv in (("SHORT", "шортів", "розвернеться вгору"), ("LONG", "лонгів", "піде вниз")):
+    near = sorted((t for t in trades if t["near"]), key=lambda t: t["now"])
+    if near: att.append({"level": "red", "title": (f"{near[0]['sym']} біля стопа" if len(near) == 1 else f"{_pl(len(near), *UG)} біля стопа"), "detail": ", ".join(f"{t['sym']} {_usd(t['now'])}" for t in near[:4]) + (" …" if len(near) > 4 else ""), "filter": "near"})
+    soon = sorted((t for t in trades if t["soon"]), key=lambda t: t["exit_ts"])
+    if soon: att.append({"level": "yellow", "title": f"За часом сьогодні виходить {_pl(len(soon), *UG)}", "detail": f"перша — {soon[0]['sym']}, {soon[0]['exit_at']}", "filter": "soon"})
+    for dr, mv in (("SHORT", "піде вгору"), ("LONG", "піде вниз")):
         n = sum(1 for t in trades if t["dir"] == dr)
-        if n >= 5: att.append({"text": f"{_pl(n, *(SH if dr == 'SHORT' else LG))} залежать від одного руху ринку. Якщо він {mv} до стопів: {_usd(-R * n)}"})
-    soon = sorted((t for t in trades if t["exit_ts"] - now <= 86400), key=lambda t: t["exit_ts"])
-    if soon: att.append({"text": (f"Протягом доби за часом виходить {_pl(len(soon), *UG)}. " + ("Це" if len(soon) == 1 else "Перша") + f" — {soon[0]['sym']}, {soon[0]['exit_at']}"), "sig_id": soon[0]["sig_id"]})
-    near = sorted((t for t in known if t["dist_pct"] is not None and t["dist_pct"] > 0), key=lambda t: t["dist_pct"])
-    if near: t0 = near[0]; att.append({"text": f"Найближча до стопа: {t0['sym']}, {t0['dir_ua']}. Зараз {_usd(t0['now'])}, до стопа {str(t0['dist_pct']).replace('.', ',')}%", "sig_id": t0["sig_id"]})
+        if n >= 5: att.append({"level": "yellow", "title": f"{_pl(n, *(SH if dr == 'SHORT' else LG))} — одна ставка", "detail": f"якщо ринок {mv} до стопів: {_usd(-R * n)}", "filter": dr.lower()})
     by_sym: Dict[str, set] = {}
     for t in trades: by_sym.setdefault(t["sym"], set()).add(t["dir"])
     both = sorted(s for s, v in by_sym.items() if len(v) == 2)
-    if both: att.append({"text": f"По {', '.join(both)} відкрито угоди в обидва боки — вони гасять одна одну"})
-    if not trades: lev = "Відкритих угод зараз немає. Чекаємо на сигнал."
+    if both: att.append({"level": "yellow", "title": f"{', '.join(both)} — угоди в обидва боки", "detail": "вони гасять одна одну", "filter": "both"})
+    for t in trades: t["both"] = t["sym"] in both
+    if not trades: lev = "Відкритих угод немає. Чекаємо на сигнал."
     else:
         ns = sum(1 for t in trades if t["dir"] == "SHORT"); nl = len(trades) - ns
-        lev = f"Зараз відкрито {_pl(len(trades), *UG)}, разом {_usd(sums['now'])}. Це ще не зафіксований результат."
-        if len(trades) >= 5 and max(ns, nl) / len(trades) >= 0.8: lev += f" Майже всі — {'шорти' if ns > nl else 'лонги'}: це одна ставка на {'падіння' if ns > nl else 'ріст'}, нову в той самий бік я б зважив двічі."
-        if soon: lev += f" Протягом доби за часом виходить {_pl(len(soon), *UG)} — дивіться нижче."
+        if len(trades) >= 5 and max(ns, nl) / len(trades) >= 0.8: lev = f"Майже все — {'шорти' if ns > nl else 'лонги'}. Нову угоду в той самий бік я б зважив двічі."
+        elif near: lev = "Є угоди біля стопа — подивіться першими."
+        else: lev = "Усе йде за планом. Нових дій не потрібно."
     open_same = {dr: sum(1 for t in trades if t["dir"] == dr) for dr in ("LONG", "SHORT")}
     ST = {"NEW": "щойно прийшов", "SENT": "відкрито", "SL": "стоп", "TP1": "ціль", "TP3": "ціль", "TIMEOUT": "закрито за часом", "EXPIRED_UNSENT": "не надіслано", "CANCEL": "скасовано"}
     signals = []
