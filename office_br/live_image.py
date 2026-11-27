@@ -17,7 +17,7 @@ def render(row, bars):
     except Exception: _tf=900.0
     if float(row["confirm_ts"])-last>_tf or last>float(row["confirm_ts"]):
         raise ValueError("candles not aligned with signal confirmation")
-    if str(row.get("sig_id","")).startswith(("TD|","SW|")):
+    if str(row.get("sig_id","")).startswith(("TD|","SW|","BN|")):
         from office_br.td_image import render_td
         return render_td(row,bars)
     from matplotlib import pyplot as plt

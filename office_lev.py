@@ -76,7 +76,7 @@ def _dm(ts: float) -> str:
 
 
 def _strat(sig_id: str) -> str:
-    return "СВІНГ" if sig_id.startswith("SW|") else ("ІНТРАДЕЙ" if sig_id.startswith("TD|") else "B&R")
+    return "СВІНГ" if sig_id.startswith("SW|") else ("ІНТРАДЕЙ" if sig_id.startswith("TD|") else ("ВІДСКОК" if sig_id.startswith("BN|") else "B&R"))
 
 
 def _hold_s(sig_id: str) -> float:
@@ -98,7 +98,7 @@ def _rows(db: str, since: float) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
     cols = "sig_id, seq, symbol, direction, entry, sl, targets_json, hyp_json, created_ts, status"
     out = []
-    for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal WHERE (sig_id LIKE 'SW|%' OR sig_id LIKE 'TD|%') AND (status = 'SENT' OR created_ts >= ?) ORDER BY created_ts", (since,)):
+    for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal WHERE (sig_id LIKE 'SW|%' OR sig_id LIKE 'TD|%' OR sig_id LIKE 'BN|%') AND (status = 'SENT' OR created_ts >= ?) ORDER BY created_ts", (since,)):
         d = dict(zip(cols.split(", "), r))
         try: d["tp"] = float((json.loads(d["targets_json"]) or [{}])[0].get("p"))
         except Exception: d["tp"] = None
@@ -202,7 +202,7 @@ def zvirka(db: str, prices: Optional[Dict[str, float]] = None, now: Optional[flo
     """Живий підсумок стратегій: закриті (стоп / ціль / за часом) і відкриті угоди, суми при ризику RISK_USD. Без комісії."""
     from office_bridge import _fetchall
     now = time.time() if now is None else now; R = risk_usd(); prices = live_prices()["val"] if prices is None else prices; out = []
-    for pfx, name in (("SW", "СВІНГ"), ("TD", "ІНТРАДЕЙ")):
+    for pfx, name in (("SW", "СВІНГ"), ("TD", "ІНТРАДЕЙ"), ("BN", "ВІДСКОК")):
         rs = _fetchall(db, "SELECT sig_id, symbol, direction, entry, sl, targets_json, status, created_ts FROM br_test_signal WHERE sig_id LIKE ? ORDER BY created_ts", (pfx + "|%",))
         tout = {sid: px for sid, px in _fetchall(db, "SELECT sig_id, price FROM br_test_event WHERE level = 'TIMEOUT' AND sig_id LIKE ?", (pfx + "|%",))}
         ent = {sid for (sid,) in _fetchall(db, "SELECT sig_id FROM br_test_event WHERE level = 'ENTRY' AND sig_id LIKE ?", (pfx + "|%",))}
