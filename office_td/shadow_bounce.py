@@ -8,7 +8,7 @@ T «біткоїн підтвердив» (BTC дав своє ПОВЕРНЕН�
 ДОДАНО 27.11.2026 (журнал BH, BK, BJ; рішення власниці «хочу такий сигнал, і щоб записувався в тихий журнал; заходити чи ні — вирішую сама»): при ПОВЕРНЕННІ, коли BTC підтвердив,
   рахуємо K (тести того ж дна за 7 діб, ±1 ATR) і падіння від 7-денного максимуму: падіння >20% і K≥1 → сигнал «ВІДСКОК» (BN|…, картка з позначкою «на перевірці»; вимкнути BNC_LIVE=0) + запис BNC_S3 (K≥2, сильний) або BNC_S2 (K=1, добрий);
   K≥1 і 10–20% (слабкий) → лише тихо BNC_W. Ордерів немає.
-Відмінність від перевірки: ширина рахується по 42 крипто-монетах Офісу (у перевірці — 72). Вимкнути: BNC_SHADOW=0."""
+Монети: 42 крипто-монети Офісу + 30 великих монет EXTRA_COINS (ті самі 72, що в перевірці). Вимкнути: BNC_SHADOW=0."""
 from __future__ import annotations
 
 import os
@@ -20,6 +20,9 @@ import pandas as pd
 
 LB = 72; D24 = 24; WAIT = 6; HOLD = 48; PER = 3600; FEE = 0.001; KA = 3.0; TP_R = 3.0
 _LAST = 0
+# ще 30 великих монет лише для «ВІДСКОКУ» (рішення власниці 27.11.2026; журнал BM: на них правило дало +$3,59 на угоду — як на 42 основних; на всьому ринку — гірше). Монета без даних просто пропускається.
+EXTRA_COINS = ("ZECUSDT", "DASHUSDT", "XMRUSDT", "NEOUSDT", "IOTAUSDT", "ONTUSDT", "QTUMUSDT", "ZILUSDT", "ENJUSDT", "CHZUSDT", "KAVAUSDT", "COMPUSDT", "YFIUSDT", "SUSHIUSDT", "1INCHUSDT", "BATUSDT", "ZRXUSDT", "WAVESUSDT",
+               "KSMUSDT", "STORJUSDT", "BANDUSDT", "RLCUSDT", "KNCUSDT", "ZENUSDT", "EGLDUSDT", "ALPHAUSDT", "CELOUSDT", "ARUSDT", "FLOWUSDT", "MINAUSDT")
 
 
 def enabled() -> bool:
@@ -124,7 +127,7 @@ def scan(db: str, fetch: Callable, now: Optional[float] = None, symbols: Optiona
     from office_td.shadow_wave import DDL
     from office_td import swing
     now = time.time() if now is None else now; _execute(db, DDL, ())
-    symbols = symbols or tuple(s for s in swing.SYMBOLS if s in ("BTCUSDT",) + swing.SYMBOLS[:12] + swing.EXTRA_CRYPTO)
+    symbols = symbols or tuple(s for s in swing.SYMBOLS if s in ("BTCUSDT",) + swing.SYMBOLS[:12] + swing.EXTRA_CRYPTO) + EXTRA_COINS
     te = float(int(now // PER) * PER); data = {}; cand = {}; tot = hit = 0; btc_ret = False
     for sym in symbols:
         try:
