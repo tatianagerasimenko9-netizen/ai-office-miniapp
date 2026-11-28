@@ -36,6 +36,9 @@ async def _send(text, **kw): sent.append(text); return 1
 os.environ.pop("LEVEL_ALERTS_TG", None)
 assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 0 and not sent      # без згоди власниці у Telegram нічого не йде
 os.environ["LEVEL_ALERTS_TG"] = "1"
+imgs = []
+async def _img(path, cap, row): imgs.append((os.path.getsize(path), row["sig_id"])); return 0     # картинку не прийняли -> подія лишається ненадісланою
+assert asyncio.run(ol.deliver(dbp, _send, now=now_, send_image=_img)) == 0 and len(imgs) == 1 and imgs[0][0] > 5000 and imgs[0][1].startswith("LEVELS|") and not sent
 assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 2 and len(sent) == 1 and sent[0].startswith("📍 Рівні за добу") and "нагадування, не сигнал" in sent[0]
 assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 0 and len(sent) == 1
 os.environ["LEVEL_ALERTS"] = "0"; ol._LAST_DAY = ""; assert ol.daily(os.path.join(tempfile.mkdtemp(), "x.db"), fetch=lambda *a, **k: rws, now=now_, symbols=("BTCUSDT",)) == 0; os.environ["LEVEL_ALERTS"] = "1"
