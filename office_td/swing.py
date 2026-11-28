@@ -107,6 +107,17 @@ def record(db: str, sym: str, side: int, why_keys: List[str], bar_open: float, e
         _lk = _mk.links(db, hyp.get("opp"), hyp.get("rep"))
         if _lk: hyp["links"] = _lk
     except Exception: pass
+    if hyp.get("rep") and os.getenv("SW_MUTE_REP", "1").strip().lower() in ("1", "true", "yes", "on"):
+        # Рішення власниці 28.11.2026: повтор у той самий бік за добу після стопа (на історії ≈ $0 на сигнал, журнал Z) НЕ надсилати.
+        # Тихо записуємо в sw_shadow (kind=SW_REP), щоб звірити на живих даних; повернути надсилання: SW_MUTE_REP=0.
+        try:
+            from office_td import shadow_wave as _sw
+            _execute(db, _sw.DDL, ())
+            _execute(db, "INSERT INTO sw_shadow(sid, kind, symbol, direction, bar_ts, entry, sl, tp, created_ts) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", (sid, "SW_REP", sym, direction, bar_open, entry, sl, tp, now))
+            print(f"[swing] {sym} {direction}: повтор після стопа — не надіслано, тихий запис", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[swing] SW_REP shadow: {type(exc).__name__}: {exc}", flush=True)
+        return None
     _execute(db, "INSERT INTO br_test_signal(sig_id, seq, symbol, direction, level, break_ts, retest_ts, confirm_ts, entry, sl, targets_json, hyp_json, created_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
              (sid, seq, sym, direction, entry, bar_open, bar_open + PER, bar_open, entry, sl, json.dumps([{"p": tp, "src": "SW"}]), json.dumps(hyp, default=str), now, "NEW"))
     return sid
