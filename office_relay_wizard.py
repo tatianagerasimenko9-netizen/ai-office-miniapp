@@ -7795,7 +7795,7 @@ EV позитивне: {prob.get('ev_positive', '')}
             scenario_id=str(row["seq"]),
             intent="BR_LIVE_EXPERIMENT", event_type=EVENT_TRADE_UPDATE,
             symbol=row["symbol"], direction=row["direction"], skip_gate=True,
-            parse_mode="HTML" if str(row.get("sig_id", "")).startswith(("TD|", "SW|", "BN|")) else None,
+            parse_mode="HTML" if str(row.get("sig_id", "")).startswith(("TD|", "SW|", "BN|", "IM|")) else None,
         )
 
     async def _monitor_br_observation() -> None:

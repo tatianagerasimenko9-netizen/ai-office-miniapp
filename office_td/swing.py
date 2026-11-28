@@ -177,6 +177,11 @@ def cycle(db: str, fetch: Callable, now: Optional[float] = None) -> Dict[str, in
         _bn.cycle(db, fetch, now)
     except Exception as exc:  # noqa: BLE001
         print(f"[bnc-shadow] {type(exc).__name__}: {exc}", flush=True)
+    try:                                                   # «ПРОБІЙ» (IM): пробій рівня ривком, раз на годину; IMP_LIVE=1 — сигнал, інакше тихий запис
+        from office_td import impulse as _im
+        _im.cycle(db, fetch, now)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[imp] {type(exc).__name__}: {exc}", flush=True)
     try:                                                   # події рівнів раз на добу (нагадування; без сигналів)
         import office_day_levels as _ol
         _ol.daily(db, fetch, now)
