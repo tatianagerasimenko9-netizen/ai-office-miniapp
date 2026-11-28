@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
-MERGE_PCT = 2.0; RECLAIM_DAYS = 5
+MERGE_PCT = 2.0; RECLAIM_DAYS = 5; TOUCH_PCT = 0.6
+# Рівні, які автор сам прокреслив на денному графіку (скриншоти власниці з його сторінки, 15–16.11.2026): показуються як «рівень Герчика» з датою. Це ПЕРШОДЖЕРЕЛО, не наш розрахунок; застарівають — оновлювати за новими скриншотами.
+AUTHOR_LEVELS = {"BTCUSDT": {"date": "16.11", "levels": [97968.51, 87399.91, 79805.80, 62278.00, 61405.72, 59839.24, 58119.35, 48243.11]}}
 _CACHE: Dict[str, Any] = {}
 
 
@@ -28,7 +30,7 @@ def _px(x: float) -> str:
     return f"{x:.5f}".rstrip("0").replace(".", ",")
 
 
-def find_levels(days: List[Dict[str, float]]) -> List[Dict[str, Any]]:
+def find_levels(days: List[Dict[str, float]], sym: str = "") -> List[Dict[str, Any]]:
     """days: закриті денні свічки за зростанням часу [{t, h, l, c}]. Повертає рівні {p, kind, label, w} (w — вага: рік 3, розворот 2, місяць 1)."""
     if len(days) < 30: return []
     out: List[Dict[str, Any]] = []; last = _dt(days[-1]["t"]); yr = last.year
@@ -48,6 +50,9 @@ def find_levels(days: List[Dict[str, float]]) -> List[Dict[str, Any]]:
         a = rec[max(0, i - 3):i + 4]; d = rec[i]; dm = f"{_dt(d['t']).day:02d}.{_dt(d['t']).month:02d}"
         if d["l"] == min(x["l"] for x in a): out.append({"p": d["l"], "kind": "low", "label": f"найнижча точка {dm}", "w": 2, "t": d["t"]})
         if d["h"] == max(x["h"] for x in a): out.append({"p": d["h"], "kind": "high", "label": f"найвища точка {dm}", "w": 2, "t": d["t"]})
+    au = AUTHOR_LEVELS.get(sym.upper())
+    if au:
+        for p in au["levels"]: out.append({"p": float(p), "kind": "author", "label": f"рівень Герчика ({au['date']})", "w": 4, "t": days[-1]["t"]})
     out.sort(key=lambda z: z["p"]); merged: List[Dict[str, Any]] = []
     for z in out:
         if merged and (z["p"] / merged[-1]["lo"] - 1) * 100 <= MERGE_PCT:
@@ -55,23 +60,27 @@ def find_levels(days: List[Dict[str, float]]) -> List[Dict[str, Any]]:
             if (z["w"], z["t"]) > (g["w"], g["t"]): g.update({"p": z["p"], "kind": z["kind"], "w": z["w"], "t": z["t"]})
         else: merged.append(dict(z, n=1, lo=z["p"], hi=z["p"], labels=[(z["w"], z["t"], z["label"])]))
     for g in merged:
-        ls = [x[2] for x in sorted(g["labels"], reverse=True)]; g["label"] = ls[0] + (f" · {ls[1]}" if len(ls) > 1 else ""); g.pop("labels")
+        ls = []
+        for x in sorted(g["labels"], reverse=True):
+            if x[2] not in ls: ls.append(x[2])
+        g["label"] = ls[0] + (f" · {ls[1]}" if len(ls) > 1 else ""); g["author"] = any(x[0] == 4 for x in g["labels"]); g.pop("labels")
+        lo_, hi_ = g["lo"] * (1 - TOUCH_PCT / 100), g["hi"] * (1 + TOUCH_PCT / 100); g["touch"] = sum(1 for d in days if lo_ <= d["l"] <= hi_ or lo_ <= d["h"] <= hi_)   # скільки днів ціна краєм свічки спиралась на цю зону
     return merged
 
 
 def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = None) -> Dict[str, Any]:
     """Сходинки рівнів навколо ціни і текст Лева. price — жива ціна (якщо немає, останнє денне закриття)."""
-    lv = find_levels(days); name = sym.replace("USDT", "")
+    lv = find_levels(days, sym); name = sym.replace("USDT", "")
     if not lv: return {"ok": False, "sym": name, "text": "Замало історії, щоб знайти рівні."}
     px = float(price or days[-1]["c"]); last_c = days[-1]["c"]
     below = [z for z in lv if z["p"] < px][-4:][::-1]; above = [z for z in lv if z["p"] >= px][:3]
     pct = lambda p: round((p / px - 1) * 100, 1)
     zone = lambda z: _px(z["p"]) if z["hi"] / z["lo"] - 1 < 0.003 else f"{_px(z['lo'])}–{_px(z['hi'])}"
-    row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"]}
+    row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"], "touch": z["touch"], "author": z["author"]}
     ladder = [row(z, "above") for z in above[::-1]] + [{"p": _px(px), "now": True}] + [row(z, "below") for z in below]
     lines: List[str] = []; state = "between"; key = None
     rc = days[-RECLAIM_DAYS:]; lo5 = min(d["l"] for d in rc)
-    old = find_levels(days[:-RECLAIM_DAYS])                                                       # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
+    old = find_levels(days[:-RECLAIM_DAYS], sym)                                                       # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
     pierced = [z for z in old if lo5 < z["lo"] and z["hi"] < min(last_c, px)]
     if pierced:
         key = max(pierced, key=lambda z: z["p"]); state = "reclaim"
@@ -84,12 +93,12 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
         lines.append(f"Ціна {_px(px)} нижче всіх рівнів, які я бачу за два роки: опори знизу немає.")
     if key is not None:
         nxt = [z for z in lv if z["hi"] < key["lo"]][-1:]
-        if nxt: lines.append(f"Якщо день закриється нижче {_px(key['lo'])}, наступна сходинка — {_px(nxt[0]['p'])} ({nxt[0]['label']}), це {str(pct(nxt[0]['p'])).replace('.', ',')}% від ціни зараз.")
+        if nxt: lines.append(f"Ціна ходить від рівня до рівня. Якщо день закриється нижче {_px(key['lo'])}, найближчий рівень, куди вона може дійти, — {_px(nxt[0]['p'])} ({nxt[0]['label']}), це {str(pct(nxt[0]['p'])).replace('.', ',')}% від ціни зараз.")
     if above:
         a = above[0]; lines.append(f"Зверху найближчий рівень — {_px(a['p'])} ({a['label']}), +{str(pct(a['p'])).replace('.', ',')}%. Поки ціна під ним, це стеля." + (f" Далі {_px(above[1]['p'])}." if len(above) > 1 else ""))
     return {"ok": True, "sym": name, "price": _px(px), "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines,
             "note": "Рахую за денними свічками: дивлюсь на закриття дня, а не на прокол. Це карта рівнів, а не прогноз.",
-            "source": "Правило «вище рівня — лонг, нижче — шорт; повернення вище рівня — сильний сигнал» — з матеріалів Герчика, які ви надіслали. Самі рівні Офіс знаходить автоматично."}
+            "source": "Правила «вище рівня — лонг, нижче — шорт», «повернення вище рівня — сильний сигнал» і «ціна ходить від рівня до рівня з денного графіка» — з матеріалів Герчика, які ви надіслали. Рівні з позначкою «рівень Герчика» — ті, що він сам прокреслив на скриншотах; решту Офіс знаходить автоматично на денних свічках."}
 
 
 def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = None, now: Optional[float] = None) -> Dict[str, Any]:

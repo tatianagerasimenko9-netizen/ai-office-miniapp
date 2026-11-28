@@ -8,10 +8,12 @@ days = [d for d in days if d["t"] < 1795824000]                                 
 A = ol.analyse("BTCUSDT", days, 59400.0); assert A["ok"] and A["state"] == "reclaim", A
 labs = " | ".join(x.get("label", "") for x in A["ladder"])
 assert any(x.get("now") for x in A["ladder"]) and "мінімум 2026 року" in labs and "найнижча точка 21.11" in labs, labs
-assert A["key"] in ("57 750", "57 258", "58 032", "57 695") and "проколювали" in A["text"][0] and "наступна сходинка" in " ".join(A["text"]), A["text"]
+assert A["key"] in ("57 750", "57 258", "58 032", "57 695", "58 119") and "проколювали" in A["text"][0] and "найближчий рівень, куди" in " ".join(A["text"]), A["text"]
 pc = [x["pct"] for x in A["ladder"] if "pct" in x]; assert all(a > b for a, b in zip(pc, pc[1:])), pc     # сходинки зверху вниз
 B = ol.analyse("BTCUSDT", days[:-45]); assert B["ok"] and B["state"] in ("between", "reclaim") and len(B["ladder"]) >= 3, B
 assert ol.analyse("XUSDT", days[:10])["ok"] is False
 rows = [{"ts": __import__("datetime").datetime.utcfromtimestamp(d["t"]).isoformat() + "+00:00", "high": d["h"], "low": d["l"], "close": d["c"]} for d in days]
 C = ol.levels("BTCUSDT", fetch=lambda *a, **k: rows, price=59400.0, now=1.0); assert C["ok"] and C["sym"] == "BTC"
+assert "рівень Герчика (16.11)" in labs and any(x.get("author") for x in A["ladder"]) and all("touch" in x for x in A["ladder"] if not x.get("now"))
+assert not any(x.get("author") for x in ol.analyse("ETHUSDT", days, 59400.0)["ladder"])
 print("ok levels"); print("\n".join(A["text"])); print([(x.get("p"), x.get("label", "ЗАРАЗ"), x.get("pct")) for x in A["ladder"]])
