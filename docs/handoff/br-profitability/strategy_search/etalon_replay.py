@@ -24,12 +24,12 @@ def rows_of(raw):
     out = []
     for ln in zipfile.ZipFile(io.BytesIO(raw)).read(zipfile.ZipFile(io.BytesIO(raw)).namelist()[0]).decode().splitlines():
         p = ln.split(",")
-        if p[0].isdigit(): out.append((int(p[0]) // 1000 if int(p[0]) > 10**11 else int(p[0]), float(p[1]), float(p[2]), float(p[3]), float(p[4])))
+        if p[0].isdigit(): out.append((int(p[0]) // 1000 if int(p[0]) > 10**11 else int(p[0]), float(p[1]), float(p[2]), float(p[3]), float(p[4]), float(p[7]) if len(p) > 7 else 0.0))
     return out
 if mode == "fetch":
     last = pd.Timestamp.utcnow().tz_localize(None).normalize()
     def one(sym):
-        g = S[S.sym == sym]; t0 = g.dt.min().normalize(); t1 = min(g.dt.max() + pd.Timedelta(days=8), last); rows = []
+        g = S[S.sym == sym] if sym in set(S.sym) else S; t0 = (g.dt.min() - pd.Timedelta(days=int(os.environ.get("PRE_DAYS", "0")))).normalize(); t1 = min(g.dt.max() + pd.Timedelta(days=8), last); rows = []
         for mo in pd.period_range(t0, t1, freq="M"):
             raw = get(f"https://data.binance.vision/data/futures/um/monthly/klines/{sym}/5m/{sym}-5m-{mo}.zip")
             if raw: rows += rows_of(raw); continue
@@ -37,10 +37,10 @@ if mode == "fetch":
                 raw = get(f"https://data.binance.vision/data/futures/um/daily/klines/{sym}/5m/{sym}-5m-{d.date()}.zip")
                 if raw: rows += rows_of(raw)
         if rows:
-            os.makedirs(DIR, exist_ok=True); pd.DataFrame(sorted(set(rows)), columns=["t", "o", "h", "l", "c"]).to_csv(f"{DIR}/{sym}.csv", index=False)
+            os.makedirs(DIR, exist_ok=True); pd.DataFrame(sorted(set(rows)), columns=["t", "o", "h", "l", "c", "v"]).drop_duplicates("t").to_csv(f"{DIR}/{sym}.csv", index=False)
         return sym, len(rows)
     with ThreadPoolExecutor(8) as ex:
-        res = list(ex.map(one, sorted(S.sym.unique())))
+        res = list(ex.map(one, sorted(set(S.sym.unique()) | {"BTCUSDT", "ETHUSDT"})))
     print("монет", len(res), "з даними", sum(1 for _, n in res if n), "без даних:", [s for s, n in res if not n][:40]); sys.exit(0)
 OUT = sys.argv[4]; FEE = 0.001; LIFE = 7 * 288; out = []
 for sym, g in S.groupby("sym"):
