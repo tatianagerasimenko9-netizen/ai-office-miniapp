@@ -199,14 +199,29 @@ def state(db: str, prices: Optional[Dict[str, float]] = None, price_ts: Optional
         w = _kd(ts); strong = w in (2, 3, 4)
         return {"strong": strong, "name": DAYS[w], "text": (f"{DAYS[w].capitalize()} — сильний день. Брати." if strong else f"{DAYS[w].capitalize()} — слабкий день. Краще пропустити."),
                 "hist": ("На історії такі давали +$2,40 на сигнал." if strong else "На історії такі давали +$0,70 на сигнал, більше стопів.")}
+    sl_ev: List[tuple] = []; streak = None
+    try:                                            # підказки «після стопа» (журнал Z, BZ): лише текст в апці, нічого не блокує
+        from office_bridge import _fetchall
+        sl_ev = [(r[0], r[1], float(r[2])) for r in _fetchall(db, "SELECT s.symbol, s.direction, e.touched_ts FROM br_test_event e JOIN br_test_signal s ON s.sig_id = e.sig_id WHERE e.level = 'SL' AND s.sig_id LIKE 'SW|%' AND e.touched_ts >= ?", (now - 96 * 3600,))]
+        last = [r[0] for r in _fetchall(db, "SELECT status FROM br_test_signal WHERE sig_id LIKE 'SW|%' AND status IN ('SL', 'TP1', 'TP3', 'TIMEOUT') ORDER BY created_ts DESC LIMIT 10", ())]
+        if len(last) == 10 and sum(1 for x in last if x == "SL") >= 8:
+            streak = {"stops": sum(1 for x in last if x == "SL"), "text": "Зараз смуга стопів. Не зупиняємось.", "hist": "На історії сигнали після такої смуги давали +$2,30 — більше, ніж звичайні (+$1,40). Найчастіше кидають саме тут і пропускають угоди, які смугу відіграють."}
+    except Exception:  # noqa: BLE001
+        pass
+    def _after(d) -> Optional[str]:
+        if not str(d["sig_id"]).startswith("SW|"): return None
+        t0 = float(d["created_ts"])
+        if any(sy == d["symbol"] and dr != d["direction"] and t0 - 86400 <= ts <= t0 for sy, dr, ts in sl_ev):
+            return "По цій монеті щойно був стоп у інший бік. Це не привід пропускати: такі сигнали на історії не гірші за звичайні."
+        return None
     ST = {"NEW": "щойно прийшов", "SENT": "відкрито", "SL": "стоп", "TP1": "ціль", "TP3": "ціль", "TIMEOUT": "закрито за часом", "EXPIRED_UNSENT": "не надіслано", "CANCEL": "скасовано"}
     signals = []
     for d in sorted((d for d in rows if d["created_ts"] >= now - 48 * 3600), key=lambda d: -d["created_ts"])[:40]:
         same = open_same[d["direction"]] - (1 if d["status"] == "SENT" and "ENTRY" in d["ev"] else 0); mins = int((now - d["created_ts"]) / 60)
         signals.append({"sig_id": d["sig_id"], "strat": _strat(d["sig_id"]), "seq": d["seq"], "sym": d["symbol"].replace("USDT", ""), "dir": d["direction"], "dir_ua": "лонг" if d["direction"] == "LONG" else "шорт",
                         "entry": _px(float(d["entry"])), "sl": _px(float(d["sl"])), "tp": _px(d["tp"]) if d["tp"] else "—", "tp_usd": (_usd(R * abs(d["tp"] - float(d["entry"])) / abs(float(d["entry"]) - float(d["sl"]))) if d["tp"] else ""),
-                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "res": _res(d, R), "kind": {"SL": "sl", "TP1": "tp", "TP3": "tp", "TIMEOUT": "time", "SENT": "open", "NEW": "open"}.get(d["status"], "none"), "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "day": (_day(d["created_ts"]) if str(d["sig_id"]).startswith("SW|") else None), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
-    return {"ok": True, "today": dict(_day(now), wd=_kd(now)), "ts": now, "updated": _hm(now), "price_ts": price_ts, "price_at": _hm(price_ts) if price_ts else None, "stale": bool(not price_ts or now - price_ts > 120), "risk": R,
+                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "res": _res(d, R), "kind": {"SL": "sl", "TP1": "tp", "TP3": "tp", "TIMEOUT": "time", "SENT": "open", "NEW": "open"}.get(d["status"], "none"), "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "day": (_day(d["created_ts"]) if str(d["sig_id"]).startswith("SW|") else None), "after_stop": _after(d), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
+    return {"ok": True, "today": dict(_day(now), wd=_kd(now)), "streak": streak, "ts": now, "updated": _hm(now), "price_ts": price_ts, "price_at": _hm(price_ts) if price_ts else None, "stale": bool(not price_ts or now - price_ts > 120), "risk": R,
             "lev": lev, "note": "Рахую за сигналами Офісу, біржу не бачу. При різкому русі стоп може виконатись гірше за розрахунок.", "attention": att, "sums": sums, "groups": groups, "signals": signals, "order_authorized": False}
 
 
