@@ -1462,6 +1462,20 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if u.path == "/api/lev/levels":
+            import office_lev as _lev
+            import office_levels as _lvl
+            if not _lev.enabled():
+                return self._send_json(503, {"ok": False, "error": "lev_disabled"})
+            import re as _re
+            sym = (parse_qs(u.query).get("sym", ["BTCUSDT"])[0] or "BTCUSDT").upper()
+            if not _re.fullmatch(r"[A-Z0-9]{2,20}USDT", sym):
+                return self._send_json(400, {"ok": False, "error": "bad_symbol"})
+            try:
+                px = (_lev.live_prices().get("val") or {}).get(sym)
+                return self._send_json(200, _lvl.levels(sym, price=px))
+            except Exception as exc:  # noqa: BLE001
+                return self._send_json(200, {"ok": False, "sym": sym.replace("USDT", ""), "text": "Не вдалося отримати свічки: " + type(exc).__name__})
         if u.path in ("/api/lev/state", "/api/lev/zvirka"):
             import office_lev as _lev
             if not _lev.enabled():
