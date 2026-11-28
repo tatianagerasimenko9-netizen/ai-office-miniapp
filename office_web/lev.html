@@ -71,7 +71,7 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .lr b{font-size:14px;font-weight:800;white-space:nowrap}.lr span{font-size:11px;color:var(--muted);line-height:1.35}.lr em{font-style:normal;font-size:11px;font-weight:700;color:var(--muted)}
 .lr.above{border-left-color:var(--down)}.lr.below{border-left-color:var(--up)}.lr.strong b{color:var(--gold)}.lr.author{box-shadow:inset 0 0 0 1px rgba(233,205,140,.45)}.lr.author b{color:#F6E3A6}
 .lr.now{background:transparent;border:1px dashed var(--gold);grid-template-columns:auto auto 1fr}.lr.now b{font-size:16px;color:var(--text)}
-p.lead{font-size:15px;line-height:1.6}#sheet p{margin:12px 0}
+p.lead{font-size:15px;line-height:1.6}.verd{background:rgba(233,205,140,.12);border:1px solid var(--gold);border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;line-height:1.45;margin:4px 0 12px}.blk{margin:10px 0}.blk .bh{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}.blk .bh.down{color:var(--down)}.blk .bh.up{color:var(--up)}.blk p{margin:4px 0 0!important;font-size:14px;line-height:1.5}#sheet p{margin:12px 0}
 .seg{display:grid;grid-template-columns:.7fr 1.1fr .9fr 1.1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
 .seg button{border:0;background:transparent;color:var(--muted);border-radius:10px;min-height:46px;font-size:11px;font-weight:700;letter-spacing:.02em;padding:0 2px}.seg button.on{background:var(--gold);color:#17140E}.seg small{margin-left:4px;font-size:10px;opacity:.75}
 .pick{display:block;position:relative}.pick:after{content:'▾';position:absolute;right:16px;top:50%;transform:translateY(-50%);color:var(--gold);pointer-events:none}
@@ -167,7 +167,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div></div>';
     h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
     h+='<div class="say"><span>'+esc(s.lev)+'</span></div></div>';
-    h+='<h2>Рівні · розбір</h2><button class="lvcard" data-lv="'+esc(LVS)+'"><span class="lvh"><b>'+esc(LVS.replace('USDT',''))+'</b><span class="chev">›</span></span><span class="lvt">'+(LV&&LV.sym===LVS.replace('USDT','')?(LV.ok?esc(LV.text[0]):esc(LV.text)):'Завантажую рівні…')+'</span></button>';
+    h+='<h2>Рівні · розбір</h2><button class="lvcard" data-lv="'+esc(LVS)+'"><span class="lvh"><b>'+esc(LVS.replace('USDT',''))+'</b><span class="chev">›</span></span><span class="lvt">'+(LV&&LV.sym===LVS.replace('USDT','')?(LV.ok?esc(LV.verdict||LV.text[0]):esc(LV.text)):'Завантажую рівні…')+'</span></button>';
     if(s.attention.length){h+='<h2>Потребує уваги</h2>';
       s.attention.forEach(function(a){h+='<button class="att '+esc(a.level)+'" data-filter="'+esc(a.filter)+'"><span class="dot '+esc(a.level)+'"></span><span><b>'+esc(a.title)+'</b><span class="d">'+esc(a.detail)+'</span></span><span class="chev" aria-hidden="true">›</span></button>'})}
     h+='<h2 id="trades">Відкриті угоди</h2>';
@@ -229,7 +229,8 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     if(!LV||LV.sym!==LVS.replace('USDT','')){h+='<p class="muted">Завантажую…</p>'}
     else if(!LV.ok){h+='<p>'+esc(LV.text)+'</p>'}
     else{h+='<div class="ladder">';LV.ladder.forEach(function(r){h+=r.now?'<div class="lr now"><i class="pulse"></i><b>'+esc(r.p)+'</b><span>ціна зараз</span></div>':'<div class="lr '+r.side+(r.strong?' strong':'')+(r.author?' author':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+(r.touch>1?' · спирались '+r.touch+' дн.':'')+'</span><em>'+(r.pct>0?'+':'')+String(r.pct).replace('.',',').replace('-','−')+'%</em></div>'});h+='</div>';
-      LV.text.forEach(function(x,i){h+='<p'+(i===0?' class="lead"':'')+'>'+esc(x)+'</p>'});
+      if(LV.verdict)h+='<div class="verd">'+esc(LV.verdict)+'</div>';
+      var B=LV.blocks||{};[['now','Зараз',''],['down','Якщо вниз','down'],['up','Якщо вгору','up']].forEach(function(k){(B[k[0]]||[]).forEach(function(x){h+='<div class="blk"><span class="bh '+k[2]+'">'+k[1]+'</span><p>'+esc(x)+'</p></div>'})});
       h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p></details>'}
     h+='<button class="btn ghost" data-close="1">Закрити</button>';show(h);
   }

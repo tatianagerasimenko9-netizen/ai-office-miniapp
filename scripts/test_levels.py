@@ -8,7 +8,7 @@ days = [d for d in days if d["t"] < 1795824000]                                 
 A = ol.analyse("BTCUSDT", days, 59400.0); assert A["ok"] and A["state"] == "reclaim", A
 labs = " | ".join(x.get("label", "") for x in A["ladder"])
 assert any(x.get("now") for x in A["ladder"]) and "мінімум 2026 року" in labs and "найнижча точка 21.11" in labs, labs
-assert A["key"] in ("57 750", "57 258", "58 032", "57 695", "58 119") and "проколювали" in A["text"][0] and "найближчий рівень, куди" in " ".join(A["text"]), A["text"]
+assert A["key"] in ("57 750", "57 258", "58 032", "57 695", "58 119") and "проколювали" in A["text"][0] and "найближча ціль 55 100" in " ".join(A["text"]) and "На історії біткоїна" in " ".join(A["text"]) and A["verdict"].startswith("Вірогідніше — вгору"), A["text"]
 pc = [x["pct"] for x in A["ladder"] if "pct" in x]; assert all(a > b for a, b in zip(pc, pc[1:])), pc     # сходинки зверху вниз
 B = ol.analyse("BTCUSDT", days[:-45]); assert B["ok"] and B["state"] in ("between", "reclaim") and len(B["ladder"]) >= 3, B
 assert ol.analyse("XUSDT", days[:10])["ok"] is False
