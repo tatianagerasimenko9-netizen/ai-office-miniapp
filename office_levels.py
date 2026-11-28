@@ -1,118 +1,106 @@
-"""Рівні як ЗОНИ (Герчик): кластери свінгів у допуску ≤0,5×ATR, дзеркальні рівні (були і опором, і підтримкою), PDH/PDL і тижневі. Події за ЗАКРИТИМИ свічками:
-- хибний пробій (ЛП): тінь за зону ≥0,1×ATR, а закриття повернулось всередину/назад;
-- закріплення: ≥2 закриття поспіль за зоною;
-- ретест: після закріплення ціна повертається в зону, а закриття знову за зоною.
-Теги для підтверджень: level_false_break, level_retest, level_hold. Рівень без ≥2 торкань зоною не вважається."""
+"""Рівні монети і короткий розбір «як аналітик» для екрана Лева (ЛИШЕ ЧИТАННЯ, нічого не надсилає і не відкриває).
+ДЖЕРЕЛО правила читання рівня — матеріали власниці (скриншоти А. Герчика, 28.11.2026): «повернення в лонгову зону вище рівня згенерує сильний сигнал на купівлю на кілька днів»; вище рівня — лонг, нижче — шорт.
+ГІПОТЕЗА (наша автоматизація, не методика автора): як саме Офіс знаходить рівні на денних свічках — мінімум/максимум поточного й минулого року, мінімуми/максимуми місяців за 24 місяці,
+денні розвороти за 60 діб (3 доби з обох боків); близькі рівні (у межах 2%) зливаються в одну зону; «прокол і повернення» = за останні 5 діб мінімум був нижче рівня, а останнє денне закриття — вище.
+Ймовірностей і прогнозів не дає: лише «де сходинки і що означає прохід кожної»."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import time
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
 
-from office_patterns import atr as _atr, closed_only
-
-K = 2
-ZONE_W_ATR = 0.5
-MIN_TOUCH = 2
-PIERCE_ATR = 0.1
-
-
-def _rows(c: Any, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    return closed_only([r for r in (c or []) if isinstance(r, dict)], now_ts)
+MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
+MERGE_PCT = 2.0; RECLAIM_DAYS = 5
+_CACHE: Dict[str, Any] = {}
 
 
-def _swings(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out = []
-    for i in range(K, len(rows) - K):
-        h, l = float(rows[i]["high"]), float(rows[i]["low"])
-        if all(h > float(rows[j]["high"]) for j in range(i - K, i + K + 1) if j != i):
-            out.append({"i": i, "p": h, "t": "H"})
-        if all(l < float(rows[j]["low"]) for j in range(i - K, i + K + 1) if j != i):
-            out.append({"i": i, "p": l, "t": "L"})
-    return out
+def _dt(ts: float) -> datetime:
+    return datetime.fromtimestamp(ts, timezone.utc)
 
 
-def zones(candles: Any, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Зони рівнів: кластери свінгів (H і L разом — рівень працював по-різному) шириною ≤0,5×ATR, ≥2 торкань. mirror=True, якщо зона була і опором (H), і підтримкою (L)."""
-    rows = _rows(candles, now_ts)[-300:]
-    a = _atr(rows) if len(rows) >= 20 else None
-    if not a:
-        return []
-    sw = sorted(_swings(rows), key=lambda s: s["p"])
-    out: List[Dict[str, Any]] = []
-    cur: List[Dict[str, Any]] = []
-    for s in sw:
-        if cur and s["p"] - cur[0]["p"] > ZONE_W_ATR * a:
-            if len(cur) >= MIN_TOUCH:
-                out.append(cur)
-            cur = []
-        cur.append(s)
-    if len(cur) >= MIN_TOUCH:
-        out.append(cur)
-    res = []
-    for grp in out:
-        lo, hi = min(x["p"] for x in grp), max(x["p"] for x in grp)
-        kinds = {x["t"] for x in grp}
-        res.append({"lo": lo, "hi": hi, "touches": len(grp), "mirror": kinds == {"H", "L"}, "last": max(x["i"] for x in grp)})
-    return sorted(res, key=lambda z: z["lo"])
+def _ts(row: dict) -> float:
+    return datetime.fromisoformat(str(row["ts"]).replace("Z", "+00:00")).timestamp()
 
 
-def previous_levels(daily: Any, weekly: Any) -> Dict[str, Optional[float]]:
-    def prev(rows, key):
-        rr = [r for r in (rows or []) if isinstance(r, dict)]
-        return float(rr[-2][key]) if len(rr) >= 2 else None
-
-    return {"PDH": prev(daily, "high"), "PDL": prev(daily, "low"), "PWH": prev(weekly, "high"), "PWL": prev(weekly, "low")}
+def _px(x: float) -> str:
+    if x >= 1000: return f"{x:,.0f}".replace(",", " ")
+    if x >= 1: return f"{x:.2f}".replace(".", ",")
+    return f"{x:.5f}".rstrip("0").replace(".", ",")
 
 
-def events(candles: Any, zone: Dict[str, Any], side: str, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Події навколо зони для сценарію `side` (LONG — від підтримки, SHORT — від опору) на останніх свічках."""
-    rows = _rows(candles, now_ts)[-60:]
-    a = _atr(rows) if len(rows) >= 15 else None
-    if not a:
-        return []
-    lo, hi = zone["lo"], zone["hi"]
-    long_ = str(side).upper() != "SHORT"
-    out: List[Dict[str, Any]] = []
-    last = rows[-1]
-    # хибний пробій: LONG — тінь під зоною і закриття назад над її низом; SHORT — дзеркально
-    if long_ and float(last["low"]) < lo - PIERCE_ATR * a and float(last["close"]) > lo:
-        out.append({"kind": "level_false_break", "why": f"тінь під зоною {lo:.6g}, закриття повернулось"})
-    if (not long_) and float(last["high"]) > hi + PIERCE_ATR * a and float(last["close"]) < hi:
-        out.append({"kind": "level_false_break", "why": f"тінь над зоною {hi:.6g}, закриття повернулось"})
-    # закріплення й ретест (пробій зони ВГОРУ для LONG, ВНИЗ для SHORT)
-    beyond = [((float(r["close"]) > hi) if long_ else (float(r["close"]) < lo)) for r in rows]
-    for i in range(len(rows) - 1, 0, -1):
-        c0 = i
-        while c0 > 0 and beyond[c0 - 1]:
-            c0 -= 1
-        # закріплення = ≥2 закриття поспіль за зоною ПІСЛЯ пробою (був хоч один закритий бар не за зоною раніше, у межах вікна)
-        if beyond[i] and beyond[i - 1] and c0 >= 1:
-            # закріплення знайдено на i-1,i; після нього — ретест: свічка торкнулась зони, а закриття знову за нею
-            for j in range(c0 + 2, len(rows)):
-                r = rows[j]
-                touched = (float(r["low"]) <= hi) if long_ else (float(r["high"]) >= lo)
-                if touched and beyond[j]:
-                    out.append({"kind": "level_retest", "why": f"ретест зони {lo:.6g}–{hi:.6g} після закріплення"})
-                    break
-            if i >= len(rows) - 6 and not [e for e in out if e["kind"] == "level_retest"]:
-                out.append({"kind": "level_hold", "why": f"≥2 закриття поспіль за зоною {lo:.6g}–{hi:.6g}"})
-            break
-    if any(e["kind"] in ("level_retest", "level_hold") for e in out):
-        out = [e for e in out if e["kind"] != "level_false_break"]   # тінь у зону після пробою — це ретест, а не хибний пробій
-    return out
+def find_levels(days: List[Dict[str, float]]) -> List[Dict[str, Any]]:
+    """days: закриті денні свічки за зростанням часу [{t, h, l, c}]. Повертає рівні {p, kind, label, w} (w — вага: рік 3, розворот 2, місяць 1)."""
+    if len(days) < 30: return []
+    out: List[Dict[str, Any]] = []; last = _dt(days[-1]["t"]); yr = last.year
+    for y, nm in ((yr, f"{yr} року"), (yr - 1, f"{yr - 1} року")):
+        ds = [d for d in days if _dt(d["t"]).year == y]
+        if len(ds) < 20: continue
+        lo = min(ds, key=lambda d: d["l"]); hi = max(ds, key=lambda d: d["h"])
+        out.append({"p": lo["l"], "kind": "low", "label": f"мінімум {nm}", "w": 3, "t": lo["t"]}); out.append({"p": hi["h"], "kind": "high", "label": f"максимум {nm}", "w": 3, "t": hi["t"]})
+    by: Dict[tuple, list] = {}
+    for d in days: by.setdefault((_dt(d["t"]).year, _dt(d["t"]).month), []).append(d)
+    for (y, m), ds in sorted(by.items())[-25:-1]:                                            # 24 завершені місяці
+        if len(ds) < 15: continue
+        lo = min(ds, key=lambda d: d["l"]); hi = max(ds, key=lambda d: d["h"]); nm = f"{MONTHS[m - 1]} {y}"
+        out.append({"p": lo["l"], "kind": "low", "label": f"мінімум {nm}", "w": 1, "t": lo["t"]}); out.append({"p": hi["h"], "kind": "high", "label": f"максимум {nm}", "w": 1, "t": hi["t"]})
+    rec = days[-60:]
+    for i in range(3, len(rec) - 1):
+        a = rec[max(0, i - 3):i + 4]; d = rec[i]; dm = f"{_dt(d['t']).day:02d}.{_dt(d['t']).month:02d}"
+        if d["l"] == min(x["l"] for x in a): out.append({"p": d["l"], "kind": "low", "label": f"найнижча точка {dm}", "w": 2, "t": d["t"]})
+        if d["h"] == max(x["h"] for x in a): out.append({"p": d["h"], "kind": "high", "label": f"найвища точка {dm}", "w": 2, "t": d["t"]})
+    out.sort(key=lambda z: z["p"]); merged: List[Dict[str, Any]] = []
+    for z in out:
+        if merged and (z["p"] / merged[-1]["lo"] - 1) * 100 <= MERGE_PCT:
+            g = merged[-1]; g["n"] += 1; g["hi"] = z["p"]; g["labels"].append((z["w"], z["t"], z["label"]))
+            if (z["w"], z["t"]) > (g["w"], g["t"]): g.update({"p": z["p"], "kind": z["kind"], "w": z["w"], "t": z["t"]})
+        else: merged.append(dict(z, n=1, lo=z["p"], hi=z["p"], labels=[(z["w"], z["t"], z["label"])]))
+    for g in merged:
+        ls = [x[2] for x in sorted(g["labels"], reverse=True)]; g["label"] = ls[0] + (f" · {ls[1]}" if len(ls) > 1 else ""); g.pop("labels")
+    return merged
 
 
-def tags_for(candles: Any, side: str, zone_lo: Any, zone_hi: Any, now_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Теги подій біля ЗОНИ сценарію; зона береться з кластерів рівнів, що перетинають zone_lo..zone_hi (інакше — нічого)."""
-    try:
-        zl, zh = sorted((float(zone_lo), float(zone_hi)))
-    except (TypeError, ValueError):
-        return []
-    out: List[Dict[str, Any]] = []
-    for z in zones(candles, now_ts):
-        if z["hi"] >= zl and z["lo"] <= zh:
-            out.extend(events(candles, z, side, now_ts))
-    seen, res = set(), []
-    for t in out:
-        if t["kind"] not in seen:
-            seen.add(t["kind"]); res.append(t)
-    return res
+def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = None) -> Dict[str, Any]:
+    """Сходинки рівнів навколо ціни і текст Лева. price — жива ціна (якщо немає, останнє денне закриття)."""
+    lv = find_levels(days); name = sym.replace("USDT", "")
+    if not lv: return {"ok": False, "sym": name, "text": "Замало історії, щоб знайти рівні."}
+    px = float(price or days[-1]["c"]); last_c = days[-1]["c"]
+    below = [z for z in lv if z["p"] < px][-4:][::-1]; above = [z for z in lv if z["p"] >= px][:3]
+    pct = lambda p: round((p / px - 1) * 100, 1)
+    zone = lambda z: _px(z["p"]) if z["hi"] / z["lo"] - 1 < 0.003 else f"{_px(z['lo'])}–{_px(z['hi'])}"
+    row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"]}
+    ladder = [row(z, "above") for z in above[::-1]] + [{"p": _px(px), "now": True}] + [row(z, "below") for z in below]
+    lines: List[str] = []; state = "between"; key = None
+    rc = days[-RECLAIM_DAYS:]; lo5 = min(d["l"] for d in rc)
+    old = find_levels(days[:-RECLAIM_DAYS])                                                       # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
+    pierced = [z for z in old if lo5 < z["lo"] and z["hi"] < min(last_c, px)]
+    if pierced:
+        key = max(pierced, key=lambda z: z["p"]); state = "reclaim"
+        lines.append(f"Рівень {zone(key)} ({key['label']}) за останні дні проколювали вниз до {_px(lo5)}, але день закрився вище. Повернення вище рівня — сильний знак на користь покупців на кілька днів.")
+        lines.append(f"Це діє, поки день закривається вище {_px(key['lo'])}. Закриття дня нижче — рівень зламано, і зона стає шортовою.")
+    elif below:
+        key = below[0]
+        lines.append(f"Ціна {_px(px)} стоїть над рівнем {_px(key['p'])} ({key['label']}). Вище нього — лонгова зона від рівня, нижче — шортова.")
+    else:
+        lines.append(f"Ціна {_px(px)} нижче всіх рівнів, які я бачу за два роки: опори знизу немає.")
+    if key is not None:
+        nxt = [z for z in lv if z["hi"] < key["lo"]][-1:]
+        if nxt: lines.append(f"Якщо день закриється нижче {_px(key['lo'])}, наступна сходинка — {_px(nxt[0]['p'])} ({nxt[0]['label']}), це {str(pct(nxt[0]['p'])).replace('.', ',')}% від ціни зараз.")
+    if above:
+        a = above[0]; lines.append(f"Зверху найближчий рівень — {_px(a['p'])} ({a['label']}), +{str(pct(a['p'])).replace('.', ',')}%. Поки ціна під ним, це стеля." + (f" Далі {_px(above[1]['p'])}." if len(above) > 1 else ""))
+    return {"ok": True, "sym": name, "price": _px(px), "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines,
+            "note": "Рахую за денними свічками: дивлюсь на закриття дня, а не на прокол. Це карта рівнів, а не прогноз.",
+            "source": "Правило «вище рівня — лонг, нижче — шорт; повернення вище рівня — сильний сигнал» — з матеріалів Герчика, які ви надіслали. Самі рівні Офіс знаходить автоматично."}
+
+
+def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = None, now: Optional[float] = None) -> Dict[str, Any]:
+    """Для API: денні свічки ф'ючерсів → розбір. Кеш 10 хв на монету (ціна підставляється свіжа)."""
+    now = time.time() if now is None else now; sym = sym.upper()
+    c = _CACHE.get(sym)
+    if not c or now - c[0] > 600:
+        if fetch is None:
+            from office_market_data import fetch_candles_futures as fetch
+        rows = fetch(sym, "1d", 800, closed_only=True)
+        if not isinstance(rows, list) or len(rows) < 30: return {"ok": False, "sym": sym.replace("USDT", ""), "text": "Немає денних свічок по цій монеті."}
+        days = [{"t": _ts(r), "h": float(r["high"]), "l": float(r["low"]), "c": float(r["close"])} for r in rows]
+        _CACHE[sym] = c = (now, days)
+    return analyse(sym, c[1], price)

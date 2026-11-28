@@ -64,6 +64,14 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .tile .f{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
 .empty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
 /* сигнали */
+.lvcard{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.lvcard .lvh{display:flex;justify-content:space-between;align-items:center}.lvcard .lvh b{font-size:16px;color:var(--gold)}.lvcard .lvt{font-size:13px;line-height:1.5;color:var(--text)}
+.ladder{display:flex;flex-direction:column;gap:6px;margin:14px 0}
+.lr{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--deep);border-left:3px solid transparent}
+.lr b{font-size:14px;font-weight:800;white-space:nowrap}.lr span{font-size:11px;color:var(--muted);line-height:1.35}.lr em{font-style:normal;font-size:11px;font-weight:700;color:var(--muted)}
+.lr.above{border-left-color:var(--down)}.lr.below{border-left-color:var(--up)}.lr.strong b{color:var(--gold)}
+.lr.now{background:transparent;border:1px dashed var(--gold);grid-template-columns:auto auto 1fr}.lr.now b{font-size:16px;color:var(--text)}
+p.lead{font-size:15px;line-height:1.6}#sheet p{margin:12px 0}
 .seg{display:grid;grid-template-columns:.7fr 1.1fr .9fr 1.1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
 .seg button{border:0;background:transparent;color:var(--muted);border-radius:10px;min-height:46px;font-size:11px;font-weight:700;letter-spacing:.02em;padding:0 2px}.seg button.on{background:var(--gold);color:#17140E}.seg small{margin-left:4px;font-size:10px;opacity:.75}
 .pick{display:block;position:relative}.pick:after{content:'▾';position:absolute;right:16px;top:50%;transform:translateY(-50%);color:var(--gold);pointer-events:none}
@@ -138,7 +146,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
 <script>
 (function(){
   try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();} }catch(e){}
-  var S=null,Z=null,frozen=false,F='all',SF='all',SK='ALL',OPEN={};
+  var S=null,Z=null,frozen=false,F='all',SF='all',SK='ALL',OPEN={},LV=null,LVS='BTCUSDT';
   var $=function(id){return document.getElementById(id)};
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
   function num(a){return String(Math.round(Math.abs(a))).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}
@@ -159,6 +167,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div></div>';
     h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
     h+='<div class="say"><span>'+esc(s.lev)+'</span></div></div>';
+    h+='<h2>Рівні · розбір</h2><button class="lvcard" data-lv="'+esc(LVS)+'"><span class="lvh"><b>'+esc(LVS.replace('USDT',''))+'</b><span class="chev">›</span></span><span class="lvt">'+(LV&&LV.sym===LVS.replace('USDT','')?(LV.ok?esc(LV.text[0]):esc(LV.text)):'Завантажую рівні…')+'</span></button>';
     if(s.attention.length){h+='<h2>Потребує уваги</h2>';
       s.attention.forEach(function(a){h+='<button class="att '+esc(a.level)+'" data-filter="'+esc(a.filter)+'"><span class="dot '+esc(a.level)+'"></span><span><b>'+esc(a.title)+'</b><span class="d">'+esc(a.detail)+'</span></span><span class="chev" aria-hidden="true">›</span></button>'})}
     h+='<h2 id="trades">Відкриті угоди</h2>';
@@ -213,6 +222,17 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     if(L.length)h+='<div class="card row"><span class="muted">Разом за 48 годин</span><b class="'+cls(sum)+'" style="font-size:18px">'+usd(sum)+'</b></div>';
     $('tab-signals').innerHTML=h;
   }
+  function loadLv(sym,then){LVS=sym;fetch('/api/lev/levels?sym='+encodeURIComponent(sym),{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){LV=j;if(then)then();else if(!frozen)renderToday()}).catch(function(){})}
+  function openLevels(){
+    frozen=true;var syms=['BTCUSDT','ETHUSDT'];all().forEach(function(t){var q=t.sym+'USDT';if(syms.indexOf(q)<0)syms.push(q)});
+    var h='<div class="grab"></div><h3>Рівні · '+esc(LVS.replace('USDT',''))+'</h3>'+sel('data-lvs="1"',syms.map(function(q){return [q,q.replace('USDT','')]}),LVS);
+    if(!LV||LV.sym!==LVS.replace('USDT','')){h+='<p class="muted">Завантажую…</p>'}
+    else if(!LV.ok){h+='<p>'+esc(LV.text)+'</p>'}
+    else{h+='<div class="ladder">';LV.ladder.forEach(function(r){h+=r.now?'<div class="lr now"><i class="pulse"></i><b>'+esc(r.p)+'</b><span>ціна зараз</span></div>':'<div class="lr '+r.side+(r.strong?' strong':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+'</span><em>'+(r.pct>0?'+':'')+String(r.pct).replace('.',',').replace('-','−')+'%</em></div>'});h+='</div>';
+      LV.text.forEach(function(x,i){h+='<p'+(i===0?' class="lead"':'')+'>'+esc(x)+'</p>'});
+      h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p></details>'}
+    h+='<button class="btn ghost" data-close="1">Закрити</button>';show(h);
+  }
   function openSignal(id){
     var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;frozen=true;
     var h='<div class="grab"></div><div class="row"><div><div class="tiny muted">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><h3>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</h3></div><span class="tag '+(x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')))+'">'+esc(x.status)+'</span></div>';
@@ -243,12 +263,13 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   function load(){fetch('/api/lev/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){S=j;if(!frozen)render()}}).catch(function(){$('upd').textContent='немає звʼязку';$('dot').className='dot stale'})}
   function loadZ(){fetch('/api/lev/zvirka',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j&&j.ok){Z=j;renderZvirka()}}).catch(function(){})}
 
-  document.addEventListener('change',function(e){var t=e.target;if(t.dataset.sfs){SF=t.value;renderSignals()}else if(t.dataset.fs){F=t.value;renderToday()}});
+  document.addEventListener('change',function(e){var t=e.target;if(t.dataset.lvs){loadLv(t.value,openLevels);openLevels()}else if(t.dataset.sfs){SF=t.value;renderSignals()}else if(t.dataset.fs){F=t.value;renderToday()}});
   document.addEventListener('click',function(e){
     if(e.target.id==='shade'){hide();return}
-    var el=e.target.closest('[data-tab],[data-sk],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
+    var el=e.target.closest('[data-tab],[data-sk],[data-lv],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
     if(d.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==d.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(d.tab==='zvirka')loadZ();window.scrollTo(0,0)}
     else if(d.f){F=d.f;renderToday()}
+    else if(d.lv){openLevels()}
     else if(d.sk){SK=d.sk;SF='all';renderSignals()}
     else if(d.filter){F=d.filter;renderToday();var a=$('trades');if(a)a.scrollIntoView({behavior:'smooth',block:'start'})}
     else if(d.g!=null){OPEN[d.g]=!OPEN[d.g];renderToday()}
@@ -259,7 +280,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     else if(d.close){hide()}
   });
   if('serviceWorker' in navigator){navigator.serviceWorker.register('/lev/sw.js',{scope:'/lev/'}).catch(function(){})}
-  load();setInterval(load,15000);
+  load();setInterval(load,15000);loadLv(LVS);setInterval(function(){if(!frozen)loadLv(LVS)},60000);
 })();
 </script>
 </body>
