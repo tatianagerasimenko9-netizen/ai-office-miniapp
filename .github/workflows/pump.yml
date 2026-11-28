@@ -26,11 +26,7 @@ jobs:
           OTH=ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,BATUSDT,ZRXUSDT,WAVESUSDT,KSMUSDT,STORJUSDT,BANDUSDT,RLCUSDT,KNCUSDT,ZENUSDT,EGLDUSDT,ALPHAUSDT,CELOUSDT,ARUSDT,FLOWUSDT,MINAUSDT
           echo "S42=$S42" >> $GITHUB_ENV; echo "OTH=$OTH" >> $GITHUB_ENV
           L=docs/handoff/br-profitability/strategy_search/div_lab.py
-          BOT=$(python3 -c "
-import csv
-k=set('$S42,$OTH'.split(','))
-s=sorted({r['sym'] for r in csv.DictReader(open('docs/handoff/br-profitability/data/etalon_signals.csv')) if r['sym'].isascii() and r['sym'] not in k})
-print(','.join(s))")
+          BOT=$(python3 -c "import csv; k=set('$S42,$OTH'.split(',')); print(','.join(sorted({r['sym'] for r in csv.DictReader(open('docs/handoff/br-profitability/data/etalon_signals.csv')) if r['sym'].isascii() and r['sym'] not in k})))")
           echo "BOT count: $(echo $BOT | tr ',' '\n' | wc -l)"
           VOL=1 python3 $L fetch candles "$S42,$OTH,$BOT"
           test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
