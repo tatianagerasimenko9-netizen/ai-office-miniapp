@@ -44,7 +44,7 @@ assert z["ІНТРАДЕЙ"]["sl"] == 1 and z["ІНТРАДЕЙ"]["tp"] == 1 and
 assert z["СВІНГ"]["open"] == 6 and z["СВІНГ"]["open_unknown"] == 1 and z["СВІНГ"]["sl"] == 0, z["СВІНГ"]
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 html = open(os.path.join(root, "office_web", "lev.html"), encoding="utf-8").read(); app = open(os.path.join(root, "office_mini_app.py"), encoding="utf-8").read()
-for fn in ("manifest.webmanifest", "sw.js", "icon-180.png", "icon-192.png", "icon-512.png", "lev.jpg"): assert os.path.getsize(os.path.join(root, "office_web", "lev_static", fn)) > 100, fn
+for fn in ("manifest.webmanifest", "sw.js", "icon-180.png", "icon-192.png", "icon-512.png", "lev.jpg", "lw.js"): assert os.path.getsize(os.path.join(root, "office_web", "lev_static", fn)) > 100, fn
 mf = json.load(open(os.path.join(root, "office_web", "lev_static", "manifest.webmanifest"), encoding="utf-8")); assert mf["display"] == "standalone" and mf["start_url"] == "/lev/" and len(mf["icons"]) == 2
 assert b["opened"] and b["tp_usd"].startswith("+$") and 'rel="manifest"' in html and "apple-touch-icon" in html and "lev_static" in app
 assert "/api/lev/state" in html and "/api/lev/zvirka" in html and "Потребує уваги" in html and '"/api/lev/state"' in app and '"/lev"' in app

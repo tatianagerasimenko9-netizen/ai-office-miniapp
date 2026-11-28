@@ -1448,7 +1448,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/lev/") and len(u.path) > 5:      # статичні файли застосунку «Лев»: іконки, маніфест, service worker, фото
             from pathlib import Path as _P
             _LEV_FILES = {"manifest.webmanifest": "application/manifest+json; charset=utf-8", "sw.js": "application/javascript; charset=utf-8", "icon-180.png": "image/png", "icon-192.png": "image/png",
-                          "icon-512.png": "image/png", "lev.jpg": "image/jpeg"}
+                          "icon-512.png": "image/png", "lev.jpg": "image/jpeg", "lw.js": "application/javascript; charset=utf-8"}
             name = u.path[5:]
             f = _P(__file__).resolve().parent / "office_web" / "lev_static" / name
             if name not in _LEV_FILES or not f.is_file():
