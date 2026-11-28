@@ -108,6 +108,75 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
             "bars": [[d["t"], d["o"], d["h"], d["l"], d["c"]] for d in days[-500:] if "o" in d]}
 
 
+TF_MIN = {"15m": 15, "1h": 60, "4h": 240}
+
+
+def _dur(bars_n: int, tf: str) -> str:
+    m = bars_n * TF_MIN.get(tf, 60)
+    return f"{m} хв" if m < 120 else (f"{round(m / 60)} год" if m < 2880 else f"{round(m / 1440)} дн.")
+
+
+def _raz(n: int, one: str, few: str, many: str) -> str:
+    return f"{n} " + (one if n % 10 == 1 and n % 100 != 11 else (few if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else many))
+
+
+def local_levels(bars: List[List[float]], price: float, tf: str, ladder: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Рівні САМЕ цього графіка (15 хв / 1 год / 4 год) і відповідь простими словами: ціна на рівні чи «в повітрі».
+    ГІПОТЕЗА (наша автоматизація): рівень = місце, де ціна щонайменше двічі розверталась (розвороти в межах 0,5 середнього розмаху свічки);
+    «тримає» = ціна ближче ніж 0,5 розмаху; «новий» = перший розворот не раніше ніж 48 свічок тому. Числа не з методик автора."""
+    n = len(bars); K = 4
+    if n < 60 or not price: return {"lines": [], "text": ""}
+    atr = sum(b[2] - b[3] for b in bars[-50:]) / 50 or price * 0.001
+    piv = []                                                    # (ціна, індекс) — лише завершені розвороти
+    for i in range(K, n - K):
+        hi, lo = bars[i][2], bars[i][3]
+        if all(hi >= bars[j][2] for j in range(i - K, i + K + 1)): piv.append((hi, i))
+        if all(lo <= bars[j][3] for j in range(i - K, i + K + 1)): piv.append((lo, i))
+    piv.sort(); cl: List[List[tuple]] = []
+    for p in piv:
+        if cl and p[0] - cl[-1][-1][0] <= 0.5 * atr and p[0] - cl[-1][0][0] <= 1.0 * atr: cl[-1].append(p)
+        else: cl.append([p])
+    loc = []
+    for c in cl:
+        if len(c) < 2: continue
+        p = sum(x[0] for x in c) / len(c); first = min(x[1] for x in c); last = max(x[1] for x in c)
+        loc.append({"num": p, "n": len(c), "new": first >= n - 48, "age": n - first, "last": n - last, "kind": "local"})
+    pick = sorted([x for x in loc if x["num"] > price], key=lambda x: x["num"])[:2] + sorted([x for x in loc if x["num"] <= price], key=lambda x: -x["num"])[:2]
+    for side, rows in (("above", sorted([r for r in ladder if not r.get("now") and r.get("side") == "above"], key=lambda r: r["lo"])), ("below", sorted([r for r in ladder if not r.get("now") and r.get("side") == "below"], key=lambda r: -r["hi"]))):
+        if rows:
+            r = rows[0]; edge = r["lo"] if side == "above" else r["hi"]
+            near = [x for x in pick if abs(x["num"] - edge) <= 0.5 * atr or r["lo"] <= x["num"] <= r["hi"]]
+            if near:
+                for x in near: x["day"] = True
+            else: pick.append({"num": edge, "n": 0, "new": False, "age": 0, "last": 0, "kind": "day", "day": True})
+    lines = []
+    for x in sorted(pick, key=lambda x: -x["num"]):
+        side = "above" if x["num"] > price else "below"; hold = abs(x["num"] - price) <= 0.5 * atr
+        lab = "денний рівень" if x["kind"] == "day" else (("новий · " if x["new"] else "") + f"{_raz(x['n'], 'розворот', 'розвороти', 'розворотів')} за {_dur(x['age'], tf)}" + (" · збігається з денним" if x.get("day") else ""))
+        lines.append({"p": _px(x["num"]), "num": x["num"], "side": side, "kind": x["kind"], "n": x["n"], "new": x["new"], "strong": bool(x.get("day")) or x["n"] >= 3, "hold": hold,
+                      "label": lab, "pct": round((x["num"] / price - 1) * 100, 1)})
+    pc = lambda v: (("+" if v > 0 else "−") + str(abs(v)).replace(".", ",") + "%")
+    held = [r for r in lines if r["hold"]]; up = [r for r in lines if r["side"] == "above" and not r["hold"]]; dn = [r for r in lines if r["side"] == "below" and not r["hold"]]
+    bar_w = {"15m": "15-хвилинна свічка", "1h": "годинна свічка", "4h": "4-годинна свічка"}.get(tf, "свічка")
+    if held:
+        r = min(held, key=lambda r: abs(r["num"] - price))
+        what = "денний рівень" if r["kind"] == "day" else (f"рівень, від якого ціна розверталась {_raz(r['n'], 'раз', 'рази', 'разів')}" + (" (він ще й денний)" if "денним" in r["label"] else ""))
+        if r["side"] == "below":
+            text = f"Ціна стоїть на рівні {r['p']} — він тримає знизу. Це {what}. Поки {bar_w} не закрилась нижче — рівень працює."
+            if dn: text += f" Якщо проб'є — наступний {dn[0]['p']} ({pc(dn[0]['pct'])})."
+        else:
+            text = f"Ціна впирається в рівень {r['p']} — він тисне зверху. Це {what}. Поки {bar_w} не закрилась вище — рівень не пробито."
+            if up: text += f" Якщо проб'є — наступний {up[-1]['p']} ({pc(up[-1]['pct'])})."
+        if r["new"]: text += " Рівень новий, сформувався щойно."
+    else:
+        text = "Ціна в повітрі: поруч її нічого не тримає."
+        if dn: text += f" Найближчий рівень знизу — {dn[0]['p']} ({pc(dn[0]['pct'])})."
+        if up: text += f" Зверху — {up[-1]['p']} ({pc(up[-1]['pct'])})."
+        nw = [r for r in lines if r["new"]]
+        if nw: text += f" Новий рівень: {nw[0]['p']}."
+    return {"lines": lines, "text": text}
+
+
 def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = None, now: Optional[float] = None, tf: str = "1d") -> Dict[str, Any]:
     """Для API: денні свічки ф'ючерсів → розбір. Кеш 10 хв на монету (ціна підставляється свіжа)."""
     now = time.time() if now is None else now; sym = sym.upper()
@@ -120,7 +189,7 @@ def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = 
         days = [{"t": _ts(r), "o": float(r["open"]), "h": float(r["high"]), "l": float(r["low"]), "c": float(r["close"])} for r in rows]
         _CACHE[sym] = c = (now, days)
     out = analyse(sym, c[1], price)
-    if out.get("ok") and tf in ("1h", "4h"):                                                 # графік на дрібнішому таймфреймі; рівні лишаються денні
+    if out.get("ok") and tf in TF_MIN:                                                 # графік на дрібнішому таймфреймі; рівні лишаються денні
         try:
             k = (sym, tf); cc = _CACHE.get(k)
             if not cc or now - cc[0] > 15:
@@ -129,9 +198,11 @@ def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = 
                 rows = fetch(sym, tf, 500, closed_only=False)
                 if isinstance(rows, list) and len(rows) > 20: _CACHE[k] = cc = (now, [[_ts(r), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])] for r in rows])
             if cc: out["bars"] = cc[1][-500:]
+            if cc:
+                ll = local_levels(cc[1][-500:], float(out.get("price_num") or cc[1][-1][4]), tf, out.get("ladder") or []); out["local"] = ll["lines"]; out["tf_text"] = ll["text"]
         except Exception:  # noqa: BLE001
             pass
-    out["tf"] = tf if tf in ("1h", "4h") else "1d"
+    out["tf"] = tf if tf in TF_MIN else "1d"
     return out
 
 
