@@ -14,6 +14,8 @@ MERGE_PCT = 2.0; RECLAIM_DAYS = 5; TOUCH_PCT = 0.6
 # Рівні, які автор сам прокреслив на денному графіку (скриншоти власниці з його сторінки, 15–16.11.2026): показуються як «рівень Герчика» з датою. Це ПЕРШОДЖЕРЕЛО, не наш розрахунок; застарівають — оновлювати за новими скриншотами.
 AUTHOR_LEVELS = {"BTCUSDT": {"date": "16.11", "levels": [97968.51, 87399.91, 79805.80, 62278.00, 61405.72, 59839.24, 58119.35, 48243.11]}}
 _CACHE: Dict[str, Any] = {}
+# Частоти з перевірки на денних свічках біткоїна 2022–2026 (levels_hist.py, журнал BT): (як часто, скільки випадків). Лише опис історії, не обіцянка.
+HIST = {"DOWN": {"near": ("у 7 випадках із 10", 212), "mid": ("приблизно пів на пів", 16)}, "RECLAIM": {"near": ("у 7 випадках із 10", 200), "mid": ("у 4 випадках із 10", 24)}}
 
 
 def _dt(ts: float) -> datetime:
@@ -78,25 +80,34 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
     zone = lambda z: _px(z["p"]) if z["hi"] / z["lo"] - 1 < 0.003 else f"{_px(z['lo'])}–{_px(z['hi'])}"
     row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"], "touch": z["touch"], "author": z["author"]}
     ladder = [row(z, "above") for z in above[::-1]] + [{"p": _px(px), "now": True}] + [row(z, "below") for z in below]
-    lines: List[str] = []; state = "between"; key = None
-    rc = days[-RECLAIM_DAYS:]; lo5 = min(d["l"] for d in rc)
-    old = find_levels(days[:-RECLAIM_DAYS], sym)                                                       # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
+    state = "between"; key = None; rc = days[-RECLAIM_DAYS:]; lo5 = min(d["l"] for d in rc)
+    old = find_levels(days[:-RECLAIM_DAYS], sym)                                                  # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
     pierced = [z for z in old if lo5 < z["lo"] and z["hi"] < min(last_c, px)]
-    if pierced:
-        key = max(pierced, key=lambda z: z["p"]); state = "reclaim"
-        lines.append(f"Рівень {zone(key)} ({key['label']}) за останні дні проколювали вниз до {_px(lo5)}, але день закрився вище. Повернення вище рівня — сильний знак на користь покупців на кілька днів.")
-        lines.append(f"Це діє, поки день закривається вище {_px(key['lo'])}. Закриття дня нижче — рівень зламано, і зона стає шортовою.")
-    elif below:
-        key = below[0]
-        lines.append(f"Ціна {_px(px)} стоїть над рівнем {_px(key['p'])} ({key['label']}). Вище нього — лонгова зона від рівня, нижче — шортова.")
+    if pierced: key = max(pierced, key=lambda z: z["p"]); state = "reclaim"
+    elif below: key = below[0]
+    pc = lambda p: str(abs(pct(p))).replace(".", ",")
+    def odds(kind: str, dist: float) -> str:
+        """Що частіше було на історії біткоїна (levels_hist.py, журнал BT): лише там, де випадків досить."""
+        b = "near" if dist < 5 else ("mid" if dist < 10 else "far"); h = HIST[kind].get(b)
+        if not h: return "Так далеко на історії було лише кілька разів — що вірогідніше, сказати не можу."
+        return f"На історії біткоїна так було {h[0]} (випадків {h[1]})."
+    now_l: List[str] = []; down_l: List[str] = []; up_l: List[str] = []
+    if key is None:
+        now_l.append(f"Ціна {_px(px)} нижче всіх рівнів за два роки. Опори знизу не бачу.")
+    elif state == "reclaim":
+        now_l.append(f"Рівень {zone(key)} проколювали вниз, але день закрився вище. Це знак на користь покупців на кілька днів.")
     else:
-        lines.append(f"Ціна {_px(px)} нижче всіх рівнів, які я бачу за два роки: опори знизу немає.")
+        now_l.append(f"Ціна {_px(px)} стоїть над рівнем {zone(key)}. Поки день закривається вище — перевага в покупців.")
     if key is not None:
         nxt = [z for z in lv if z["hi"] < key["lo"]][-1:]
-        if nxt: lines.append(f"Ціна ходить від рівня до рівня. Якщо день закриється нижче {_px(key['lo'])}, найближчий рівень, куди вона може дійти, — {_px(nxt[0]['p'])} ({nxt[0]['label']}), це {str(pct(nxt[0]['p'])).replace('.', ',')}% від ціни зараз.")
+        if nxt: down_l.append(f"Якщо день закриється нижче {_px(key['lo'])} — рівень зламано, найближча ціль {_px(nxt[0]['p'])} (−{pc(nxt[0]['p'])}%). " + odds("DOWN", abs(pct(nxt[0]["p"]))))
+        else: down_l.append(f"Якщо день закриється нижче {_px(key['lo'])} — рівень зламано, а наступного рівня знизу я не бачу.")
     if above:
-        a = above[0]; lines.append(f"Зверху найближчий рівень — {_px(a['p'])} ({a['label']}), +{str(pct(a['p'])).replace('.', ',')}%. Поки ціна під ним, це стеля." + (f" Далі {_px(above[1]['p'])}." if len(above) > 1 else ""))
-    return {"ok": True, "sym": name, "price": _px(px), "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines,
+        a = above[0]; nx2 = f" Далі {_px(above[1]['p'])}." if len(above) > 1 else ""
+        up_l.append(f"Якщо день закриється вище {_px(a['hi'])} — дорога до {_px(above[1]['p'])} відкрита (+{pc(above[1]['p'])}%)." if len(above) > 1 else f"Зверху один рівень: {_px(a['p'])} (+{pc(a['p'])}%).")
+    lines = now_l + down_l + up_l
+    verdict = ("Вірогідніше — вгору до " + _px(above[0]["p"]) + ", поки день не закрився нижче " + _px(key["lo"]) + ".") if (state == "reclaim" and above and key) else (("Рівень тримається. Сигналу немає, поки день не закриється за рівнем.") if key else "")
+    return {"ok": True, "sym": name, "price": _px(px), "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines, "verdict": verdict, "blocks": {"now": now_l, "down": down_l, "up": up_l},
             "note": "Рахую за денними свічками: дивлюсь на закриття дня, а не на прокол. Це карта рівнів, а не прогноз.",
             "source": "Правила «вище рівня — лонг, нижче — шорт», «повернення вище рівня — сильний сигнал» і «ціна ходить від рівня до рівня з денного графіка» — з матеріалів Герчика, які ви надіслали. Рівні з позначкою «рівень Герчика» — ті, що він сам прокреслив на скриншотах; решту Офіс знаходить автоматично на денних свічках."}
 
