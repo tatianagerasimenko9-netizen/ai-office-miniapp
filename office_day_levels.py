@@ -105,7 +105,7 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
     return {"ok": True, "sym": name, "price": _px(px), "price_num": px, "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines, "verdict": verdict, "blocks": {"now": now_l, "down": down_l, "up": up_l},
             "note": "Рахую за денними свічками: дивлюсь на закриття дня, а не на прокол. Це карта рівнів, а не прогноз.",
             "source": "Рівні Офіс знаходить сам на денному графіку — там, де ціна кілька разів спиралась, — і перераховує щодня. Спосіб читати рівень (вище — покупці, нижче — продавці; повернення після проколу; рух від рівня до рівня) — з матеріалів, які ви надіслали.",
-            "bars": [[d["t"], d["o"], d["h"], d["l"], d["c"]] for d in days[-90:] if "o" in d]}
+            "bars": [[d["t"], d["o"], d["h"], d["l"], d["c"]] for d in days[-500:] if "o" in d]}
 
 
 def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = None, now: Optional[float] = None, tf: str = "1d") -> Dict[str, Any]:
@@ -123,12 +123,12 @@ def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = 
     if out.get("ok") and tf in ("1h", "4h"):                                                 # графік на дрібнішому таймфреймі; рівні лишаються денні
         try:
             k = (sym, tf); cc = _CACHE.get(k)
-            if not cc or now - cc[0] > 60:
+            if not cc or now - cc[0] > 15:
                 if fetch is None:
                     from office_market_data import fetch_candles_futures as fetch
-                rows = fetch(sym, tf, 120, closed_only=False)
+                rows = fetch(sym, tf, 500, closed_only=False)
                 if isinstance(rows, list) and len(rows) > 20: _CACHE[k] = cc = (now, [[_ts(r), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])] for r in rows])
-            if cc: out["bars"] = cc[1][-110:]
+            if cc: out["bars"] = cc[1][-500:]
         except Exception:  # noqa: BLE001
             pass
     out["tf"] = tf if tf in ("1h", "4h") else "1d"

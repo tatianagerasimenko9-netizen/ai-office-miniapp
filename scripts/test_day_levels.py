@@ -13,7 +13,7 @@ pc = [x["pct"] for x in A["ladder"] if "pct" in x]; assert all(a > b for a, b in
 B = ol.analyse("BTCUSDT", days[:-45]); assert B["ok"] and B["state"] in ("between", "reclaim") and len(B["ladder"]) >= 3, B
 assert ol.analyse("XUSDT", days[:10])["ok"] is False
 rows = [{"ts": __import__("datetime").datetime.utcfromtimestamp(d["t"]).isoformat() + "+00:00", "open": d["c"], "high": d["h"], "low": d["l"], "close": d["c"]} for d in days]
-C = ol.levels("BTCUSDT", fetch=lambda *a, **k: rows, price=59400.0, now=1.0); assert C["ok"] and C["sym"] == "BTC" and len(C["bars"]) == 90
+C = ol.levels("BTCUSDT", fetch=lambda *a, **k: rows, price=59400.0, now=1.0); assert C["ok"] and C["sym"] == "BTC" and len(C["bars"]) >= 90
 assert "Герчик" not in labs and "Герчик" not in " ".join(A["text"]) and all("touch" in x and x["lo"] <= x["hi"] for x in A["ladder"] if not x.get("now"))
 print("ok levels"); print("\n".join(A["text"])); print([(x.get("p"), x.get("label", "ЗАРАЗ"), x.get("pct")) for x in A["ladder"]])
 
