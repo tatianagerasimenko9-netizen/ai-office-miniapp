@@ -1473,9 +1473,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(400, {"ok": False, "error": "bad_symbol"})
             try:
                 px = (_lev.live_prices().get("val") or {}).get(sym)
-                return self._send_json(200, _lvl.levels(sym, price=px))
+                tf = (parse_qs(u.query).get("tf", ["1d"])[0] or "1d").lower()
+                return self._send_json(200, _lvl.levels(sym, price=px, tf=tf))
             except Exception as exc:  # noqa: BLE001
                 return self._send_json(200, {"ok": False, "sym": sym.replace("USDT", ""), "text": "Не вдалося отримати свічки: " + type(exc).__name__})
+        if u.path == "/api/lev/level_events":
+            import office_lev as _lev
+            import office_levels as _lvl
+            if not _lev.enabled():
+                return self._send_json(503, {"ok": False, "error": "lev_disabled"})
+            from office_td import swing as _sw
+            coins = [s for s in _sw.SYMBOLS if s in _sw.SYMBOLS[:12] + _sw.EXTRA_CRYPTO]
+            return self._send_json(200, {"ok": True, "events": _lvl.events(_db_target_for_identity()), "coins": coins})
         if u.path in ("/api/lev/state", "/api/lev/zvirka"):
             import office_lev as _lev
             if not _lev.enabled():

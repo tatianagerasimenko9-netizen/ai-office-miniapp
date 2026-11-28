@@ -166,6 +166,11 @@ def cycle(db: str, fetch: Callable, now: Optional[float] = None) -> Dict[str, in
         _bn.cycle(db, fetch, now)
     except Exception as exc:  # noqa: BLE001
         print(f"[bnc-shadow] {type(exc).__name__}: {exc}", flush=True)
+    try:                                                   # події рівнів раз на добу (нагадування; без сигналів)
+        import office_levels as _ol
+        _ol.daily(db, fetch, now)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[levels] {type(exc).__name__}: {exc}", flush=True)
     k = int(now // PER)
     if k > _LAST_H4 and now - k * PER >= 20:
         got = scan(db, fetch, now)
