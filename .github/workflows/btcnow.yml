@@ -25,7 +25,7 @@ jobs:
                   try: return json.loads(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "office-research"}), timeout=20).read())
                   except Exception as e: time.sleep(1 + a)
               return {}
-          for sym in ("BTC", "ETH"):
+          for sym in ("BTC", "ETH", "WLFI"):
               for bar, pages in (("15m", 12), ("1H", 15), ("4H", 8), ("1Dutc", 20)):
                   rows = {}; after = ""
                   for _ in range(pages):
@@ -49,3 +49,4 @@ jobs:
 # rerun 2026-11-27T11:38:37Z
 # rerun daily 2026-11-27
 # rerun 2026-11-28T16:30:08
+# wlfi
