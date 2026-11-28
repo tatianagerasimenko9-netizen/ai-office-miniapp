@@ -169,6 +169,12 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
     if tg: L.append(f"🟢 ціль  <code>{plain(tg[0]['p'])}</code> (ліміт)")
     lv = r_levels(row)
     if lv: L.append("📍 орієнтири: " + " · ".join(f"+${10 * k} → <code>{plain(p)}</code>" + (" 🔒 беззбиток" if k == 2 and is_swing(row) else "") for k, p in lv))
+    try:                                            # сильний / слабкий день або час сигналу (погоджено власницею 28.11.2026)
+        import office_marks as _mk
+        _tm = _mk.time_mark(row.get("sig_id", ""), row.get("created_ts") or row.get("confirm_ts") or 0) if (row.get("created_ts") or row.get("confirm_ts")) else None
+        if _tm: L.append(f"{'🟢' if _tm[0] else '🟡'} <b>{html.escape(_tm[1])}</b>\n<i>{html.escape(_tm[2])}</i>")
+    except Exception:  # noqa: BLE001
+        pass
     if calm_line(row): L.append(calm_line(row))
     if hy.get("opp"): L.append("⚠️ " + linkify(hy["opp"], hy))
     if hy.get("pair"): L.append("⚠️ " + linkify(hy["pair"], hy))

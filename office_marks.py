@@ -167,3 +167,33 @@ def recent_stop(db: str, symbol: str, direction: str, now: Optional[float] = Non
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+def time_mark(sig_id: str, ts: float) -> Optional[tuple]:
+    """Рядок «сильний / слабкий час» для картки (рішення власниці 28.11.2026: і в апці, і на картках у Telegram). Лише підказка, сигнал не блокується.
+    СВІНГ і ПРОБІЙ — день тижня (ср–пт сильні; журнал BW, BY, CC); ІНТРАДЕЙ — вечір 16:00–24:00 за Києвом (журнал CD, гіпотеза до живої перевірки).
+    Повертає (сильний?, заголовок, довідка з історії) або None."""
+    if not enabled():
+        return None
+    try:
+        from datetime import datetime, timezone
+        try:
+            from zoneinfo import ZoneInfo
+            k = datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Kyiv"))
+        except Exception:  # noqa: BLE001
+            k = datetime.fromtimestamp(float(ts) + 7200, timezone.utc)
+        sid = str(sig_id)
+        if sid.startswith(("SW|", "IM|")):
+            name = ("Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя")[k.weekday()]; strong = k.weekday() in (2, 3, 4)
+            if sid.startswith("SW|"):
+                hist = "На історії такі давали +$2,40 на сигнал." if strong else "На історії такі давали +$0,70 на сигнал, більше стопів."
+            else:
+                hist = "На історії такі давали +$3,40 на сигнал." if strong else "На історії такі давали +$1,90 на сигнал, провали більші."
+            return strong, (f"{name} — сильний день. Брати." if strong else f"{name} — слабкий день. Краще пропустити."), hist
+        if sid.startswith("TD|"):
+            strong = k.hour >= 16
+            return strong, ("Вечірній сигнал (16:00–24:00) — сильний час. Брати." if strong else "Сигнал поза вечором — слабший час. Краще пропустити."), \
+                ("На історії вечірні давали +$2,40 на сигнал." if strong else "На історії такі давали +$0,20 на сигнал і більшість провалів.")
+    except Exception:  # noqa: BLE001
+        pass
+    return None
