@@ -171,3 +171,10 @@ for s, g in x.groupby("ses"):
 print("\n== найкраща сесія для входу залежно від сесії сигналу ($ на сигнал): ОДРАЗУ / чекати Азії / Лондона / Нью-Йорка")
 for s in sorted(x.ses.unique()):
     print(f"  сигнал у «{s}»: " + " / ".join(f"{T[(T.v == v) & (T.ses == s)].usd.mean():+.2f}" for v in ("ОДРАЗУ", "СЕСІЯ Азія", "СЕСІЯ Лондон", "СЕСІЯ Нью-Йорк")))
+print("\n== ОДРАЗУ: за годиною приходу сигналу (київський час) — $ на сигнал по періодах (n)")
+x = T[T.v == "ОДРАЗУ"].copy(); k = pd.to_datetime(x.ts, unit="s", utc=True).dt.tz_convert("Europe/Kyiv"); x["kh"] = k.dt.hour if MODE == "sw" else k.dt.hour // 4 * 4; x["kd"] = k.dt.day_of_week
+for hh, g in x.groupby("kh"):
+    print(f"  {hh:02d}:00{'' if MODE == 'sw' else f'–{hh+4:02d}:00'}: усього {g.usd.mean():+.2f} (n={len(g)}) | " + " | ".join(f"{p}: {g[g.P == p].usd.mean():+.2f} ({int((g.P == p).sum())})" for p in PS))
+print("\n== ОДРАЗУ: за днем тижня приходу сигналу (київський час)")
+for dd, g in x.groupby("kd"):
+    print(f"  {('пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд')[dd]}: усього {g.usd.mean():+.2f} (n={len(g)}) | " + " | ".join(f"{p}: {g[g.P == p].usd.mean():+.2f} ({int((g.P == p).sum())})" for p in PS))

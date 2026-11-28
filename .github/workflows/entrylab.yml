@@ -69,3 +69,4 @@ jobs:
           git add docs/handoff/br-profitability/entrylab_td_out.txt
           git commit -m "entrylab: коли заходити за сигналом ІНТРАДЕЙ (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# rerun
