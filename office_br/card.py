@@ -22,11 +22,12 @@ TD_TAG = "#ТЕСТ"
 
 
 def is_td(row: Dict[str, Any]) -> bool:
-    return str(row.get("sig_id", "")).startswith(("TD|", "SW|", "BN|"))
+    return str(row.get("sig_id", "")).startswith(("TD|", "SW|", "BN|", "IM|"))
 
 
 STRATS = {"TD": ("ІНТРАДЕЙ", "🟨", "#ffd500", "#2a2200", "15 хв · угоди до 2 діб"), "SW": ("СВІНГ", "🟦", "#0057b7", "#ffffff", "4 год · угоди до 10 діб"),
-          "BN": ("ВІДСКОК", "✨", "#D8B66A", "#17140E", "1 год · угоди до 2 діб")}   # третій вид сигналу (рішення власниці 27.11.2026): лонг після глибокого зливу, на перевірці
+          "BN": ("ВІДСКОК", "✨", "#D8B66A", "#17140E", "1 год · угоди до 2 діб"),
+          "IM": ("ПРОБІЙ", "⚡", "#7C5CFF", "#ffffff", "1 год · угоди до 3 діб")}   # третій вид сигналу (рішення власниці 27.11.2026): лонг після глибокого зливу, на перевірці
 
 
 def strat(row: Dict[str, Any]):
@@ -40,11 +41,11 @@ def is_swing(row: Dict[str, Any]) -> bool:
 
 def hold_hours(row: Dict[str, Any]) -> int:
     """Скільки тримати: ІНТРАДЕЙ — до 48 год, СВІНГ — до 10 діб."""
-    return 240 if is_swing(row) else 48
+    return 240 if is_swing(row) else (72 if str(row.get("sig_id", "")).startswith("IM|") else 48)
 
 
 def hold_text(row: Dict[str, Any]) -> str:
-    return "до 10 діб" if is_swing(row) else "до 48 год"
+    return "до 10 діб" if is_swing(row) else ("до 3 діб" if str(row.get("sig_id", "")).startswith("IM|") else "до 48 год")
 
 
 def head(row: Dict[str, Any]) -> str:
@@ -179,7 +180,7 @@ def build_td_caption_html(row: Dict[str, Any]) -> str:
         L.append(f"➕ Ще {n} {word}" + (f" ({html.escape(syms)})" if syms else "") + " у той самий бік — це один рух")
     if hy.get("why"): L.append("📌 " + html.escape(str(hy["why"])))
     if hy.get("note"): L.append("⚠️ " + html.escape(str(hy["note"])))
-    if not str(row.get("sig_id", "")).startswith("BN|"): L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))   # ВІДСКОК: строк уже є на картинці (прохання власниці 27.11.2026)
+    if not str(row.get("sig_id", "")).startswith(("BN|", "IM|")): L.append("⏱ тримати " + html.escape(str(hy.get("hold") or hold_text(row))))   # ВІДСКОК: строк уже є на картинці (прохання власниці 27.11.2026)
     L.append(TD_TAG)
     return "\n".join(L)
 

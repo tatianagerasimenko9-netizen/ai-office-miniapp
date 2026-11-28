@@ -373,7 +373,7 @@ def repair_outage_data_gap(db: str, now: float | None = None) -> int:
     _execute(db, "CREATE TABLE IF NOT EXISTS br_repair (key TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL, n INTEGER)")
     if _fetchone(db, "SELECT 1 FROM br_repair WHERE key = 'dg_outage_20261122b'"):
         return 0
-    rows = _fetchall(db, "SELECT sig_id FROM br_test_signal WHERE status = 'DATA_GAP' AND msg_id IS NOT NULL AND sent_ts >= ? AND (sig_id LIKE 'TD|%' OR sig_id LIKE 'SW|%' OR sig_id LIKE 'BN|%')", (now - 11 * 86400,))
+    rows = _fetchall(db, "SELECT sig_id FROM br_test_signal WHERE status = 'DATA_GAP' AND msg_id IS NOT NULL AND sent_ts >= ? AND (sig_id LIKE 'TD|%' OR sig_id LIKE 'SW|%' OR sig_id LIKE 'BN|%' OR sig_id LIKE 'IM|%')", (now - 11 * 86400,))
     for (sid,) in rows:
         _execute(db, "UPDATE br_test_signal SET status = 'SENT' WHERE sig_id = ? AND status = 'DATA_GAP'", (sid,))
     _execute(db, "INSERT INTO br_repair(key, ts, n) VALUES ('dg_outage_20261122b', ?, ?) ON CONFLICT DO NOTHING", (now, len(rows)))

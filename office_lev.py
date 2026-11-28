@@ -76,11 +76,11 @@ def _dm(ts: float) -> str:
 
 
 def _strat(sig_id: str) -> str:
-    return "СВІНГ" if sig_id.startswith("SW|") else ("ІНТРАДЕЙ" if sig_id.startswith("TD|") else ("ВІДСКОК" if sig_id.startswith("BN|") else "B&R"))
+    return "СВІНГ" if sig_id.startswith("SW|") else ("ІНТРАДЕЙ" if sig_id.startswith("TD|") else ("ВІДСКОК" if sig_id.startswith("BN|") else ("ПРОБІЙ" if sig_id.startswith("IM|") else "B&R")))
 
 
 def _hold_s(sig_id: str) -> float:
-    return 10 * 86400.0 if sig_id.startswith("SW|") else 48 * 3600.0
+    return 10 * 86400.0 if sig_id.startswith("SW|") else (72 * 3600.0 if sig_id.startswith("IM|") else 48 * 3600.0)
 
 
 def _res(d: Dict[str, Any], R: float) -> Optional[float]:
@@ -98,7 +98,7 @@ def _rows(db: str, since: float) -> List[Dict[str, Any]]:
     from office_bridge import _fetchall
     cols = "sig_id, seq, symbol, direction, entry, sl, targets_json, hyp_json, created_ts, status"
     out = []
-    for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal WHERE (sig_id LIKE 'SW|%' OR sig_id LIKE 'TD|%' OR sig_id LIKE 'BN|%') AND (status = 'SENT' OR created_ts >= ?) ORDER BY created_ts", (since,)):
+    for r in _fetchall(db, f"SELECT {cols} FROM br_test_signal WHERE (sig_id LIKE 'SW|%' OR sig_id LIKE 'TD|%' OR sig_id LIKE 'BN|%' OR sig_id LIKE 'IM|%') AND (status = 'SENT' OR created_ts >= ?) ORDER BY created_ts", (since,)):
         d = dict(zip(cols.split(", "), r))
         try: d["tp"] = float((json.loads(d["targets_json"]) or [{}])[0].get("p"))
         except Exception: d["tp"] = None
@@ -199,6 +199,17 @@ def state(db: str, prices: Optional[Dict[str, float]] = None, price_ts: Optional
         w = _kd(ts); strong = w in (2, 3, 4)
         return {"strong": strong, "name": DAYS[w], "text": (f"{DAYS[w].capitalize()} — сильний день. Брати." if strong else f"{DAYS[w].capitalize()} — слабкий день. Краще пропустити."),
                 "hist": ("На історії такі давали +$2,40 на сигнал." if strong else "На історії такі давали +$0,70 на сигнал, більше стопів.")}
+    def _kh(ts: float) -> int:
+        try:
+            from zoneinfo import ZoneInfo
+            return datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Kyiv")).hour
+        except Exception:  # noqa: BLE001
+            return datetime.fromtimestamp(float(ts) + 7200, timezone.utc).hour
+    def _eve(ts: float) -> Dict[str, Any]:
+        """ІНТРАДЕЙ: сигнали 16:00–24:00 за Києвом — сильний час (журнал BW, CD; гіпотеза до живої перевірки). Лише підказка в апці."""
+        strong = _kh(ts) >= 16
+        return {"strong": strong, "name": "", "text": ("Вечірній сигнал (16:00–24:00) — сильний час. Брати." if strong else "Сигнал поза вечором — слабший час. Краще пропустити."),
+                "hist": ("На історії вечірні давали +$2,40 на сигнал." if strong else "На історії такі давали +$0,20 на сигнал і більшість провалів.")}
     sl_ev: List[tuple] = []; streak = None
     try:                                            # підказки «після стопа» (журнал Z, BZ): лише текст в апці, нічого не блокує
         from office_bridge import _fetchall
@@ -220,8 +231,8 @@ def state(db: str, prices: Optional[Dict[str, float]] = None, price_ts: Optional
         same = open_same[d["direction"]] - (1 if d["status"] == "SENT" and "ENTRY" in d["ev"] else 0); mins = int((now - d["created_ts"]) / 60)
         signals.append({"sig_id": d["sig_id"], "strat": _strat(d["sig_id"]), "seq": d["seq"], "sym": d["symbol"].replace("USDT", ""), "dir": d["direction"], "dir_ua": "лонг" if d["direction"] == "LONG" else "шорт",
                         "entry": _px(float(d["entry"])), "sl": _px(float(d["sl"])), "tp": _px(d["tp"]) if d["tp"] else "—", "tp_usd": (_usd(R * abs(d["tp"] - float(d["entry"])) / abs(float(d["entry"]) - float(d["sl"]))) if d["tp"] else ""),
-                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "res": _res(d, R), "kind": {"SL": "sl", "TP1": "tp", "TP3": "tp", "TIMEOUT": "time", "SENT": "open", "NEW": "open"}.get(d["status"], "none"), "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "day": (_day(d["created_ts"]) if str(d["sig_id"]).startswith("SW|") else None), "after_stop": _after(d), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
-    return {"ok": True, "today": dict(_day(now), wd=_kd(now)), "streak": streak, "ts": now, "updated": _hm(now), "price_ts": price_ts, "price_at": _hm(price_ts) if price_ts else None, "stale": bool(not price_ts or now - price_ts > 120), "risk": R,
+                        "status": ST.get(d["status"], d["status"]), "open": d["status"] == "SENT", "res": _res(d, R), "kind": {"SL": "sl", "TP1": "tp", "TP3": "tp", "TIMEOUT": "time", "SENT": "open", "NEW": "open"}.get(d["status"], "none"), "ago": (f"{mins} хв тому" if mins < 90 else f"{mins // 60} год тому"), "at": _dm(d["created_ts"]), "day": (_day(d["created_ts"]) if str(d["sig_id"]).startswith(("SW|", "IM|")) else (_eve(d["created_ts"]) if str(d["sig_id"]).startswith("TD|") else None)), "after_stop": _after(d), "lev": _verdict(d, same, -R * same, R, is_open=(d["status"] == "SENT" and "ENTRY" in d["ev"]))})
+    return {"ok": True, "today": dict(_day(now), wd=_kd(now), td_now=_kh(now) >= 16), "streak": streak, "ts": now, "updated": _hm(now), "price_ts": price_ts, "price_at": _hm(price_ts) if price_ts else None, "stale": bool(not price_ts or now - price_ts > 120), "risk": R,
             "lev": lev, "note": "Рахую за сигналами Офісу, біржу не бачу. При різкому русі стоп може виконатись гірше за розрахунок.", "attention": att, "sums": sums, "groups": groups, "signals": signals, "order_authorized": False}
 
 
@@ -229,7 +240,7 @@ def zvirka(db: str, prices: Optional[Dict[str, float]] = None, now: Optional[flo
     """Живий підсумок стратегій: закриті (стоп / ціль / за часом) і відкриті угоди, суми при ризику RISK_USD. Без комісії."""
     from office_bridge import _fetchall
     now = time.time() if now is None else now; R = risk_usd(); prices = live_prices()["val"] if prices is None else prices; out = []
-    for pfx, name in (("SW", "СВІНГ"), ("TD", "ІНТРАДЕЙ"), ("BN", "ВІДСКОК")):
+    for pfx, name in (("SW", "СВІНГ"), ("TD", "ІНТРАДЕЙ"), ("BN", "ВІДСКОК"), ("IM", "ПРОБІЙ")):
         rs = _fetchall(db, "SELECT sig_id, symbol, direction, entry, sl, targets_json, status, created_ts FROM br_test_signal WHERE sig_id LIKE ? ORDER BY created_ts", (pfx + "|%",))
         tout = {sid: px for sid, px in _fetchall(db, "SELECT sig_id, price FROM br_test_event WHERE level = 'TIMEOUT' AND sig_id LIKE ?", (pfx + "|%",))}
         ent = {sid for (sid,) in _fetchall(db, "SELECT sig_id FROM br_test_event WHERE level = 'ENTRY' AND sig_id LIKE ?", (pfx + "|%",))}
