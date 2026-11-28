@@ -155,6 +155,13 @@ def local_levels(bars: List[List[float]], price: float, tf: str, ladder: List[Di
         lab = "денний рівень" if x["kind"] == "day" else (("новий · " if x["new"] else "") + f"{_raz(x['n'], 'розворот', 'розвороти', 'розворотів')} за {_dur(x['age'], tf)}" + (" · збігається з денним" if x.get("day") else ""))
         lines.append({"p": _px(x["num"]), "num": x["num"], "side": side, "kind": x["kind"], "n": x["n"], "new": x["new"], "strong": bool(x.get("day")) or x["n"] >= 3, "hold": hold,
                       "label": lab, "pct": round((x["num"] / price - 1) * 100, 1)})
+    # щоб не було «павутини»: головні — рівень, біля якого ціна, і по ОДНОМУ найближчому сильному зверху та знизу; решта — у згорнутому списку
+    hl = [r for r in lines if r["hold"]]
+    if hl: min(hl, key=lambda r: abs(r["num"] - price))["main"] = True
+    for side, key in (("above", lambda r: r["num"]), ("below", lambda r: -r["num"])):
+        c = [r for r in lines if r["side"] == side and not r["hold"]]
+        best = sorted([r for r in c if r["strong"]], key=key) or sorted(c, key=key)
+        if best: best[0]["main"] = True
     pc = lambda v: (("+" if v > 0 else "−") + str(abs(v)).replace(".", ",") + "%")
     held = [r for r in lines if r["hold"]]; up = [r for r in lines if r["side"] == "above" and not r["hold"]]; dn = [r for r in lines if r["side"] == "below" and not r["hold"]]
     bar_w = {"15m": "15-хвилинна свічка", "1h": "годинна свічка", "4h": "4-годинна свічка"}.get(tf, "свічка")
