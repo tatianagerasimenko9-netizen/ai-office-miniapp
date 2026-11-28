@@ -26,11 +26,13 @@ jobs:
           python3 $D/strategy_search/etalon_replay.py fetch $D/data/etalon_signals.csv /tmp/k | tee /tmp/fetch.txt
           python3 $D/strategy_search/etalon_replay.py run $D/data/etalon_signals.csv /tmp/k $D/data/etalon_replay.csv | tee $D/etalon_replay_out.txt
           tail -1 /tmp/fetch.txt >> $D/etalon_replay_out.txt
+          python3 $D/strategy_search/etalon_twist.py $D/data/etalon_signals.csv /tmp/k x | tee $D/etalon_twist_out.txt
       - name: Save
         if: always()
         shell: bash
         run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-          git add docs/handoff/br-profitability/etalon_replay_out.txt docs/handoff/br-profitability/data/etalon_replay.csv || true
+          git add docs/handoff/br-profitability/etalon_twist_out.txt docs/handoff/br-profitability/etalon_replay_out.txt docs/handoff/br-profitability/data/etalon_replay.csv || true
           git commit -m "etalon: перевірка сигналів бота-еталона на свічках (автоматично)"
           for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
+# twist
