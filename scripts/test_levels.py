@@ -16,3 +16,27 @@ rows = [{"ts": __import__("datetime").datetime.utcfromtimestamp(d["t"]).isoforma
 C = ol.levels("BTCUSDT", fetch=lambda *a, **k: rows, price=59400.0, now=1.0); assert C["ok"] and C["sym"] == "BTC" and len(C["bars"]) == 90
 assert "Герчик" not in labs and "Герчик" not in " ".join(A["text"]) and all("touch" in x and x["lo"] <= x["hi"] for x in A["ladder"] if not x.get("now"))
 print("ok levels"); print("\n".join(A["text"])); print([(x.get("p"), x.get("label", "ЗАРАЗ"), x.get("pct")) for x in A["ladder"]])
+
+# --- події рівнів: запис раз на добу, зведення одним повідомленням, список для апки
+import tempfile, asyncio, datetime as _d
+from office_bridge import _fetchall
+dbp = os.path.join(tempfile.mkdtemp(), "l.db"); found = None
+for cut in range(len(days) - 1, len(days) - 120, -1):                                       # знайти день з подією на реальній історії
+    ev = ol.day_event(days[:cut])
+    if ev: found = (cut, ev); break
+assert found, "за 120 днів немає жодної події"; cut, ev = found; dd = days[:cut]; day = _d.datetime.utcfromtimestamp(dd[-1]["t"]).strftime("%Y-%m-%d")
+rws = [{"ts": _d.datetime.utcfromtimestamp(d["t"]).isoformat() + "+00:00", "open": d["c"], "high": d["h"], "low": d["l"], "close": d["c"]} for d in dd]
+now_ = dd[-1]["t"] + 86400 + 1800; ol._LAST_DAY = ""
+n1 = ol.daily(dbp, fetch=lambda *a, **k: rws, now=now_, symbols=("BTCUSDT", "ETHUSDT")); assert n1 == 2, n1
+assert ol.daily(dbp, fetch=lambda *a, **k: rws, now=now_ + 600, symbols=("BTCUSDT", "ETHUSDT")) == 0                      # повторів немає
+ol._LAST_DAY = ""; assert ol.daily(dbp, fetch=lambda *a, **k: rws, now=now_ + 900, symbols=("BTCUSDT",)) == 0             # і після перезапуску
+evs = ol.events(dbp, now=now_); assert len(evs) == 2 and evs[0]["sym"] in ("BTC", "ETH") and evs[0]["kind"] == ev["kind"], evs
+sent = []
+async def _send(text, **kw): sent.append(text); return 1
+os.environ.pop("LEVEL_ALERTS_TG", None)
+assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 0 and not sent      # без згоди власниці у Telegram нічого не йде
+os.environ["LEVEL_ALERTS_TG"] = "1"
+assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 2 and len(sent) == 1 and sent[0].startswith("📍 Рівні за добу") and "нагадування, не сигнал" in sent[0]
+assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 0 and len(sent) == 1
+os.environ["LEVEL_ALERTS"] = "0"; ol._LAST_DAY = ""; assert ol.daily(os.path.join(tempfile.mkdtemp(), "x.db"), fetch=lambda *a, **k: rws, now=now_, symbols=("BTCUSDT",)) == 0; os.environ["LEVEL_ALERTS"] = "1"
+print("ok level events:", day, ev["kind"]); print(sent[0])
