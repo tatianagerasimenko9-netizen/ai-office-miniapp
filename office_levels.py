@@ -1,5 +1,5 @@
 """Рівні монети і короткий розбір «як аналітик» для екрана Лева (ЛИШЕ ЧИТАННЯ, нічого не надсилає і не відкриває).
-ДЖЕРЕЛО правила читання рівня — матеріали власниці (скриншоти А. Герчика, 28.11.2026): «повернення в лонгову зону вище рівня згенерує сильний сигнал на купівлю на кілька днів»; вище рівня — лонг, нижче — шорт.
+ДЖЕРЕЛО способу читати рівень — матеріали власниці (скриншоти А. Герчика, 28.11.2026; docs/strategies/GERCHIK_LEVELS_UA.md); рівнів автора Офіс не показує — шукає власні (рішення власниці 28.11.2026): «повернення в лонгову зону вище рівня згенерує сильний сигнал на купівлю на кілька днів»; вище рівня — лонг, нижче — шорт.
 ГІПОТЕЗА (наша автоматизація, не методика автора): як саме Офіс знаходить рівні на денних свічках — мінімум/максимум поточного й минулого року, мінімуми/максимуми місяців за 24 місяці,
 денні розвороти за 60 діб (3 доби з обох боків); близькі рівні (у межах 2%) зливаються в одну зону; «прокол і повернення» = за останні 5 діб мінімум був нижче рівня, а останнє денне закриття — вище.
 Ймовірностей і прогнозів не дає: лише «де сходинки і що означає прохід кожної»."""
@@ -11,8 +11,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
 MERGE_PCT = 2.0; RECLAIM_DAYS = 5; TOUCH_PCT = 0.6
-# Рівні, які автор сам прокреслив на денному графіку (скриншоти власниці з його сторінки, 15–16.11.2026): показуються як «рівень Герчика» з датою. Це ПЕРШОДЖЕРЕЛО, не наш розрахунок; застарівають — оновлювати за новими скриншотами.
-AUTHOR_LEVELS = {"BTCUSDT": {"date": "16.11", "levels": [97968.51, 87399.91, 79805.80, 62278.00, 61405.72, 59839.24, 58119.35, 48243.11]}}
 _CACHE: Dict[str, Any] = {}
 # Частоти з перевірки на денних свічках біткоїна 2022–2026 (levels_hist.py, журнал BT): (як часто, скільки випадків). Лише опис історії, не обіцянка.
 HIST = {"DOWN": {"near": ("у 7 випадках із 10", 212), "mid": ("приблизно пів на пів", 16)}, "RECLAIM": {"near": ("у 7 випадках із 10", 200), "mid": ("у 4 випадках із 10", 24)}}
@@ -52,9 +50,6 @@ def find_levels(days: List[Dict[str, float]], sym: str = "") -> List[Dict[str, A
         a = rec[max(0, i - 3):i + 4]; d = rec[i]; dm = f"{_dt(d['t']).day:02d}.{_dt(d['t']).month:02d}"
         if d["l"] == min(x["l"] for x in a): out.append({"p": d["l"], "kind": "low", "label": f"найнижча точка {dm}", "w": 2, "t": d["t"]})
         if d["h"] == max(x["h"] for x in a): out.append({"p": d["h"], "kind": "high", "label": f"найвища точка {dm}", "w": 2, "t": d["t"]})
-    au = AUTHOR_LEVELS.get(sym.upper())
-    if au:
-        for p in au["levels"]: out.append({"p": float(p), "kind": "author", "label": f"рівень Герчика ({au['date']})", "w": 4, "t": days[-1]["t"]})
     out.sort(key=lambda z: z["p"]); merged: List[Dict[str, Any]] = []
     for z in out:
         if merged and (z["p"] / merged[-1]["lo"] - 1) * 100 <= MERGE_PCT:
@@ -65,7 +60,7 @@ def find_levels(days: List[Dict[str, float]], sym: str = "") -> List[Dict[str, A
         ls = []
         for x in sorted(g["labels"], reverse=True):
             if x[2] not in ls: ls.append(x[2])
-        g["label"] = ls[0] + (f" · {ls[1]}" if len(ls) > 1 else ""); g["author"] = any(x[0] == 4 for x in g["labels"]); g.pop("labels")
+        g["label"] = ls[0] + (f" · {ls[1]}" if len(ls) > 1 else ""); g.pop("labels")
         lo_, hi_ = g["lo"] * (1 - TOUCH_PCT / 100), g["hi"] * (1 + TOUCH_PCT / 100); g["touch"] = sum(1 for d in days if lo_ <= d["l"] <= hi_ or lo_ <= d["h"] <= hi_)   # скільки днів ціна краєм свічки спиралась на цю зону
     return merged
 
@@ -78,7 +73,7 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
     below = [z for z in lv if z["p"] < px][-4:][::-1]; above = [z for z in lv if z["p"] >= px][:3]
     pct = lambda p: round((p / px - 1) * 100, 1)
     zone = lambda z: _px(z["p"]) if z["hi"] / z["lo"] - 1 < 0.003 else f"{_px(z['lo'])}–{_px(z['hi'])}"
-    row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"], "touch": z["touch"], "author": z["author"]}
+    row = lambda z, side: {"p": zone(z), "label": z["label"], "pct": pct(z["p"]), "side": side, "strong": z["w"] >= 3 or z["n"] >= 3, "n": z["n"], "touch": z["touch"], "lo": z["lo"], "hi": z["hi"]}
     ladder = [row(z, "above") for z in above[::-1]] + [{"p": _px(px), "now": True}] + [row(z, "below") for z in below]
     state = "between"; key = None; rc = days[-RECLAIM_DAYS:]; lo5 = min(d["l"] for d in rc)
     old = find_levels(days[:-RECLAIM_DAYS], sym)                                                  # рівні, що існували ДО цих 5 діб: їх проколювали, а закриття вже вище
@@ -109,7 +104,8 @@ def analyse(sym: str, days: List[Dict[str, float]], price: Optional[float] = Non
     verdict = ("Вірогідніше — вгору до " + _px(above[0]["p"]) + ", поки день не закрився нижче " + _px(key["lo"]) + ".") if (state == "reclaim" and above and key) else (("Рівень тримається. Сигналу немає, поки день не закриється за рівнем.") if key else "")
     return {"ok": True, "sym": name, "price": _px(px), "state": state, "key": _px(key["lo"]) if key else None, "ladder": ladder, "text": lines, "verdict": verdict, "blocks": {"now": now_l, "down": down_l, "up": up_l},
             "note": "Рахую за денними свічками: дивлюсь на закриття дня, а не на прокол. Це карта рівнів, а не прогноз.",
-            "source": "Правила «вище рівня — лонг, нижче — шорт», «повернення вище рівня — сильний сигнал» і «ціна ходить від рівня до рівня з денного графіка» — з матеріалів Герчика, які ви надіслали. Рівні з позначкою «рівень Герчика» — ті, що він сам прокреслив на скриншотах; решту Офіс знаходить автоматично на денних свічках."}
+            "source": "Рівні Офіс знаходить сам на денному графіку — там, де ціна кілька разів спиралась, — і перераховує щодня. Спосіб читати рівень (вище — покупці, нижче — продавці; повернення після проколу; рух від рівня до рівня) — з матеріалів, які ви надіслали.",
+            "bars": [[d["t"], d["o"], d["h"], d["l"], d["c"]] for d in days[-90:] if "o" in d]}
 
 
 def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = None, now: Optional[float] = None) -> Dict[str, Any]:
@@ -121,6 +117,6 @@ def levels(sym: str, fetch: Optional[Callable] = None, price: Optional[float] = 
             from office_market_data import fetch_candles_futures as fetch
         rows = fetch(sym, "1d", 800, closed_only=True)
         if not isinstance(rows, list) or len(rows) < 30: return {"ok": False, "sym": sym.replace("USDT", ""), "text": "Немає денних свічок по цій монеті."}
-        days = [{"t": _ts(r), "h": float(r["high"]), "l": float(r["low"]), "c": float(r["close"])} for r in rows]
+        days = [{"t": _ts(r), "o": float(r["open"]), "h": float(r["high"]), "l": float(r["low"]), "c": float(r["close"])} for r in rows]
         _CACHE[sym] = c = (now, days)
     return analyse(sym, c[1], price)
