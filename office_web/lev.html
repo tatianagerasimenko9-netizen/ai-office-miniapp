@@ -120,6 +120,10 @@ p{margin:0}
 nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);background:rgba(11,21,36,.97);max-width:560px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom);z-index:10}
 nav button{min-height:58px;background:none;border:0;border-top:2px solid transparent;font-size:11px;font-weight:600;color:var(--muted)}
 nav button.on{color:var(--gold);border-top-color:var(--gold)}
+.dayc{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;margin:14px 0 4px}.dayc b{font-size:18px;font-weight:800}.dayc p{margin:6px 0 0;font-size:14px;line-height:1.5;color:var(--muted)}.dayc.g{border-color:rgba(95,211,154,.5)}
+.wk{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:12px 0 4px}.wk span{background:var(--deep);border-radius:9px;padding:7px 0;text-align:center;font-size:11px;font-weight:700;color:var(--muted)}.wk i{display:block;width:9px;height:9px;border-radius:50%;margin:5px auto 0;background:#E9CD8C}.wk .g i{background:#5FD39A}.wk .g{color:#fff}.wk .on{outline:2px solid var(--gold)}
+.rule{display:flex;gap:12px;background:var(--deep);border-radius:14px;padding:12px;margin:8px 0}.rule .rn{flex:0 0 30px;height:30px;border-radius:9px;background:var(--gold);color:#17140E;font-weight:800;display:flex;align-items:center;justify-content:center}.rule b{font-size:15px}.rule .d{display:block;font-size:13px;line-height:1.5;color:var(--muted);margin-top:3px}
+.dd{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:5px;vertical-align:middle;background:#E9CD8C}.dd.g{background:#5FD39A}
 </style>
 </head>
 <body>
@@ -170,6 +174,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     h+='<div class="hero"><div class="row" style="align-items:flex-start"><div><div class="big '+cls(s.sums.now)+'">'+(s.sums.n?usd(s.sums.now):'$0')+'</div><div class="lab">зараз по '+s.sums.n+' відкритих угодах · не зафіксовано</div></div></div>';
     h+='<div class="pair"><div class="mini"><div class="tiny muted">якщо всі стопи</div><b class="down">'+(s.sums.n?usd(s.sums.if_stop):'—')+'</b></div><div class="mini"><div class="tiny muted">до стопів від зараз</div><b>'+(s.sums.n?'$'+num(s.sums.to_stop):'—')+'</b></div></div>';
     h+='<div class="say"><span>'+esc(s.lev)+'</span></div></div>';
+    if(s.today){var td=s.today,WD=['пн','вт','ср','чт','пт','сб','нд'];h+='<div class="dayc '+(td.strong?'g':'y')+'"><b>'+(td.strong?'🟢 ':'🟡 ')+esc(td.name.charAt(0).toUpperCase()+td.name.slice(1))+' — '+(td.strong?'сильний день':'слабкий день')+'</b><p>'+(td.strong?'Сигнали СВІНГ сьогодні беремо.':'Нові сигнали СВІНГ сьогодні краще не брати. Те, що вже відкрите, — не чіпаємо. Стоп і ціль працюють самі.')+'</p><div class="wk">'+WD.map(function(n,i){return '<span class="'+((i>=2&&i<=4)?'g':'y')+(i===td.wd?' on':'')+'">'+n+'<i></i></span>'}).join('')+'</div><button class="more" data-rules="1">Правила СВІНГу ›</button></div>'}
     h+='<h2>Рівні · розбір</h2><button class="lvcard" data-lv="'+esc(LVS)+'"><span class="lvh"><b>'+esc(LVS.replace('USDT',''))+'</b><span class="chev">›</span></span><span class="lvt">'+(LV&&LV.sym===LVS.replace('USDT','')?(LV.ok?esc(LV.verdict||LV.text[0]):esc(LV.text)):'Завантажую рівні…')+'</span></button>';
     if(EV.length){h+='<div class="evs">';EV.slice(0,EVALL?60:4).forEach(function(e){h+='<button class="ev '+(e.kind==='DOWN'?'down':'up')+'" data-lvsym="'+esc(e.symbol)+'"><span class="ed">'+esc(e.day)+'</span><span class="et">'+esc(e.text)+'</span><span class="chev">›</span></button>'});
       if(EV.length>4)h+='<button class="more" data-evall="1">'+(EVALL?'Згорнути':'Усі події за тиждень · '+EV.length)+'</button>';h+='</div>'}
@@ -222,7 +227,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     L.forEach(function(x){var d=x.at.slice(0,5);if(d!==day){if(open)h+='</div>';day=d;h+='<div class="day">'+esc(d)+'</div><div class="stiles">';open=true}
       var v=sres(x),c=cls(v),ic=x.kind==='tp'?'✓ ':'',me=dec()[x.sig_id];if(v!=null)sum+=v;
       var sk=x.strat==='СВІНГ'?'sw':(x.strat==='ВІДСКОК'?'bn':'td');
-      h+='<button class="stile '+sk+' '+(x.kind==='open'?'live ':'')+c+'" data-sigid="'+esc(x.sig_id)+'"><span class="st">'+esc(x.strat)+'</span><span class="n">'+esc(x.sym)+'</span><span class="d '+(x.dir==='LONG'?'lg':'sh')+'">'+(x.dir==='LONG'?'▲ ЛОНГ':'▼ ШОРТ')+'</span><span class="v '+c+'">'+(v==null?'—':ic+usd(v))+'</span><span class="t">'+(x.kind==='open'?'<i class="pulse"></i>'+(function(){var t=find(x.sig_id);return t&&t.price?'<b class="px">'+esc(t.price)+'</b>':'йде зараз'})():(x.kind==='tp'?'тейк':(x.kind==='sl'?'стоп':esc(x.status))))+(me==='took'?' · взяла':'')+'</span></button>'});
+      h+='<button class="stile '+sk+' '+(x.kind==='open'?'live ':'')+c+'" data-sigid="'+esc(x.sig_id)+'"><span class="st">'+esc(x.strat)+(x.day?'<i class="dd '+(x.day.strong?'g':'y')+'"></i>':'')+'</span><span class="n">'+esc(x.sym)+'</span><span class="d '+(x.dir==='LONG'?'lg':'sh')+'">'+(x.dir==='LONG'?'▲ ЛОНГ':'▼ ШОРТ')+'</span><span class="v '+c+'">'+(v==null?'—':ic+usd(v))+'</span><span class="t">'+(x.kind==='open'?'<i class="pulse"></i>'+(function(){var t=find(x.sig_id);return t&&t.price?'<b class="px">'+esc(t.price)+'</b>':'йде зараз'})():(x.kind==='tp'?'тейк':(x.kind==='sl'?'стоп':esc(x.status))))+(me==='took'?' · взяла':'')+'</span></button>'});
     if(open)h+='</div>';
     if(L.length)h+='<div class="card row"><span class="muted">Разом за 48 годин</span><b class="'+cls(sum)+'" style="font-size:18px">'+usd(sum)+'</b></div>';
     $('tab-signals').innerHTML=h;
@@ -264,11 +269,16 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
       h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p>'+(low?'<p class="small muted">Рівні малих графіків: місця, де ціна щонайменше двічі розверталась. Це наш спосіб рахунку, не правило з методик.</p>':'')+'</details>'}
     h+='<button class="btn ghost" data-close="1">Закрити</button>';show(h);if(LV&&LV.ok&&LV.sym===LVS.replace('USDT',''))mountChart(LV);
   }
+  function openRules(){frozen=true;var R=[['Торгуємо в середу, четвер, п\'ятницю','Ці три дні дають 70% заробітку СВІНГу, а провал у них утричі менший.'],['Заходимо одразу','Запізнились до години — нічого не втрачено. Чекати кращої ціни, сесії чи свічки не треба: так губляться найсильніші сигнали.'],['У плюсі — тримаємо, не закриваємо','Після +$10 до стопа повертаються 15 зі 100. Після +$20 — 6 зі 100: тут ставимо стоп у беззбиток і тримаємо далі.'],['Відкриті угоди не чіпаємо','Ні на вихідних, ні в слабкі дні. Стоп і ціль працюють самі, до 10 діб.'],['Ціль — це стеля, а не обіцянка','До повної цілі доходять 3 зі 100. Зазвичай угода закривається за часом із +$10–20. Половина — стоп −$10.']];
+    var h='<div class="grab"></div><h3>Правила СВІНГу</h3><p class="small muted">Перевірено на історії 2020–2026. Тільки те, що підтвердилось.</p>';
+    R.forEach(function(r,i){h+='<div class="rule"><span class="rn">'+(i+1)+'</span><span><b>'+r[0]+'</b><span class="d">'+r[1]+'</span></span></div>'});
+    h+='<details><summary>Що не підтвердилось — не використовуємо</summary><p class="small muted">«Найкраща година» сигналу — плаває від року до року.<br>Закривати під кінець тижня.<br>Закривати раніше за будь-якою ознакою (перевірено 10).<br>Вхід на відкаті або з коротким стопом.<br>Додавати нові монети — наші 42 кращі за решту 836.</p></details><button class="btn ghost" data-close="1">Закрити</button>';show(h)}
   function openSignal(id){
     var x=null;S.signals.forEach(function(q){if(q.sig_id===id)x=q});if(!x)return;frozen=true;
     var h='<div class="grab"></div><div class="row"><div><div class="tiny muted">'+esc(x.strat)+(x.seq?' №'+x.seq:'')+' · '+esc(x.at)+'</div><h3>'+esc(x.sym)+' · '+esc(x.dir_ua)+'</h3></div><span class="tag '+(x.status==='стоп'?'sl':(x.status==='ціль'?'tp':(x.open?'open':'')))+'">'+esc(x.status)+'</span></div>';
     h+='<div class="three"><div><div class="tiny muted">вхід</div><b>'+esc(x.entry)+'</b></div><div><div class="tiny muted">стоп · −$'+S.risk+'</div><b class="down">'+esc(x.sl)+'</b></div><div><div class="tiny muted">ціль · '+esc(x.tp_usd)+'</div><b class="up">'+esc(x.tp)+'</b></div></div>';
     h+='<div class="row" style="justify-content:flex-start;margin-top:4px"><b style="font-size:16px;line-height:1.3">'+esc(x.lev.title)+'</b></div>';
+    if(x.day)h+='<div class="note '+(x.day.strong?'':'warn')+'">'+(x.day.strong?'🟢 ':'🟡 ')+'<b>'+esc(x.day.text)+'</b><br><span class="small muted">'+esc(x.day.hist)+'</span></div><div class="note"><span class="small muted">Ціль — стеля: до неї доходять 3 зі 100. Частіше угода дає +$10–20 за часом.</span></div>';
     if(x.lev.cautions.length)x.lev.cautions.forEach(function(c){h+='<div class="note warn">'+esc(c)+'</div>'});
     h+='<div class="note">'+esc(x.lev.after)+'</div>';
     h+='<details><summary>На що я дивився</summary>';x.lev.facts.forEach(function(f){h+='<div class="kv"><span>'+esc(f[0])+'</span><span>'+esc(f[1])+'</span></div>'});h+='</details>';
@@ -297,12 +307,13 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   document.addEventListener('change',function(e){var t=e.target;if(t.dataset.lvs){loadLv(t.value,openLevels);openLevels()}else if(t.dataset.sfs){SF=t.value;renderSignals()}else if(t.dataset.fs){F=t.value;renderToday()}});
   document.addEventListener('click',function(e){
     if(e.target.id==='shade'){hide();return}
-    var el=e.target.closest('[data-tab],[data-sk],[data-lv],[data-ltf],[data-lvsym],[data-evall],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
+    var el=e.target.closest('[data-tab],[data-sk],[data-rules],[data-lv],[data-ltf],[data-lvsym],[data-evall],[data-filter],[data-g],[data-trade],[data-calm],[data-sigid],[data-close],[data-dec]');if(!el)return;var d=el.dataset;
     if(d.tab){['today','signals','invest','zvirka'].forEach(function(t){$('tab-'+t).classList.toggle('hide',t!==d.tab)});document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b===el)});if(d.tab==='zvirka')loadZ();window.scrollTo(0,0)}
     else if(d.f){F=d.f;renderToday()}
     else if(d.ltf){LTF=d.ltf;loadLv(LVS,openLevels)}
     else if(d.lvsym){loadLv(d.lvsym,openLevels);openLevels()}
     else if(d.evall){EVALL=!EVALL;renderToday()}
+    else if(d.rules){openRules()}
     else if(d.lv){openLevels()}
     else if(d.sk){SK=d.sk;SF='all';renderSignals()}
     else if(d.filter){F=d.filter;renderToday();var a=$('trades');if(a)a.scrollIntoView({behavior:'smooth',block:'start'})}
