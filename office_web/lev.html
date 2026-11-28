@@ -66,7 +66,7 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 /* сигнали */
 .lvcard{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 .lvcard .lvh{display:flex;justify-content:space-between;align-items:center}.lvcard .lvh b{font-size:16px;color:var(--gold)}.lvcard .lvt{font-size:13px;line-height:1.5;color:var(--text)}
-.tfs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:12px 0 0}.tfs button{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:10px;min-height:40px;font-size:12px;font-weight:700}.tfs button.on{background:var(--gold);border-color:var(--gold);color:#17140E}
+.tfs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0 0}.tfs button{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:10px;min-height:40px;font-size:12px;font-weight:700}.tfs button.on{background:var(--gold);border-color:var(--gold);color:#17140E}
 .evs{display:flex;flex-direction:column;gap:6px;margin-top:8px}.ev{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;text-align:left;background:var(--panel);border:0;border-left:3px solid var(--up);border-radius:10px;padding:10px 12px;min-height:44px}.ev.down{border-left-color:var(--down)}.ev .ed{font-size:10px;color:var(--muted);font-weight:700}.ev .et{font-size:12.5px;line-height:1.4;color:var(--text)}.more{border:0;background:transparent;color:var(--gold);font-size:12px;font-weight:700;min-height:40px}
 .chart{width:100%;height:420px;overflow:hidden;touch-action:pan-y;background:var(--deep);border-radius:12px;margin:12px 0 8px;display:block}.ladder{display:flex;flex-direction:column;gap:6px;margin:14px 0}
 .lr{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--deep);border-left:3px solid transparent}
@@ -233,9 +233,10 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
   function chart(L){return (L.bars||[]).length<10?'':'<div class="chart" id="lwc"></div>'}
   function cdata(L){var off=-new Date().getTimezoneOffset()*60,B=(L.bars||[]).map(function(b){return {time:b[0]+off,open:b[1],high:b[2],low:b[3],close:b[4]}}),n=B.length,live=L.price_num;
     if(n&&live){var x=B[n-1];x.close=live;x.high=Math.max(x.high,live);x.low=Math.min(x.low,live)}return B}
-  function clines(L){if(!CS)return;CL.forEach(function(p){try{CS.removePriceLine(p)}catch(e){}});CL=[];
-    (L.ladder||[]).forEach(function(r){if(r.now)return;var c=r.side==='above'?'#F4A08F':'#5FD39A',wide=(r.hi-r.lo)/r.hi>0.004;
-      (wide?[r.lo,r.hi]:[(r.lo+r.hi)/2]).forEach(function(p){CL.push(CS.createPriceLine({price:p,color:c,lineWidth:r.strong?2:1,lineStyle:0,axisLabelVisible:!wide||p===(r.side==='above'?r.lo:r.hi),title:''}))})})}
+  function clines(L){if(!CS)return;CL.forEach(function(p){try{CS.removePriceLine(p)}catch(e){}});CL=[];var add=function(p,c,w,st,t){CL.push(CS.createPriceLine({price:p,color:c,lineWidth:w,lineStyle:st,axisLabelVisible:true,title:t}))};
+    if((L.tf||'1d')!=='1d'&&L.local&&L.local.length){L.local.forEach(function(r){var c=r.hold?'#E9CD8C':(r.side==='above'?'#F4A08F':'#5FD39A');add(r.num,c,r.kind==='day'||r.hold?2:1,r.kind==='day'?0:2,r.kind==='day'?'денний':(r.new?'новий':''))});return}
+    var Z=(L.ladder||[]).filter(function(r){return !r.now}),up=Z.filter(function(r){return r.side==='above'}).sort(function(a,b){return a.lo-b.lo}).slice(0,3),dn=Z.filter(function(r){return r.side==='below'}).sort(function(a,b){return b.hi-a.hi}).slice(0,3);
+    up.concat(dn).forEach(function(r){add(r.side==='above'?r.lo:r.hi,r.side==='above'?'#F4A08F':'#5FD39A',r.strong?2:1,0,'')})}
   function mountChart(L){var el=$('lwc');if(!el||!window.LightweightCharts)return;var key=L.sym+'|'+(L.tf||'1d');
     if(CH){try{CH.remove()}catch(e){}CH=null;CS=null;CL=[]}
     var p=L.price_num||1,prec=p>=1000?0:(p>=10?2:(p>=1?3:(p>=0.01?5:7)));
@@ -246,16 +247,20 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     var B=cdata(L);CS.setData(B);clines(L);CKEY=key;var n=B.length,show=(L.tf||'1d')==='1d'?120:90;CH.timeScale().setVisibleLogicalRange({from:Math.max(0,n-show),to:n+4})}
   function updChart(){var L=LV;if(!L||!L.ok||!CS||!$('lwc'))return;if(CKEY!==L.sym+'|'+(L.tf||'1d')){openLevels();return}CS.setData(cdata(L));clines(L)}
   window.addEventListener('resize',function(){var el=$('lwc');if(CH&&el)CH.applyOptions({width:el.clientWidth})});
-  function tfTabs(){return '<div class="tfs">'+[['1h','1 година'],['4h','4 години'],['1d','День']].map(function(k){return '<button class="'+(LTF===k[0]?'on':'')+'" data-ltf="'+k[0]+'">'+k[1]+'</button>'}).join('')+'</div>'}
+  function tfTabs(){return '<div class="tfs">'+[['15m','15 хв'],['1h','1 год'],['4h','4 год'],['1d','День']].map(function(k){return '<button class="'+(LTF===k[0]?'on':'')+'" data-ltf="'+k[0]+'">'+k[1]+'</button>'}).join('')+'</div>'}
   function openLevels(){
     frozen=true;var syms=['BTCUSDT','ETHUSDT'];all().forEach(function(t){var q=t.sym+'USDT';if(syms.indexOf(q)<0)syms.push(q)});COINS.forEach(function(q){if(syms.indexOf(q)<0)syms.push(q)});if(syms.indexOf(LVS)<0)syms.push(LVS);
     var h='<div class="grab"></div><h3>Рівні · '+esc(LVS.replace('USDT',''))+'</h3>'+sel('data-lvs="1"',syms.map(function(q){return [q,q.replace('USDT','')]}),LVS);
     if(!LV||LV.sym!==LVS.replace('USDT','')){h+='<p class="muted">Завантажую…</p>'}
     else if(!LV.ok){h+='<p>'+esc(LV.text)+'</p>'}
-    else{h+=tfTabs()+chart(LV)+'<div class="tiny muted" style="margin:-2px 0 8px">Живий графік: тягніть пальцем убік, щоб гортати, двома пальцями — наблизити. Зелені лінії — рівні знизу, червоні — зверху, жовта — ціна зараз.</div>';h+='<div class="ladder">';LV.ladder.forEach(function(r){h+=r.now?'<div class="lr now"><i class="pulse"></i><b>'+esc(r.p)+'</b><span>ціна зараз</span></div>':'<div class="lr '+r.side+(r.strong?' strong':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+(r.touch>1?' · спирались '+r.touch+' дн.':'')+'</span><em>'+(r.pct>0?'+':'')+String(r.pct).replace('.',',').replace('-','−')+'%</em></div>'});h+='</div>';
-      if(LV.verdict)h+='<div class="verd">'+esc(LV.verdict)+'</div>';
-      var B=LV.blocks||{};[['now','Зараз',''],['down','Якщо вниз','down'],['up','Якщо вгору','up']].forEach(function(k){(B[k[0]]||[]).forEach(function(x){h+='<div class="blk"><span class="bh '+k[2]+'">'+k[1]+'</span><p>'+esc(x)+'</p></div>'})});
-      h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p></details>'}
+    else{var low=(LV.tf||'1d')!=='1d',pcs=function(v){return (v>0?'+':'')+String(v).replace('.',',').replace('-','−')+'%'},nowRow='<div class="lr now"><i class="pulse"></i><b>'+esc(LV.price)+'</b><span>ціна зараз</span></div>';
+      var dayHtml='<div class="ladder">';LV.ladder.forEach(function(r){dayHtml+=r.now?nowRow:'<div class="lr '+r.side+(r.strong?' strong':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+(r.touch>1?' · спирались '+r.touch+' дн.':'')+'</span><em>'+pcs(r.pct)+'</em></div>'});dayHtml+='</div>';
+      var B=LV.blocks||{};[['now','Зараз',''],['down','Якщо вниз','down'],['up','Якщо вгору','up']].forEach(function(k){(B[k[0]]||[]).forEach(function(x){dayHtml+='<div class="blk"><span class="bh '+k[2]+'">'+k[1]+'</span><p>'+esc(x)+'</p></div>'})});
+      h+=tfTabs();var top=low?LV.tf_text:LV.verdict;if(top)h+='<div class="verd" style="margin-top:12px">'+esc(top)+'</div>';
+      h+=chart(LV)+'<div class="tiny muted" style="margin:-2px 0 8px">Тягніть пальцем убік — гортати, двома пальцями — наблизити. '+(low?'Жовта лінія — рівень, біля якого ціна зараз. Суцільні — денні рівні, пунктир — рівні цього графіка.':'Зелені лінії — рівні знизу, червоні — зверху.')+'</div>';
+      if(low){h+='<div class="ladder">';var put=false;(LV.local||[]).forEach(function(r){if(!put&&r.side==='below'){h+=nowRow;put=true}h+='<div class="lr '+r.side+(r.strong?' strong':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+(r.hold?' · ціна тут':'')+'</span><em>'+pcs(r.pct)+'</em></div>'});if(!put)h+=nowRow;h+='</div><details><summary>Денна картина</summary>'+(LV.verdict?'<p><b>'+esc(LV.verdict)+'</b></p>':'')+dayHtml+'</details>'}
+      else h+=dayHtml;
+      h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p>'+(low?'<p class="small muted">Рівні малих графіків: місця, де ціна щонайменше двічі розверталась. Це наш спосіб рахунку, не правило з методик.</p>':'')+'</details>'}
     h+='<button class="btn ghost" data-close="1">Закрити</button>';show(h);if(LV&&LV.ok&&LV.sym===LVS.replace('USDT',''))mountChart(LV);
   }
   function openSignal(id){

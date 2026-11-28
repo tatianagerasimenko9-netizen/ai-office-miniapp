@@ -43,3 +43,13 @@ assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 2 and len(sent) == 1 and
 assert asyncio.run(ol.deliver(dbp, _send, now=now_)) == 0 and len(sent) == 1
 os.environ["LEVEL_ALERTS"] = "0"; ol._LAST_DAY = ""; assert ol.daily(os.path.join(tempfile.mkdtemp(), "x.db"), fetch=lambda *a, **k: rws, now=now_, symbols=("BTCUSDT",)) == 0; os.environ["LEVEL_ALERTS"] = "1"
 print("ok level events:", day, ev["kind"]); print(sent[0])
+
+# рівні малого графіка: ціна на рівні / в повітрі
+import math as _m
+_b = [[i * 900.0, 100 + 2 * _m.sin(i / 8), 100.4 + 2 * _m.sin(i / 8), 99.6 + 2 * _m.sin(i / 8), 100 + 2 * _m.sin((i + 1) / 8)] for i in range(300)]
+_r = ol.local_levels(_b, 102.3, "15m", [])
+assert _r["lines"] and any(x["hold"] for x in _r["lines"]) and ("впирається" in _r["text"] or "стоїть на рівні" in _r["text"]), _r
+_r2 = ol.local_levels(_b, 100.0, "1h", [])
+assert _r2["text"].startswith("Ціна в повітрі") and all(not x["hold"] for x in _r2["lines"]), _r2
+assert ol._raz(5, "раз", "рази", "разів") == "5 разів" and ol._raz(3, "раз", "рази", "разів") == "3 рази" and ol.local_levels(_b[:20], 100.0, "1h", [])["lines"] == []
+print("ok local levels")
