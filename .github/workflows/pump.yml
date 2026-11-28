@@ -1,0 +1,47 @@
+name: pump
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/pump.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch
+        shell: bash
+        run: |
+          S42=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          OTH=ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,BATUSDT,ZRXUSDT,WAVESUSDT,KSMUSDT,STORJUSDT,BANDUSDT,RLCUSDT,KNCUSDT,ZENUSDT,EGLDUSDT,ALPHAUSDT,CELOUSDT,ARUSDT,FLOWUSDT,MINAUSDT
+          echo "S42=$S42" >> $GITHUB_ENV; echo "OTH=$OTH" >> $GITHUB_ENV
+          L=docs/handoff/br-profitability/strategy_search/div_lab.py
+          BOT=$(python3 -c "import csv; k=set('$S42,$OTH'.split(',')); print(','.join(sorted({r['sym'] for r in csv.DictReader(open('docs/handoff/br-profitability/data/etalon_signals.csv')) if r['sym'].isascii() and r['sym'] not in k})))")
+          echo "BOT count: $(echo $BOT | tr ',' '\n' | wc -l)"
+          VOL=1 python3 $L fetch candles "$S42,$OTH,$BOT"
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Pump lab
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          python3 $D/strategy_search/pump_lab.py candles "$S42" "$OTH" /tmp/pump.csv | grep -v "USDT [0-9]*$" | tee $D/pump_out.txt
+          gzip -c /tmp/pump.csv > $D/data/pump_trades.csv.gz || true
+      - name: Save
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/pump_out.txt || true
+          [ $(stat -c%s docs/handoff/br-profitability/data/pump_trades.csv.gz) -lt 40000000 ] && git add docs/handoff/br-profitability/data/pump_trades.csv.gz || true
+          git commit -m "pump: шорт після вильоту на історії (автоматично)"
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done

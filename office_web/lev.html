@@ -80,7 +80,7 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .stile .d{font-size:10px;font-weight:800;letter-spacing:.06em;padding:3px 8px;border-radius:99px}
 .stile .d.lg{background:rgba(95,211,154,.16);color:var(--up)}.stile .d.sh{background:rgba(244,160,143,.16);color:var(--down)}
 .stile .v{font-size:19px;font-weight:800;margin-top:5px}.stile .t{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:5px}
-.pulse{width:6px;height:6px;border-radius:50%;background:var(--gold);display:inline-block;animation:pulse 1.4s ease-in-out infinite}
+.stile .t .px{color:var(--text);font-size:11px;font-weight:700}.pulse{width:7px;height:7px;border-radius:50%;background:var(--up);box-shadow:0 0 6px var(--up);display:inline-block;animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
 @media (prefers-reduced-motion:reduce){.stile.bn .st,.pulse{animation:none}}
 .day{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 2px 0}
@@ -208,7 +208,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     L.forEach(function(x){var d=x.at.slice(0,5);if(d!==day){if(open)h+='</div>';day=d;h+='<div class="day">'+esc(d)+'</div><div class="stiles">';open=true}
       var v=sres(x),c=cls(v),ic=x.kind==='tp'?'✓ ':'',me=dec()[x.sig_id];if(v!=null)sum+=v;
       var sk=x.strat==='СВІНГ'?'sw':(x.strat==='ВІДСКОК'?'bn':'td');
-      h+='<button class="stile '+sk+' '+(x.kind==='open'?'live ':'')+c+'" data-sigid="'+esc(x.sig_id)+'"><span class="st">'+esc(x.strat)+'</span><span class="n">'+esc(x.sym)+'</span><span class="d '+(x.dir==='LONG'?'lg':'sh')+'">'+(x.dir==='LONG'?'▲ ЛОНГ':'▼ ШОРТ')+'</span><span class="v '+c+'">'+(v==null?'—':ic+usd(v))+'</span><span class="t">'+(x.kind==='open'?'<i class="pulse"></i>йде зараз':(x.kind==='tp'?'тейк':(x.kind==='sl'?'стоп':esc(x.status))))+(me==='took'?' · взяла':'')+'</span></button>'});
+      h+='<button class="stile '+sk+' '+(x.kind==='open'?'live ':'')+c+'" data-sigid="'+esc(x.sig_id)+'"><span class="st">'+esc(x.strat)+'</span><span class="n">'+esc(x.sym)+'</span><span class="d '+(x.dir==='LONG'?'lg':'sh')+'">'+(x.dir==='LONG'?'▲ ЛОНГ':'▼ ШОРТ')+'</span><span class="v '+c+'">'+(v==null?'—':ic+usd(v))+'</span><span class="t">'+(x.kind==='open'?'<i class="pulse"></i>'+(function(){var t=find(x.sig_id);return t&&t.price?'<b class="px">'+esc(t.price)+'</b>':'йде зараз'})():(x.kind==='tp'?'тейк':(x.kind==='sl'?'стоп':esc(x.status))))+(me==='took'?' · взяла':'')+'</span></button>'});
     if(open)h+='</div>';
     if(L.length)h+='<div class="card row"><span class="muted">Разом за 48 годин</span><b class="'+cls(sum)+'" style="font-size:18px">'+usd(sum)+'</b></div>';
     $('tab-signals').innerHTML=h;

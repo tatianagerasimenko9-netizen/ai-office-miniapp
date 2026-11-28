@@ -1,0 +1,45 @@
+name: judas
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/judas.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch
+        shell: bash
+        run: |
+          S42=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,BNBUSDT,LTCUSDT,DOTUSDT,ATOMUSDT,TRXUSDT,NEARUSDT,OPUSDT,FILUSDT,ETCUSDT,UNIUSDT,AAVEUSDT,MKRUSDT,SANDUSDT,MANAUSDT,AXSUSDT,GALAUSDT,RUNEUSDT,LDOUSDT,CRVUSDT,SNXUSDT,ICPUSDT,XLMUSDT,BCHUSDT,ALGOUSDT,VETUSDT,GRTUSDT,APEUSDT,IMXUSDT,INJUSDT,APTUSDT,EOSUSDT,HBARUSDT,THETAUSDT,DYDXUSDT
+          OTH=ZECUSDT,DASHUSDT,XMRUSDT,NEOUSDT,IOTAUSDT,ONTUSDT,QTUMUSDT,ZILUSDT,ENJUSDT,CHZUSDT,KAVAUSDT,COMPUSDT,YFIUSDT,SUSHIUSDT,1INCHUSDT,BATUSDT,ZRXUSDT,WAVESUSDT,KSMUSDT,STORJUSDT,BANDUSDT,RLCUSDT,KNCUSDT,ZENUSDT,EGLDUSDT,ALPHAUSDT,CELOUSDT,ARUSDT,FLOWUSDT,MINAUSDT
+          echo "S42=$S42" >> $GITHUB_ENV; echo "OTH=$OTH" >> $GITHUB_ENV
+          L=docs/handoff/br-profitability/strategy_search/div_lab.py
+          python3 $L fetch candles "$S42,$OTH"
+          test -s candles/BTCUSDT/15m.csv || { echo 'FETCH FAILED'; exit 1; }
+      - name: Judas lab
+        shell: bash
+        run: |
+          D=docs/handoff/br-profitability
+          python3 $D/strategy_search/judas_lab.py candles "$S42" /tmp/judas.csv | grep -v "USDT$" | tee $D/judas_out.txt
+          gzip -c /tmp/judas.csv > $D/data/judas_trades.csv.gz || true
+      - name: Save
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/judas_out.txt || true
+          ls -la docs/handoff/br-profitability/data/judas_trades.csv.gz && [ $(stat -c%s docs/handoff/br-profitability/data/judas_trades.csv.gz) -lt 40000000 ] && git add docs/handoff/br-profitability/data/judas_trades.csv.gz || true
+          git commit -m "judas: ранковий хибний пробій на історії (автоматично)"
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%20+5)); done
