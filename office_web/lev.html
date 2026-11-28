@@ -69,7 +69,7 @@ h2{margin:6px 2px 0;font-size:12px;font-weight:700;letter-spacing:.08em;text-tra
 .ladder{display:flex;flex-direction:column;gap:6px;margin:14px 0}
 .lr{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--deep);border-left:3px solid transparent}
 .lr b{font-size:14px;font-weight:800;white-space:nowrap}.lr span{font-size:11px;color:var(--muted);line-height:1.35}.lr em{font-style:normal;font-size:11px;font-weight:700;color:var(--muted)}
-.lr.above{border-left-color:var(--down)}.lr.below{border-left-color:var(--up)}.lr.strong b{color:var(--gold)}
+.lr.above{border-left-color:var(--down)}.lr.below{border-left-color:var(--up)}.lr.strong b{color:var(--gold)}.lr.author{box-shadow:inset 0 0 0 1px rgba(233,205,140,.45)}.lr.author b{color:#F6E3A6}
 .lr.now{background:transparent;border:1px dashed var(--gold);grid-template-columns:auto auto 1fr}.lr.now b{font-size:16px;color:var(--text)}
 p.lead{font-size:15px;line-height:1.6}#sheet p{margin:12px 0}
 .seg{display:grid;grid-template-columns:.7fr 1.1fr .9fr 1.1fr;gap:6px;background:var(--panel);border-radius:14px;padding:5px}
@@ -228,7 +228,7 @@ nav button.on{color:var(--gold);border-top-color:var(--gold)}
     var h='<div class="grab"></div><h3>Рівні · '+esc(LVS.replace('USDT',''))+'</h3>'+sel('data-lvs="1"',syms.map(function(q){return [q,q.replace('USDT','')]}),LVS);
     if(!LV||LV.sym!==LVS.replace('USDT','')){h+='<p class="muted">Завантажую…</p>'}
     else if(!LV.ok){h+='<p>'+esc(LV.text)+'</p>'}
-    else{h+='<div class="ladder">';LV.ladder.forEach(function(r){h+=r.now?'<div class="lr now"><i class="pulse"></i><b>'+esc(r.p)+'</b><span>ціна зараз</span></div>':'<div class="lr '+r.side+(r.strong?' strong':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+'</span><em>'+(r.pct>0?'+':'')+String(r.pct).replace('.',',').replace('-','−')+'%</em></div>'});h+='</div>';
+    else{h+='<div class="ladder">';LV.ladder.forEach(function(r){h+=r.now?'<div class="lr now"><i class="pulse"></i><b>'+esc(r.p)+'</b><span>ціна зараз</span></div>':'<div class="lr '+r.side+(r.strong?' strong':'')+(r.author?' author':'')+'"><b>'+esc(r.p)+'</b><span>'+esc(r.label)+(r.touch>1?' · спирались '+r.touch+' дн.':'')+'</span><em>'+(r.pct>0?'+':'')+String(r.pct).replace('.',',').replace('-','−')+'%</em></div>'});h+='</div>';
       LV.text.forEach(function(x,i){h+='<p'+(i===0?' class="lead"':'')+'>'+esc(x)+'</p>'});
       h+='<details><summary>На чому це базується</summary><p class="small muted">'+esc(LV.note)+'</p><p class="small muted">'+esc(LV.source)+'</p></details>'}
     h+='<button class="btn ghost" data-close="1">Закрити</button>';show(h);
