@@ -1,0 +1,52 @@
+name: swwide
+on:
+  push:
+    branches: [claude/eager-pascal-t9e1ac]
+    paths:
+      - .github/workflows/swwide.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/eager-pascal-t9e1ac
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Fetch
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          L=docs/handoff/br-profitability/strategy_search/div_lab.py
+          LIST=$(python3 .github/swwide_list.py)
+          echo "LIST=$LIST" >> $GITHUB_ENV
+          echo "shard $SHARD: $(echo $LIST | tr ',' '\n' | wc -l) монет"
+          python3 $L fetch candles "$LIST"
+      - name: Run
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          D=docs/handoff/br-profitability
+          python3 $D/strategy_search/sw_wide.py candles "$LIST" /tmp/sw_wide_$SHARD.csv | tail -5
+          gzip -c /tmp/sw_wide_$SHARD.csv > $D/data/sw_wide_$SHARD.csv.gz
+      - name: Save
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add docs/handoff/br-profitability/data/sw_wide_$SHARD.csv.gz
+          git commit -m "swwide: СВІНГ на всіх ф'ючерсах, частина $SHARD (автоматично)"
+          for i in 1 2 3 4 5 6 7 8; do git pull --rebase -X theirs origin claude/eager-pascal-t9e1ac && git push origin HEAD:claude/eager-pascal-t9e1ac && break; sleep $((RANDOM%30+5)); done
