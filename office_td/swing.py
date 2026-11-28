@@ -167,7 +167,7 @@ def cycle(db: str, fetch: Callable, now: Optional[float] = None) -> Dict[str, in
     except Exception as exc:  # noqa: BLE001
         print(f"[bnc-shadow] {type(exc).__name__}: {exc}", flush=True)
     try:                                                   # події рівнів раз на добу (нагадування; без сигналів)
-        import office_levels as _ol
+        import office_day_levels as _ol
         _ol.daily(db, fetch, now)
     except Exception as exc:  # noqa: BLE001
         print(f"[levels] {type(exc).__name__}: {exc}", flush=True)

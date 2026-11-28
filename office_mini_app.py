@@ -1464,7 +1464,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/lev/levels":
             import office_lev as _lev
-            import office_levels as _lvl
+            import office_day_levels as _lvl
             if not _lev.enabled():
                 return self._send_json(503, {"ok": False, "error": "lev_disabled"})
             import re as _re
@@ -1479,7 +1479,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"ok": False, "sym": sym.replace("USDT", ""), "text": "Не вдалося отримати свічки: " + type(exc).__name__})
         if u.path == "/api/lev/level_events":
             import office_lev as _lev
-            import office_levels as _lvl
+            import office_day_levels as _lvl
             if not _lev.enabled():
                 return self._send_json(503, {"ok": False, "error": "lev_disabled"})
             from office_td import swing as _sw
