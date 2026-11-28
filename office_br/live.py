@@ -430,7 +430,7 @@ async def monitor(db: str, send: Callable, fetch: Callable, send_image: Callable
                     print(f"[td-remind] {type(exc).__name__}: {exc}", flush=True)
                 try:                    # зведення «рівні за добу» (нагадування, одне повідомлення на добу)
                     import office_levels as _ol
-                    await _ol.deliver(db, send)
+                    await _ol.deliver(db, send, send_image=send_image)
                 except Exception as exc:
                     print(f"[levels] deliver: {type(exc).__name__}: {exc}", flush=True)
                 if send_image is not None:           # Табло відкритих угод раз на добу о 09:00 за Києвом (BOARD=0 вимикає)

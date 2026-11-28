@@ -226,7 +226,44 @@ def events(db: str, days_back: int = 7, now: Optional[float] = None) -> List[Dic
     return out
 
 
-async def deliver(db: str, send: Callable, now: Optional[float] = None) -> int:
+def render_card(rows: List[Dict[str, Any]], day: str, path: str) -> str:
+    """Картинка «Рівні за добу» (вигляд погоджено власницею 28.11.2026): дві групи — пробили вниз / вгору, до 8 рядків у групі."""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+    BG, CARD, TXT, MUT, GOLD, RED, GRN = "#0A0F1C", "#121B2C", "#ffffff", "#aab3c5", "#D8B66A", "#F08A7B", "#5FD39A"
+    MON = ("", "січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня")
+    groups = []
+    for kinds, head, col, word in ((("DOWN",), "▼  ПРОБИЛИ РІВЕНЬ ВНИЗ", RED, "нижче"), (("UP", "RECLAIM"), "▲  ПРОБИЛИ РІВЕНЬ ВГОРУ", GRN, "вище")):
+        xs = sorted([r for r in rows if r["kind"] in kinds], key=lambda r: -abs(r.get("pct") or 0))
+        if xs: groups.append((head, col, word, xs[:8], max(0, len(xs) - 8)))
+    RH, GAP = 13.0, 1.6
+    height = 16 + sum(9 + len(g[3]) * (RH + GAP) + (5 if g[4] else 0) + 2 for g in groups) + 7
+    fig = plt.figure(figsize=(7.2, height * 0.072), dpi=150, facecolor=BG); ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(height, 0); ax.axis("off")
+    t = lambda x, y, txt, size=12, c=TXT, w="normal", ha="left": ax.text(x, y, txt, color=c, fontsize=size, fontweight=w, ha=ha, va="center")
+    t(6, 8, "РІВНІ", 21, GOLD, "bold"); t(94, 8, f"за {int(day[8:10])} {MON[int(day[5:7])]}", 13, "#8a93a6", ha="right")
+    y = 16.0
+    for head, col, word, xs, more in groups:
+        t(6, y + 3, head, 12.5, col, "bold"); y += 9
+        for r in xs:
+            ax.add_patch(FancyBboxPatch((6, y), 88, RH, boxstyle="round,pad=0,rounding_size=1.6", fc=CARD, ec="none")); ax.add_patch(Rectangle((6, y + 1.2), 0.9, RH - 2.4, fc=col, ec="none"))
+            t(10, y + RH / 2, r["symbol"].replace("USDT", ""), 18, TXT, "bold")
+            t(34, y + RH * 0.33, f"{word} {_px(r['level'])}", 12.5, MUT)
+            if r.get("target"):
+                t(34, y + RH * 0.70, f"далі до {_px(r['target'])}", 12.5, TXT, "bold")
+                t(91, y + RH / 2, ("−" if word == "нижче" else "+") + str(abs(r["pct"])).replace(".", ",") + "%", 17, col, "bold", "right")
+            else:
+                t(34, y + RH * 0.70, "рівня далі не бачу", 12.5, MUT)
+            y += RH + GAP
+        if more: t(50, y + 1.5, f"ще {more} — в апці", 11, "#8a93a6", ha="center"); y += 5
+        y += 2
+    t(50, height - 4.5, "нагадування, не сигнал · графіки в апці", 10.5, "#6f7890", ha="center")
+    try: fig.savefig(path, dpi=150, facecolor=BG)
+    finally: plt.close(fig)
+    return path
+
+
+async def deliver(db: str, send: Callable, now: Optional[float] = None, send_image: Optional[Callable] = None) -> int:
     """Worker: надіслати зведення за добу, якщо є ненадіслані події. Позначає надісланими лише після успіху."""
     if not alerts_enabled(): return 0
     import os
@@ -237,7 +274,16 @@ async def deliver(db: str, send: Callable, now: Optional[float] = None) -> int:
     day = rs[-1][0]; now = time.time() if now is None else now
     if not _fetchall(db, "SELECT 1 FROM lev_level_event WHERE day = ?", (day + "#done",)): return 0      # чекаємо, доки добу дораховано
     rows = [dict(zip(("day", "symbol", "kind", "level", "target", "pct", "low", "close"), r)) for r in rs if r[0] == day]
-    mid = await send(digest(rows, day), symbol="", direction="")
+    mid = None
+    if send_image is not None:                      # картинка — основний вигляд; текст лише як запасний, якщо картинку не вдалося намалювати
+        import asyncio, tempfile
+        with tempfile.TemporaryDirectory() as td:
+            try: png = await asyncio.to_thread(render_card, rows, day, os.path.join(td, "levels.png"))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[levels] картинка: {type(exc).__name__}: {exc}", flush=True); return 0
+            mid = await send_image(png, "Рівні за добу", {"seq": 0, "symbol": "", "direction": "", "sig_id": "LEVELS|" + day})
+    else:
+        mid = await send(digest(rows, day), symbol="", direction="")
     if mid:
         _execute(db, "UPDATE lev_level_event SET sent = 1 WHERE sent = 0", ()); print(f"[levels] надіслано зведення {day}: {len(rows)} подій", flush=True); return len(rows)
     return 0
