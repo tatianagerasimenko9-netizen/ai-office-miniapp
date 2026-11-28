@@ -8,7 +8,7 @@ def txt(m):
 num = lambda s: float(s.replace(",", "."))
 sigs = []; open_by = {}
 for m in M:
-    t = txt(m); ts = datetime.fromisoformat(m["date"]).timestamp()
+    t = txt(m); ts = float(m.get("date_unixtime") or datetime.fromisoformat(m["date"]).timestamp())
     if "Сигнал бота" in t:
         h = re.search(r"(LONG|SHORT) · (\w+USDT) · (\w+) · #(\d+)", t); e = re.search(r"Вхід:\s+([\d.]+)", t); sl = re.search(r"SL:\s+([\d.]+) \(([\d.]+)%\)", t)
         tp = re.findall(r"TP(\d):\s+([\d.]+)", t)
@@ -55,7 +55,7 @@ for s in sigs:
         else: z = pnl(s["tp"][1], 0.5) + (pnl(s["tp"][2], 0.25) if "TP2" in ev and 2 in s["tp"] else 0.0) + (pnl(s["tp"][3], 0.25) if "TP3" in ev and 3 in s["tp"] else 0.0)
         z -= 0.001 * sum(w * p for w, p in pos) / full
     dur = (max(t for _, t in s["ev"]) - s["ts"]) / 3600 if s["ev"] else 0
-    rows.append(dict(date=s["date"], sym=s["sym"], dir=s["dir"], tf=s["tf"], id=s["id"], tier=s["tier"], kind=s["kind"], score=s["score"], ai=s["ai"], ai_s=s["ai_s"], ses=s["ses"], regime=s["regime"], rsi=s["rsi"], adx=s["adx"], atr=s["atr"],
+    rows.append(dict(ts=int(s["ts"]), entry=s["entry"], addp=s["addp"] or "", sl=s["sl"], tp1=s["tp"].get(1, ""), tp2=s["tp"].get(2, ""), tp3=s["tp"].get(3, ""), we=s["we"], wa=s["wa"], date=s["date"], sym=s["sym"], dir=s["dir"], tf=s["tf"], id=s["id"], tier=s["tier"], kind=s["kind"], score=s["score"], ai=s["ai"], ai_s=s["ai_s"], ses=s["ses"], regime=s["regime"], rsi=s["rsi"], adx=s["adx"], atr=s["atr"],
                      kz=s["kz"], against=s["against"], slp=s["slp"], rr1=round(rr.get(1, 0), 2), status=st, add=int("ADD" in ev), fee=round(fee, 3),
                      m1=None if m1 is None else round(m1 - fee, 3), m2=None if m2 is None else round(m2 - fee, 3), m3=None if m3 is None else round(m3 - fee, 3), dur_h=round(dur, 1), z=None if z is None else round(z, 3)))
 w = csv.DictWriter(open(sys.argv[2], "w", newline=""), fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows); print("signals", len(rows))
